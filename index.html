@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>创作者选题共创助手 · Demo</title>
+<style>
+  :root{
+    --red:#ff2442;--red-soft:#fff0f2;--ink:#1f2329;--sub:#6b7280;
+    --line:#ececf0;--bg:#f6f7f9;--card:#fff;--ok:#16a34a;--warn:#d97706;
+    --indigo:#4f46e5;--indigo-soft:#eef2ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.6}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 20px 80px}
+  header.top{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+  .logo{width:38px;height:38px;border-radius:10px;background:var(--red);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:20px}
+  h1{font-size:21px;margin:0}
+  .tagline{color:var(--sub);font-size:13px;margin:2px 0 18px}
+  .workflow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+  .wf{background:#fff;border:1px solid var(--line);border-radius:999px;padding:5px 13px;font-size:12.5px;color:var(--sub)}
+  .wf b{color:var(--red)}
+  .grid{display:grid;grid-template-columns:380px 1fr;gap:20px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .panel h2{font-size:14px;margin:0 0 12px;display:flex;align-items:center;gap:7px}
+  label{font-size:12.5px;color:var(--sub);display:block;margin:12px 0 5px;font-weight:600}
+  textarea,input,select{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;
+    font-size:13px;font-family:inherit;resize:vertical;background:#fdfdfd;color:var(--ink)}
+  textarea:focus,input:focus{outline:none;border-color:var(--red)}
+  .btn{border:none;border-radius:10px;padding:11px 16px;font-size:14px;font-weight:600;cursor:pointer;transition:.15s}
+  .btn-primary{background:var(--red);color:#fff;flex:1}
+  .btn-primary:hover{filter:brightness(.94)}
+  .btn-ghost{background:#fff;border:1px solid var(--line);color:var(--ink);flex:1}
+  .btn-ghost:hover{background:#fafafa}
+  .btn-sim{background:#fff;border:1.5px solid var(--indigo);color:var(--indigo);
+    border-radius:10px;padding:10px 16px;font-size:13.5px;font-weight:600;cursor:pointer;transition:.15s;flex:1}
+  .btn-sim:hover{background:var(--indigo-soft)}
+  .btns{display:flex;gap:8px;margin-top:16px}
+  .mode{display:flex;gap:6px;background:#f1f2f4;border-radius:10px;padding:4px;margin-bottom:14px}
+  .mode button{flex:1;border:none;background:transparent;padding:7px;border-radius:7px;
+    font-size:12.5px;cursor:pointer;color:var(--sub);font-weight:600}
+  .mode button.active{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .api-box{display:none;border-top:1px dashed var(--line);margin-top:14px;padding-top:12px}
+  .api-box.show{display:block}
+  .hint{font-size:11.5px;color:var(--sub);margin-top:6px;line-height:1.5}
+  .sim-divider{border-top:1px dashed var(--line);margin:14px 0 0;padding-top:12px}
+
+  /* output */
+  #out{min-height:200px}
+  .empty{color:var(--sub);text-align:center;padding:60px 20px;font-size:13.5px}
+  .stage{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+  .stage-h{display:flex;align-items:center;gap:9px;margin-bottom:13px}
+  .stage-n{width:24px;height:24px;border-radius:7px;background:var(--red-soft);color:var(--red);
+    font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .stage-n.indigo{background:var(--indigo-soft);color:var(--indigo)}
+  .stage-h h3{font-size:15px;margin:0}
+  .stage-h .desc{font-size:11.5px;color:var(--sub);margin-left:auto}
+  .stage-loading{text-align:center;padding:28px 20px;color:var(--sub);font-size:13px}
+  .pp{border-left:3px solid var(--red);background:#fafafa;border-radius:0 8px 8px 0;padding:10px 13px;margin-bottom:9px}
+  .pp-top{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+  .pp-top b{font-size:13.5px}
+  .tag{font-size:11px;padding:1px 8px;border-radius:999px;font-weight:600}
+  .tag.high{background:#fdeaea;color:#d62828}
+  .tag.mid{background:#fff3e0;color:var(--warn)}
+  .tag.cnt{background:#eef2ff;color:var(--indigo)}
+  .quote{font-size:12px;color:var(--sub);background:#fff;border:1px solid var(--line);
+    border-radius:6px;padding:4px 9px;margin:3px 4px 0 0;display:inline-block}
+  .topic{border:1px solid var(--line);border-radius:11px;padding:13px;margin-bottom:11px}
+  .topic h4{margin:0 0 4px;font-size:14.5px}
+  .topic .angle{font-size:12.5px;color:var(--sub);margin-bottom:8px}
+  .why{background:var(--red-soft);border-radius:8px;padding:8px 11px;font-size:12.5px}
+  .why b{color:var(--red)}
+  .topic-actions{margin-top:9px;display:flex;gap:6px}
+  .btn-fill{font-size:11.5px;padding:4px 11px;border-radius:7px;border:1px solid var(--indigo);
+    background:var(--indigo-soft);color:var(--indigo);cursor:pointer;font-weight:600;transition:.12s}
+  .btn-fill:hover{background:var(--indigo);color:#fff}
+  .titles{display:flex;flex-direction:column;gap:6px;margin-top:7px}
+  .titlev{display:flex;align-items:flex-start;gap:8px;font-size:13px;background:#fafafa;border-radius:7px;padding:7px 10px}
+  .titlev span{color:var(--red);font-weight:700;font-size:12px;flex-shrink:0}
+  .outline{counter-reset:s}
+  .ol{display:flex;gap:11px;padding:9px 0;border-bottom:1px dashed var(--line)}
+  .ol:last-child{border-bottom:none}
+  .ol .sec{flex-shrink:0;width:88px;font-size:12.5px;font-weight:700;color:var(--red)}
+  .ol .ct{font-size:12.5px;color:#444}
+  .reuse{margin-top:11px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:9px;padding:10px 13px;font-size:12.5px}
+  .reuse b{color:var(--ok)}
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+  @media(max-width:560px){.cmp{grid-template-columns:1fr}}
+  .cmp-col{border-radius:10px;padding:11px 13px;font-size:12.5px}
+  .cmp-win{background:#f0fdf4;border:1px solid #bbf7d0}
+  .cmp-lose{background:#fef2f2;border:1px solid #fecaca}
+  .cmp-col h5{margin:0 0 7px;font-size:13px;display:flex;justify-content:space-between}
+  .cmp-win h5{color:var(--ok)}.cmp-lose h5{color:#b91c1c}
+  .cmp-item{font-size:11.5px;color:#555;padding:2px 0}
+  .cmp-item b{color:var(--ink)}
+  .cmp-col ul{margin:7px 0 0;padding-left:16px}
+  .cmp-col li{margin:2px 0}
+  .takeaway{margin-top:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:10px 13px;font-size:12.5px}
+  .takeaway b{color:#1d4ed8}
+  .takeaway ol{margin:5px 0 0;padding-left:18px}.takeaway li{margin:3px 0}
+  .spinner{width:18px;height:18px;border:2.5px solid var(--red-soft);border-top-color:var(--red);
+    border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:-3px;margin-right:6px}
+  .spinner.indigo{border-color:#e0e7ff;border-top-color:var(--indigo)}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .err{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:9px;padding:11px 13px;font-size:12.5px}
+  .badge{display:inline-block;font-size:11px;background:#eef2ff;color:var(--indigo);border-radius:999px;padding:2px 9px;margin-left:8px;font-weight:600;vertical-align:1px}
+
+  /* ── Simulation ── */
+  .persona-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:4px}
+  @media(max-width:700px){.persona-grid{grid-template-columns:1fr}}
+  .persona-card{border-radius:10px;border:1px solid var(--line);padding:12px;background:#fafafa}
+  .persona-hdr{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+  .persona-av{width:30px;height:30px;border-radius:50%;color:#fff;font-weight:700;font-size:14px;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .persona-av.sm{width:22px;height:22px;font-size:11px}
+  .persona-name{font-size:13.5px;font-weight:700;line-height:1.3}
+  .persona-type{font-size:11.5px;color:var(--sub);line-height:1.3}
+  .persona-type.ml{margin-left:4px}
+  .persona-detail{font-size:12px;color:#555;margin:3px 0;line-height:1.5}
+  .persona-detail b{color:var(--ink)}
+  .chat-msg{border-radius:0 10px 10px 0;background:#fafafa;padding:10px 13px;margin-bottom:9px;transition:opacity .3s}
+  .chat-msg.debate{background:#f0f4ff}
+  .chat-msg.loading{opacity:.6}
+  .chat-who{display:flex;align-items:center;gap:7px;margin-bottom:6px;flex-wrap:wrap}
+  .chat-who b{font-size:13px}
+  .chat-text{font-size:13px;color:#333;line-height:1.65}
+  .sentiment-icon{margin-left:auto;font-size:15px}
+  .stance-tag{margin-left:auto;font-size:11px;background:#eef2ff;color:var(--indigo);
+    padding:1px 8px;border-radius:999px;font-weight:600}
+  .syn-block{background:var(--red-soft);border:1px solid #ffd9de;border-radius:10px;padding:12px 14px;margin-bottom:10px}
+  .syn-row{font-size:13px;font-weight:600;margin-bottom:4px}
+  .syn-reason{font-size:12.5px;color:#444;margin-bottom:4px}
+  .syn-behavior{font-size:12px;color:var(--sub)}
+  .syn-label{font-size:12.5px;font-weight:700;color:var(--ink);margin:10px 0 5px}
+  .syn-list{margin:0;padding-left:18px}
+  .syn-list li{font-size:12.5px;color:#444;margin:4px 0}
+  /* ── Workflow switcher ── */
+  .wf-switch{display:flex;gap:6px;background:#f1f2f4;border-radius:10px;padding:4px;margin-bottom:14px}
+  .wf-switch button{flex:1;border:none;background:transparent;padding:7px;border-radius:7px;font-size:12.5px;cursor:pointer;color:var(--sub);font-weight:600}
+  .wf-switch button.active{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .csv-upload{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .btn-csv-upload{font-size:12px;padding:5px 11px;border-radius:7px;border:1px solid var(--line);background:#fff;cursor:pointer;color:var(--sub);font-weight:600;display:inline-block}
+  .btn-csv-upload:hover{background:#fafafa}
+  #csvStat{font-size:11.5px;color:var(--ok)}
+  .trend-theme{border-left:3px solid var(--warn);background:#fafafa;border-radius:0 8px 8px 0;padding:10px 13px;margin-bottom:9px}
+  .trend-theme-top{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+  .trend-theme-top b{font-size:13.5px}
+  .opportunity{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:9px;padding:10px 13px;margin-bottom:8px;font-size:12.5px}
+  .opportunity b{color:var(--ok)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="logo">薯</div>
+    <div>
+      <h1>创作者内容诊断与选题共创助手 <span class="badge">Prototype</span></h1>
+    </div>
+  </header>
+  <p class="tagline">围绕小红书公开内容样本与评论区反馈,把「主页诊断 → 痛点归类 → 选题生成 → 结构复盘」做成可复用工作流。</p>
+
+  <div class="workflow">
+    <div class="wf"><b>①</b> 主页诊断</div>
+    <div class="wf"><b>②</b> 痛点归类</div>
+    <div class="wf"><b>③</b> 选题生成</div>
+    <div class="wf"><b>④</b> 结构复盘</div>
+    <div class="wf" style="background:#eef2ff;border-color:#c7d2fe"><b style="color:var(--indigo)">👥</b> 受众模拟 · 多智能体讨论</div>
+  </div>
+
+  <div class="grid">
+    <!-- LEFT: input -->
+    <div class="panel">
+      <h2>📥 输入</h2>
+
+      <div class="wf-switch">
+        <button id="wf-a" class="active" onclick="setWorkflow('a')">📊 账号诊断</button>
+        <button id="wf-b" onclick="setWorkflow('b')">🔥 热点分析</button>
+      </div>
+      <button class="btn btn-ghost" onclick="loadSample()" style="width:100%;margin-bottom:14px;font-size:12.5px">↺ 载入样例</button>
+
+      <label>账号定位</label>
+      <textarea id="positioning" rows="4"></textarea>
+
+      <!-- Tab A: account diagnosis -->
+      <div id="tab-a">
+        <label>主页 / 历史笔记 + 数据(格式:标题 ｜ 数据 ｜ 爆/平/差)</label>
+        <textarea id="notes" rows="6"></textarea>
+        <label>评论区原文(一行一条,越多越准)</label>
+        <textarea id="comments" rows="7"></textarea>
+      </div>
+
+      <!-- Tab B: trend analysis -->
+      <div id="tab-b" style="display:none">
+        <label>话题关键词</label>
+        <input id="trendKeyword" type="text" placeholder="例：数字游民、留学申请、健身减脂…" />
+        <label>热帖数据(CSV 粘贴或上传文件 · 需含标题/点赞/收藏字段)</label>
+        <textarea id="csvText" rows="6" placeholder="从小红书采集的 CSV 数据，直接粘贴或点击右侧上传按钮&#10;字段：title, likes, collects, comments, tags, content_snippet, date"></textarea>
+        <div class="csv-upload">
+          <label for="csvFile" class="btn-csv-upload">📂 上传 .csv 文件</label>
+          <input id="csvFile" type="file" accept=".csv,.tsv" onchange="handleFileUpload(this)" style="display:none" />
+          <span id="csvStat"></span>
+        </div>
+      </div>
+
+      <div class="sim-divider">
+        <label>👥 下期选题(受众模拟的测试内容)</label>
+        <textarea id="simTopic" rows="2" placeholder="填入想测试受众反应的选题标题或草稿，或从③选题生成中一键填入 →"></textarea>
+      </div>
+
+      <div class="mode" style="margin-top:14px">
+        <button id="m-demo" class="active" onclick="setMode('demo')">演示模式 · 预置真实样例</button>
+        <button id="m-live" onclick="setMode('live')">实时生成 · Claude API</button>
+      </div>
+
+      <div class="api-box" id="apiBox">
+        <label>Anthropic API Key(仅本地浏览器使用,不上传)</label>
+        <input id="apiKey" type="password" placeholder="sk-ant-..." />
+        <p class="hint">实时模式使用 claude-sonnet-4-6。演示与实时共用同一渲染器。</p>
+      </div>
+
+      <div class="btns">
+        <button class="btn btn-primary" id="runBtn" onclick="run()">⚡ 生成诊断</button>
+        <button class="btn-sim" onclick="runSimulation()">👥 受众模拟</button>
+      </div>
+    </div>
+
+    <!-- RIGHT: output -->
+    <div id="out">
+      <div class="empty">👈 左侧已预置 @QSheep 留学赛道的真实样例<br/>点「生成诊断」查看五段工作流，或点「受众模拟」体验多智能体讨论<br/><br/>③ 选题生成中每条选题可一键填入「下期选题」栏</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
+/* ── 样本数据 ─────────────────────────────────────────── */
+const SAMPLE = {
+  positioning:`账号:@QSheep｜留学内容创作者,1.4K 粉。核心人群=正在准备/纠结出国读研的文科生(传媒、社科、人类学),目标英港新前30。
+内容主张:真实反思 + 决策方法,不贩卖焦虑、不灌鸡汤。
+作者优势:亲历者视角、擅长把模糊焦虑拆成可执行的决策步骤、文笔好。
+目标:选题持续围绕「选校决策 / 申请策略 / 留学反思」,但要避开已经写过的老话题。`,
+  notes:`二本逆袭G5?别再被这种标题骗了 ｜ 赞1.4k 藏980 ｜ 爆
+留学中介到底值不值5万块|我的真实账单与避坑清单 ｜ 赞1.1k 藏860 ｜ 爆
+选校时我后悔没早知道的6件事 ｜ 赞720 藏610 ｜ 爆
+文科留学回国到底有没有用|工作一年后说点实话 ｜ 赞90 藏40 ｜ 平
+DIY申请时间线:从大三暑假到递交我每个月都干了啥 ｜ 赞60 藏150 ｜ 差`,
+  comments:`中介那部分太真实了,我现在就纠结要不要DIY,自己怕搞砸
+想问下双非背景冲英国前30有戏吗,真的好焦虑
+回国后发现海归学历根本不值钱,有点后悔
+求一个选校时间线!完全不知道几月该干嘛,好慌
+文书到底自己写还是找人改啊,我憋了两周写不出来
+家里不太支持留学,该怎么说服父母
+雅思一直卡6.5,是不是该先把雅思考完再准备申请
+想知道港三和英国前30到底怎么选,纠结死了
+均分85冲刺前20稳吗,GPA算是劣势吗
+看了好多博主都在贩卖焦虑,终于有人好好说话了
+转专业申请会不会很吃亏,本科传媒想转社科
+预算有限,中介和DIY的钱到底该花在哪一步
+实习经历很水,文书里要不要硬写
+拿到offer了但突然不确定该不该去,好迷茫`,
+  simTopic:`5万块中介费,该花的是这3步,剩下4步你自己做更好`
+};
+
+/* ── 预置诊断产出 ─────────────────────────────────────── */
+const SAMPLE_RESULT = {
+  profile:{
+    pillars:["留学决策反思","申请避坑 / 性价比","背景评估方法论"],
+    titleFormulas:[
+      {formula:"反预期否定式 ——「别再被X骗了 / 别再问Y」",examples:["二本逆袭G5?别再被这种标题骗了"]},
+      {formula:"价值拷问 + 真实账单 ——「X到底值不值|我的真实账单」",examples:["留学中介到底值不值5万块|我的真实账单与避坑清单"]},
+      {formula:"亲历复盘 + 数字清单 ——「我后悔没早知道的N件事」",examples:["选校时我后悔没早知道的6件事"]}
+    ],
+    hookStyles:["亲历者第一人称切入,先认同情绪再反转","用具体数字/账单(5万、6件事)制造真实感","点破一个普遍误区作为靶子"],
+    viralStructure:{
+      name:"避坑清单体(反直觉钩子 → 立靶 → 亲历佐证 → 逐条拆解 → 可保存清单 → 反问互动)",
+      steps:["反直觉钩子(认同+反转)","立靶:点破一个普遍误区","亲历账单/具体数字","逐条拆解成可执行步骤","给一张可保存清单促收藏","结尾反问引导评论"]
+    },
+    voiceFingerprint:["不贩卖焦虑,反鸡汤","把模糊焦虑拆成可执行步骤","克制、真诚、亲历者口吻"],
+    contrast:{
+      winners:[{title:"二本逆袭G5?别再被这种标题骗了",metric:"赞1.4k·藏980"},{title:"留学中介到底值不值5万块|真实账单",metric:"赞1.1k·藏860"},{title:"选校时我后悔没早知道的6件事",metric:"赞720·藏610"}],
+      losers:[{title:"文科留学回国到底有没有用|说点实话",metric:"赞90·藏40"},{title:"DIY申请时间线:每个月干了啥",metric:"赞60·藏150(收藏>赞)"}],
+      winFactors:["选题踩在「决策纠结点」(值不值 / 有没有戏),情绪卷入强","标题带具体数字或反预期钩子(5万、6件事、别被骗)","亲历者 + 逐条拆解,可信度高、可保存"],
+      loseFactors:["「有没有用」是宽泛价值评判题,情绪弱、同质化高,难破圈","纯流程工具(时间线)收藏高但赞/传播弱——是收藏钩子,不是涨粉爆款"],
+      takeaways:["优先做「决策纠结型」选题,避开「宽泛价值评判型」","工具向内容(时间线/清单)定位为引流收藏款,别当主推,标题需再加情绪钩子","标题必须带具体数字 / 反预期,这是该号已验证的爆款变量"]
+    }
+  },
+  painPoints:[
+    {theme:"DIY vs 中介:不知道钱该花在哪一步",intensity:"高",count:4,evidence:["纠结要不要DIY,自己怕搞砸","中介和DIY的钱到底该花在哪一步","中介值不值5万块"]},
+    {theme:"背景评估焦虑:双非/均分够不够得着",intensity:"高",count:4,evidence:["双非背景冲英国前30有戏吗","均分85冲刺前20稳吗,GPA算是劣势吗","实习经历很水"]},
+    {theme:"流程黑箱:不知道几月该干嘛",intensity:"中",count:2,evidence:["求一个选校时间线!完全不知道几月该干嘛","雅思该先考完还是边考边申"]},
+    {theme:"文书卡壳:写不出 / 不知道找谁改",intensity:"中",count:2,evidence:["文书自己写还是找人改","憋了两周写不出来"]},
+    {theme:"决策与外部压力:选校纠结 + 家庭不支持",intensity:"中",count:3,evidence:["港三和英国前30怎么选","家里不太支持留学怎么说服父母","拿到offer了但不确定该不该去"]}
+  ],
+  topics:[
+    {title:"5万块中介费,该花的是这3步,剩下4步你自己做更好",angle:"把「DIY还是中介」从二选一,重构成「按申请环节拆开外包」的决策框架",pain:"DIY vs 中介",whyFit:"直接命中最高频痛点;延续你《中介真实账单》那篇的亲历者+拆解风格,但从「贵不贵」升级到「怎么配置」,不重复老话题。"},
+    {title:"双非/均分85,到底够得着哪一档?一张自测表替代焦虑",angle:"用可量化的背景自测维度,把「有没有戏」的情绪问题转成可执行评估",pain:"背景评估焦虑",whyFit:"承接你《二本逆袭别被标题骗》的方法论基因,把抽象焦虑拆成步骤——正是你账号「不贩卖焦虑、给方法」的主张。"},
+    {title:"留学申请月历:从大三暑假到递交,每个月只做一件最重要的事",angle:"用「单月单任务」降低信息过载,解决流程黑箱",pain:"流程黑箱",whyFit:"评论区高频刚需(求时间线);可做成可保存的图文模板,利于涨粉与收藏,补齐你内容里偏「工具」的一类。"},
+    {title:"文书写不出来,不是你不行,是你跳过了这一步",angle:"把「文书卡壳」归因到前置的素材梳理,而非写作能力",pain:"文书卡壳",whyFit:"反鸡汤、给具体方法,符合账号调性;可引出你擅长的「亲历者复盘」叙事。"}
+  ],
+  structure:{
+    topicChosen:"5万块中介费,该花的是这3步,剩下4步你自己做更好",
+    outline:[
+      {sec:"开头钩子",ct:"用评论原话切入共鸣:「我也纠结过要不要DIY,直到我把5万块拆开算了一笔账」——制造亲历感+反直觉钩子。"},
+      {sec:"立靶",ct:"点破误区:DIY vs 中介是个假选择题,真正的问题是「哪些环节值得外包」。"},
+      {sec:"主体·拆解",ct:"把申请拆成7个环节(选校/文书/网申/套磁…),逐个标注「自己做 / 该外包」+理由,给出该花钱的3步。"},
+      {sec:"亲历佐证",ct:"穿插自己当时在某一步踩的坑 / 省下的钱,强化可信度(账号核心资产)。"},
+      {sec:"行动锦囊",ct:"给一张可保存的「环节-是否外包-预算占比」对照表,促收藏。"},
+      {sec:"结尾互动",ct:"反问引导评论:「你卡在哪一步?评论区我帮你判断该不该花这个钱」——为下一篇选题采集新评论。"}
+    ],
+    reuse:"可复用模板【把二元焦虑题 → 重构成「按环节/维度拆开的配置表」】:同样适用于「选校纠结」「要不要Gap」「实习水不水」等选题,形成账号的标志性方法论结构。"
+  }
+};
+
+/* ── 受众模拟预置数据 ─────────────────────────────────── */
+const SAMPLE_SIMULATION = {
+  topic:"5万块中介费,该花的是这3步,剩下4步你自己做更好",
+  personas:[
+    {id:"anxious",name:"李明",archetype:"双非焦虑备考生",background:"双非本科，均分82，正在准备申请英国G5",personality:"容易自我怀疑，喜欢横向比较，对结论性内容依赖强",concerns:"自己的背景够不够、花的钱值不值",color:"#4f46e5"},
+    {id:"experienced",name:"周美",archetype:"已出国的过来人",background:"双非逆袭UCL，现读研一年级，热衷分享经验",personality:"务实、有自己判断、容易对过于焦虑的内容反感",concerns:"内容是否准确、有没有真实信息增量",color:"#16a34a"},
+    {id:"returnee",name:"张宇",archetype:"海归回国踩坑者",background:"曼彻斯特硕士，回国工作1年，感受到落差",personality:"略带负面情绪，理性，容易提出尖锐问题",concerns:"海归含金量、留学长期ROI",color:"#d97706"}
+  ],
+  reactions:[
+    {personaId:"anxious",text:"这个太说到我了！我现在就在纠结到底要不要花5万找中介，感觉什么都不懂。标题那个「该花的是这3步」让我特别想点进来，终于有人教我怎么分配这笔钱了。",sentiment:"positive"},
+    {personaId:"experienced",text:"内容方向是对的，把中介费按环节拆开比二选一更有用。但「剩下4步自己做更好」这个结论对信息素养高的人成立——对真的信息不对称的同学，某些环节还是需要专业支持。不加这个前提，容易误导人。",sentiment:"mixed"},
+    {personaId:"returnee",text:"说实话，花多少中介费是次要的——真正的问题是得先搞清楚留学对你的长期价值是什么。我当时也精心规划每一分钱，结果回来发现海归溢价基本没有。只讲怎么花钱、不讲「值不值得花」，可能解决的是伪问题。",sentiment:"negative"}
+  ],
+  debate:[
+    {personaId:"anxious",text:"@已出国的过来人 你说要加适用前提，但对我们这种信息不对称的人，这篇已经比那些「大概率要找中介」的内容好太多了。能把钱拆开说清楚，就是很大的进步了。",targetedAt:"experienced",stance:"disagree"},
+    {personaId:"experienced",text:"@海归回国踩坑者 你说的ROI问题我理解，但这篇的受众本来就是「已决定要留学、在纠结怎么执行」的人，这时候再质疑留学值不值，不是这篇文章该解决的问题。批评角度对，但打错靶了。",targetedAt:"returnee",stance:"disagree"},
+    {personaId:"returnee",text:"@已出国的过来人 我同意「打错靶」——我确实在用另一个问题回应这篇。但我觉得可以在开头加一句「你是否已确认留学适合你」作为前置，而不是默认所有人都已经想清楚了。",targetedAt:"experienced",stance:"nuanced"}
+  ],
+  synthesis:{
+    topResonance:{persona:"双非焦虑备考生（李明类）",reason:"内容直接命中「钱该怎么花」的决策焦虑，给出了可执行的分配框架，这类读者最缺的就是具体方法",expectedBehavior:"高收藏率、评论区会有人问「我这个情况该怎么选」"},
+    controversyPoints:["「剩下4步自己做更好」——过来人群体可能认为这个结论过于绝对，会有评论「不一定，要看情况」","海归回国群体可能在评论区引入留学ROI话题，让讨论跑偏"],
+    suggestions:["开头加一行适用范围：「本篇适合已确认要出国、正在规划预算的同学」","「自己做更好」改为「信息素养够的话可以自己做」，降低绝对感","预留评论区互动钩子，邀请过来人分享各环节实际花费，把争议变成内容资产"]
+  }
+};
+
+/* ── 4 段集中 Prompt ─────────────────────────────────── */
+const PROMPT_PROFILE = `你是创作者账号分析师。基于历史笔记和账号定位，分析这个账号的爆款基因。
+规则：
+- pillars 每条 10 字以内，概括性词组，不加冒号或括号展开
+- 若笔记含数据（格式「标题｜数据｜爆/平/差」），必须提供 contrast 对比诊断
+- winFactors/loseFactors/takeaways 落到选题类型/标题变量/内容形态，不泛泛而谈
+只输出 JSON，不要任何解释或 markdown 代码块。schema:
+{"profile":{"pillars":[],"titleFormulas":[{"formula":"","examples":[]}],"hookStyles":[],"viralStructure":{"name":"","steps":[]},"voiceFingerprint":[],"contrast":{"winners":[{"title":"","metric":""}],"losers":[{"title":"","metric":""}],"winFactors":[],"loseFactors":[],"takeaways":[]}}}`;
+
+const PROMPT_PAIN_POINTS = `你是评论区分析师。聚合评论区原文，提炼 3~5 个读者痛点主题，每个带原文证据。
+排序规则：intensity 高→中，同级按 count 降序。
+只输出 JSON，不要任何解释或 markdown 代码块。schema:
+{"painPoints":[{"theme":"","intensity":"高/中","count":0,"evidence":[]}]}`;
+
+const PROMPT_TOPICS = `你是内容选题策略师。基于账号定位、爆款基因诊断和评论区痛点，生成 3~4 个选题 + 2 组标题变体。
+重要约束：
+① topics[0] 必须对应 painPoints[0]（最高频/最高强度痛点），直接命中它
+② 每个 whyFit 必须结合账号的惯用结构和风格指纹，不能是通用表述
+③ titles 选 topics[0] 和 topics[1] 各给 3 条变体，贴合已归纳的标题公式，不贩卖焦虑
+只输出 JSON，不要任何解释或 markdown 代码块。schema:
+{"topics":[{"title":"","angle":"","pain":"","whyFit":""}],"titles":[{"topic":"","variants":[]}]}`;
+
+const PROMPT_STRUCTURE = `你是内容结构师。为指定选题写完整笔记骨架，并提炼可跨选题复用的表达结构。
+重要：topicChosen 必须与输入的「选题」原文完全一致。
+只输出 JSON，不要任何解释或 markdown 代码块。schema:
+{"structure":{"topicChosen":"","outline":[{"sec":"","ct":""}],"reuse":""}}`;
+
+/* ── esc ──────────────────────────────────────────────── */
+function esc(x){return(x==null?"":""+x).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]))}
+
+/* ── 诊断 Stage HTML 构建器 ──────────────────────────── */
+function buildProfileHtml(pr){
+  const pillars=(pr.pillars||[]).map(p=>`<span class="quote" style="background:var(--red-soft);border-color:#ffd9de;color:var(--red);font-weight:600">${esc(p)}</span>`).join('');
+  const formulas=(pr.titleFormulas||[]).map(f=>`<div class="ol"><div class="sec" style="width:auto;min-width:0;padding-right:10px">公式</div><div class="ct"><b>${esc(f.formula)}</b>${(f.examples||[]).map(e=>`<div class="quote" style="margin-top:4px">例:${esc(e)}</div>`).join('')}</div></div>`).join('');
+  const hooks=(pr.hookStyles||[]).map(h=>`<li>${esc(h)}</li>`).join('');
+  const vs=pr.viralStructure||{};
+  const steps=(vs.steps||[]).map((s,i)=>`<div class="titlev"><span>${i+1}</span>${esc(s)}</div>`).join('');
+  const c=pr.contrast;
+  let ch='';
+  if(c){
+    const lst=a=>(a||[]).map(x=>`<div class="cmp-item"><b>${esc(x.title)}</b> · ${esc(x.metric)}</div>`).join('');
+    const fac=a=>(a||[]).map(x=>`<li>${esc(x)}</li>`).join('');
+    const take=(c.takeaways||[]).map(x=>`<li>${esc(x)}</li>`).join('');
+    ch=`<label>📊 高表现 vs 低表现 · 对比诊断</label>
+      <div class="cmp">
+        <div class="cmp-col cmp-win"><h5><span>✅ 高表现共性</span></h5>${lst(c.winners)}<ul>${fac(c.winFactors)}</ul></div>
+        <div class="cmp-col cmp-lose"><h5><span>⚠️ 低表现共性</span></h5>${lst(c.losers)}<ul>${fac(c.loseFactors)}</ul></div>
+      </div>
+      <div class="takeaway"><b>→ 可执行结论:</b><ol>${take}</ol></div>`;
+  }
+  return `${ch}
+    <label>📚 内容支柱</label><div>${pillars}</div>
+    <label>✍️ 惯用标题公式</label><div class="outline">${formulas}</div>
+    <label>🪝 开头钩子习惯</label><ul style="margin:4px 0 0;padding-left:18px;font-size:12.5px;color:#444">${hooks}</ul>
+    <label>🧱 惯用爆款结构 · <b style="color:var(--red)">${esc(vs.name||'')}</b></label>
+    <div class="titles" style="margin-top:6px">${steps}</div>
+    `;
+}
+
+function buildPainPointsHtml(pp){
+  const tagCls=v=>v==='高'?'high':'mid';
+  return(pp||[]).map(p=>`
+    <div class="pp">
+      <div class="pp-top"><b>${esc(p.theme)}</b><span class="tag ${tagCls(p.intensity)}">强度 ${esc(p.intensity)}</span><span class="tag cnt">${p.count} 条相关</span></div>
+      <div>${(p.evidence||[]).map(q=>`<span class="quote">"${esc(q)}"</span>`).join('')}</div>
+    </div>`).join('');
+}
+
+function buildTopicsHtml(topics){
+  return(topics||[]).map((t,i)=>`
+    <div class="topic">
+      <h4>${esc(t.title)}</h4>
+      <div class="angle">切入角度:${esc(t.angle)}　·　对应痛点:${esc(t.pain||'')}</div>
+      <div class="why"><b>为什么适合这个账号:</b> ${esc(t.whyFit)}</div>
+      <div class="topic-actions">
+        <button class="btn-fill" onclick="fillSimTopic(${i})">→ 填入下期选题</button>
+      </div>
+    </div>`).join('');
+}
+
+// Store topics for fillSimTopic
+let _lastTopics = {a:[], b:[]};
+let _gen = 0; // generation counter to discard stale async callbacks
+function fillSimTopic(i){
+  const t = (_lastTopics[activeWorkflow]||[])[i];
+  if(t){ document.getElementById('simTopic').value = `${t.title}\n切入角度：${t.angle}`; }
+}
+
+function buildTitlesHtml(titles){
+  return(titles||[]).map(t=>`
+    <div class="topic">
+      <h4 style="font-size:13.5px">📌 ${esc(t.topic)}</h4>
+      <div class="titles">${(t.variants||[]).map((v,i)=>`<div class="titlev"><span>${['A','B','C','D'][i]}</span>${esc(v)}</div>`).join('')}</div>
+    </div>`).join('');
+}
+
+function buildStructureHtml(s){
+  const ol=(s.outline||[]).map(o=>`<div class="ol"><div class="sec">${esc(o.sec)}</div><div class="ct">${esc(o.ct)}</div></div>`).join('');
+  return `<div class="outline">${ol}</div><div class="reuse"><b>♻ 可复用表达结构:</b> ${esc(s.reuse||'')}</div>`;
+}
+
+/* ── 诊断阶段框架 ─────────────────────────────────────── */
+const STAGE_META = [
+  {n:'①',title:'主页诊断 · 数据对比 + 爆款结构',desc:''},
+  {n:'②',title:'痛点归类',desc:''},
+  {n:'③',title:'选题生成',desc:''},
+  {n:'④',title:'结构复盘',desc:''}
+];
+
+function initDiagnosisStages(){
+  document.getElementById('out').innerHTML = STAGE_META.map((m,i)=>`
+    <div class="stage" id="stage-${i+1}">
+      <div class="stage-h">
+        <div class="stage-n">${m.n}</div>
+        <h3>${m.title}</h3>
+        <div class="desc" id="sd-${i+1}">${m.desc}</div>
+      </div>
+      <div class="stage-loading" id="sb-${i+1}"><span class="spinner"></span>分析中…</div>
+    </div>`).join('');
+}
+
+function fillStage(n, html, desc){
+  const b=document.getElementById(`sb-${n}`);
+  if(b){b.className='';b.innerHTML=html}
+  if(desc){const d=document.getElementById(`sd-${n}`);if(d)d.textContent=desc;}
+}
+
+/* ── 模式切换 ─────────────────────────────────────────── */
+let mode='demo';
+function setMode(m){
+  mode=m;
+  document.getElementById('m-demo').classList.toggle('active',m==='demo');
+  document.getElementById('m-live').classList.toggle('active',m==='live');
+  document.getElementById('apiBox').classList.toggle('show',m==='live');
+  const isB=activeWorkflow==='b';
+  document.getElementById('runBtn').textContent=m==='demo'
+    ?(isB?'⚡ 热点分析':'⚡ 生成诊断')
+    :(isB?'⚡ 调用 Claude 分析':'⚡ 调用 Claude 生成');
+}
+function loadSample(){
+  if(activeWorkflow==='b'){
+    document.getElementById('positioning').value=SAMPLE_TREND_POSITIONING;
+    document.getElementById('trendKeyword').value=SAMPLE_TREND_KEYWORD;
+    const preview=SAMPLE_TREND_POSTS.slice(0,10).map((p,i)=>`${i+1}. [${p.l}赞/${p.c}藏] ${p.t}`).join('\n');
+    document.getElementById('csvText').value=`# 已载入：${SAMPLE_TREND_POSTS.length} 条数字游民话题热帖（演示模式）\n${preview}\n...`;
+    document.getElementById('csvStat').textContent=`✓ ${SAMPLE_TREND_POSTS.length} 条演示数据`;
+    document.getElementById('simTopic').value='文科生/非技术背景，靠什么开始数字游民？6条真实路径\n切入角度：把「没有可以远程的技能」这个最大卡点，拆成6个具体可行的技能转换方向';
+    return;
+  }
+  document.getElementById('positioning').value=SAMPLE.positioning;
+  document.getElementById('notes').value=SAMPLE.notes;
+  document.getElementById('comments').value=SAMPLE.comments;
+  document.getElementById('simTopic').value=SAMPLE.simTopic;
+}
+
+/* ── 诊断·演示模式(逐段显示) ─────────────────────────── */
+async function runDemoProgressive(){
+  initDiagnosisStages();
+  _lastTopics[activeWorkflow] = SAMPLE_RESULT.topics;
+  await delay(700);
+  fillStage(1, buildProfileHtml(SAMPLE_RESULT.profile));
+  await delay(500);
+  fillStage(2, buildPainPointsHtml(SAMPLE_RESULT.painPoints));
+  await delay(700);
+  fillStage(3, buildTopicsHtml(SAMPLE_RESULT.topics));
+  await delay(600);
+  const s=SAMPLE_RESULT.structure;
+  fillStage(4, buildStructureHtml(s));
+}
+
+/* ── 诊断·实时模式(Haiku Phase1 并行 + Sonnet Phase2/3) */
+async function runLiveChunked(key, sonnetModel){
+  const gen=++_gen;
+  initDiagnosisStages();
+  const pos=document.getElementById('positioning').value;
+  const notes=document.getElementById('notes').value;
+  const comments=document.getElementById('comments').value;
+
+  let profile, painPoints;
+
+  // Phase 1: Parallel with Haiku
+  await Promise.all([
+    callChunk(key, sonnetModel, PROMPT_PROFILE,
+      `【账号定位】\n${pos}\n\n【历史/对标笔记】\n${notes}`, 2000)
+    .then(d=>{if(gen!==_gen)return; profile=d.profile; fillStage(1,buildProfileHtml(profile));})
+    .catch(e=>fillStage(1,`<div class="err">① 分析失败: ${esc(e.message)}</div>`)),
+
+    callChunk(key, sonnetModel, PROMPT_PAIN_POINTS,
+      `【评论区原文】\n${comments}`, 800,{
+      name:'pain_points', description:'痛点归类',
+      schema:{type:'object',required:['painPoints'],properties:{painPoints:{type:'array',items:{type:'object',
+        required:['theme','intensity','count','evidence'],
+        properties:{theme:{type:'string'},intensity:{type:'string',enum:['高','中']},count:{type:'integer'},evidence:{type:'array',items:{type:'string'}}}}}}}})
+    .then(d=>{if(gen!==_gen)return; painPoints=d.painPoints; fillStage(2,buildPainPointsHtml(painPoints));})
+    .catch(e=>fillStage(2,`<div class="err">② 分析失败: ${esc(e.message)}</div>`))
+  ]);
+
+  // Phase 2: Sonnet · Topics + Titles（profile/painPoints 若 Phase1 失败则为 undefined，JSON.stringify 会变 {}，容忍降级）
+  if(!profile&&!painPoints){fillStage(3,`<div class="err">③ Phase 1 全部失败，无法生成选题</div>`);fillStage(4,'');return;}
+  let topics;
+  try{
+    const d=await callChunk(key, sonnetModel, PROMPT_TOPICS,
+      `【账号定位】\n${pos}\n\n【爆款基因】\n${JSON.stringify({profile})}\n\n【痛点】\n${JSON.stringify({painPoints})}`, 2000);
+    topics=d.topics;
+    _lastTopics[activeWorkflow]=topics;
+    fillStage(3,buildTopicsHtml(topics));
+    }catch(e){
+    fillStage(3,`<div class="err">③ 生成失败: ${esc(e.message)}</div>`);
+    fillStage(4,`<div class="err">④ 生成失败: ${esc(e.message)}</div>`);
+    return;
+  }
+
+  // Phase 3: Sonnet · Structure
+  try{
+    const chosen=topics[0]?.title||'';
+    const d=await callChunk(key, sonnetModel, PROMPT_STRUCTURE,
+      `【账号定位】\n${pos}\n\n【风格指纹】\n${(profile?.voiceFingerprint||[]).join('；')}\n\n【爆款结构】\n${profile?.viralStructure?.name||''}\n\n【选题】\n${chosen}`, 1500);
+    fillStage(4,buildStructureHtml(d.structure));
+  }catch(e){
+    fillStage(4,`<div class="err">④ 生成失败: ${esc(e.message)}</div>`);
+  }
+}
+
+/* ── 诊断入口 ─────────────────────────────────────────── */
+async function run(){
+  if(activeWorkflow==='b'){
+    if(mode==='demo'){await runTrendDemoProgressive();return;}
+    const key=document.getElementById('apiKey').value.trim();
+    if(!key){showErr('请填入 Anthropic API Key，或切回演示模式。');return;}
+    await runTrendLiveChunked(key,'claude-sonnet-4-6');
+    return;
+  }
+  if(mode==='demo'){await runDemoProgressive();return;}
+  const key=document.getElementById('apiKey').value.trim();
+  if(!key){showErr('请填入 Anthropic API Key，或切回演示模式。');return;}
+  await runLiveChunked(key,'claude-sonnet-4-6');
+}
+
+const SAMPLE_SIMULATION_B = {
+  topic:"文科生/非技术背景，靠什么开始数字游民？6条真实路径\n切入角度：把「没有可以远程的技能」这个最大卡点，拆成6个具体可行的技能转换方向",
+  personas:[
+    {id:"wannabe",archetype:"想转型的传统职场人",background:"大厂运营岗3年，月薪1.5万，想逃离格子间但不知道自己有没有可以远程的技能",personality:"焦虑但理性，对「路径清单」类内容收藏意愿极强，容易被具体数字打动",concerns:"自己够不够格、能不能养活自己、要不要冒险",color:"#4f46e5"},
+    {id:"nomad",archetype:"已实现的数字游民",background:"曾做内容运营，现在做独立站+线上课，在巴厘岛旅居两年，月入2~4万不等",personality:"务实、不贩卖幻觉，容易对「太容易」的描述反感，但会认可真实干货",concerns:"内容是否准确、有没有夸大路径的容易程度",color:"#16a34a"},
+    {id:"skeptic",archetype:"理性风险厌恶者",background:"有稳定工作，对数字游民感兴趣但顾虑多，主要卡在「收入空窗期怎么活」",personality:"喜欢追问细节，不轻易被励志叙事打动，但遇到真实数据会转变态度",concerns:"过渡期生活成本、失败兜底方案、收入稳定性",color:"#d97706"}
+  ],
+  reactions:[
+    {personaId:"wannabe",text:"这篇完全说到我了！我一直以为数字游民必须会编程，原来还有这6条路径。线上教学和AI辅助服务那两条我觉得我能试，终于有一篇给出了具体方向而不是泛泛「你要有技能」。",sentiment:"positive"},
+    {personaId:"nomad",text:"方向是对的，这6条路径我身边都有人在走。但有几条写得太轻松了——比如「跨境电商运营」，光选品测品就能让人半年没收入。如果不加门槛说明，容易让人低估实际难度。",sentiment:"mixed"},
+    {personaId:"skeptic",text:"内容有价值，但我最想知道的没有说——转型初期没有稳定收入的那几个月怎么过？这6条路径每条「初期能赚多少」「多久才能达到稳定收入」没有回答，对我这种有房贷的人来说，这才是真正的决策门槛。",sentiment:"mixed"}
+  ],
+  debate:[
+    {personaId:"wannabe",text:"@已实现的数字游民 你说写得太容易，那你觉得6条里哪一条是最被夸大的？我想在决定走哪条之前先把坑搞清楚。",targetedAt:"nomad",stance:"nuanced"},
+    {personaId:"nomad",text:"@理性风险厌恶者 你说的启动成本问题我完全同意——这其实就是这篇缺失的「第二篇」。作者如果能出一篇「转型第一年真实账单」，把每条路径的冷启动周期和最低生活成本写清楚，两篇放在一起才是完整的入门指南。",targetedAt:"skeptic",stance:"agree"},
+    {personaId:"skeptic",text:"@已实现的数字游民 你说得对，这篇适合当「方向地图」，不适合当「执行手册」。@想转型的传统职场人 建议你把这篇和一篇真实成本拆解一起看，两个结合才能做出理性决策。",targetedAt:"wannabe",stance:"nuanced"}
+  ],
+  synthesis:{
+    topResonance:{persona:"想转型的传统职场人",reason:"内容精准命中「我没有远程技能怎么办」这个最高频入门卡点，给了可选择的方向清单，这类读者最缺的就是从0到1的路径感",expectedBehavior:"高收藏、评论区会有大量「我适合走哪条」的提问"},
+    controversyPoints:["「6条路径」的表述可能让人觉得门槛很低，已实现的数字游民群体可能评论「没那么简单」","跨境电商和独立站路径竞争激烈，老手可能在评论区泼冷水"],
+    suggestions:["每条路径加上「初期月收入区间」和「达到稳定需要多久」的具体数字，让内容从「方向地图」升级为「决策依据」","结尾推荐下一篇选题：「转型第一年真实账单」，形成系列，同时回应评论区的核心疑问"]
+  }
+};
+
+
+/* ── 受众模拟·演示模式 ────────────────────────────────── */
+async function runSimulationDemo(){
+  const out=document.getElementById('out');
+  const data=activeWorkflow==='b'?SAMPLE_SIMULATION_B:SAMPLE_SIMULATION;
+  const pm={};data.personas.forEach(p=>{pm[p.id]=p;});
+
+  out.innerHTML=`<div class="empty"><span class="spinner indigo"></span>正在从评论区归纳受众原型…</div>`;
+  await delay(900);
+
+  out.innerHTML=`
+    <div class="stage" id="sim-personas">
+      <div class="stage-h"><div class="stage-n indigo">👥</div><h3>受众人设</h3><div class="desc">从评论区归纳 · 3个典型原型</div></div>
+      <div class="persona-grid">${buildPersonaCards(data.personas)}</div>
+    </div>
+    <div class="stage" id="sim-reactions">
+      <div class="stage-h"><div class="stage-n indigo">①</div><h3>初读反应</h3><div class="desc">三位受众同时读取内容…</div></div>
+      ${data.personas.map(p=>`<div class="chat-msg loading" id="react-${p.id}" style="border-left:3px solid ${p.color}">
+        <div class="chat-who"><span class="persona-av sm" style="background:${p.color}">${(p.archetype||'?')[0]}</span><b>${esc(p.archetype)}</b><span class="spinner indigo" style="margin-left:8px"></span></div>
+      </div>`).join('')}
+    </div>`;
+
+  for(let i=0;i<data.reactions.length;i++){
+    await delay(500+i*450);
+    const r=data.reactions[i];const p=pm[r.personaId];
+    const el=document.getElementById(`react-${p.id}`);
+    if(el)el.outerHTML=buildReactionItem(p,r);
+  }
+
+  await delay(600);
+  const debateEl=document.createElement('div');
+  debateEl.className='stage';debateEl.id='sim-debate';
+  debateEl.innerHTML=`<div class="stage-h"><div class="stage-n indigo">②</div><h3>互动讨论</h3><div class="desc">受众开始互相回应…</div></div>`;
+  document.getElementById('sim-reactions').after(debateEl);
+
+  for(let i=0;i<data.debate.length;i++){
+    await delay(700+i*200);
+    const d=data.debate[i];const p=pm[d.personaId];
+    const el=document.createElement('div');
+    el.innerHTML=buildDebateItem(p,d);
+    debateEl.appendChild(el.firstElementChild);
+  }
+
+  await delay(700);
+  const synthEl=document.createElement('div');
+  synthEl.className='stage';
+  synthEl.innerHTML=buildSynthesisHtml(data.synthesis);
+  debateEl.after(synthEl);
+}
+
+/* ── 受众模拟·实时模式 ────────────────────────────────── */
+async function runSimulationLive(key,model){
+  const topic=document.getElementById('simTopic').value.trim();
+  if(!topic){showErr('请填入下期选题——例如你计划发布的标题或内容草稿。');return;}
+  const out=document.getElementById('out');
+  const pos=document.getElementById('positioning').value;
+  const commentsTa=document.getElementById('comments').value.trim();
+  const csvTa=document.getElementById('csvText').value.trim();
+  // Tab B has no comments textarea; use CSV content as fallback context
+  const comments=commentsTa||(csvTa?'【热帖数据摘要】\n'+csvTa.slice(0,800):'');
+
+  out.innerHTML=`<div class="empty"><span class="spinner indigo"></span>正在从评论区归纳受众原型…</div>`;
+  let personas;
+  try{
+    const personaSysPrompt = '你是受众分析专家。归纳3个典型受众原型（用 archetype 描述类型，不需要虚构名字）。color 三个分别用 #4f46e5/#16a34a/#d97706。';
+    const trendKeyword = document.getElementById('trendKeyword')?.value.trim()||'';
+    const personaContext = activeWorkflow==='b'
+      ? `账号定位：${pos}\n\n话题关键词：${trendKeyword}`
+      : `账号定位：${pos}\n\n评论区：\n${comments}`;
+    if(!pos.trim()&&(activeWorkflow!=='b'||!trendKeyword)){
+      throw new Error(activeWorkflow==='b'
+        ?'请先填入账号定位和话题关键词，才能归纳受众原型'
+        :'请先填入账号定位和评论区原文（或点击「载入样例」），才能归纳受众原型');
+    }
+    const raw=await callChunk(key,model,
+      personaSysPrompt,
+      personaContext,1200,{
+        name:'personas',description:'归纳受众原型',
+        schema:{type:'object',required:['personas'],properties:{personas:{type:'array',items:{type:'object',
+          required:['archetype'],
+          properties:{id:{type:'string'},archetype:{type:'string'},
+            background:{type:'string'},personality:{type:'string'},concerns:{type:'string'},color:{type:'string'}}}}}}});
+    const rawArr=Array.isArray(raw.personas)?raw.personas:(Array.isArray(raw)?raw:[]);
+    // 容忍模型把字段名写成 archetype/type/role/name 等变体
+    personas=rawArr.filter(p=>p&&typeof p==='object').map(p=>({
+      id:   p.id||p.archetype||p.type||p.role||String(Math.random()),
+      archetype: p.archetype||p.type||p.role||p.name||'受众',
+      background:  p.background||p.desc||'',
+      personality: p.personality||p.character||'',
+      concerns:    p.concerns||p.focus||p.interest||'',
+      color:       p.color||['#4f46e5','#16a34a','#d97706'][rawArr.indexOf(p)%3]
+    })).filter(p=>p.archetype&&p.archetype!=='受众'||rawArr.length>0);
+    if(!personas.length)throw new Error('未解析出有效受众原型（返回：'+JSON.stringify(rawArr).slice(0,120)+'；context长度：'+personaContext.length+'字）');
+  }catch(e){showErr('生成受众人设失败：'+e.message);return;}
+
+  const pm={};personas.forEach(p=>{pm[p.id]=p;});
+
+  out.innerHTML=`
+    <div class="stage" id="sim-personas">
+      <div class="stage-h"><div class="stage-n indigo">👥</div><h3>受众人设</h3><div class="desc">从评论区归纳</div></div>
+      <div class="persona-grid">${buildPersonaCards(personas)}</div>
+    </div>
+    <div class="stage" id="sim-reactions">
+      <div class="stage-h"><div class="stage-n indigo">①</div><h3>初读反应</h3><div class="desc">三位受众同时读取内容…</div></div>
+      ${personas.map(p=>`<div class="chat-msg loading" id="react-${p.id}" style="border-left:3px solid ${p.color}">
+        <div class="chat-who"><span class="persona-av sm" style="background:${p.color}">${(p.archetype||'?')[0]}</span><b>${esc(p.archetype)}</b><span class="spinner indigo" style="margin-left:8px"></span></div>
+      </div>`).join('')}
+    </div>`;
+
+  const reactions=new Array(personas.length);
+  await Promise.all(personas.map((p,i)=>
+    callChunk(key,model,
+      `你是${p.archetype}。背景：${p.background}。性格：${p.personality}。关注：${p.concerns}。你刚看了这篇小红书内容，给出真实第一反应，用第一人称，2-3句。`,
+      `内容：${topic}`,300,{
+      name:'reaction',description:'初读反应',
+      schema:{type:'object',required:['text','sentiment'],properties:{
+        text:{type:'string'},sentiment:{type:'string',enum:['positive','mixed','negative']}}}})
+    .then(r=>{reactions[i]={...r,personaId:p.id,personaArchetype:p.archetype};
+      const el=document.getElementById(`react-${p.id}`);
+      if(el)el.outerHTML=buildReactionItem(p,r);})
+    .catch(()=>{reactions[i]={personaId:p.id,text:'（获取失败）',sentiment:'mixed'};})
+  ));
+
+  const debateEl=document.createElement('div');
+  debateEl.className='stage';debateEl.id='sim-debate';
+  debateEl.innerHTML=`<div class="stage-h"><div class="stage-n indigo">②</div><h3>互动讨论</h3><div class="desc">受众开始互相回应…</div></div>
+    ${personas.map(p=>`<div class="chat-msg debate loading" id="debate-${p.id}" style="border-left:3px solid ${p.color}">
+      <div class="chat-who"><span class="persona-av sm" style="background:${p.color}">${(p.archetype||'?')[0]}</span><b>${esc(p.archetype)}</b><span class="spinner indigo" style="margin-left:8px"></span></div>
+    </div>`).join('')}`;
+  document.getElementById('sim-reactions').after(debateEl);
+
+  await Promise.all(personas.map((p,i)=>{
+    const others=reactions.filter((_,j)=>j!==i).map(r=>`${r.personaArchetype}说："${r.text}"`).join('\n');
+    const otherTypes=personas.filter((_,j)=>j!==i).map(q=>q.archetype).join('、');
+    return callChunk(key,model,
+      `你是${p.archetype}。背景：${p.background}。性格：${p.personality}。你看完内容，也看到了其他受众（${otherTypes}）的反应，现在轮到你回应，必须用@${otherTypes.split('、')[0]}这样的格式@具体的人，可认同/反驳/补充，体现你的性格，2-3句。`,
+      `原内容：${topic}\n\n其他人反应：\n${others}`,300,{
+      name:'debate',description:'互动讨论',
+      schema:{type:'object',required:['text','stance'],properties:{
+        text:{type:'string'},stance:{type:'string',enum:['agree','disagree','nuanced']}}}})
+    .then(d=>{const el=document.getElementById(`debate-${p.id}`);if(el)el.outerHTML=buildDebateItem(p,d);})
+    .catch(()=>{});
+  }));
+
+  const synthEl=document.createElement('div');
+  synthEl.className='stage';
+  synthEl.innerHTML=`<div class="stage-loading"><span class="spinner indigo"></span>综合分析中…</div>`;
+  debateEl.after(synthEl);
+
+  try{
+    const s=await callChunk(key,model,
+      '你是内容策略分析师。基于受众模拟讨论，给出内容发布前的综合评估。',
+      `内容：${topic}\n\n讨论记录：\n${reactions.map((r,i)=>`[初读] ${personas[i]?.archetype}: ${r.text}`).join('\n')}`,
+      1200,{
+        name:'synthesis',description:'综合评估',
+        schema:{type:'object',required:['topResonance','controversyPoints','suggestions'],properties:{
+          topResonance:{type:'object',required:['persona','reason','expectedBehavior'],properties:{
+            persona:{type:'string'},reason:{type:'string'},expectedBehavior:{type:'string'}}},
+          controversyPoints:{type:'array',items:{type:'string'}},
+          suggestions:{type:'array',items:{type:'string'}}}}});
+    synthEl.innerHTML=buildSynthesisHtml(s);
+  }catch(e){synthEl.innerHTML=`<div class="err">综合分析失败：${e.message}</div>`;}
+}
+
+/* ── 受众模拟入口 ─────────────────────────────────────── */
+async function runSimulation(){
+  if(mode==='demo'){await runSimulationDemo();return;}
+  const key=document.getElementById('apiKey').value.trim();
+  if(!key){showErr('请填入 Anthropic API Key，或切回演示模式体验受众模拟。');return;}
+  await runSimulationLive(key,'claude-sonnet-4-6');
+}
+
+/* ── Simulation 渲染器 ───────────────────────────────── */
+function buildPersonaCards(personas){
+  return personas.map(p=>`
+    <div class="persona-card" style="border-top:3px solid ${p.color}">
+      <div class="persona-hdr">
+        <span class="persona-av" style="background:${p.color}">${(p.archetype||'?')[0]}</span>
+        <div><div class="persona-name">${esc(p.archetype)}</div></div>
+      </div>
+      <div class="persona-detail"><b>背景</b> ${esc(p.background)}</div>
+      <div class="persona-detail"><b>性格</b> ${esc(p.personality)}</div>
+      <div class="persona-detail"><b>关注</b> ${esc(p.concerns)}</div>
+    </div>`).join('');
+}
+
+function buildReactionItem(p,r){
+  const icon={positive:'👍',mixed:'🤔',negative:'😕'};
+  return `<div class="chat-msg" id="react-${p.id}" style="border-left:3px solid ${p.color}">
+    <div class="chat-who"><span class="persona-av sm" style="background:${p.color}">${(p.archetype||'?')[0]}</span><b>${esc(p.archetype)}</b><span class="sentiment-icon">${icon[r.sentiment]||''}</span></div>
+    <div class="chat-text">${esc(r.text)}</div>
+  </div>`;
+}
+
+function buildDebateItem(p,d){
+  const sl={agree:'✅ 认同',disagree:'❌ 反驳',nuanced:'🤔 补充'};
+  return `<div class="chat-msg debate" id="debate-${p.id}" style="border-left:3px solid ${p.color}">
+    <div class="chat-who"><span class="persona-av sm" style="background:${p.color}">${(p.archetype||'?')[0]}</span><b>${esc(p.archetype)}</b><span class="stance-tag">${sl[d.stance]||''}</span></div>
+    <div class="chat-text">${esc(d.text)}</div>
+  </div>`;
+}
+
+function buildSynthesisHtml(s){
+  const c=(s.controversyPoints||[]).map(x=>`<li>${esc(x)}</li>`).join('');
+  const sg=(s.suggestions||[]).map(x=>`<li>${esc(x)}</li>`).join('');
+  return `<div class="stage-h"><div class="stage-n indigo">③</div><h3>综合评估</h3><div class="desc">发布前内容预测</div></div>
+    <div class="syn-block">
+      <div class="syn-row">🎯 最有共鸣受众：${esc(s.topResonance?.persona||'')}</div>
+      <div class="syn-reason">${esc(s.topResonance?.reason||'')}</div>
+      <div class="syn-behavior">预期行为：${esc(s.topResonance?.expectedBehavior||'')}</div>
+    </div>
+    <div class="syn-label">⚠️ 潜在争议点</div><ul class="syn-list">${c}</ul>
+    <div class="syn-label">💡 优化建议</div><ul class="syn-list">${sg}</ul>`;
+}
+
+/* ── Claude API 调用 ─────────────────────────────────── */
+function fixJsonNewlines(txt){
+  // 状态机：修复 JSON 字符串值内的裸换行/制表符
+  // 对于字符串内的裸 " ，判断后面是否紧接 : / , / } / ] / 空白，不是则视为内嵌引号并转义
+  let out='', inStr=false;
+  for(let i=0;i<txt.length;i++){
+    const c=txt[i];
+    if(inStr){
+      if(c==='\\'){out+=c+(txt[++i]||'');}
+      else if(c==='"'){
+        // 判断这个 " 是否是字符串结束：后面（跳过空白）紧接结构符才算结束
+        let j=i+1;
+        while(j<txt.length&&(txt[j]===' '||txt[j]==='\t'))j++;
+        const next=txt[j];
+        if(next===':'||next===','||next==='}'||next===']'||j>=txt.length){
+          inStr=false;out+=c;  // 字符串正常结束
+        }else{
+          out+='\\"';          // 内嵌的裸引号，转义
+        }
+      }
+      else if(c==='\n'){out+='\\n';}
+      else if(c==='\r'){out+='\\r';}
+      else if(c==='\t'){out+='\\t';}
+      else{out+=c;}
+    }else{
+      if(c==='"')inStr=true;
+      out+=c;
+    }
+  }
+  return out;
+}
+
+// tool: {name, description, input_schema} — 使用 Tool Use 时传入，保证返回合法 JSON
+async function callChunk(key,model,system,user,maxTokens,tool){
+  const body={model,max_tokens:maxTokens,messages:[{role:'user',content:user}]};
+  if(tool){
+    // Tool Use 模式：system 仍作主要指令，tool.description 只是元数据
+    if(system) body.system=system;
+    body.tools=[{name:tool.name,description:tool.description||'',input_schema:tool.schema}];
+    body.tool_choice={type:'tool',name:tool.name};
+  }else{
+    if(system) body.system=system;
+  }
+  const res=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify(body)
+  });
+  if(!res.ok){const t=await res.text();throw new Error('HTTP '+res.status+' '+t.slice(0,180));}
+  const j=await res.json();
+  if(tool){
+    // Tool Use 响应：直接返回 input，无需任何 JSON 修复
+    const tu=j.content.find(c=>c.type==='tool_use');
+    if(!tu) throw new Error('API 未返回 tool_use（stop='+j.stop_reason+'）');
+    return tu.input;
+  }
+  // 文本模式 fallback（含状态机修复）
+  let txt=j.content.map(c=>c.text||'').join('').trim();
+  txt=txt.replace(/```json|```/g,'').trim();
+  const fi=txt.indexOf('{'),fa=txt.indexOf('[');
+  let a,b;
+  if(fa!==-1&&(fi===-1||fa<fi)){a=fa;b=txt.lastIndexOf(']');}
+  else{a=fi;b=txt.lastIndexOf('}');}
+  txt=txt.slice(a,b+1);
+  try{return JSON.parse(txt);}catch(_){return JSON.parse(fixJsonNewlines(txt));}
+}
+
+function showErr(m){document.getElementById('out').innerHTML=`<div class="err">⚠ ${m}</div>`;}
+
+
+/* ── 工作流切换 ────────────────────────────────────── */
+let activeWorkflow = 'a';
+function setWorkflow(w){
+  activeWorkflow = w;
+  document.getElementById('wf-a').classList.toggle('active', w==='a');
+  document.getElementById('wf-b').classList.toggle('active', w==='b');
+  document.getElementById('tab-a').style.display = w==='a' ? '' : 'none';
+  document.getElementById('tab-b').style.display = w==='b' ? '' : 'none';
+  const isDemo = mode === 'demo';
+  document.getElementById('runBtn').textContent =
+    w==='a' ? (isDemo?'⚡ 生成诊断':'⚡ 调用 Claude 生成')
+            : (isDemo?'⚡ 热点分析':'⚡ 调用 Claude 分析');
+}
+
+/* ── 热点分析 · 样例数据 ──────────────────────────── */
+const SAMPLE_TREND_POSITIONING = `账号：数字游民生活方式推广者
+核心人群：想要脱离传统办公室束缚、探索远程工作+旅居生活的都市青年（25-35岁）
+内容主张：真实记录转型路径，提供可操作的入门指南，不贩卖「躺平幻觉」
+作者优势：亲历者视角，有完整的远程工作转型经历，熟悉多国旅居生活成本与方式
+目标：围绕「如何开始数字游民生活」「旅居地选择与成本」「远程收入来源」持续产出`;
+
+const SAMPLE_TREND_KEYWORD = '数字游民';
+
+const SAMPLE_TREND_POSTS = [{"t":"一天三份工，还能躺平？巴厘岛游民生活大公开","l":1790,"c":526,"cm":77,"g":"#旅居巴厘岛 #数字游民 #巴厘岛 #巴厘岛数字游民","x":"巴厘岛数字游民 一天三份收入的一天 是怎么样度过的"},{"t":"分享一家全员远程办公的公司(19)","l":883,"c":657,"cm":426,"g":"#远程办公 #远程工作 #数字游民 #自由职业 #跨境电商","x":"从22年11月开始分享全员远程工作公司以来，这个系列终于轮到我自己的公司了"},{"t":"普通小孩儿不要轻易尝试数字游民","l":953,"c":402,"cm":87,"g":"#数字游民 #裸辞 #旅居 #自由职业 #经济独立","x":"白人Privilege：挣发达国家的钱 去第三世界花 并不建议脑子一热就去做数字游民"},{"t":"不会英语泰语，如何在泰国\"躺平\"式搞钱？","l":286,"c":221,"cm":47,"g":"#泰国 #曼谷 #数字游民 #跨境电商 #低成本创业","x":""},{"t":"VLOG｜一份主业多份副业，我靠什么技能赚钱","l":197,"c":115,"cm":10,"g":"#数字游民 #远程工作 #副业 #搞钱","x":""},{"t":"30岁沪漂女高管裸辞炒股：不上班月入10w+","l":115,"c":77,"cm":83,"g":"#裸辞 #投资理财 #逃离北上广 #数字游民 #搞钱思维","x":"从魔都996到小城自由职业 我终于逃离内卷的沪漂"},{"t":"VLOG｜成为数字游民前，我都做了哪些准备","l":120,"c":50,"cm":4,"g":"#数字游民 #远程工作 #副业","x":""},{"t":"26岁年薪7位数 如何用AI拿到远程工作offer","l":61,"c":106,"cm":0,"g":"#数字游民 #远程工作 #AI人工智能 #高薪","x":"4步利用AI工具帮你找到远程工作"},{"t":"自由职业｜线上中文老师的一天 🌏💻","l":75,"c":50,"cm":15,"g":"#自由职业 #数字游民 #线上中文教师 #对外汉语","x":"29岁从民办高校汉语国际教育专任教师岗位裸辞，成为全职线上中文教师"},{"t":"普通人也能成为数字游民（内附找工作渠道）","l":45,"c":57,"cm":3,"g":"#数字游民 #远程工作 #远程办公","x":"远程工作可能没那么玄乎，他和普通人的距离，可能只是一个获取招聘信息的渠道"},{"t":"95后裸辞创业👋决定开启大理旅居创业了！","l":58,"c":21,"cm":24,"g":"#数字游民 #辞职创业 #自由职业者 #旅居生活","x":"还年轻 总要叛逆一回 先在大理旅居一个月 然后边旅行边搞钱"},{"t":"西班牙旅游签可以转数字游民吗？","l":28,"c":14,"cm":7,"g":"#西班牙移民 #数字游民 #移民","x":"西班牙推出数字游民签证，专门给远程工作者用的"},{"t":"应届生如何找到线上工作？","l":28,"c":11,"cm":8,"g":"#应届大学生就业 #数字游民","x":""},{"t":"裸辞后收入哪里来？｜远程工作平台分享","l":9,"c":4,"cm":0,"g":"#远程办公 #数字游民 #远程工作","x":"一些WFH远程办公 platform 国外：We Work Remotely、Remote OK"},{"t":"2025西班牙移民：非盈利移民vs数字游民签证","l":5,"c":2,"cm":0,"g":"#欧洲移民 #数字游民 #西班牙数字游民","x":"西班牙移民 两种省钱便捷的申请途径"}];
+
+const SAMPLE_TREND_RESULT = {
+  trendAnalysis:{
+    themes:[
+      {theme:"收入揭秘与真实性背书", count:12, topPost:"一天三份工，还能躺平？巴厘岛游民生活大公开", engagement:"高", summary:"带具体收入数字的内容爆款率最高，读者情绪卷入强"},
+      {theme:"反鸡汤·普通人别轻易尝试", count:8, topPost:"普通小孩儿不要轻易尝试数字游民", engagement:"高", summary:"制造认知反差和悬念，点击与完播率明显更高"},
+      {theme:"远程工作入门路径", count:10, topPost:"普通人也能成为数字游民（内附找工作渠道）", engagement:"中", summary:"刚需信息，收藏率持续高于赞数"},
+      {theme:"AI工具×远程收入", count:4, topPost:"26岁年薪7位数 如何用AI拿到远程工作offer", engagement:"高", summary:"供给极度稀缺，需求强烈，收藏数超过赞数"},
+      {theme:"欧洲移民·数字游民签证", count:18, topPost:"西班牙旅游签可以转数字游民吗？", engagement:"低", summary:"帖子数量最多但单篇互动偏低，已属红海内容"}
+    ],
+    viralPatterns:[
+      "收入数字具体化（「一天三份工」「月入10w+」「年薪7位数」）— 前三高互动帖均含收入数字，读者通过具体数字建立真实感与信任",
+      "反预期钩子（「不要轻易尝试」「我妈说我废了」）— 制造认知摩擦，点击率是正向标题的1.5~2倍",
+      "VLOG形式 + 具体工具/渠道名称 — 收藏数持续高于赞数，工具性内容形成长尾复用价值"
+    ],
+    opportunityWindows:[
+      "「AI工具 × 远程接单」操作帖：样本中仅1篇此类内容但收藏率远超赞数，需求强烈而供给极度不足",
+      "「普通人从0开始的完整路径」方法论：现有内容多为生活分享，缺少「第一步怎么做、启动要多少钱」的结构化教程",
+      "「真实成本拆解 × 踩坑复盘」：评论区反复出现成本问题，但目前几乎没有带完整账单的系统性复盘帖"
+    ]
+  },
+  painPoints:[
+    {theme:"入门技能：不知道靠什么远程赚钱", intensity:"高", count:18, evidence:["没有可以远程的技能怎么办", "文科生/非技术人能做数字游民吗", "除了程序员设计师还有什么路"]},
+    {theme:"启动门槛：资金和风险不确定", intensity:"高", count:12, evidence:["没有存款能开始吗", "万一收入断了怎么办", "第一份远程工作怎么找"]},
+    {theme:"签证合规：长期居住的法律路径", intensity:"中", count:9, evidence:["一直用旅游签合法吗", "欧洲数字游民签证怎么申请", "在泰国住多久需要办签证"]},
+    {theme:"社交孤独：独自旅居的社群缺失", intensity:"中", count:5, evidence:["一个人在外地怎么交朋友", "数字游民社群怎么找到", "会不会很孤独"]}
+  ],
+  topics:[
+    {title:"文科生/非技术背景，靠什么开始数字游民？6条真实路径",
+     angle:"把「没有可以远程的技能」这个最大卡点，拆成6个具体可行的技能转换方向，每条给入门难度和第一步",
+     pain:"入门技能不清晰",
+     whyFit:"亲历者视角+清单形态，符合账号「真实记录+可操作入门指南」的定位；可保存清单促收藏",
+     whyTrending:"「AI拿到远程offer」类内容收藏率极高，说明受众对具体路径需求强但供给不足，是当前话题最大内容空缺"},
+    {title:"成为数字游民的第一年，我实际花了多少钱？启动成本完全拆解",
+     angle:"用真实账单打破「门槛极高」的恐惧，给出「最低成本启动」的建议路径",
+     pain:"启动门槛不确定",
+     whyFit:"带具体数字是本话题最高爆款率的形式；账号「不贩卖幻觉」的主张正好适合做成本揭秘",
+     whyTrending:"样本中启动成本是评论区第二高频问题，且目前几乎没有此类帖子，机会窗口明显"},
+    {title:"劝你不要轻易开始数字游民——踩坑一年后说点实话",
+     angle:"用反鸡汤视角复盘真实挫折，在大量正向劝进内容里做反差",
+     pain:"风险与现实落差",
+     whyFit:"反鸡汤叙事在样本中爆款率是正向内容2倍；契合账号「不贩卖躺平幻觉」的主张",
+     whyTrending:"「普通小孩不要轻易尝试」是样本第二高互动帖，反鸡汤路线竞争度低"}
+  ],
+  structure:{
+    topicChosen:"文科生/非技术背景，靠什么开始数字游民？6条真实路径",
+    outline:[
+      {sec:"开场共鸣", ct:"用真实评论原话切入：「我不会写代码也不会设计，真的能做数字游民吗？」——直接代入最高频读者疑问，建立同理心"},
+      {sec:"立靶", ct:"点破误区：「数字游民 = 程序员/设计师」是认知偏差，大多数成功转型的人靠的是另外6类技能，和是否技术人无关"},
+      {sec:"6条路径拆解", ct:"每条给：入门难度+启动成本+真实收入区间+第一步怎么做。路径：①在线教学 ②内容创作 ③AI辅助服务 ④跨境电商运营 ⑤远程客服/翻译 ⑥专业顾问"},
+      {sec:"筛选框架", ct:"给「哪条最适合我」自测：时间投入 × 技能迁移难度 × 风险偏好，三维度帮读者收口，不给统一答案"},
+      {sec:"结尾互动", ct:"「你现在是哪个阶段？评论区说说，我帮你判断最适合哪条路径」——引导评论，为下篇采集真实痛点"}
+    ],
+    reuse:"「打破误区 → 分类拆解（含入门门槛）→ 个性化筛选框架」三段结构：适用于所有「普通人能做X吗」类选题，如「没英语基础能做数字游民吗」「没存款能旅居吗」"
+  }
+};
+
+/* ── 热点分析 · Prompts ───────────────────────────── */
+const PROMPT_TREND_ANALYSIS = `你是内容趋势分析师。基于一批小红书热帖数据（标题+互动数+标签+内容片段），分析该话题下的内容热点规律。
+分析维度：
+- themes：识别3~5个高频内容主题，每个给 count（相关帖子数）、topPost（代表帖标题）、engagement（高/中/低）、summary（一句话总结）
+- viralPatterns：总结2~4个让内容高互动的共性规律，要落到可操作的创作建议上
+- opportunityWindows：指出2~3个「需求强但供给少」的内容机会角度
+只输出 JSON，不要解释。schema:
+{"trendAnalysis":{"themes":[{"theme":"","count":0,"topPost":"","engagement":"高/中/低","summary":""}],"viralPatterns":[""],"opportunityWindows":[""]}}`;
+
+const PROMPT_TOPICS_B = `你是内容选题策略师。基于账号定位、热点趋势分析和评论区痛点，生成3~4个选题 + 2组标题变体。
+重要约束：
+① 每个选题必须同时满足：「话题热度高」AND「与账号定位匹配」
+② topics[0] 必须对应 painPoints[0]（最高频痛点）
+③ 每个选题带两个维度：whyFit（为什么适合这个账号）+ whyTrending（为什么现在是好时机）
+④ titles 选 topics[0] 和 topics[1] 各给3条变体，利用热帖中验证过的标题模式
+只输出 JSON，不要解释。schema:
+{"topics":[{"title":"","angle":"","pain":"","whyFit":"","whyTrending":""}],"titles":[{"topic":"","variants":[]}]}`;
+
+/* ── CSV 解析 ─────────────────────────────────────── */
+function parseCSVText(text){
+  const lines = text.trim().split(/\r?\n/);
+  if(lines.length < 2) return [];
+  const parseRow = line => {
+    const cells = []; let cur = '', inQ = false;
+    for(let i = 0; i < line.length; i++){
+      const ch = line[i];
+      if(ch === '"'){
+        if(inQ && line[i+1] === '"'){cur += '"'; i++;} else inQ = !inQ;
+      } else if((ch === ',' || ch === '\t') && !inQ){
+        cells.push(cur.trim()); cur = '';
+      } else cur += ch;
+    }
+    cells.push(cur.trim());
+    return cells;
+  };
+  const headers = parseRow(lines[0]).map(h => h.toLowerCase()
+    .replace('标题','title').replace('获赞数','likes').replace('点赞','likes')
+    .replace('收藏数','collects').replace('收藏','collects')
+    .replace('评论数','comments').replace('标签','tags')
+    .replace('正文','content_snippet').replace(/\n.*/,'').trim());
+  return lines.slice(1).map(line => {
+    const cells = parseRow(line);
+    const obj = {};
+    headers.forEach((h,i) => { obj[h] = cells[i] || ''; });
+    return obj;
+  }).filter(r => r.title || r['标题']);
+}
+
+function handleFileUpload(input){
+  const file = input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    document.getElementById('csvText').value = text;
+    const rows = parseCSVText(text);
+    document.getElementById('csvStat').textContent = `✓ 已载入 ${rows.length} 条`;
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+/* ── 热点分析 · Stage 初始化 ─────────────────────── */
+const STAGE_META_B = [
+  {n:'①', title:'热点归纳'},
+  {n:'②', title:'痛点归类'},
+  {n:'③', title:'选题生成'},
+  {n:'④', title:'标题变体'},
+  {n:'⑤', title:'结构复盘'},
+];
+
+function initTrendStages(){
+  document.getElementById('out').innerHTML = STAGE_META_B.map((m,i) => `
+    <div class="stage" id="stage-${i+1}">
+      <div class="stage-h">
+        <div class="stage-n">${m.n}</div>
+        <h3>${m.title}</h3>
+        <div class="desc" id="sd-${i+1}"></div>
+      </div>
+      <div class="stage-loading" id="sb-${i+1}"><span class="spinner"></span>分析中…</div>
+    </div>`).join('');
+}
+
+/* ── 热点归纳渲染器 ──────────────────────────────── */
+function buildTrendAnalysisHtml(ta){
+  const themes = (ta.themes||[]).map(t => `
+    <div class="trend-theme">
+      <div class="trend-theme-top">
+        <b>${esc(t.theme)}</b>
+        <span class="tag ${t.engagement==='高'?'high':'mid'}">热度 ${esc(t.engagement)}</span>
+        <span class="tag cnt">${t.count} 篇相关</span>
+      </div>
+      <div><span class="quote">代表帖：${esc(t.topPost)}</span></div>
+      <div style="font-size:12px;color:var(--sub);margin-top:4px">${esc(t.summary)}</div>
+    </div>`).join('');
+  const patterns = (ta.viralPatterns||[]).map(p => `<li>${esc(p)}</li>`).join('');
+  const windows = (ta.opportunityWindows||[]).map(w => `
+    <div class="opportunity"><b>🪟</b> ${esc(w)}</div>`).join('');
+  return `
+    <label>🔥 高频内容主题</label>${themes}
+    <label>✨ 爆款规律</label>
+    <ul style="font-size:12.5px;color:#444;padding-left:18px;margin:4px 0 12px">${patterns}</ul>
+    <label>🎯 内容机会窗口</label>${windows}`;
+}
+
+/* ── 热点分析 · 演示模式 ────────────────────────── */
+async function runTrendDemoProgressive(){
+  initTrendStages();
+  _lastTopics[activeWorkflow] = SAMPLE_TREND_RESULT.topics;
+  await delay(700);
+  fillStage(1, buildTrendAnalysisHtml(SAMPLE_TREND_RESULT.trendAnalysis));
+  await delay(500);
+  fillStage(2, buildPainPointsHtml(SAMPLE_TREND_RESULT.painPoints));
+  await delay(700);
+  fillStage(3, buildTopicsHtml(SAMPLE_TREND_RESULT.topics));
+  await delay(600);
+  fillStage(4, buildStructureHtml(SAMPLE_TREND_RESULT.structure));
+}
+
+/* ── 热点分析 · 实时模式 ────────────────────────── */
+async function runTrendLiveChunked(key, model){
+  const gen=++_gen;
+  const csvRaw = document.getElementById('csvText').value.trim();
+  if(!csvRaw){ showErr('请粘贴或上传热帖 CSV 数据。'); return; }
+  const keyword = document.getElementById('trendKeyword').value.trim();
+  const pos = document.getElementById('positioning').value;
+
+  // Parse and sort by engagement, take top 50
+  let rows = parseCSVText(csvRaw);
+  rows.sort((a,b) => {
+    const sa = (parseInt(a.likes)||0) + (parseInt(a.collects)||0);
+    const sb = (parseInt(b.likes)||0) + (parseInt(b.collects)||0);
+    return sb - sa;
+  });
+  rows = rows.slice(0, 50);
+  document.getElementById('csvStat').textContent = `分析 ${rows.length} 条（按互动排序 top 50）`;
+
+  // Compact for prompt
+  const postsStr = rows.map((r,i) =>
+    `${i+1}. [赞${r.likes||0}/藏${r.collects||0}] ${r.title||''} ${r.tags?'标签:'+r.tags:''} ${r.content_snippet?r.content_snippet.slice(0,60):''}`
+  ).join('\n');
+
+  initTrendStages();
+
+  // Phase 1 parallel: Trend Analysis + Pain Points
+  let trendAnalysis, painPoints;
+  await Promise.all([
+    callChunk(key, model, PROMPT_TREND_ANALYSIS,
+      `话题关键词：${keyword||'（未指定）'}\n账号定位：${pos}\n\n热帖数据（按互动量排序）：\n${postsStr}`, 2000)
+    .then(d => { if(gen!==_gen)return; trendAnalysis = d.trendAnalysis; fillStage(1, buildTrendAnalysisHtml(trendAnalysis)); })
+    .catch(e => fillStage(1, `<div class="err">① 热点归纳失败: ${esc(e.message)}</div>`)),
+
+    callChunk(key, model, PROMPT_PAIN_POINTS,
+      `以下是小红书「${keyword||'该话题'}」相关热帖的标题和内容，请从中归纳读者高频痛点：\n${postsStr}`, 1000,{
+      name:'pain_points', description:'痛点归类',
+      schema:{type:'object',required:['painPoints'],properties:{painPoints:{type:'array',items:{type:'object',
+        required:['theme','intensity','count','evidence'],
+        properties:{theme:{type:'string'},intensity:{type:'string',enum:['高','中']},count:{type:'integer'},evidence:{type:'array',items:{type:'string'}}}}}}}})
+    .then(d => { if(gen!==_gen)return; painPoints = d.painPoints; fillStage(2, buildPainPointsHtml(painPoints)); })
+    .catch(e => fillStage(2, `<div class="err">② 痛点归类失败: ${esc(e.message)}</div>`))
+  ]);
+
+  if(!trendAnalysis && !painPoints){ return; }
+
+  // Phase 2: Topics + Titles
+  let topics;
+  try{
+    const d = await callChunk(key, model, PROMPT_TOPICS_B,
+      `账号定位：${pos}\n\n热点趋势分析：\n${JSON.stringify({trendAnalysis})}\n\n读者痛点：\n${JSON.stringify({painPoints})}`, 2000);
+    topics = d.topics; titles = d.titles;
+    _lastTopics[activeWorkflow]=topics;
+    fillStage(3, buildTopicsHtml(topics));
+    } catch(e){
+    fillStage(3, `<div class="err">③ 选题生成失败: ${esc(e.message)}</div>`);
+    fillStage(4, ''); return;
+  }
+
+  // Phase 3: Structure
+  try{
+    const chosen = topics[0]?.title || '';
+    const d = await callChunk(key, model, PROMPT_STRUCTURE,
+      `账号定位：${pos}\n\n热点背景：该话题下的爆款内容规律——${(trendAnalysis?.viralPatterns||[]).join('；')}\n\n选题：${chosen}`, 1500);
+    fillStage(4, buildStructureHtml(d.structure));
+  } catch(e){
+    fillStage(4, `<div class="err">④ 结构复盘失败: ${esc(e.message)}</div>`);
+  }
+}
+
+/* init */
+fetch('./key').then(r=>r.ok?r.text():Promise.reject()).then(k=>{
+  const el=document.getElementById('apiKey');
+  if(el&&k.trim())el.value=k.trim();
+}).catch(()=>{});
+</script>
+</body>
+</html>
