@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import type {
   Agent,
+  AgentConversation,
+  AgentConversationSummary,
   AgentSummary,
   AnalysisRunSummary,
   DraftSummary,
@@ -241,6 +243,11 @@ const agents: Record<string, AgentSummary[]> = {
   ],
 }
 
+const agentConversations: Record<string, AgentConversationSummary[]> = {
+  'workspace-1': [],
+  'workspace-2': [],
+}
+
 const agentDetail: Agent = {
   ...agentSummary,
   systemPrompt:
@@ -348,6 +355,80 @@ function installWorkspaceApiMock() {
     const agentsMatch = url.match(/^\/api\/workspaces\/(workspace-[12])\/agents$/)
     if (agentsMatch && method === 'GET') {
       return jsonResponse(agents[agentsMatch[1]])
+    }
+    const agentConversationsMatch = url.match(
+      /^\/api\/workspaces\/(workspace-[12])\/agent-conversations$/,
+    )
+    if (agentConversationsMatch && method === 'GET') {
+      return jsonResponse(agentConversations[agentConversationsMatch[1]])
+    }
+    if (agentConversationsMatch && method === 'POST') {
+      const body = JSON.parse(String(init?.body)) as {
+        agentAssetId: string
+        title?: string
+      }
+      const conversation: AgentConversation = {
+        id: 'conversation-1',
+        workspaceId: agentConversationsMatch[1],
+        agentAssetId: body.agentAssetId,
+        title: body.title || '与 Agent 对话',
+        status: 'active',
+        createdAt: '2026-07-11T14:00:00Z',
+        updatedAt: '2026-07-11T14:00:00Z',
+        messages: [],
+      }
+      agentConversations[agentConversationsMatch[1]] = [conversation]
+      return jsonResponse(conversation, 201)
+    }
+    if (url === '/api/agent-conversations/conversation-1' && method === 'GET') {
+      const conversation = agentConversations['workspace-1'][0]
+      return jsonResponse({ ...conversation, messages: [] })
+    }
+    if (
+      url === '/api/agent-conversations/conversation-1/messages' &&
+      method === 'POST'
+    ) {
+      const body = JSON.parse(String(init?.body)) as {
+        content: string
+        mode: 'demo' | 'live'
+      }
+      const conversation = agentConversations['workspace-1'][0]
+      return jsonResponse({
+        ...conversation,
+        messages: [
+          {
+            id: 'message-user',
+            conversationId: 'conversation-1',
+            role: 'user',
+            content: body.content,
+            contextPack: {},
+            assetRefs: [],
+            proposedActions: [],
+            modelMetadata: {},
+            createdAt: '2026-07-11T14:00:01Z',
+          },
+          {
+            id: 'message-agent',
+            conversationId: 'conversation-1',
+            role: 'assistant',
+            content:
+              '我是 Account Diagnosis Strategist。我已读取当前 workspace 的 broad context pack。',
+            contextPack: { mode: 'workspace_pack', scope: 'broad' },
+            assetRefs: [{ assetType: 'account_profile', assetId: 'workspace-1' }],
+            proposedActions: [
+              {
+                type: 'workspace.update_profile',
+                status: 'requires_confirmation',
+              },
+            ],
+            modelMetadata: {
+              provider: body.mode === 'live' ? 'anthropic' : 'fake',
+              operation: 'agent_chat',
+            },
+            createdAt: '2026-07-11T14:00:02Z',
+          },
+        ],
+      })
     }
     if (url === '/api/agents/agent-account' && method === 'GET') {
       return jsonResponse(agentDetail)
@@ -501,6 +582,8 @@ function installWorkspaceApiMock() {
 
 beforeEach(() => {
   window.history.pushState({}, '', '/')
+  agentConversations['workspace-1'] = []
+  agentConversations['workspace-2'] = []
 })
 
 afterEach(() => {
@@ -595,6 +678,14 @@ describe('workspace UI', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('analysis.profile_from_history')).toBeInTheDocument()
     expect(screen.getByText(/selected historical posts/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /开始对话/ }))
+
+    expect(
+      await screen.findByText(/发送第一条消息/),
+    ).toBeInTheDocument()
+    const composer = screen.getByPlaceholderText(/直接和这个 Agent 对话/)
+    await waitFor(() => expect(composer).toHaveFocus())
   })
 
   it('shows workspace workflows as multi-agent task plans', async () => {
@@ -680,6 +771,12 @@ describe('workspace UI', () => {
           return jsonResponse([])
         }
         if (url === '/api/workspaces/workspace-1/agents' && method === 'GET') {
+          return jsonResponse([])
+        }
+        if (
+          url === '/api/workspaces/workspace-1/agent-conversations' &&
+          method === 'GET'
+        ) {
           return jsonResponse([])
         }
         if (url === '/api/workspaces/workspace-1/workflows' && method === 'GET') {

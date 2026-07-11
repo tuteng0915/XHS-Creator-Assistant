@@ -2,7 +2,16 @@
 
 This document designs how product agents access creator workspace context assets.
 
-The core decision: agents should not read SQLite, uploaded files, or the whole workspace directly. They should access assets through a small internal Context Access Layer. MCP can be one adapter over that layer later, but the product contract should not depend on MCP terminology.
+The core decision: agents should have broad product-level workspace awareness, but should not read SQLite, uploaded file paths, or arbitrary filesystem content directly. They should access workspace assets through an internal Context Access Layer that builds auditable context packs.
+
+The design bias is **global vision first**:
+
+- prefer giving the agent enough surrounding context to reason well;
+- avoid over-isolating nodes into narrow, blind prompt calls;
+- keep context product-scoped, provenance-tracked, and budget-aware;
+- use summaries/projections only to manage size, not to hide relevant information by default.
+
+MCP can be one adapter over this layer later, but the product contract should not depend on MCP terminology.
 
 ## 1. Goal
 
@@ -22,10 +31,11 @@ Agents need controlled access to:
 The access layer must support:
 
 - exact asset retrieval when a node needs raw source text;
-- compact context packs when a node only needs selected fields;
+- broad workspace context packs when a node benefits from cross-asset awareness;
+- compact or summarized views when raw assets are too large;
 - immutable input snapshots for runs;
 - relationship traversal between assets;
-- product-specific permissions and context policies;
+- product-specific asset boundaries and context budgets;
 - future adapter exposure through MCP or similar tool protocols.
 
 ## 2. Non-goals
@@ -36,7 +46,7 @@ Do not expose:
 - arbitrary filesystem paths;
 - generic file browsing;
 - a generic vector database;
-- generic workspace search across everything by default;
+- unbounded generic search that ignores product asset types and provenance;
 - user-editable agent tool permissions in the creator-facing UI;
 - direct model access to uploaded file paths.
 
@@ -116,7 +126,7 @@ Examples:
 
 ## 5. Context request contract
 
-Agents should request context by declaring intent and allowed selectors.
+Agents should request context by declaring intent, desired scope, and useful selectors. Selectors are not a hard “only these fields may exist” wall; they are the requested focus inside a broader product context pack.
 
 ```ts
 type ContextRequest = {
@@ -131,7 +141,8 @@ type ContextRequest = {
   purpose: string
   refs: ContextAssetRef[]
   selectors: ContextSelector[]
-  mode: "exact" | "compact" | "summary" | "snapshot"
+  mode: "workspace_pack" | "exact" | "compact" | "summary" | "snapshot"
+  scope: "broad" | "focused" | "deep"
   maxChars?: number
 }
 ```
@@ -161,7 +172,8 @@ The response is a structured context pack:
 type ContextPack = {
   requestId: string
   workspaceId: string
-  mode: "exact" | "compact" | "summary" | "snapshot"
+  mode: "workspace_pack" | "exact" | "compact" | "summary" | "snapshot"
+  scope: "broad" | "focused" | "deep"
   items: ContextItem[]
   citations: ContextCitation[]
   omitted: ContextOmission[]
@@ -172,6 +184,22 @@ type ContextPack = {
   }
 }
 ```
+
+### Default workspace pack
+
+Most workflow nodes should start from a broad workspace pack:
+
+- account profile / positioning snapshot;
+- current selected topic if one exists;
+- relevant recent analysis summaries;
+- relevant source material summaries and IDs;
+- topic library highlights;
+- available draft/simulation context where relevant;
+- capability metadata for the active skill/agent/workflow.
+
+Then the node can request deep exact context for specific assets, such as the selected comments material or top-ranked trend posts.
+
+This gives agents a working mental model of the creator workspace without giving them arbitrary database or filesystem access.
 
 Each item is typed:
 
@@ -188,11 +216,13 @@ type ContextItem = {
 
 ## 6. Policy model
 
-Access is allowed only when all three layers agree:
+The policy model should not be overly restrictive. Its job is to keep context inside the product asset graph, make size/cost predictable, and record what was used.
+
+Context expansion is allowed when all three layers agree:
 
 1. Workflow plan allows the agent to perform the task.
 2. Agent asset allows the skill.
-3. Skill context policy allows the requested selectors.
+3. Skill context policy describes which asset families are normally relevant.
 
 Current assets already contain the required building blocks:
 
@@ -203,20 +233,23 @@ Current assets already contain the required building blocks:
 - `Skill.requiredInputs`
 - `Skill.optionalInputs`
 
-The Context Access Layer should enforce these centrally.
+The Context Access Layer should enforce these centrally, but the default should be “provide broad relevant workspace context” rather than “deny everything not explicitly listed.”
 
 Example: account topic generation may read:
 
 - workspace positioning snapshot;
 - profile stage result;
 - pain-point stage result.
+- selected/current topic if present;
+- recent related topics and drafts;
+- summaries of source materials used by the source run.
 
-It may not read:
+It should not read:
 
-- complete workspace;
-- raw uploaded trend CSV;
-- unrelated drafts;
-- unrelated simulation runs.
+- arbitrary files;
+- arbitrary SQL results;
+- raw uploaded CSV bytes unless the workflow asks for the controlled trend projection;
+- assets from another workspace.
 
 ## 7. Recommended agent-facing tools
 
@@ -277,7 +310,7 @@ Purpose:
 
 - Build a multi-asset context pack for one model call.
 
-This is the preferred API for LLM nodes because it produces a stable, logged, hashable input bundle.
+This is the preferred API for LLM nodes because it produces a stable, logged, hashable input bundle. The default mode should be a broad `workspace_pack`, with deeper exact asset content included when it materially improves the node.
 
 ### `context.snapshot_for_run`
 
@@ -329,51 +362,68 @@ The MCP server should call the same Context Access Layer used by backend workflo
 
 ### Account diagnosis
 
+Account diagnosis should not be artificially split into blind calls. Each node should understand the broader creator workspace, while still emphasizing the source assets that matter most for that stage.
+
 #### `profile_analysis`
 
-Allowed context:
+Default broad context:
 
 - Account Profile positioning snapshot.
-- Historical posts material.
+- Historical posts material or selected summary/projection.
+- Topic library highlights.
+- Recent analysis summaries for the workspace.
+- Current selected topic/draft if present.
+
+Deep context:
+
+- full or sampled historical post text.
 
 Context pack:
 
 ```json
 {
   "selectors": ["account_positioning", "historical_posts_text"],
-  "mode": "snapshot"
+  "mode": "workspace_pack",
+  "scope": "broad"
 }
 ```
 
 #### `pain_point_analysis`
 
-Allowed context:
+Default broad context:
 
 - Account Profile positioning snapshot.
 - Comment samples material.
+- Recent topics/drafts/simulations that reveal audience assumptions.
+
+Deep context:
+
+- full or sampled comment text.
 
 Context pack:
 
 ```json
 {
   "selectors": ["account_positioning", "comment_samples_text"],
-  "mode": "snapshot"
+  "mode": "workspace_pack",
+  "scope": "broad"
 }
 ```
 
 #### `topic_generation`
 
-Allowed context:
+Default broad context:
 
 - Account Profile positioning snapshot.
 - Profile stage result.
 - Pain point stage result.
+- Topic library highlights to avoid repetition.
+- Prior drafts and simulations when they help understand what has already been explored.
+- Source material summaries/provenance from the source run.
 
-Not allowed:
+Deep context:
 
-- raw historical posts;
-- raw comments;
-- full workspace.
+- raw historical posts or comments only when the workflow decides the summaries are insufficient.
 
 ### Trend analysis
 
@@ -388,59 +438,66 @@ Output:
 
 - compact top-50 ranked posts snapshot.
 
-The graph state and agent-facing context should store only the source material ID and ranked compact snapshot, not the complete CSV.
+The graph state should store only the source material ID and ranked compact snapshot, not the complete CSV. The agent-facing context may include the ranked projection plus workspace-wide creator context.
 
 #### `trend_pattern_analysis`
 
-Allowed context:
+Default broad context:
 
 - Account Profile positioning snapshot.
 - top-50 ranked trend posts.
+- Existing account diagnosis summaries if available.
+- Topic library highlights to avoid duplicate topics.
 
 #### `pain_point_analysis`
 
-Allowed context:
+Default broad context:
 
 - Account Profile positioning snapshot.
 - top-50 ranked trend posts.
+- Comment-source or previous simulation summaries when useful for interpreting audience needs.
 
 #### `topic_generation`
 
-Allowed context:
+Default broad context:
 
 - Account Profile positioning snapshot.
 - trend pattern result.
 - trend pain point result.
+- current topic library and draft history.
 
 ### Draft generation
 
-Allowed context:
+Default broad context:
 
 - selected Topic core fields;
-- relevant compact analysis context:
+- relevant analysis context:
   - voice fingerprint;
   - viral structure;
   - trend pattern summary if topic came from trend analysis.
+- prior drafts and selected simulation summaries;
+- topic library context to avoid duplicating old structures.
 
-Not allowed by default:
+Deep context:
 
-- complete source materials;
-- complete analysis run JSON;
-- unrelated topics.
+- exact source run stage output;
+- relevant source excerpts when needed.
 
 ### Audience simulation
 
-Allowed context:
+Default broad context:
 
 - target Topic or Draft;
 - Account Profile positioning snapshot;
-- optional compact analysis context.
+- relevant analysis context;
+- relevant prior simulations;
+- topic/draft lineage.
 
 Persona reaction nodes receive:
 
 - persona definition;
 - target topic/draft;
-- only context selected by the simulation workflow.
+- workspace pack selected by the simulation workflow.
 
 Debate response nodes receive:
 
@@ -498,14 +555,16 @@ If a requested asset is missing:
 - do not let the model infer missing source content;
 - allow the workflow to pause, fail early, or ask the UI to collect the missing asset.
 
-If a policy denies access:
+If a policy or budget excludes content:
 
-- fail the node with a policy error;
+- include the omission in the context pack;
+- prefer summaries over omission when the asset is relevant but too large;
+- fail the node only when the asset is required and no useful representation is available;
 - include safe debugging information:
   - requester;
   - selector;
   - asset type;
-  - policy layer that denied access.
+  - policy or budget layer that excluded access.
 
 Do not include hidden asset content in the error.
 
@@ -516,8 +575,8 @@ Do not include hidden asset content in the error.
 Add backend service:
 
 - `ContextAccessService`
-- `ContextPolicyService`
 - `ContextPackBuilder`
+- `ContextBudgetService`
 
 Use existing repositories. No MCP yet.
 
@@ -525,7 +584,8 @@ Acceptance:
 
 - account diagnosis nodes get context through `ContextAccessService`;
 - existing visible behavior unchanged;
-- tests assert nodes cannot request unrelated context.
+- tests assert nodes receive broad workspace context plus the deep assets needed for the stage;
+- tests assert context packs record omissions, hashes, and source refs.
 
 ### Slice 2: Replace ad hoc input snapshot builders
 
@@ -569,6 +629,8 @@ This is not a creator-facing builder.
 
 ## 14. Design rule
 
-Agents do not own context.
+Agents should not be starved of context.
 
-Agents request context for a declared product skill. The Context Access Layer decides what they can see, returns a bounded context pack, snapshots what was used, and records enough provenance to debug or replay the run.
+Agents request context for a declared product skill. The Context Access Layer builds a broad product-scoped workspace pack, deepens it where useful, snapshots what was used, and records enough provenance to debug or replay the run.
+
+The constraint is not “minimum necessary information.” The constraint is “no arbitrary external access, no cross-workspace leakage, no untracked context, and no unbounded token growth.”

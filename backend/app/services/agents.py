@@ -128,6 +128,98 @@ BUILTIN_AGENTS = [
             "must_not_read": ["full workspace", "unrelated analysis runs"],
         },
     ),
+    BuiltinAgentDefinition(
+        agent_id="skill_maker",
+        display_name="Skill Maker",
+        purpose=(
+            "Converts creator-product requirements into proposed Skill asset "
+            "definitions instead of asking users to fill definition forms."
+        ),
+        system_prompt=(
+            "You design product-specific Skill assets for this creator workspace. "
+            "Start from the user's concrete need, inspect the existing workspace "
+            "assets and capability catalog, then propose a bounded skill definition. "
+            "Do not design a generic plugin, marketplace, filesystem tool, or "
+            "workflow editor. Output a practical proposal with skillId, inputs, "
+            "output schema, context policy, side effects, failure mode, and how it "
+            "composes with existing skills. Do not claim that the asset has been "
+            "written; propose changes for confirmation."
+        ),
+        skill_ids=["meta.design_skill_asset"],
+        default_context_policy={
+            "may_read": [
+                "workspace profile",
+                "source material overview",
+                "existing skills",
+                "existing agents",
+                "existing workflows",
+                "recent run summaries",
+            ],
+            "must_not_read": ["secrets", "arbitrary filesystem paths"],
+            "write_policy": "proposal_only",
+        },
+    ),
+    BuiltinAgentDefinition(
+        agent_id="agent_maker",
+        display_name="Agent Maker",
+        purpose=(
+            "Converts user needs into proposed Agent assets with system prompts "
+            "and skill composition."
+        ),
+        system_prompt=(
+            "You design product-specific Agent assets for this creator workspace. "
+            "Given a user need, propose the agent's purpose, system prompt, skillIds, "
+            "and default context policy. Prefer composing existing skills; if a "
+            "missing skill is needed, explicitly mark it as a proposed dependency. "
+            "Do not expose this as a generic agent builder. Do not claim writes have "
+            "happened; propose changes for confirmation."
+        ),
+        skill_ids=["meta.design_agent_asset", "meta.design_skill_asset"],
+        default_context_policy={
+            "may_read": [
+                "workspace profile",
+                "existing skills",
+                "existing agents",
+                "existing workflows",
+                "recent run summaries",
+            ],
+            "must_not_read": ["secrets", "unrelated filesystem"],
+            "write_policy": "proposal_only",
+        },
+    ),
+    BuiltinAgentDefinition(
+        agent_id="workflow_maker",
+        display_name="Workflow Maker",
+        purpose=(
+            "Converts larger creator-product needs into proposed multi-agent "
+            "workflow assets."
+        ),
+        system_prompt=(
+            "You design product-specific Workflow assets for this creator workspace. "
+            "Given a user need, propose a bounded workflow with entry agents, task "
+            "dependencies, parallel sections where useful, expected artifacts, and "
+            "failure/retry boundaries. Compose existing or proposed agents and skills. "
+            "Do not design a generic workflow editor or platform abstraction. Do not "
+            "claim writes have happened; propose changes for confirmation."
+        ),
+        skill_ids=[
+            "meta.design_workflow_asset",
+            "meta.design_agent_asset",
+            "meta.design_skill_asset",
+        ],
+        default_context_policy={
+            "may_read": [
+                "workspace profile",
+                "source material overview",
+                "existing skills",
+                "existing agents",
+                "existing workflows",
+                "recent run summaries",
+            ],
+            "must_not_read": ["secrets", "arbitrary filesystem paths"],
+            "write_policy": "proposal_only",
+        },
+    ),
 ]
 
 

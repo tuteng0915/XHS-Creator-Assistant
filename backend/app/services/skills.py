@@ -391,6 +391,137 @@ BUILTIN_SKILLS = [
         composable_with=["draft.rewrite"],
         implementation_refs=["ModelOperation.SIMULATION_SYNTHESIS"],
     ),
+    BuiltinSkillDefinition(
+        skill_id="meta.design_skill_asset",
+        display_name="Design Skill Asset",
+        category="meta",
+        purpose=(
+            "Turn a user requirement into a product-specific skill proposal with "
+            "input contract, output schema, context policy, side effects, and "
+            "composition boundaries."
+        ),
+        required_inputs=["user_requirement", "workspace_context_pack"],
+        optional_inputs=["related_skills", "target_workflow", "implementation_refs"],
+        context_policy={
+            "allowed_fields": [
+                "workspace profile",
+                "source material overview",
+                "existing skills",
+                "existing agents",
+                "existing workflows",
+                "recent runs",
+            ],
+            "disallowed_fields": ["arbitrary filesystem paths", "secrets"],
+            "scope": "broad_workspace_view",
+        },
+        output_schema={
+            "root": "skillProposal",
+            "fields": [
+                "skillId",
+                "displayName",
+                "category",
+                "purpose",
+                "requiredInputs",
+                "optionalInputs",
+                "contextPolicy",
+                "outputSchema",
+                "artifactEffect",
+                "sideEffects",
+                "failureMode",
+                "composableWith",
+                "implementationRefs",
+            ],
+        },
+        artifact_effect="Proposed Skill asset definition",
+        side_effects=["proposes asset changes only", "requires confirmation before writing"],
+        failure_mode="proposal_only",
+        composable_with=["meta.design_agent_asset", "meta.design_workflow_asset"],
+        implementation_refs=["AgentConversationService", "ModelOperation.AGENT_CHAT"],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="meta.design_agent_asset",
+        display_name="Design Agent Asset",
+        category="meta",
+        purpose=(
+            "Turn a user requirement into a product-specific agent proposal with "
+            "system prompt, skill composition, and default context policy."
+        ),
+        required_inputs=["user_requirement", "workspace_context_pack", "available_skills"],
+        optional_inputs=["target_workflow", "runtime_constraints"],
+        context_policy={
+            "allowed_fields": [
+                "workspace profile",
+                "existing skills",
+                "existing agents",
+                "existing workflows",
+                "recent runs",
+            ],
+            "disallowed_fields": ["secrets", "arbitrary platform agents"],
+            "scope": "broad_workspace_view",
+        },
+        output_schema={
+            "root": "agentProposal",
+            "fields": [
+                "agentId",
+                "displayName",
+                "purpose",
+                "systemPrompt",
+                "skillIds",
+                "defaultContextPolicy",
+                "version",
+            ],
+        },
+        artifact_effect="Proposed Agent asset definition",
+        side_effects=["proposes asset changes only", "requires confirmation before writing"],
+        failure_mode="proposal_only",
+        composable_with=["meta.design_workflow_asset"],
+        implementation_refs=["AgentConversationService", "ModelOperation.AGENT_CHAT"],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="meta.design_workflow_asset",
+        display_name="Design Workflow Asset",
+        category="meta",
+        purpose=(
+            "Turn a user requirement into a product-specific workflow proposal "
+            "that composes existing or proposed agents into a bounded node graph."
+        ),
+        required_inputs=[
+            "user_requirement",
+            "workspace_context_pack",
+            "available_agents",
+            "available_skills",
+        ],
+        optional_inputs=["source_assets", "expected_artifacts", "failure_recovery_policy"],
+        context_policy={
+            "allowed_fields": [
+                "workspace profile",
+                "source material overview",
+                "existing skills",
+                "existing agents",
+                "existing workflows",
+                "recent runs",
+            ],
+            "disallowed_fields": ["generic workflow editor concepts", "plugin marketplace"],
+            "scope": "broad_workspace_view",
+        },
+        output_schema={
+            "root": "workflowProposal",
+            "fields": [
+                "workflowId",
+                "displayName",
+                "purpose",
+                "entryAgentIds",
+                "agentPlan",
+                "artifactEffect",
+                "version",
+            ],
+        },
+        artifact_effect="Proposed Workflow asset definition",
+        side_effects=["proposes asset changes only", "requires confirmation before writing"],
+        failure_mode="proposal_only",
+        composable_with=["meta.design_skill_asset", "meta.design_agent_asset"],
+        implementation_refs=["AgentConversationService", "ModelOperation.AGENT_CHAT"],
+    ),
 ]
 
 

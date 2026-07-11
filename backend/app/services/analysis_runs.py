@@ -21,6 +21,7 @@ from app.repositories.analysis_runs import AnalysisRunRepository
 from app.repositories.source_materials import SourceMaterialRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.common import utc_now
+from app.services.context_access import ContextAccessService
 
 STAGE_KEYS = {
     WorkflowType.ACCOUNT_DIAGNOSIS.value: {
@@ -47,12 +48,14 @@ class AnalysisRunService:
         workspace_repository: WorkspaceRepository,
         source_repository: SourceMaterialRepository,
         settings: Settings,
+        context_access_service: ContextAccessService,
     ) -> None:
         self.database = database
         self.repository = repository
         self.workspace_repository = workspace_repository
         self.source_repository = source_repository
         self.settings = settings
+        self.context_access_service = context_access_service
 
     def create(
         self, workspace_id: str, payload: AnalysisRunCreate
@@ -163,7 +166,7 @@ class AnalysisRunService:
                 SourceMaterialType.COMMENTS.value,
                 "Comments material is required",
             )
-            return {
+            workflow_snapshot = {
                 **base,
                 "historicalPosts": {
                     "materialId": historical["id"],
@@ -178,6 +181,61 @@ class AnalysisRunService:
                     "updatedAt": comments["updated_at"],
                 },
             }
+            workflow_snapshot["contextPack"] = (
+                self.context_access_service.build_workspace_pack(
+                    connection,
+                    workspace=workspace,
+                    requester={
+                        "workflowId": payload.workflow_type.value,
+                        "agentId": "account_diagnosis_workflow",
+                        "skillId": "analysis.account_diagnosis",
+                    },
+                    purpose="create_account_diagnosis_analysis_run",
+                    selectors=[
+                        "account_positioning",
+                        "historical_posts_text",
+                        "comment_samples_text",
+                        "source_materials_overview",
+                        "analysis_history_overview",
+                        "topic_library_overview",
+                        "draft_history_overview",
+                        "simulation_history_overview",
+                    ],
+                    deep_items=[
+                        self.context_access_service.deep_item(
+                            key="selected_historical_posts",
+                            asset_type="source_material",
+                            asset_id=historical["id"],
+                            selector="historical_posts_text",
+                            role="historical_posts",
+                            data={
+                                "workspaceId": workspace["id"],
+                                "materialId": historical["id"],
+                                "name": historical["name"],
+                                "updatedAt": historical["updated_at"],
+                                "charCount": len(historical["text_content"] or ""),
+                            },
+                            text=historical["text_content"] or "",
+                        ),
+                        self.context_access_service.deep_item(
+                            key="selected_comment_samples",
+                            asset_type="source_material",
+                            asset_id=comments["id"],
+                            selector="comment_samples_text",
+                            role="comments",
+                            data={
+                                "workspaceId": workspace["id"],
+                                "materialId": comments["id"],
+                                "name": comments["name"],
+                                "updatedAt": comments["updated_at"],
+                                "charCount": len(comments["text_content"] or ""),
+                            },
+                            text=comments["text_content"] or "",
+                        ),
+                    ],
+                )
+            )
+            return workflow_snapshot
 
         trend_csv = self._require_material(
             connection,
@@ -186,7 +244,10 @@ class AnalysisRunService:
             SourceMaterialType.TREND_CSV.value,
             "Trend CSV material is required",
         )
-        return {
+        ranked_posts = self._rank_trend_posts(
+            self._read_upload_text(trend_csv["stored_key"])
+        )
+        workflow_snapshot = {
             **base,
             "trendCsv": {
                 "materialId": trend_csv["id"],
@@ -195,15 +256,57 @@ class AnalysisRunService:
                 "originalFilename": trend_csv["original_filename"],
                 "rowCount": trend_csv["row_count"],
                 "updatedAt": trend_csv["updated_at"],
-                "rankedPosts": self._rank_trend_posts(
-                    self._read_upload_text(trend_csv["stored_key"])
-                ),
+                "rankedPosts": ranked_posts,
                 "ranking": {
                     "method": "likes_plus_collects_desc",
                     "limit": 50,
                 },
             },
         }
+        workflow_snapshot["contextPack"] = (
+            self.context_access_service.build_workspace_pack(
+                connection,
+                workspace=workspace,
+                requester={
+                    "workflowId": payload.workflow_type.value,
+                    "agentId": "trend_analysis_workflow",
+                    "skillId": "analysis.trend_analysis",
+                },
+                purpose="create_trend_analysis_run",
+                selectors=[
+                    "account_positioning",
+                    "trend_top_ranked_posts",
+                    "source_materials_overview",
+                    "analysis_history_overview",
+                    "topic_library_overview",
+                    "draft_history_overview",
+                    "simulation_history_overview",
+                ],
+                deep_items=[
+                    self.context_access_service.deep_item(
+                        key="selected_trend_top_ranked_posts",
+                        asset_type="source_material",
+                        asset_id=trend_csv["id"],
+                        selector="trend_top_ranked_posts",
+                        role="trend_csv",
+                        data={
+                            "workspaceId": workspace["id"],
+                            "materialId": trend_csv["id"],
+                            "name": trend_csv["name"],
+                            "keyword": trend_csv["keyword"],
+                            "originalFilename": trend_csv["original_filename"],
+                            "rowCount": trend_csv["row_count"],
+                            "ranking": {
+                                "method": "likes_plus_collects_desc",
+                                "limit": 50,
+                            },
+                            "rankedPosts": ranked_posts,
+                        },
+                    )
+                ],
+            )
+        )
+        return workflow_snapshot
 
     def _require_material(
         self,

@@ -14,10 +14,15 @@ def test_workspace_agents_are_materialized_from_builtin_assets(
     agent_ids = {agent["agentId"] for agent in agents}
     assert "account_diagnosis_strategist" in agent_ids
     assert "audience_simulation_researcher" in agent_ids
+    assert "skill_maker" in agent_ids
+    assert "agent_maker" in agent_ids
+    assert "workflow_maker" in agent_ids
     account_agent = next(
         agent for agent in agents if agent["agentId"] == "account_diagnosis_strategist"
     )
     assert "analysis.profile_from_history" in account_agent["skillIds"]
+    workflow_maker = next(agent for agent in agents if agent["agentId"] == "workflow_maker")
+    assert "meta.design_workflow_asset" in workflow_maker["skillIds"]
     assert all(agent["workspaceId"] == workspace["id"] for agent in agents)
     assert all(agent["source"] == "builtin" for agent in agents)
 

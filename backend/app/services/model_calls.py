@@ -75,6 +75,23 @@ PROMPT_SIMULATION_SYNTHESIS = """你是内容策略师。基于完整受众模�
 只输出 JSON，不要解释。schema:
 {"synthesis":{"verdict":"","mainResistance":"","strongestAngle":"","contentAdjustments":[],"riskWarnings":[]}}"""
 
+PROMPT_AGENT_CHAT = """你是创作者 workspace 中的产品内 Agent。
+你会收到：
+- agent 定义：包括名称、用途、system prompt、关联 skill
+- workspace context pack：账号资料、素材、分析、选题、草稿、受众模拟的全局视野
+- conversation history：当前对话历史
+- user message：用户最新消息
+
+行为规则：
+- 充分利用 workspace context pack 中的资产，但不要编造不存在的资产。
+- 可以提出修改资产、创建选题、生成草稿等建议，但不能声称已经执行写入。
+- 若用户表达修改意图，放入 proposedActions，status 必须是 requires_confirmation。
+- 回复要直接、具体、中文优先。
+- 不要输出 markdown 代码块。
+
+只输出 JSON。schema:
+{"reply":"","proposedActions":[{"type":"","status":"requires_confirmation","description":""}]}"""
+
 
 MAX_TOKENS = {
     ModelOperation.PROFILE: 1800,
@@ -87,6 +104,7 @@ MAX_TOKENS = {
     ModelOperation.SIMULATION_REACTION: 1200,
     ModelOperation.SIMULATION_DEBATE: 1200,
     ModelOperation.SIMULATION_SYNTHESIS: 1600,
+    ModelOperation.AGENT_CHAT: 2000,
 }
 
 
@@ -98,6 +116,18 @@ class ModelCallService:
         return await self.call_operation(payload.operation, payload.context)
 
     async def call_operation(
+        self, operation: ModelOperation, context: dict[str, Any]
+    ) -> ModelCallResponse:
+        provider = self.settings.model_provider.strip().lower()
+        if provider == "anthropic":
+            return await self._call_anthropic(operation, context)
+        if provider in {"qwen", "dashscope"}:
+            return await self._call_qwen(operation, context)
+        raise ValidationError(
+            "Unsupported MODEL_PROVIDER. Use 'anthropic', 'qwen', or 'dashscope'."
+        )
+
+    async def _call_anthropic(
         self, operation: ModelOperation, context: dict[str, Any]
     ) -> ModelCallResponse:
         if not self.settings.anthropic_api_key:
@@ -134,6 +164,47 @@ class ModelCallService:
             model_metadata={
                 "provider": "anthropic",
                 "model": body.get("model", self.settings.anthropic_model),
+                "usage": body.get("usage", {}),
+                "operation": operation.value,
+            },
+        )
+
+    async def _call_qwen(
+        self, operation: ModelOperation, context: dict[str, Any]
+    ) -> ModelCallResponse:
+        if not self.settings.qwen_api_key:
+            raise ValidationError(
+                "QWEN_API_KEY or DASHSCOPE_API_KEY is required for live generation"
+            )
+
+        system, user = self._build_prompt(operation, context)
+        async with httpx.AsyncClient(timeout=90) as client:
+            response = await client.post(
+                f"{self.settings.qwen_base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "content-type": "application/json",
+                    "authorization": f"Bearer {self.settings.qwen_api_key}",
+                },
+                json={
+                    "model": self.settings.qwen_model,
+                    "max_tokens": MAX_TOKENS[operation],
+                    "temperature": 0.3,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                },
+            )
+        if response.status_code >= 400:
+            raise ValidationError(f"Model call failed ({response.status_code})")
+
+        body = response.json()
+        text = self._extract_openai_compatible_text(body)
+        return ModelCallResponse(
+            output=self._parse_json(text),
+            model_metadata={
+                "provider": "qwen",
+                "model": body.get("model", self.settings.qwen_model),
                 "usage": body.get("usage", {}),
                 "operation": operation.value,
             },
@@ -219,6 +290,19 @@ class ModelCallService:
                 "第二轮回应：\n"
                 f"{json.dumps(context.get('debateResponses'), ensure_ascii=False)}",
             )
+        if operation == ModelOperation.AGENT_CHAT:
+            return (
+                PROMPT_AGENT_CHAT,
+                json.dumps(
+                    {
+                        "agent": context.get("agent"),
+                        "workspaceContextPack": context.get("contextPack"),
+                        "conversationHistory": context.get("messages"),
+                        "userMessage": context.get("userMessage"),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
         raise ValidationError("Unsupported model operation")
 
     @staticmethod
@@ -233,3 +317,25 @@ class ModelCallService:
         if not isinstance(value, dict):
             raise ValidationError("Model response JSON must be an object")
         return value
+
+    @staticmethod
+    def _extract_openai_compatible_text(body: dict[str, Any]) -> str:
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ValidationError("Model response missing choices")
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise ValidationError("Model response choice must be an object")
+        message = first_choice.get("message")
+        if not isinstance(message, dict):
+            raise ValidationError("Model response missing message")
+        content = message.get("content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") in {"text", "output_text"}
+            )
+        raise ValidationError("Model response message content must be text")

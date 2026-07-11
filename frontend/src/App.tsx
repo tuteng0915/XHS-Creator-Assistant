@@ -1,8 +1,16 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 
 import {
   ApiError,
   agentApi,
+  agentConversationApi,
   analysisRunApi,
   draftApi,
   simulationRunApi,
@@ -15,6 +23,8 @@ import {
 import { HealthPage } from './HealthPage'
 import type {
   Agent,
+  AgentConversation,
+  AgentConversationSummary,
   AgentSummary,
   AnalysisRun,
   AnalysisRunSummary,
@@ -73,8 +83,24 @@ type StageView = {
   result?: unknown
   error?: string
 }
+type WorkflowOutputKind = 'analysis' | 'simulation'
+type WorkflowStageViews = Record<WorkflowTab, StageView[]>
+type WorkflowOutputKinds = Record<WorkflowTab, WorkflowOutputKind>
+const MAKER_AGENT_IDS = {
+  skill: 'skill_maker',
+  agent: 'agent_maker',
+  workflow: 'workflow_maker',
+} as const
 
 const idleState: SaveState = { phase: 'idle' }
+const emptyWorkflowStageViews = (): WorkflowStageViews => ({
+  account: [],
+  trend: [],
+})
+const defaultWorkflowOutputKinds = (): WorkflowOutputKinds => ({
+  account: 'analysis',
+  trend: 'analysis',
+})
 const SIMULATION_STAGES = [
   { key: 'personas', n: '01', title: '受众角色推导' },
   { key: 'initial_reactions', n: '02', title: '第一轮独立反应' },
@@ -169,6 +195,16 @@ function latestTrendMaterial(
 
 function workflowFromTab(tab: WorkflowTab): WorkflowType {
   return tab === 'account' ? 'account_diagnosis' : 'trend_analysis'
+}
+
+function workflowTabFromSource(sourceWorkflow?: unknown): WorkflowTab {
+  return sourceWorkflow === 'trend_analysis' ? 'trend' : 'account'
+}
+
+function workflowTabFromSimulation(run: SimulationRun): WorkflowTab {
+  const topic = run.inputSnapshot.topic as { sourceWorkflow?: unknown } | null
+  const draft = run.inputSnapshot.draft as { sourceWorkflow?: unknown } | null
+  return workflowTabFromSource(draft?.sourceWorkflow || topic?.sourceWorkflow)
 }
 
 function stageSeed(tab: WorkflowTab): StageView[] {
@@ -580,6 +616,14 @@ function WorkspaceApp() {
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null)
   const [agents, setAgents] = useState<AgentSummary[]>([])
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
+  const [agentConversations, setAgentConversations] = useState<
+    AgentConversationSummary[]
+  >([])
+  const [selectedAgentConversation, setSelectedAgentConversation] =
+    useState<AgentConversation | null>(null)
+  const [agentMessageDraft, setAgentMessageDraft] = useState('')
+  const [agentSending, setAgentSending] = useState(false)
+  const [agentConversationCreating, setAgentConversationCreating] = useState(false)
   const [workflowAssets, setWorkflowAssets] = useState<WorkflowAssetSummary[]>([])
   const [selectedWorkflowAsset, setSelectedWorkflowAsset] =
     useState<WorkflowAsset | null>(null)
@@ -605,7 +649,11 @@ function WorkspaceApp() {
   const [trendKeyword, setTrendKeyword] = useState('')
   const [trendFile, setTrendFile] = useState<File | null>(null)
   const [simulationTopic, setSimulationTopic] = useState('')
-  const [stageViews, setStageViews] = useState<StageView[]>([])
+  const [analysisStageViewsByWorkflow, setAnalysisStageViewsByWorkflow] =
+    useState<WorkflowStageViews>(emptyWorkflowStageViews)
+  const [simulationStageViews, setSimulationStageViews] = useState<StageView[]>([])
+  const [workflowOutputKindByWorkflow, setWorkflowOutputKindByWorkflow] =
+    useState<WorkflowOutputKinds>(defaultWorkflowOutputKinds)
   const [currentRun, setCurrentRun] = useState<AnalysisRun | null>(null)
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState('')
@@ -631,6 +679,20 @@ function WorkspaceApp() {
     [materials],
   )
   const trendMaterial = useMemo(() => latestTrendMaterial(materials), [materials])
+  const agentChatComposerRef = useRef<HTMLTextAreaElement | null>(null)
+  const selectedAgentConversationId = selectedAgentConversation?.id
+
+  useEffect(() => {
+    if (activePage !== 'agents' || !selectedAgentConversationId) return
+    window.setTimeout(() => {
+      const composer = agentChatComposerRef.current
+      if (!composer) return
+      if (typeof composer.scrollIntoView === 'function') {
+        composer.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      }
+      composer.focus()
+    }, 0)
+  }, [activePage, selectedAgentConversationId])
 
   useEffect(() => {
     let active = true
@@ -667,6 +729,7 @@ function WorkspaceApp() {
       simulationRunApi.list(selectedWorkspaceId),
       skillApi.list(selectedWorkspaceId),
       agentApi.list(selectedWorkspaceId),
+      agentConversationApi.list(selectedWorkspaceId),
       workflowAssetApi.list(selectedWorkspaceId),
       draftApi.list(selectedWorkspaceId),
       topicApi.list(selectedWorkspaceId),
@@ -679,6 +742,7 @@ function WorkspaceApp() {
           loadedSimulationRuns,
           loadedSkills,
           loadedAgents,
+          loadedAgentConversations,
           loadedWorkflowAssets,
           loadedDrafts,
           loadedTopics,
@@ -690,6 +754,7 @@ function WorkspaceApp() {
         setSimulationRuns(loadedSimulationRuns)
         setSkills(loadedSkills)
         setAgents(loadedAgents)
+        setAgentConversations(loadedAgentConversations)
         setWorkflowAssets(loadedWorkflowAssets)
         setDrafts(loadedDrafts)
         setTopics(loadedTopics)
@@ -711,10 +776,14 @@ function WorkspaceApp() {
         setSelectedSimulationRun(null)
         setSelectedSkill(null)
         setSelectedAgent(null)
+        setSelectedAgentConversation(null)
+        setAgentMessageDraft('')
         setSelectedWorkflowAsset(null)
         setSelectedDraft(null)
         setDraftEditor('')
-        setStageViews([])
+        setAnalysisStageViewsByWorkflow(emptyWorkflowStageViews())
+        setSimulationStageViews([])
+        setWorkflowOutputKindByWorkflow(defaultWorkflowOutputKinds())
         setSaveStates({
           workspace: idleState,
           historical: idleState,
@@ -757,10 +826,16 @@ function WorkspaceApp() {
     setSelectedSimulationRun(null)
     setSelectedSkill(null)
     setSelectedAgent(null)
+    setAgentConversations([])
+    setSelectedAgentConversation(null)
+    setAgentMessageDraft('')
+    setAgentConversationCreating(false)
     setSelectedWorkflowAsset(null)
     setSelectedDraft(null)
     setDraftEditor('')
-    setStageViews([])
+    setAnalysisStageViewsByWorkflow(emptyWorkflowStageViews())
+    setSimulationStageViews([])
+    setWorkflowOutputKindByWorkflow(defaultWorkflowOutputKinds())
   }
 
   function setSaveState(key: SaveKey, state: SaveState) {
@@ -775,6 +850,7 @@ function WorkspaceApp() {
       loadedSimulationRuns,
       loadedSkills,
       loadedAgents,
+      loadedAgentConversations,
       loadedWorkflowAssets,
       loadedDrafts,
       loadedTopics,
@@ -785,6 +861,7 @@ function WorkspaceApp() {
       simulationRunApi.list(workspace.id),
       skillApi.list(workspace.id),
       agentApi.list(workspace.id),
+      agentConversationApi.list(workspace.id),
       workflowAssetApi.list(workspace.id),
       draftApi.list(workspace.id),
       topicApi.list(workspace.id),
@@ -797,6 +874,7 @@ function WorkspaceApp() {
     setSimulationRuns(loadedSimulationRuns)
     setSkills(loadedSkills)
     setAgents(loadedAgents)
+    setAgentConversations(loadedAgentConversations)
     setWorkflowAssets(loadedWorkflowAssets)
     setDrafts(loadedDrafts)
     setTopics(loadedTopics)
@@ -1021,10 +1099,37 @@ function WorkspaceApp() {
     return { trend: savedTrend, simulationTopic: nextSimulationTopic }
   }
 
-  function setStageStatus(key: string, patch: Partial<StageView>) {
-    setStageViews((current) =>
+  function setAnalysisStageViews(
+    targetTab: WorkflowTab,
+    next: StageView[] | ((current: StageView[]) => StageView[]),
+  ) {
+    setAnalysisStageViewsByWorkflow((current) => ({
+      ...current,
+      [targetTab]: typeof next === 'function' ? next(current[targetTab]) : next,
+    }))
+  }
+
+  function setAnalysisStageStatus(
+    targetTab: WorkflowTab,
+    key: string,
+    patch: Partial<StageView>,
+  ) {
+    setAnalysisStageViews(targetTab, (current) =>
       current.map((stage) => (stage.key === key ? { ...stage, ...patch } : stage)),
     )
+  }
+
+  function setSimulationStageStatus(key: string, patch: Partial<StageView>) {
+    setSimulationStageViews((current) =>
+      current.map((stage) => (stage.key === key ? { ...stage, ...patch } : stage)),
+    )
+  }
+
+  function setWorkflowOutputKind(targetTab: WorkflowTab, kind: WorkflowOutputKind) {
+    setWorkflowOutputKindByWorkflow((current) => ({
+      ...current,
+      [targetTab]: kind,
+    }))
   }
 
   async function runDiagnosis(targetTab: WorkflowTab = workflowTab) {
@@ -1032,7 +1137,8 @@ function WorkspaceApp() {
     setWorkflowTab(targetTab)
     setRunError('')
     setRunning(true)
-    setStageViews(stageSeed(targetTab))
+    setWorkflowOutputKind(targetTab, 'analysis')
+    setAnalysisStageViews(targetTab, stageSeed(targetTab))
     try {
       const savedInputs = await ensureInputsSavedForRun(targetTab)
       const created = await analysisRunApi.create(workspace.id, {
@@ -1043,7 +1149,7 @@ function WorkspaceApp() {
         mode,
       })
       setCurrentRun(created)
-      await runAnalysisGraphWorkflow(created)
+      await runAnalysisGraphWorkflow(created, targetTab)
       await refreshWorkspaceSummary()
     } catch (error) {
       const message = errorMessage(error)
@@ -1061,14 +1167,14 @@ function WorkspaceApp() {
     }
   }
 
-  async function runAnalysisGraphWorkflow(run: AnalysisRun) {
+  async function runAnalysisGraphWorkflow(run: AnalysisRun, targetTab: WorkflowTab) {
     await new Promise<void>((resolve, reject) => {
       const source = new EventSource(`/api/analysis-runs/${run.id}/events`)
       const finish = async () => {
         source.close()
         const completed = await analysisRunApi.get(run.id)
         setCurrentRun(completed)
-        setStageViews(stageSeedFromRun(completed))
+        setAnalysisStageViews(targetTab, stageSeedFromRun(completed))
         resolve()
       }
       const fail = (error: unknown) => {
@@ -1079,13 +1185,13 @@ function WorkspaceApp() {
         const activity = JSON.parse(message.data) as ActivityEvent
         const eventType = activity.data.eventType
         if (eventType === 'stage.started' && activity.stageKey) {
-          setStageStatus(activity.stageKey, { status: 'running' })
+          setAnalysisStageStatus(targetTab, activity.stageKey, { status: 'running' })
           return
         }
         if (eventType === 'stage.succeeded' && activity.stageKey) {
           const result = { ...activity.data }
           delete result.eventType
-          setStageStatus(activity.stageKey, {
+          setAnalysisStageStatus(targetTab, activity.stageKey, {
             status: 'completed',
             result,
             error: undefined,
@@ -1093,7 +1199,7 @@ function WorkspaceApp() {
           return
         }
         if (eventType === 'stage.failed' && activity.stageKey) {
-          setStageStatus(activity.stageKey, {
+          setAnalysisStageStatus(targetTab, activity.stageKey, {
             status: 'failed',
             error: String(activity.data.error || '阶段执行失败'),
           })
@@ -1130,9 +1236,19 @@ function WorkspaceApp() {
     setRunError('')
     setRunning(true)
     setCurrentRun(null)
-    setStageViews(SIMULATION_STAGES.map((stage) => ({ ...stage, status: 'waiting' })))
+    setWorkflowOutputKind(targetTab, 'simulation')
+    setSimulationStageViews(
+      SIMULATION_STAGES.map((stage) => ({ ...stage, status: 'waiting' })),
+    )
     try {
-      const savedInputs = await ensureInputsSavedForRun(targetTab)
+      const savedInputs = draft
+        ? { simulationTopic }
+        : await ensureInputsSavedForRun(targetTab)
+      if (draft) {
+        setSaveState('workspace', { phase: 'saving' })
+        await persistWorkspace()
+        setSaveState('workspace', { phase: 'saved' })
+      }
       const topicForSimulation = savedInputs.simulationTopic.trim()
       if (!draft && !topicForSimulation) throw new Error('请填写受众模拟选题。')
       const useSavedTopic =
@@ -1143,7 +1259,7 @@ function WorkspaceApp() {
         manualTopic: draft || useSavedTopic ? undefined : topicForSimulation,
         mode,
       })
-      await runSimulationGraphWorkflow(created)
+      await runSimulationGraphWorkflow(created, targetTab)
       await refreshWorkspaceSummary()
     } catch (error) {
       const message = errorMessage(error)
@@ -1161,13 +1277,14 @@ function WorkspaceApp() {
     }
   }
 
-  async function runSimulationGraphWorkflow(run: SimulationRun) {
+  async function runSimulationGraphWorkflow(run: SimulationRun, targetTab: WorkflowTab) {
     await new Promise<void>((resolve, reject) => {
       const source = new EventSource(`/api/simulation-runs/${run.id}/events`)
       const finish = async () => {
         source.close()
         const completed = await simulationRunApi.get(run.id)
-        setStageViews(stageSeedFromSimulation(completed))
+        setWorkflowOutputKind(targetTab, 'simulation')
+        setSimulationStageViews(stageSeedFromSimulation(completed))
         resolve()
       }
       const fail = (error: unknown) => {
@@ -1178,13 +1295,13 @@ function WorkspaceApp() {
         const activity = JSON.parse(message.data) as ActivityEvent
         const eventType = activity.data.eventType
         if (eventType === 'stage.started' && activity.stageKey) {
-          setStageStatus(activity.stageKey, { status: 'running' })
+          setSimulationStageStatus(activity.stageKey, { status: 'running' })
           return
         }
         if (eventType === 'stage.succeeded' && activity.stageKey) {
           const result = { ...activity.data }
           delete result.eventType
-          setStageStatus(activity.stageKey, {
+          setSimulationStageStatus(activity.stageKey, {
             status: 'completed',
             result,
             error: undefined,
@@ -1192,7 +1309,7 @@ function WorkspaceApp() {
           return
         }
         if (eventType === 'stage.failed' && activity.stageKey) {
-          setStageStatus(activity.stageKey, {
+          setSimulationStageStatus(activity.stageKey, {
             status: 'failed',
             error: String(activity.data.error || '阶段执行失败'),
           })
@@ -1299,7 +1416,7 @@ function WorkspaceApp() {
       setSelectedDraft(draft)
       setDraftEditor(JSON.stringify(draft.editableContent, null, 2))
       await refreshWorkspaceSummary()
-      setActivePage('drafts')
+      setActivePage('topics')
       setSaveState('draft', { phase: 'saved' })
       return draft
     } catch (error) {
@@ -1339,14 +1456,12 @@ function WorkspaceApp() {
     const run = await analysisRunApi.get(runId)
     setSelectedRun(run)
     if (inOutput) {
+      const targetTab = run.workflowType === 'account_diagnosis' ? 'account' : 'trend'
       setCurrentRun(run)
-      setStageViews(stageSeedFromRun(run))
-      setWorkflowTab(run.workflowType === 'account_diagnosis' ? 'account' : 'trend')
-      setActivePage(
-        run.workflowType === 'account_diagnosis'
-          ? 'account-diagnosis'
-          : 'trend-analysis',
-      )
+      setAnalysisStageViews(targetTab, stageSeedFromRun(run))
+      setWorkflowOutputKind(targetTab, 'analysis')
+      setWorkflowTab(targetTab)
+      setActivePage(targetTab === 'account' ? 'account-diagnosis' : 'trend-analysis')
     }
   }
 
@@ -1354,15 +1469,18 @@ function WorkspaceApp() {
     const run = await simulationRunApi.get(simulationId)
     setSelectedSimulationRun(run)
     if (inOutput) {
+      const targetTab = workflowTabFromSimulation(run)
       setCurrentRun(null)
-      setStageViews(stageSeedFromSimulation(run))
+      setSimulationStageViews(stageSeedFromSimulation(run))
+      setWorkflowOutputKind(targetTab, 'simulation')
+      setWorkflowTab(targetTab)
       const topic = run.inputSnapshot.topic as { title?: string; angle?: string }
       setSimulationTopic(
         [topic?.title || '', topic?.angle ? `切入角度：${topic.angle}` : '']
           .filter(Boolean)
           .join('\n'),
       )
-      setActivePage(workflowTab === 'trend' ? 'trend-analysis' : 'account-diagnosis')
+      setActivePage(targetTab === 'trend' ? 'trend-analysis' : 'account-diagnosis')
     }
   }
 
@@ -1374,6 +1492,96 @@ function WorkspaceApp() {
   async function openAgent(agentAssetId: string) {
     const agent = await agentApi.get(agentAssetId)
     setSelectedAgent(agent)
+    setSelectedAgentConversation((current) =>
+      current?.agentAssetId === agent.id ? current : null,
+    )
+    setAgentMessageDraft('')
+  }
+
+  async function startAgentConversation(
+    agent: Agent,
+    title = `与 ${agent.displayName} 对话`,
+    initialDraft = '',
+  ) {
+    if (!workspace) return
+    setRunError('')
+    setActivePage('agents')
+    setAgentConversationCreating(true)
+    try {
+      const conversation = await agentConversationApi.create(
+        workspace.id,
+        agent.id,
+        title,
+      )
+      setAgentConversations((current) => [
+        conversation,
+        ...current.filter((item) => item.id !== conversation.id),
+      ])
+      setSelectedAgentConversation(conversation)
+      setAgentMessageDraft(initialDraft)
+      await refreshWorkspaceSummary()
+    } catch (error) {
+      setRunError(errorMessage(error))
+    } finally {
+      setAgentConversationCreating(false)
+    }
+  }
+
+  async function startMakerConversation(
+    agentId: string,
+    initialDraft: string,
+  ) {
+    setRunError('')
+    setActivePage('agents')
+    const summary = agents.find((agent) => agent.agentId === agentId)
+    if (!summary) {
+      setRunError('这个 workspace 还没有同步对应的 maker agent，请刷新后重试。')
+      return
+    }
+    try {
+      const agent =
+        selectedAgent?.id === summary.id ? selectedAgent : await agentApi.get(summary.id)
+      setSelectedAgent(agent)
+      await startAgentConversation(
+        agent,
+        `与 ${agent.displayName} 对话`,
+        initialDraft,
+      )
+    } catch (error) {
+      setRunError(errorMessage(error))
+    }
+  }
+
+  async function openAgentConversation(conversationId: string) {
+    setRunError('')
+    const conversation = await agentConversationApi.get(conversationId)
+    setSelectedAgentConversation(conversation)
+    setAgentMessageDraft('')
+    const agent = agents.find((item) => item.id === conversation.agentAssetId)
+    if (agent) {
+      await openAgent(agent.id)
+    }
+  }
+
+  async function sendAgentMessage(event: FormEvent) {
+    event.preventDefault()
+    if (!selectedAgentConversation || !agentMessageDraft.trim()) return
+    setAgentSending(true)
+    setRunError('')
+    try {
+      const conversation = await agentConversationApi.sendMessage(
+        selectedAgentConversation.id,
+        agentMessageDraft.trim(),
+        mode,
+      )
+      setSelectedAgentConversation(conversation)
+      setAgentMessageDraft('')
+      await refreshWorkspaceSummary()
+    } catch (error) {
+      setRunError(errorMessage(error))
+    } finally {
+      setAgentSending(false)
+    }
   }
 
   async function openWorkflowAsset(workflowAssetId: string) {
@@ -2028,23 +2236,40 @@ function WorkspaceApp() {
           </button>
         </div>
       </section>
-        {renderWorkflowOutputPanel(targetTab)}
+        {renderWorkflowOutputPanel(
+          targetTab,
+          workflowOutputKindByWorkflow[targetTab] === 'simulation'
+            ? simulationStageViews
+            : analysisStageViewsByWorkflow[targetTab],
+          workflowOutputKindByWorkflow[targetTab],
+        )}
       </div>
     )
   }
 
-  function renderWorkflowOutputPanel(targetTab: WorkflowTab) {
+  function renderWorkflowOutputPanel(
+    targetTab: WorkflowTab,
+    views: StageView[],
+    outputKind: WorkflowOutputKind,
+  ) {
+    const isSimulation = outputKind === 'simulation'
     return (
       <section className="output-panel">
         {runError && <div className="error-banner">⚠ {runError}</div>}
-        {!stageViews.length ? (
+        {!views.length ? (
           <div className="output-empty">
             <span>✓</span>
-            <h2>{targetTab === 'account' ? '账号诊断待运行' : '热点分析待运行'}</h2>
+            <h2>
+              {isSimulation
+                ? '受众模拟待运行'
+                : targetTab === 'account'
+                  ? '账号诊断待运行'
+                  : '热点分析待运行'}
+            </h2>
             <p>运行后结果会渐进渲染，并保存到 Analysis History。</p>
           </div>
         ) : (
-          stageViews.map((stage) => (
+          views.map((stage) => (
             <div className="stage" key={stage.key}>
               <div className="stage-h">
                 <div className="stage-n">{stage.n}</div>
@@ -2333,6 +2558,21 @@ function WorkspaceApp() {
             Skills 是当前 workspace 可组合的产品能力资产；用户侧只读展示 contract，
             不提供通用 agent builder。
           </p>
+          <div className="asset-maker-call">
+            <span>不要手填 contract：描述你需要的能力，让 Skill Maker 生成定义提案。</span>
+            <button
+              className="small-primary"
+              disabled={agentConversationCreating}
+              onClick={() =>
+                startMakerConversation(
+                  MAKER_AGENT_IDS.skill,
+                  '我想设计一个新的 Skill，用来：\n\n它应该读取哪些 workspace 资产：\n\n它应该输出什么结构：',
+                )
+              }
+            >
+              让 Skill Maker 设计 Skill
+            </button>
+          </div>
           {Object.entries(grouped).map(([category, items]) => (
             <div key={category} className="skill-group">
               <label>{category}</label>
@@ -2402,6 +2642,11 @@ function WorkspaceApp() {
   }
 
   function renderAgentsPage() {
+    const selectedAgentConversations = selectedAgent
+      ? agentConversations.filter(
+          (conversation) => conversation.agentAssetId === selectedAgent.id,
+        )
+      : []
     return (
       <div className="workspace-page">
         <section className="history-list">
@@ -2410,6 +2655,22 @@ function WorkspaceApp() {
             Agent 是产品角色资产：system prompt + 多个 Skills +
             默认上下文边界。用户侧只读展示，不提供通用 agent builder。
           </p>
+          <div className="asset-maker-call">
+            <span>描述你需要的角色，Agent Maker 会组合 system prompt、skills 和上下文边界。</span>
+            <button
+              className="small-primary"
+              disabled={agentConversationCreating}
+              onClick={() =>
+                startMakerConversation(
+                  MAKER_AGENT_IDS.agent,
+                  '我想设计一个新的 Agent，用来：\n\n它应该具备哪些能力 / skills：\n\n它应该读取哪些资产，不应该读取哪些资产：',
+                )
+              }
+            >
+              让 Agent Maker 设计 Agent
+            </button>
+          </div>
+          {runError && <div className="error-banner">⚠ {runError}</div>}
           {agents.map((agent) => (
             <button
               key={agent.id}
@@ -2421,6 +2682,35 @@ function WorkspaceApp() {
               <small>{agent.agentId}</small>
             </button>
           ))}
+          {selectedAgent && (
+            <>
+              <div className="panel-title secondary-title">Conversations</div>
+              <button
+                className="small-primary"
+                disabled={agentConversationCreating}
+                onClick={() => startAgentConversation(selectedAgent)}
+              >
+                {agentConversationCreating ? '创建中…' : '＋ 开始对话'}
+              </button>
+              {selectedAgentConversations.length === 0 ? (
+                <div className="empty-card compact-empty">暂无 agent 对话。</div>
+              ) : (
+                selectedAgentConversations.map((conversation) => (
+                  <button
+                    key={conversation.id}
+                    className={`run-row ${
+                      selectedAgentConversation?.id === conversation.id ? 'active' : ''
+                    }`}
+                    onClick={() => openAgentConversation(conversation.id)}
+                  >
+                    <span>{conversation.title}</span>
+                    <b>{conversation.status}</b>
+                    <small>{new Date(conversation.updatedAt).toLocaleString()}</small>
+                  </button>
+                ))
+              )}
+            </>
+          )}
         </section>
         <section className="history-detail">
           {selectedAgent ? (
@@ -2454,6 +2744,70 @@ function WorkspaceApp() {
                   <div className="why">{selectedAgent.userNotes}</div>
                 </>
               )}
+              <label>Agent Conversation</label>
+              {selectedAgentConversation ? (
+                <>
+                  <div className="agent-chat">
+                    <p className="microcopy">
+                      当前对话模式：{mode === 'demo' ? '演示模式' : '实时生成'}
+                    </p>
+                    {selectedAgentConversation.messages.length === 0 ? (
+                      <div className="empty-card compact-empty">
+                        发送第一条消息，Agent 会读取当前 workspace broad context。
+                      </div>
+                    ) : (
+                      selectedAgentConversation.messages.map((message) => (
+                        <div
+                          className={`chat-message ${message.role}`}
+                          key={message.id}
+                        >
+                          <b>{message.role === 'user' ? '你' : selectedAgent.displayName}</b>
+                          <p>{message.content}</p>
+                          {message.role === 'assistant' && (
+                            <details>
+                              <summary>
+                                引用资产 {message.assetRefs.length} · Proposed Actions{' '}
+                                {message.proposedActions.length}
+                              </summary>
+                              <pre className="json-preview">
+                                {JSON.stringify(
+                                  {
+                                    assetRefs: message.assetRefs,
+                                    proposedActions: message.proposedActions,
+                                    modelMetadata: message.modelMetadata,
+                                  },
+                                  null,
+                                  2,
+                                )}
+                              </pre>
+                            </details>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <form className="agent-chat-form" onSubmit={sendAgentMessage}>
+                    <textarea
+                      ref={agentChatComposerRef}
+                      rows={3}
+                      value={agentMessageDraft}
+                      onChange={(event) => setAgentMessageDraft(event.target.value)}
+                      placeholder="直接和这个 Agent 对话。第一版会引用 workspace 资产并提出建议，不会自动修改资产。"
+                    />
+                    <button
+                      className="primary"
+                      disabled={agentSending || !agentMessageDraft.trim()}
+                    >
+                      {agentSending ? '发送中…' : '发送给 Agent'}
+                    </button>
+                  </form>
+                </>
+              ) : (
+                <div className="empty-card">
+                  点击“开始对话”，直接调用这个 Agent。第一版只读 workspace
+                  context，并把潜在修改保存为 proposed actions。
+                </div>
+              )}
             </>
           ) : (
             <div className="empty-card">
@@ -2474,6 +2828,21 @@ function WorkspaceApp() {
             Workflow 是多 agent、多级 task 的产品工作流资产；用户侧只读展示计划结构，
             不提供通用流程编辑器。
           </p>
+          <div className="asset-maker-call">
+            <span>描述你想新增的创作者链路，Workflow Maker 会生成多 Agent task plan 提案。</span>
+            <button
+              className="small-primary"
+              disabled={agentConversationCreating}
+              onClick={() =>
+                startMakerConversation(
+                  MAKER_AGENT_IDS.workflow,
+                  '我想设计一个新的 Workflow，用来：\n\n输入资产包括：\n\n输出资产应该是：\n\n需要哪些 agent / skill 协作：',
+                )
+              }
+            >
+              让 Workflow Maker 设计 Workflow
+            </button>
+          </div>
           {workflowAssets.map((workflowAsset) => (
             <button
               key={workflowAsset.id}

@@ -92,6 +92,34 @@ export interface Agent extends AgentSummary {
   userNotes: string
 }
 
+export type AgentConversationStatus = 'active' | 'archived'
+
+export interface AgentConversationSummary {
+  id: string
+  workspaceId: string
+  agentAssetId: string
+  title: string
+  status: AgentConversationStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AgentMessage {
+  id: string
+  conversationId: string
+  role: 'user' | 'assistant'
+  content: string
+  contextPack: Record<string, unknown>
+  assetRefs: Array<Record<string, unknown>>
+  proposedActions: Array<Record<string, unknown>>
+  modelMetadata: Record<string, unknown>
+  createdAt: string
+}
+
+export interface AgentConversation extends AgentConversationSummary {
+  messages: AgentMessage[]
+}
+
 export type WorkflowAssetStatus = 'enabled' | 'disabled'
 export type WorkflowAssetSource = 'builtin'
 

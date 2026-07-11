@@ -98,16 +98,16 @@ Every skill should eventually be described by this contract:
 | `trigger_intents` | User intents that may invoke the skill |
 | `required_inputs` | Required artifact IDs, snapshots, or text fields |
 | `optional_inputs` | Optional context that may improve output |
-| `context_policy` | Exact fields allowed into model context |
+| `context_policy` | Workspace context scope, deep asset requests, budgets, and provenance rules |
 | `output_schema` | Structured output contract |
 | `artifact_effect` | What artifact is created, updated, or read |
 | `side_effects` | Persistence, run creation, status transitions |
 | `failure_mode` | Whether partial output is allowed |
 | `composable_with` | Skills that can safely consume this skill's output |
 
-The context policy is mandatory. A skill should not receive the whole workspace or whole conversation history by default.
+The context policy is mandatory, but it should not be interpreted as a narrow allowlist that starves the skill. Most skills should receive a broad product-scoped workspace context pack plus exact deep asset content where useful.
 
-The concrete access design is defined in `docs/agent-context-access.md`. In short, agents should request bounded context packs through a Context Access Layer; they should not read SQLite, uploaded files, or whole workspace state directly.
+The concrete access design is defined in `docs/agent-context-access.md`. In short, agents should request auditable workspace context packs through a Context Access Layer; they should not read SQLite, uploaded files, arbitrary paths, or cross-workspace state directly.
 
 ## 3. Skill Granularity Rules
 

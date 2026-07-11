@@ -15,6 +15,13 @@ def test_workspace_skills_are_materialized_from_builtin_catalog(
     assert "analysis.profile_from_history" in skill_ids
     assert "topic.generate_from_account_diagnosis" in skill_ids
     assert "simulation.synthesize" in skill_ids
+    assert "meta.design_skill_asset" in skill_ids
+    assert "meta.design_agent_asset" in skill_ids
+    assert "meta.design_workflow_asset" in skill_ids
+    skill_maker = next(
+        skill for skill in skills if skill["skillId"] == "meta.design_skill_asset"
+    )
+    assert skill_maker["category"] == "meta"
     assert all(skill["workspaceId"] == workspace["id"] for skill in skills)
     assert all(skill["source"] == "builtin" for skill in skills)
 

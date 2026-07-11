@@ -59,6 +59,26 @@ uvicorn app.main:app --reload
 
 Open `http://localhost:8000/api/health` or `http://localhost:8000/docs`.
 
+Live generation uses the backend model proxy. Anthropic remains the default:
+
+```bash
+export MODEL_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=...
+export ANTHROPIC_MODEL=claude-sonnet-4-20250514
+```
+
+To use Qwen through DashScope's OpenAI-compatible API:
+
+```bash
+export MODEL_PROVIDER=qwen
+export QWEN_API_KEY=...
+export QWEN_MODEL=qwen-plus
+# Optional; this is the default:
+export QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+`DASHSCOPE_API_KEY` and `DASHSCOPE_BASE_URL` are also accepted aliases.
+
 Checks:
 
 ```bash

@@ -9,6 +9,7 @@ from app.db.database import SQLiteDatabase
 from app.errors import ApplicationError, ConflictError, NotFoundError, ValidationError
 from app.models import HealthResponse
 from app.repositories import (
+    AgentConversationRepository,
     AgentRepository,
     AnalysisRunRepository,
     DraftRepository,
@@ -21,12 +22,16 @@ from app.repositories import (
     WorkspaceRepository,
 )
 from app.services import (
+    AgentConversationService,
     AgentService,
     AnalysisRunService,
+    ContextAccessService,
     DraftGenerationService,
     DraftService,
+    FakeAgentConversationModelProvider,
     FakeStructureModelProvider,
     ModelCallService,
+    RealAgentConversationModelProvider,
     RealStructureModelProvider,
     SimulationRunService,
     SkillService,
@@ -62,8 +67,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     simulation_repository = SimulationRunRepository()
     skill_repository = SkillRepository()
     agent_repository = AgentRepository()
+    agent_conversation_repository = AgentConversationRepository()
     workflow_asset_repository = WorkflowAssetRepository()
     checkpoint_repository = GraphCheckpointRepository()
+    context_access_service = ContextAccessService(
+        source_repository=source_repository,
+        analysis_repository=analysis_repository,
+        topic_repository=topic_repository,
+        draft_repository=draft_repository,
+        simulation_repository=simulation_repository,
+    )
     workspace_service = WorkspaceService(database, workspace_repository)
     source_service = SourceMaterialService(
         database,
@@ -77,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         workspace_repository,
         source_repository,
         active_settings,
+        context_access_service,
     )
     topic_service = TopicService(
         database,
@@ -117,6 +131,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         agent_repository,
         workspace_repository,
         skill_service,
+    )
+    agent_conversation_service = AgentConversationService(
+        database,
+        agent_conversation_repository,
+        workspace_repository,
+        agent_repository,
+        context_access_service,
+        fake_provider=FakeAgentConversationModelProvider(),
+        live_provider=RealAgentConversationModelProvider(model_call_service),
     )
     workflow_asset_service = WorkflowAssetService(
         database,
@@ -180,8 +203,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.simulation_service = simulation_service
     application.state.skill_service = skill_service
     application.state.agent_service = agent_service
+    application.state.agent_conversation_service = agent_conversation_service
     application.state.workflow_asset_service = workflow_asset_service
     application.state.model_call_service = model_call_service
+    application.state.context_access_service = context_access_service
     application.state.account_workflow_service = account_workflow_service
     application.state.trend_workflow_service = trend_workflow_service
     application.state.simulation_workflow_service = simulation_workflow_service
@@ -218,11 +243,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             simulation_service,
             skill_service,
             agent_service,
+            agent_conversation_service,
             workflow_asset_service,
-            model_call_service,
-            account_workflow_service,
-            trend_workflow_service,
-            simulation_workflow_service,
             workflow_worker,
         )
     )

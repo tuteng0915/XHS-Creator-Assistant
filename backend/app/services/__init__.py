@@ -1,5 +1,11 @@
+from app.services.agent_conversations import (
+    AgentConversationService,
+    FakeAgentConversationModelProvider,
+    RealAgentConversationModelProvider,
+)
 from app.services.agents import AgentService
 from app.services.analysis_runs import AnalysisRunService
+from app.services.context_access import ContextAccessService
 from app.services.draft_generation import (
     DraftGenerationService,
     FakeStructureModelProvider,
@@ -17,12 +23,16 @@ from app.services.workspaces import WorkspaceService
 
 __all__ = [
     "AgentService",
+    "AgentConversationService",
     "AnalysisRunService",
+    "ContextAccessService",
     "DraftGenerationService",
     "DraftService",
     "FakeStructureModelProvider",
+    "FakeAgentConversationModelProvider",
     "ModelCallService",
     "RealStructureModelProvider",
+    "RealAgentConversationModelProvider",
     "SimulationRunService",
     "SkillService",
     "SourceMaterialService",

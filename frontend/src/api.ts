@@ -1,13 +1,13 @@
 import type {
   Agent,
+  AgentConversation,
+  AgentConversationSummary,
   AgentStatus,
   AgentSummary,
   AnalysisRun,
   AnalysisRunSummary,
   Draft,
   DraftSummary,
-  ModelCallResponse,
-  ModelOperation,
   SimulationRun,
   SimulationRunSummary,
   Skill,
@@ -181,6 +181,40 @@ export const agentApi = {
     }),
 }
 
+export const agentConversationApi = {
+  list: (workspaceId: string) =>
+    request<AgentConversationSummary[]>(
+      `/api/workspaces/${workspaceId}/agent-conversations`,
+    ),
+
+  create: (workspaceId: string, agentAssetId: string, title?: string) =>
+    request<AgentConversation>(
+      `/api/workspaces/${workspaceId}/agent-conversations`,
+      {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({ agentAssetId, title }),
+      },
+    ),
+
+  get: (conversationId: string) =>
+    request<AgentConversation>(`/api/agent-conversations/${conversationId}`),
+
+  sendMessage: (
+    conversationId: string,
+    content: string,
+    mode: 'demo' | 'live',
+  ) =>
+    request<AgentConversation>(
+      `/api/agent-conversations/${conversationId}/messages`,
+      {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify({ content, mode }),
+      },
+    ),
+}
+
 export const workflowAssetApi = {
   list: (workspaceId: string) =>
     request<WorkflowAssetSummary[]>(`/api/workspaces/${workspaceId}/workflows`),
@@ -226,32 +260,6 @@ export const analysisRunApi = {
     ),
 
   get: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${runId}`),
-
-  transition: (
-    runId: string,
-    payload: { status: AnalysisRun['status']; modelMetadata?: unknown },
-  ) =>
-    request<AnalysisRun>(`/api/analysis-runs/${runId}`, {
-      method: 'PATCH',
-      headers: jsonHeaders,
-      body: JSON.stringify(payload),
-    }),
-
-  updateStage: (
-    runId: string,
-    stageKey: string,
-    payload: {
-      status: AnalysisRun['status']
-      result?: unknown
-      error?: string
-      modelMetadata?: unknown
-    },
-  ) =>
-    request<AnalysisRun>(`/api/analysis-runs/${runId}/stages/${stageKey}`, {
-      method: 'PUT',
-      headers: jsonHeaders,
-      body: JSON.stringify(payload),
-    }),
 }
 
 export const simulationRunApi = {
@@ -357,13 +365,4 @@ export const topicApi = {
 
   archive: (topicId: string) =>
     request<Topic>(`/api/topics/${topicId}/archive`, { method: 'POST' }),
-}
-
-export const modelCallApi = {
-  call: (operation: ModelOperation, context: Record<string, unknown>) =>
-    request<ModelCallResponse>('/api/model-calls', {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify({ operation, context }),
-    }),
 }

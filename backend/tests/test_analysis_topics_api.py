@@ -1,5 +1,9 @@
+import pytest
 from fastapi import FastAPI
 from test_workspace_api import create_workspace, send
+
+from app.errors import ConflictError
+from app.models import AnalysisRunStatus, AnalysisRunTransition, AnalysisStageUpdate
 
 
 def create_text_material(
@@ -47,6 +51,26 @@ def test_account_analysis_run_lifecycle_preserves_input_snapshot(
     run = created.json()
     assert run["status"] == "pending"
     assert "纠结要不要DIY" in run["inputSnapshot"]["comments"]["content"]
+    context_pack = run["inputSnapshot"]["contextPack"]
+    assert context_pack["mode"] == "workspace_pack"
+    assert context_pack["scope"] == "broad"
+    assert context_pack["requester"]["workflowId"] == "account_diagnosis"
+    item_keys = {item["key"] for item in context_pack["items"]}
+    assert {
+        "account_profile",
+        "source_materials_overview",
+        "analysis_history_overview",
+        "topic_library_overview",
+        "draft_history_overview",
+        "simulation_history_overview",
+        "selected_historical_posts",
+        "selected_comment_samples",
+    }.issubset(item_keys)
+    comment_item = next(
+        item for item in context_pack["items"] if item["key"] == "selected_comment_samples"
+    )
+    assert "纠结要不要DIY" in comment_item["text"]
+    assert context_pack["snapshot"]["contentHash"]
 
     updated_comments = send(
         app,
@@ -59,39 +83,69 @@ def test_account_analysis_run_lifecycle_preserves_input_snapshot(
     )
     assert updated_comments.status_code == 200
 
-    stage = send(
-        app,
-        "PUT",
-        f"/api/analysis-runs/{run['id']}/stages/profile",
-        json={
-            "status": "completed",
-            "result": {"profile": {"pillars": ["留学决策"]}},
-            "modelMetadata": {"mode": "demo"},
-        },
+    stage = app.state.analysis_service.update_stage(
+        run["id"],
+        "profile",
+        AnalysisStageUpdate(
+            status=AnalysisRunStatus.COMPLETED,
+            result={"profile": {"pillars": ["留学决策"]}},
+            model_metadata={"mode": "demo"},
+        ),
     )
-    assert stage.status_code == 200
-    assert stage.json()["status"] == "running"
-    assert stage.json()["stageResults"]["profile"]["profile"]["pillars"] == [
+    stage_json = stage.model_dump(mode="json", by_alias=True)
+    assert stage_json["status"] == "running"
+    assert stage_json["stageResults"]["profile"]["profile"]["pillars"] == [
         "留学决策"
     ]
 
-    completed = send(
+    completed = app.state.analysis_service.transition(
+        run["id"],
+        AnalysisRunTransition(
+            status=AnalysisRunStatus.COMPLETED,
+            model_metadata={"mode": "demo"},
+        ),
+    )
+    completed_json = completed.model_dump(mode="json", by_alias=True)
+    assert completed_json["completedAt"] is not None
+    assert "纠结要不要DIY" in completed_json["inputSnapshot"]["comments"]["content"]
+
+    with pytest.raises(ConflictError, match="Completed analysis runs are immutable"):
+        app.state.analysis_service.update_stage(
+            run["id"],
+            "topics",
+            AnalysisStageUpdate(
+                status=AnalysisRunStatus.COMPLETED,
+                result={"topics": []},
+            ),
+        )
+
+
+def test_internal_execution_mutation_and_model_call_routes_are_not_public(
+    app: FastAPI,
+) -> None:
+    patch_run = send(
         app,
         "PATCH",
-        f"/api/analysis-runs/{run['id']}",
-        json={"status": "completed", "modelMetadata": {"mode": "demo"}},
+        "/api/analysis-runs/not-public",
+        json={"status": "completed"},
     )
-    assert completed.status_code == 200
-    assert completed.json()["completedAt"] is not None
-    assert "纠结要不要DIY" in completed.json()["inputSnapshot"]["comments"]["content"]
+    assert patch_run.status_code == 405
 
-    immutable = send(
+    put_stage = send(
         app,
         "PUT",
-        f"/api/analysis-runs/{run['id']}/stages/topics",
-        json={"status": "completed", "result": {"topics": []}},
+        "/api/analysis-runs/not-public/stages/profile",
+        json={"status": "completed", "result": {}},
     )
-    assert immutable.status_code == 409
+    assert put_stage.status_code == 404
+
+    model_call = send(
+        app,
+        "POST",
+        "/api/model-calls",
+        json={"operation": "profile", "context": {}},
+    )
+    assert model_call.status_code == 404
 
 
 def test_trend_analysis_snapshot_reads_server_stored_csv(app: FastAPI) -> None:
@@ -129,6 +183,16 @@ def test_trend_analysis_snapshot_reads_server_stored_csv(app: FastAPI) -> None:
     }
     assert snapshot["trendCsv"]["rankedPosts"][0]["title"] == "普通人如何开始数字游民"
     assert "rawText" not in snapshot["trendCsv"]
+    context_pack = snapshot["contextPack"]
+    assert context_pack["mode"] == "workspace_pack"
+    assert context_pack["requester"]["workflowId"] == "trend_analysis"
+    ranked_item = next(
+        item
+        for item in context_pack["items"]
+        if item["key"] == "selected_trend_top_ranked_posts"
+    )
+    assert ranked_item["data"]["rankedPosts"][0]["title"] == "普通人如何开始数字游民"
+    assert "rawText" not in ranked_item["data"]
 
 
 def test_topic_library_create_select_edit_archive(app: FastAPI) -> None:

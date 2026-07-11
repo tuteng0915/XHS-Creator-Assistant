@@ -7,20 +7,20 @@ from fastapi import APIRouter, File, Form, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from app.models import (
+    AgentConversationCreate,
+    AgentConversationResponse,
+    AgentConversationSummary,
+    AgentMessageCreate,
     AgentResponse,
     AgentSummary,
     AgentUpdate,
     AnalysisRunCreate,
     AnalysisRunResponse,
     AnalysisRunSummary,
-    AnalysisRunTransition,
-    AnalysisStageUpdate,
     DraftGenerateRequest,
     DraftResponse,
     DraftSummary,
     DraftUpdate,
-    ModelCallRequest,
-    ModelCallResponse,
     SimulationRunCreate,
     SimulationRunResponse,
     SimulationRunSummary,
@@ -44,11 +44,11 @@ from app.models import (
     WorkspaceUpdate,
 )
 from app.services import (
+    AgentConversationService,
     AgentService,
     AnalysisRunService,
     DraftGenerationService,
     DraftService,
-    ModelCallService,
     SimulationRunService,
     SkillService,
     SourceMaterialService,
@@ -62,9 +62,6 @@ from app.workflows import (
     ACCOUNT_STAGE_ORDER,
     SIMULATION_STAGE_ORDER,
     TREND_STAGE_ORDER,
-    AccountDiagnosisWorkflowService,
-    AudienceSimulationWorkflowService,
-    TrendAnalysisWorkflowService,
 )
 
 
@@ -113,11 +110,8 @@ def create_api_router(
     simulation_service: SimulationRunService,
     skill_service: SkillService,
     agent_service: AgentService,
+    agent_conversation_service: AgentConversationService,
     workflow_asset_service: WorkflowAssetService,
-    model_call_service: ModelCallService,
-    account_workflow_service: AccountDiagnosisWorkflowService,
-    trend_workflow_service: TrendAnalysisWorkflowService,
-    simulation_workflow_service: AudienceSimulationWorkflowService,
     workflow_worker: WorkflowWorkerService,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
@@ -233,6 +227,41 @@ def create_api_router(
     ) -> AgentResponse:
         return agent_service.update(agent_asset_id, payload)
 
+    @router.post(
+        "/workspaces/{workspace_id}/agent-conversations",
+        response_model=AgentConversationResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_agent_conversation(
+        workspace_id: str, payload: AgentConversationCreate
+    ) -> AgentConversationResponse:
+        return agent_conversation_service.create(workspace_id, payload)
+
+    @router.get(
+        "/workspaces/{workspace_id}/agent-conversations",
+        response_model=list[AgentConversationSummary],
+    )
+    def list_agent_conversations(
+        workspace_id: str,
+    ) -> list[AgentConversationSummary]:
+        return agent_conversation_service.list(workspace_id)
+
+    @router.get(
+        "/agent-conversations/{conversation_id}",
+        response_model=AgentConversationResponse,
+    )
+    def get_agent_conversation(conversation_id: str) -> AgentConversationResponse:
+        return agent_conversation_service.get(conversation_id)
+
+    @router.post(
+        "/agent-conversations/{conversation_id}/messages",
+        response_model=AgentConversationResponse,
+    )
+    async def send_agent_message(
+        conversation_id: str, payload: AgentMessageCreate
+    ) -> AgentConversationResponse:
+        return await agent_conversation_service.send_message(conversation_id, payload)
+
     @router.get(
         "/workspaces/{workspace_id}/workflows",
         response_model=list[WorkflowAssetSummary],
@@ -276,21 +305,6 @@ def create_api_router(
     @router.get("/analysis-runs/{run_id}", response_model=AnalysisRunResponse)
     def get_analysis_run(run_id: str) -> AnalysisRunResponse:
         return analysis_service.get(run_id)
-
-    @router.patch("/analysis-runs/{run_id}", response_model=AnalysisRunResponse)
-    def transition_analysis_run(
-        run_id: str, payload: AnalysisRunTransition
-    ) -> AnalysisRunResponse:
-        return analysis_service.transition(run_id, payload)
-
-    @router.put(
-        "/analysis-runs/{run_id}/stages/{stage_key}",
-        response_model=AnalysisRunResponse,
-    )
-    def update_analysis_stage(
-        run_id: str, stage_key: str, payload: AnalysisStageUpdate
-    ) -> AnalysisRunResponse:
-        return analysis_service.update_stage(run_id, stage_key, payload)
 
     @router.get("/analysis-runs/{run_id}/events")
     async def stream_analysis_run_events(run_id: str) -> StreamingResponse:
@@ -580,9 +594,5 @@ def create_api_router(
         topic_id: str, payload: DraftGenerateRequest
     ) -> DraftResponse:
         return await draft_generation_service.generate_from_topic(topic_id, payload)
-
-    @router.post("/model-calls", response_model=ModelCallResponse)
-    async def call_model(payload: ModelCallRequest) -> ModelCallResponse:
-        return await model_call_service.call(payload)
 
     return router

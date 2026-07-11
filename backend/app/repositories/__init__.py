@@ -1,3 +1,4 @@
+from app.repositories.agent_conversations import AgentConversationRepository
 from app.repositories.agents import AgentRepository
 from app.repositories.analysis_runs import AnalysisRunRepository
 from app.repositories.drafts import DraftRepository
@@ -11,6 +12,7 @@ from app.repositories.workspaces import WorkspaceRepository
 
 __all__ = [
     "AgentRepository",
+    "AgentConversationRepository",
     "AnalysisRunRepository",
     "DraftRepository",
     "GraphCheckpointRepository",

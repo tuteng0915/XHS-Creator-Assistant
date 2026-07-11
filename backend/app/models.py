@@ -175,6 +175,47 @@ class AgentUpdate(APIModel):
     expected_updated_at: datetime
 
 
+class AgentConversationStatus(StrEnum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class AgentConversationCreate(APIModel):
+    agent_asset_id: str
+    title: str | None = Field(default=None, max_length=160)
+
+
+class AgentMessageCreate(APIModel):
+    content: str = Field(min_length=1, max_length=20_000)
+    mode: Literal["demo", "live"] = "demo"
+
+
+class AgentMessageResponse(APIModel):
+    id: str
+    conversation_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    context_pack: dict[str, Any]
+    asset_refs: list[dict[str, Any]]
+    proposed_actions: list[dict[str, Any]]
+    model_metadata: dict[str, Any]
+    created_at: datetime
+
+
+class AgentConversationSummary(APIModel):
+    id: str
+    workspace_id: str
+    agent_asset_id: str
+    title: str
+    status: AgentConversationStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentConversationResponse(AgentConversationSummary):
+    messages: list[AgentMessageResponse]
+
+
 class WorkflowAssetStatus(StrEnum):
     ENABLED = "enabled"
     DISABLED = "disabled"
@@ -350,6 +391,7 @@ class ModelOperation(StrEnum):
     SIMULATION_REACTION = "simulation_reaction"
     SIMULATION_DEBATE = "simulation_debate"
     SIMULATION_SYNTHESIS = "simulation_synthesis"
+    AGENT_CHAT = "agent_chat"
 
 
 class ModelCallRequest(APIModel):
