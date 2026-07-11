@@ -1,0 +1,588 @@
+import asyncio
+import json
+from typing import Annotated
+from uuid import uuid4
+
+from fastapi import APIRouter, File, Form, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
+
+from app.models import (
+    AgentResponse,
+    AgentSummary,
+    AgentUpdate,
+    AnalysisRunCreate,
+    AnalysisRunResponse,
+    AnalysisRunSummary,
+    AnalysisRunTransition,
+    AnalysisStageUpdate,
+    DraftGenerateRequest,
+    DraftResponse,
+    DraftSummary,
+    DraftUpdate,
+    ModelCallRequest,
+    ModelCallResponse,
+    SimulationRunCreate,
+    SimulationRunResponse,
+    SimulationRunSummary,
+    SkillResponse,
+    SkillSummary,
+    SkillUpdate,
+    SourceMaterialResponse,
+    SourceMaterialType,
+    SourceMaterialUpdate,
+    TextSourceMaterialCreate,
+    TopicCreate,
+    TopicResponse,
+    TopicSourceWorkflow,
+    TopicStatus,
+    TopicUpdate,
+    WorkflowAssetResponse,
+    WorkflowAssetSummary,
+    WorkflowAssetUpdate,
+    WorkspaceCreate,
+    WorkspaceResponse,
+    WorkspaceUpdate,
+)
+from app.services import (
+    AgentService,
+    AnalysisRunService,
+    DraftGenerationService,
+    DraftService,
+    ModelCallService,
+    SimulationRunService,
+    SkillService,
+    SourceMaterialService,
+    TopicService,
+    WorkflowAssetService,
+    WorkflowWorkerService,
+    WorkspaceService,
+)
+from app.services.common import utc_now
+from app.workflows import (
+    ACCOUNT_STAGE_ORDER,
+    SIMULATION_STAGE_ORDER,
+    TREND_STAGE_ORDER,
+    AccountDiagnosisWorkflowService,
+    AudienceSimulationWorkflowService,
+    TrendAnalysisWorkflowService,
+)
+
+
+def _terminal_event_type(status: str) -> str:
+    if status == "completed":
+        return "run.succeeded"
+    if status == "partially_completed":
+        return "run.partial"
+    return "run.failed"
+
+
+def _sse_event(
+    *,
+    run_id: str,
+    run_type: str,
+    stage_key: str | None,
+    status: str,
+    sequence: int,
+    event_type: str,
+    data: dict,
+) -> str:
+    event = {
+        "eventId": str(uuid4()),
+        "runId": run_id,
+        "runType": run_type,
+        "stageKey": stage_key,
+        "status": status,
+        "sequence": sequence,
+        "occurredAt": utc_now(),
+        "data": {"eventType": event_type, **data},
+    }
+    return (
+        f"id: {event['eventId']}\n"
+        f"event: {event_type}\n"
+        f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+    )
+
+
+def create_api_router(
+    workspace_service: WorkspaceService,
+    source_service: SourceMaterialService,
+    analysis_service: AnalysisRunService,
+    topic_service: TopicService,
+    draft_service: DraftService,
+    draft_generation_service: DraftGenerationService,
+    simulation_service: SimulationRunService,
+    skill_service: SkillService,
+    agent_service: AgentService,
+    workflow_asset_service: WorkflowAssetService,
+    model_call_service: ModelCallService,
+    account_workflow_service: AccountDiagnosisWorkflowService,
+    trend_workflow_service: TrendAnalysisWorkflowService,
+    simulation_workflow_service: AudienceSimulationWorkflowService,
+    workflow_worker: WorkflowWorkerService,
+) -> APIRouter:
+    router = APIRouter(prefix="/api")
+
+    @router.post(
+        "/workspaces",
+        response_model=WorkspaceResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_workspace(payload: WorkspaceCreate) -> WorkspaceResponse:
+        return workspace_service.create(payload)
+
+    @router.get("/workspaces", response_model=list[WorkspaceResponse])
+    def list_workspaces() -> list[WorkspaceResponse]:
+        return workspace_service.list()
+
+    @router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
+    def get_workspace(workspace_id: str) -> WorkspaceResponse:
+        return workspace_service.get(workspace_id)
+
+    @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
+    def update_workspace(
+        workspace_id: str, payload: WorkspaceUpdate
+    ) -> WorkspaceResponse:
+        return workspace_service.update(workspace_id, payload)
+
+    @router.post(
+        "/workspaces/{workspace_id}/source-materials",
+        response_model=SourceMaterialResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_text_source_material(
+        workspace_id: str, payload: TextSourceMaterialCreate
+    ) -> SourceMaterialResponse:
+        return source_service.create_text(workspace_id, payload)
+
+    @router.post(
+        "/workspaces/{workspace_id}/source-materials/trend-csv",
+        response_model=SourceMaterialResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_trend_csv(
+        workspace_id: str,
+        name: Annotated[str, Form()],
+        keyword: Annotated[str, Form()],
+        file: Annotated[UploadFile, File()],
+    ) -> SourceMaterialResponse:
+        return source_service.create_csv(
+            workspace_id,
+            name=name,
+            keyword=keyword,
+            filename=file.filename or "upload.csv",
+            content=await file.read(),
+        )
+
+    @router.get(
+        "/workspaces/{workspace_id}/source-materials",
+        response_model=list[SourceMaterialResponse],
+    )
+    def list_source_materials(
+        workspace_id: str,
+        material_type: Annotated[
+            SourceMaterialType | None, Query(alias="type")
+        ] = None,
+    ) -> list[SourceMaterialResponse]:
+        return source_service.list(workspace_id, material_type)
+
+    @router.get(
+        "/source-materials/{material_id}", response_model=SourceMaterialResponse
+    )
+    def get_source_material(material_id: str) -> SourceMaterialResponse:
+        return source_service.get(material_id)
+
+    @router.patch(
+        "/source-materials/{material_id}", response_model=SourceMaterialResponse
+    )
+    def update_source_material(
+        material_id: str, payload: SourceMaterialUpdate
+    ) -> SourceMaterialResponse:
+        return source_service.update(material_id, payload)
+
+    @router.get(
+        "/workspaces/{workspace_id}/skills",
+        response_model=list[SkillSummary],
+    )
+    def list_skills(workspace_id: str) -> list[SkillSummary]:
+        return skill_service.list(workspace_id)
+
+    @router.get("/skills/{skill_asset_id}", response_model=SkillResponse)
+    def get_skill(skill_asset_id: str) -> SkillResponse:
+        return skill_service.get(skill_asset_id)
+
+    @router.patch("/skills/{skill_asset_id}", response_model=SkillResponse)
+    def update_skill(
+        skill_asset_id: str, payload: SkillUpdate
+    ) -> SkillResponse:
+        return skill_service.update(skill_asset_id, payload)
+
+    @router.get(
+        "/workspaces/{workspace_id}/agents",
+        response_model=list[AgentSummary],
+    )
+    def list_agents(workspace_id: str) -> list[AgentSummary]:
+        return agent_service.list(workspace_id)
+
+    @router.get("/agents/{agent_asset_id}", response_model=AgentResponse)
+    def get_agent(agent_asset_id: str) -> AgentResponse:
+        return agent_service.get(agent_asset_id)
+
+    @router.patch("/agents/{agent_asset_id}", response_model=AgentResponse)
+    def update_agent(
+        agent_asset_id: str, payload: AgentUpdate
+    ) -> AgentResponse:
+        return agent_service.update(agent_asset_id, payload)
+
+    @router.get(
+        "/workspaces/{workspace_id}/workflows",
+        response_model=list[WorkflowAssetSummary],
+    )
+    def list_workflow_assets(workspace_id: str) -> list[WorkflowAssetSummary]:
+        return workflow_asset_service.list(workspace_id)
+
+    @router.get(
+        "/workflows/{workflow_asset_id}", response_model=WorkflowAssetResponse
+    )
+    def get_workflow_asset(workflow_asset_id: str) -> WorkflowAssetResponse:
+        return workflow_asset_service.get(workflow_asset_id)
+
+    @router.patch(
+        "/workflows/{workflow_asset_id}", response_model=WorkflowAssetResponse
+    )
+    def update_workflow_asset(
+        workflow_asset_id: str, payload: WorkflowAssetUpdate
+    ) -> WorkflowAssetResponse:
+        return workflow_asset_service.update(workflow_asset_id, payload)
+
+    @router.post(
+        "/workspaces/{workspace_id}/analysis-runs",
+        response_model=AnalysisRunResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_analysis_run(
+        workspace_id: str, payload: AnalysisRunCreate
+    ) -> AnalysisRunResponse:
+        run = analysis_service.create(workspace_id, payload)
+        await workflow_worker.enqueue_analysis_run(run.id)
+        return run
+
+    @router.get(
+        "/workspaces/{workspace_id}/analysis-runs",
+        response_model=list[AnalysisRunSummary],
+    )
+    def list_analysis_runs(workspace_id: str) -> list[AnalysisRunSummary]:
+        return analysis_service.list(workspace_id)
+
+    @router.get("/analysis-runs/{run_id}", response_model=AnalysisRunResponse)
+    def get_analysis_run(run_id: str) -> AnalysisRunResponse:
+        return analysis_service.get(run_id)
+
+    @router.patch("/analysis-runs/{run_id}", response_model=AnalysisRunResponse)
+    def transition_analysis_run(
+        run_id: str, payload: AnalysisRunTransition
+    ) -> AnalysisRunResponse:
+        return analysis_service.transition(run_id, payload)
+
+    @router.put(
+        "/analysis-runs/{run_id}/stages/{stage_key}",
+        response_model=AnalysisRunResponse,
+    )
+    def update_analysis_stage(
+        run_id: str, stage_key: str, payload: AnalysisStageUpdate
+    ) -> AnalysisRunResponse:
+        return analysis_service.update_stage(run_id, stage_key, payload)
+
+    @router.get("/analysis-runs/{run_id}/events")
+    async def stream_analysis_run_events(run_id: str) -> StreamingResponse:
+        async def event_stream():
+            emitted_stages: set[tuple[str, str]] = set()
+            emitted_terminal = False
+            sequence = 0
+            while True:
+                run = analysis_service.get(run_id)
+                stage_order = (
+                    ACCOUNT_STAGE_ORDER
+                    if run.workflow_type.value == "account_diagnosis"
+                    else TREND_STAGE_ORDER
+                )
+                if sequence == 0:
+                    sequence += 1
+                    yield _sse_event(
+                        run_id=run.id,
+                        run_type=run.workflow_type.value,
+                        stage_key=None,
+                        status=run.status.value,
+                        sequence=sequence,
+                        event_type="run.created",
+                        data={},
+                    )
+                for stage_key in stage_order:
+                    if (
+                        run.status.value == "running"
+                        and stage_key not in run.stage_results
+                        and stage_key not in run.stage_errors
+                        and ("started", stage_key) not in emitted_stages
+                    ):
+                        emitted_stages.add(("started", stage_key))
+                        sequence += 1
+                        yield _sse_event(
+                            run_id=run.id,
+                            run_type=run.workflow_type.value,
+                            stage_key=stage_key,
+                            status="running",
+                            sequence=sequence,
+                            event_type="stage.started",
+                            data={},
+                        )
+                    if stage_key in run.stage_results and ("ok", stage_key) not in emitted_stages:
+                        emitted_stages.add(("ok", stage_key))
+                        sequence += 1
+                        yield _sse_event(
+                            run_id=run.id,
+                            run_type=run.workflow_type.value,
+                            stage_key=stage_key,
+                            status="completed",
+                            sequence=sequence,
+                            event_type="stage.succeeded",
+                            data=run.stage_results[stage_key],
+                        )
+                    if stage_key in run.stage_errors and ("err", stage_key) not in emitted_stages:
+                        emitted_stages.add(("err", stage_key))
+                        sequence += 1
+                        yield _sse_event(
+                            run_id=run.id,
+                            run_type=run.workflow_type.value,
+                            stage_key=stage_key,
+                            status="failed",
+                            sequence=sequence,
+                            event_type="stage.failed",
+                            data={"error": run.stage_errors[stage_key]},
+                        )
+                if run.status.value in {"completed", "partially_completed", "failed"}:
+                    if not emitted_terminal:
+                        emitted_terminal = True
+                        sequence += 1
+                        yield _sse_event(
+                            run_id=run.id,
+                            run_type=run.workflow_type.value,
+                            stage_key=None,
+                            status=run.status.value,
+                            sequence=sequence,
+                            event_type=_terminal_event_type(run.status.value),
+                            data={
+                                "stageResults": run.stage_results,
+                                "stageErrors": run.stage_errors,
+                            },
+                        )
+                    break
+                await asyncio.sleep(0.2)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @router.post(
+        "/workspaces/{workspace_id}/simulation-runs",
+        response_model=SimulationRunResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_simulation_run(
+        workspace_id: str, payload: SimulationRunCreate
+    ) -> SimulationRunResponse:
+        run = simulation_service.create(workspace_id, payload)
+        await workflow_worker.enqueue_simulation_run(run.id)
+        return run
+
+    @router.get(
+        "/workspaces/{workspace_id}/simulation-runs",
+        response_model=list[SimulationRunSummary],
+    )
+    def list_simulation_runs(workspace_id: str) -> list[SimulationRunSummary]:
+        return simulation_service.list(workspace_id)
+
+    @router.get("/simulation-runs/{simulation_id}", response_model=SimulationRunResponse)
+    def get_simulation_run(simulation_id: str) -> SimulationRunResponse:
+        return simulation_service.get(simulation_id)
+
+    @router.get("/simulation-runs/{simulation_id}/events")
+    async def stream_simulation_run_events(simulation_id: str) -> StreamingResponse:
+        async def event_stream():
+            emitted_stages: set[tuple[str, str]] = set()
+            emitted_terminal = False
+            sequence = 0
+            while True:
+                run = simulation_service.get(simulation_id)
+                if sequence == 0:
+                    sequence += 1
+                    yield _sse_event(
+                        run_id=run.id,
+                        run_type="audience_simulation",
+                        stage_key=None,
+                        status=run.status.value,
+                        sequence=sequence,
+                        event_type="run.created",
+                        data={},
+                    )
+                stage_data = {
+                    "personas": {"personas": run.persona_definitions},
+                    "initial_reactions": {"reactions": run.reaction_results},
+                    "debate_responses": {"debateResponses": run.debate_results},
+                    "synthesis": {"synthesis": run.synthesis},
+                }
+                stage_has_result = {
+                    "personas": bool(run.persona_definitions),
+                    "initial_reactions": bool(run.reaction_results),
+                    "debate_responses": bool(run.debate_results),
+                    "synthesis": bool(run.synthesis),
+                }
+                for stage_key in SIMULATION_STAGE_ORDER:
+                    if (
+                        run.status.value == "running"
+                        and not stage_has_result[stage_key]
+                        and not any(
+                            key == stage_key or key.startswith(f"{stage_key}.")
+                            for key in run.stage_errors
+                        )
+                        and ("started", stage_key) not in emitted_stages
+                    ):
+                        emitted_stages.add(("started", stage_key))
+                        sequence += 1
+                        yield _sse_event(
+                            run_id=run.id,
+                            run_type="audience_simulation",
+                            stage_key=stage_key,
+                            status="running",
+                            sequence=sequence,
+                            event_type="stage.started",
+                            data={},
+                        )
+                    if stage_has_result[stage_key] and ("ok", stage_key) not in emitted_stages:
+                        emitted_stages.add(("ok", stage_key))
+                        sequence += 1
+                        yield _sse_event(
+                            run_id=run.id,
+                            run_type="audience_simulation",
+                            stage_key=stage_key,
+                            status="completed",
+                            sequence=sequence,
+                            event_type="stage.succeeded",
+                            data=stage_data[stage_key],
+                        )
+                    stage_errors = [
+                        (key, message)
+                        for key, message in run.stage_errors.items()
+                        if key == stage_key or key.startswith(f"{stage_key}.")
+                    ]
+                    if stage_errors and ("err", stage_key) not in emitted_stages:
+                        emitted_stages.add(("err", stage_key))
+                        sequence += 1
+                        yield _sse_event(
+                            run_id=run.id,
+                            run_type="audience_simulation",
+                            stage_key=stage_key,
+                            status="failed",
+                            sequence=sequence,
+                            event_type="stage.failed",
+                            data={"error": "; ".join(message for _, message in stage_errors)},
+                        )
+                if run.status.value in {"completed", "partially_completed", "failed"}:
+                    if not emitted_terminal:
+                        emitted_terminal = True
+                        sequence += 1
+                        yield _sse_event(
+                            run_id=run.id,
+                            run_type="audience_simulation",
+                            stage_key=None,
+                            status=run.status.value,
+                            sequence=sequence,
+                            event_type=_terminal_event_type(run.status.value),
+                            data={
+                                "personaDefinitions": run.persona_definitions,
+                                "reactionResults": run.reaction_results,
+                                "debateResults": run.debate_results,
+                                "synthesis": run.synthesis,
+                                "stageErrors": run.stage_errors,
+                            },
+                        )
+                    break
+                await asyncio.sleep(0.2)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @router.get(
+        "/workspaces/{workspace_id}/drafts",
+        response_model=list[DraftSummary],
+    )
+    def list_drafts(workspace_id: str) -> list[DraftSummary]:
+        return draft_service.list(workspace_id)
+
+    @router.get("/drafts/{draft_id}", response_model=DraftResponse)
+    def get_draft(draft_id: str) -> DraftResponse:
+        return draft_service.get(draft_id)
+
+    @router.patch("/drafts/{draft_id}", response_model=DraftResponse)
+    def update_draft(draft_id: str, payload: DraftUpdate) -> DraftResponse:
+        return draft_service.update(draft_id, payload)
+
+    @router.post(
+        "/workspaces/{workspace_id}/topics",
+        response_model=TopicResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_topic(workspace_id: str, payload: TopicCreate) -> TopicResponse:
+        return topic_service.create(workspace_id, payload)
+
+    @router.get(
+        "/workspaces/{workspace_id}/topics",
+        response_model=list[TopicResponse],
+    )
+    def list_topics(
+        workspace_id: str,
+        source_workflow: Annotated[
+            TopicSourceWorkflow | None, Query(alias="sourceWorkflow")
+        ] = None,
+        topic_status: Annotated[TopicStatus | None, Query(alias="status")] = None,
+    ) -> list[TopicResponse]:
+        return topic_service.list(
+            workspace_id,
+            source_workflow=source_workflow,
+            status=topic_status,
+        )
+
+    @router.get("/topics/{topic_id}", response_model=TopicResponse)
+    def get_topic(topic_id: str) -> TopicResponse:
+        return topic_service.get(topic_id)
+
+    @router.patch("/topics/{topic_id}", response_model=TopicResponse)
+    def update_topic(topic_id: str, payload: TopicUpdate) -> TopicResponse:
+        return topic_service.update(topic_id, payload)
+
+    @router.post("/topics/{topic_id}/select", response_model=TopicResponse)
+    def select_topic(topic_id: str) -> TopicResponse:
+        return topic_service.select(topic_id)
+
+    @router.post("/topics/{topic_id}/archive", response_model=TopicResponse)
+    def archive_topic(topic_id: str) -> TopicResponse:
+        return topic_service.archive(topic_id)
+
+    @router.post(
+        "/topics/{topic_id}/drafts/generate",
+        response_model=DraftResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def generate_draft(
+        topic_id: str, payload: DraftGenerateRequest
+    ) -> DraftResponse:
+        return await draft_generation_service.generate_from_topic(topic_id, payload)
+
+    @router.post("/model-calls", response_model=ModelCallResponse)
+    async def call_model(payload: ModelCallRequest) -> ModelCallResponse:
+        return await model_call_service.call(payload)
+
+    return router

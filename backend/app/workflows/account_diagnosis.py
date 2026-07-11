@@ -1,0 +1,671 @@
+from __future__ import annotations
+
+import asyncio
+import contextvars
+from collections.abc import AsyncIterator
+from typing import Any, Literal, Protocol, TypedDict
+from uuid import uuid4
+
+from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, Field
+from pydantic import ValidationError as PydanticValidationError
+
+from app.db.database import SQLiteDatabase
+from app.errors import ConflictError, ValidationError
+from app.models import (
+    AnalysisRunStatus,
+    AnalysisRunTransition,
+    AnalysisStageUpdate,
+    ModelOperation,
+    WorkflowType,
+)
+from app.repositories.analysis_runs import TERMINAL_STATUSES, AnalysisRunRepository
+from app.repositories.graph_checkpoints import GraphCheckpointRepository
+from app.services.analysis_runs import AnalysisRunService
+from app.services.common import utc_now
+from app.services.model_calls import ModelCallService
+
+ACCOUNT_GRAPH_NODE_ORDER = [
+    "profile_analysis",
+    "topic_generation",
+    "finalize",
+]
+ACCOUNT_STAGE_ORDER = ["profile", "pain_points", "topics"]
+ACTIVE_EXECUTION: contextvars.ContextVar[
+    _AccountDiagnosisGraphExecution | None
+] = contextvars.ContextVar("account_diagnosis_execution", default=None)
+
+
+class ActivityEvent(TypedDict):
+    eventId: str
+    runId: str
+    runType: Literal["account_diagnosis"]
+    stageKey: str | None
+    status: str
+    sequence: int
+    occurredAt: str
+    data: dict[str, Any]
+
+
+class AccountDiagnosisState(TypedDict, total=False):
+    run_id: str
+    workspace_id: str
+    positioning_snapshot: str
+    historical_posts_material_id: str
+    comments_material_id: str
+    profile: dict[str, Any]
+    pain_points: list[dict[str, Any]]
+    topics: list[dict[str, Any]]
+    titles: list[dict[str, Any]]
+    stage_errors: dict[str, str]
+    completed_nodes: list[str]
+
+
+class TitleFormula(BaseModel):
+    formula: str = ""
+    examples: list[str] = Field(default_factory=list)
+
+
+class ViralStructure(BaseModel):
+    name: str = ""
+    steps: list[str] = Field(default_factory=list)
+
+
+class ProfileData(BaseModel):
+    pillars: list[str] = Field(default_factory=list)
+    titleFormulas: list[TitleFormula] = Field(default_factory=list)
+    hookStyles: list[str] = Field(default_factory=list)
+    viralStructure: ViralStructure = Field(default_factory=ViralStructure)
+    voiceFingerprint: list[str] = Field(default_factory=list)
+    contrast: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProfileStageResult(BaseModel):
+    profile: ProfileData
+
+
+class PainPoint(BaseModel):
+    theme: str
+    intensity: str
+    count: int
+    evidence: list[str] = Field(default_factory=list)
+
+
+class PainPointsStageResult(BaseModel):
+    painPoints: list[PainPoint]
+
+
+class TopicItem(BaseModel):
+    title: str
+    angle: str = ""
+    pain: str = ""
+    whyFit: str = ""
+    whyTrending: str | None = None
+
+
+class TitleVariants(BaseModel):
+    topic: str
+    variants: list[str] = Field(default_factory=list)
+
+
+class TopicsStageResult(BaseModel):
+    topics: list[TopicItem]
+    titles: list[TitleVariants] = Field(default_factory=list)
+
+
+class StructureOutlineItem(BaseModel):
+    sec: str
+    ct: str
+
+
+class StructureData(BaseModel):
+    topicChosen: str
+    outline: list[StructureOutlineItem] = Field(default_factory=list)
+    reuse: str = ""
+
+
+class StructureStageResult(BaseModel):
+    structure: StructureData
+
+
+class AccountDiagnosisModelProvider(Protocol):
+    async def profile(
+        self, *, positioning: str, historical_posts: str
+    ) -> dict[str, Any]: ...
+
+    async def pain_points(self, *, comments: str) -> dict[str, Any]: ...
+
+    async def topics(
+        self,
+        *,
+        positioning: str,
+        profile: dict[str, Any] | None,
+        pain_points: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]: ...
+
+SAMPLE_ACCOUNT_RESULT = {
+    "profile": {
+        "pillars": ["留学决策反思", "申请避坑", "背景评估方法论"],
+        "titleFormulas": [
+            {
+                "formula": "反预期否定式",
+                "examples": ["二本逆袭G5?别再被这种标题骗了"],
+            },
+            {
+                "formula": "价值拷问 + 真实账单",
+                "examples": ["留学中介到底值不值5万块|我的真实账单与避坑清单"],
+            },
+        ],
+        "hookStyles": ["亲历者第一人称切入，先认同情绪再反转", "用具体数字制造真实感"],
+        "viralStructure": {
+            "name": "避坑清单体",
+            "steps": ["反直觉钩子", "立靶", "亲历账单", "逐条拆解", "可保存清单", "反问互动"],
+        },
+        "voiceFingerprint": ["不贩卖焦虑", "把模糊焦虑拆成可执行步骤", "克制真诚"],
+        "contrast": {
+            "winners": [
+                {"title": "二本逆袭G5?别再被这种标题骗了", "metric": "赞1.4k·藏980"},
+                {"title": "留学中介到底值不值5万块", "metric": "赞1.1k·藏860"},
+            ],
+            "losers": [{"title": "DIY申请时间线", "metric": "赞60·藏150"}],
+            "winFactors": ["选题踩在决策纠结点", "标题带具体数字或反预期钩子"],
+            "loseFactors": ["流程工具传播弱，需要更强情绪钩子"],
+            "takeaways": ["优先做决策纠结型选题", "标题必须带具体数字或反预期"],
+        },
+    },
+    "painPoints": [
+        {
+            "theme": "DIY vs 中介：不知道钱该花在哪一步",
+            "intensity": "高",
+            "count": 4,
+            "evidence": ["纠结要不要DIY，自己怕搞砸", "中介和DIY的钱到底该花在哪一步"],
+        },
+        {
+            "theme": "背景评估焦虑：双非/均分够不够得着",
+            "intensity": "高",
+            "count": 4,
+            "evidence": ["双非背景冲英国前30有戏吗", "均分85冲刺前20稳吗"],
+        },
+    ],
+    "topics": [
+        {
+            "title": "5万块中介费，该花的是这3步，剩下4步你自己做更好",
+            "angle": "把 DIY 还是中介从二选一重构成按申请环节拆开外包的决策框架",
+            "pain": "DIY vs 中介",
+            "whyFit": "命中最高频痛点，延续亲历者加拆解风格，避免重复旧话题。",
+        },
+        {
+            "title": "双非/均分85，到底够得着哪一档？一张自测表替代焦虑",
+            "angle": "用可量化维度把有没有戏转成可执行评估",
+            "pain": "背景评估焦虑",
+            "whyFit": "承接反焦虑的方法论基因，把抽象焦虑拆成步骤。",
+        },
+    ],
+    "titles": [
+        {
+            "topic": "5万块中介费，该花的是这3步，剩下4步你自己做更好",
+            "variants": ["中介费到底该花在哪三步", "5万中介费，我只建议你花在这里"],
+        }
+    ],
+}
+
+
+class FakeAccountDiagnosisModelProvider:
+    def __init__(self, failures: set[str] | None = None) -> None:
+        self.failures = failures or set()
+        self.calls: list[str] = []
+
+    async def profile(
+        self, *, positioning: str, historical_posts: str
+    ) -> dict[str, Any]:
+        self.calls.append("profile")
+        if "profile" in self.failures:
+            raise RuntimeError("profile failed")
+        return {"profile": SAMPLE_ACCOUNT_RESULT["profile"]}
+
+    async def pain_points(self, *, comments: str) -> dict[str, Any]:
+        self.calls.append("pain_points")
+        if "pain_points" in self.failures:
+            raise RuntimeError("pain points failed")
+        return {"painPoints": SAMPLE_ACCOUNT_RESULT["painPoints"]}
+
+    async def topics(
+        self,
+        *,
+        positioning: str,
+        profile: dict[str, Any] | None,
+        pain_points: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        self.calls.append("topics")
+        if "topics" in self.failures:
+            raise RuntimeError("topics failed")
+        return {
+            "topics": SAMPLE_ACCOUNT_RESULT["topics"],
+            "titles": SAMPLE_ACCOUNT_RESULT["titles"],
+        }
+
+class RealAccountDiagnosisModelProvider:
+    def __init__(self, model_call_service: ModelCallService) -> None:
+        self.model_call_service = model_call_service
+
+    async def profile(
+        self, *, positioning: str, historical_posts: str
+    ) -> dict[str, Any]:
+        response = await self.model_call_service.call_operation(
+            ModelOperation.PROFILE,
+            {"positioning": positioning, "historicalPosts": historical_posts},
+        )
+        return response.output
+
+    async def pain_points(self, *, comments: str) -> dict[str, Any]:
+        response = await self.model_call_service.call_operation(
+            ModelOperation.PAIN_POINTS,
+            {"sourceText": comments},
+        )
+        return response.output
+
+    async def topics(
+        self,
+        *,
+        positioning: str,
+        profile: dict[str, Any] | None,
+        pain_points: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        response = await self.model_call_service.call_operation(
+            ModelOperation.TOPICS,
+            {
+                "positioning": positioning,
+                "profile": profile,
+                "painPoints": pain_points,
+            },
+        )
+        return response.output
+
+class GraphExecutionPaused(Exception):
+    pass
+
+
+class AccountDiagnosisWorkflowService:
+    def __init__(
+        self,
+        *,
+        database: SQLiteDatabase,
+        analysis_repository: AnalysisRunRepository,
+        checkpoint_repository: GraphCheckpointRepository,
+        analysis_service: AnalysisRunService,
+        fake_provider: AccountDiagnosisModelProvider,
+        live_provider: AccountDiagnosisModelProvider,
+    ) -> None:
+        self.database = database
+        self.analysis_repository = analysis_repository
+        self.checkpoint_repository = checkpoint_repository
+        self.analysis_service = analysis_service
+        self.fake_provider = fake_provider
+        self.live_provider = live_provider
+        self.graph = self._build_graph()
+
+    def initial_state_for_run(self, run_id: str) -> AccountDiagnosisState:
+        run = self.analysis_service.get(run_id)
+        if run.workflow_type != WorkflowType.ACCOUNT_DIAGNOSIS:
+            raise ValidationError("Only account diagnosis runs can use this workflow")
+        snapshot = run.input_snapshot
+        return AccountDiagnosisState(
+            run_id=run.id,
+            workspace_id=run.workspace_id,
+            positioning_snapshot=str(snapshot["accountPositioning"]),
+            historical_posts_material_id=str(
+                snapshot["historicalPosts"]["materialId"]
+            ),
+            comments_material_id=str(snapshot["comments"]["materialId"]),
+            profile=run.stage_results.get("profile", {}).get("profile"),
+            pain_points=run.stage_results.get("pain_points", {}).get("painPoints"),
+            topics=run.stage_results.get("topics", {}).get("topics"),
+            titles=run.stage_results.get("topics", {}).get("titles", []),
+            stage_errors=run.stage_errors,
+            completed_nodes=[],
+        )
+
+    async def stream_events(
+        self, run_id: str, *, stop_after_node: str | None = None
+    ) -> AsyncIterator[ActivityEvent]:
+        queue: asyncio.Queue[ActivityEvent | None] = asyncio.Queue()
+        runner = _AccountDiagnosisGraphExecution(
+            service=self,
+            run_id=run_id,
+            queue=queue,
+            stop_after_node=stop_after_node,
+        )
+        task = asyncio.create_task(runner.run())
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield event
+            await task
+        finally:
+            if not task.done():
+                task.cancel()
+
+    async def collect_events(
+        self, run_id: str, *, stop_after_node: str | None = None
+    ) -> list[ActivityEvent]:
+        return [
+            event
+            async for event in self.stream_events(
+                run_id, stop_after_node=stop_after_node
+            )
+        ]
+
+    def _build_graph(self):
+        builder = StateGraph(AccountDiagnosisState)
+        builder.add_node("profile_analysis", self._profile_analysis)
+        builder.add_node("topic_generation", self._topic_generation)
+        builder.add_node("finalize", self._finalize)
+        builder.add_edge(START, "profile_analysis")
+        builder.add_edge("profile_analysis", "topic_generation")
+        builder.add_edge("topic_generation", "finalize")
+        builder.add_edge("finalize", END)
+        return builder.compile()
+
+    async def _profile_analysis(
+        self, state: AccountDiagnosisState
+    ) -> AccountDiagnosisState:
+        execution = _AccountDiagnosisGraphExecution.current()
+        return await execution.profile_analysis(state)
+
+    async def _topic_generation(
+        self, state: AccountDiagnosisState
+    ) -> AccountDiagnosisState:
+        execution = _AccountDiagnosisGraphExecution.current()
+        return await execution.topic_generation(state)
+
+    async def _finalize(self, state: AccountDiagnosisState) -> AccountDiagnosisState:
+        execution = _AccountDiagnosisGraphExecution.current()
+        return await execution.finalize(state)
+
+
+class _AccountDiagnosisGraphExecution:
+    def __init__(
+        self,
+        *,
+        service: AccountDiagnosisWorkflowService,
+        run_id: str,
+        queue: asyncio.Queue[ActivityEvent | None],
+        stop_after_node: str | None,
+    ) -> None:
+        self.service = service
+        self.run_id = run_id
+        self.queue = queue
+        self.stop_after_node = stop_after_node
+        self.sequence = 0
+
+    @classmethod
+    def current(cls) -> _AccountDiagnosisGraphExecution:
+        active = ACTIVE_EXECUTION.get()
+        if active is None:
+            raise RuntimeError("No active account diagnosis graph execution")
+        return active
+
+    async def run(self) -> None:
+        token = ACTIVE_EXECUTION.set(self)
+        try:
+            run = self.service.analysis_service.get(self.run_id)
+            if run.status.value in TERMINAL_STATUSES:
+                await self._emit_existing_terminal_run(run)
+                return
+            await self.emit("run.created", None, run.status, {})
+            if run.status == AnalysisRunStatus.PENDING:
+                self.service.analysis_service.transition(
+                    self.run_id,
+                    AnalysisRunTransition(
+                        status=AnalysisRunStatus.RUNNING,
+                        model_metadata={"engine": "langgraph"},
+                    ),
+                )
+            await self.emit("run.started", None, "running", {})
+            state = self.service.initial_state_for_run(self.run_id)
+            try:
+                await self.service.graph.ainvoke(
+                    state,
+                    config={"configurable": {"thread_id": self.run_id}},
+                )
+            except GraphExecutionPaused:
+                return
+        finally:
+            ACTIVE_EXECUTION.reset(token)
+            await self.queue.put(None)
+
+    async def profile_analysis(
+        self, state: AccountDiagnosisState
+    ) -> AccountDiagnosisState:
+        provider = self.provider()
+        snapshot = self.snapshot()
+        updated = dict(state)
+
+        async def run_profile() -> None:
+            if updated.get("profile"):
+                return
+            await self.emit("stage.started", "profile", "running", {})
+            try:
+                output = await provider.profile(
+                    positioning=str(snapshot["accountPositioning"]),
+                    historical_posts=str(snapshot["historicalPosts"]["content"]),
+                )
+                result = ProfileStageResult.model_validate(output).model_dump(
+                    mode="json"
+                )
+                self.service.analysis_service.update_stage(
+                    self.run_id,
+                    "profile",
+                    AnalysisStageUpdate(
+                        status=AnalysisRunStatus.COMPLETED,
+                        result=result,
+                        model_metadata={"engine": "langgraph"},
+                    ),
+                )
+                updated["profile"] = result["profile"]
+                await self.emit("stage.succeeded", "profile", "completed", result)
+            except Exception as error:
+                await self.stage_failed("profile", error, updated)
+
+        async def run_pain_points() -> None:
+            if updated.get("pain_points"):
+                return
+            await self.emit("stage.started", "pain_points", "running", {})
+            try:
+                output = await provider.pain_points(
+                    comments=str(snapshot["comments"]["content"])
+                )
+                result = PainPointsStageResult.model_validate(output).model_dump(
+                    mode="json"
+                )
+                self.service.analysis_service.update_stage(
+                    self.run_id,
+                    "pain_points",
+                    AnalysisStageUpdate(
+                        status=AnalysisRunStatus.COMPLETED,
+                        result=result,
+                        model_metadata={"engine": "langgraph"},
+                    ),
+                )
+                updated["pain_points"] = result["painPoints"]
+                await self.emit(
+                    "stage.succeeded", "pain_points", "completed", result
+                )
+            except Exception as error:
+                await self.stage_failed("pain_points", error, updated)
+
+        await asyncio.gather(run_profile(), run_pain_points())
+        await self.save_checkpoint("profile_analysis", updated)
+        return AccountDiagnosisState(**updated)
+
+    async def topic_generation(
+        self, state: AccountDiagnosisState
+    ) -> AccountDiagnosisState:
+        updated = dict(state)
+        if updated.get("topics"):
+            await self.save_checkpoint("topic_generation", updated)
+            return AccountDiagnosisState(**updated)
+        if not updated.get("profile") and not updated.get("pain_points"):
+            await self.save_checkpoint("topic_generation", updated)
+            return AccountDiagnosisState(**updated)
+        await self.emit("stage.started", "topics", "running", {})
+        try:
+            output = await self.provider().topics(
+                positioning=str(self.snapshot()["accountPositioning"]),
+                profile=updated.get("profile"),
+                pain_points=updated.get("pain_points"),
+            )
+            result = TopicsStageResult.model_validate(output).model_dump(mode="json")
+            self.service.analysis_service.update_stage(
+                self.run_id,
+                "topics",
+                AnalysisStageUpdate(
+                    status=AnalysisRunStatus.COMPLETED,
+                    result=result,
+                    model_metadata={"engine": "langgraph"},
+                ),
+            )
+            updated["topics"] = result["topics"]
+            updated["titles"] = result["titles"]
+            await self.emit("stage.succeeded", "topics", "completed", result)
+        except Exception as error:
+            await self.stage_failed("topics", error, updated)
+        await self.save_checkpoint("topic_generation", updated)
+        return AccountDiagnosisState(**updated)
+
+    async def finalize(self, state: AccountDiagnosisState) -> AccountDiagnosisState:
+        updated = dict(state)
+        run = self.service.analysis_service.get(self.run_id)
+        has_errors = bool(run.stage_errors)
+        has_results = bool(run.stage_results)
+        if has_errors and has_results:
+            status = AnalysisRunStatus.PARTIALLY_COMPLETED
+            event_type = "run.partial"
+        elif has_errors:
+            status = AnalysisRunStatus.FAILED
+            event_type = "run.failed"
+        else:
+            status = AnalysisRunStatus.COMPLETED
+            event_type = "run.succeeded"
+        completed = self.service.analysis_service.transition(
+            self.run_id,
+            AnalysisRunTransition(
+                status=status,
+                model_metadata={"engine": "langgraph"},
+            ),
+        )
+        await self.save_checkpoint("finalize", updated)
+        await self.emit(
+            event_type,
+            None,
+            completed.status.value,
+            {"stageResults": completed.stage_results, "stageErrors": completed.stage_errors},
+        )
+        return AccountDiagnosisState(**updated)
+
+    def provider(self) -> AccountDiagnosisModelProvider:
+        run = self.service.analysis_service.get(self.run_id)
+        if run.input_snapshot.get("mode") == "live":
+            return self.service.live_provider
+        return self.service.fake_provider
+
+    def snapshot(self) -> dict[str, Any]:
+        return self.service.analysis_service.get(self.run_id).input_snapshot
+
+    async def stage_failed(
+        self, stage_key: str, error: Exception, state: dict[str, Any]
+    ) -> None:
+        message = self.error_message(error)
+        state.setdefault("stage_errors", {})[stage_key] = message
+        self.service.analysis_service.update_stage(
+            self.run_id,
+            stage_key,
+            AnalysisStageUpdate(status=AnalysisRunStatus.FAILED, error=message),
+        )
+        await self.emit("stage.failed", stage_key, "failed", {"error": message})
+
+    async def save_checkpoint(self, node_key: str, state: dict[str, Any]) -> None:
+        checkpoint_state = {
+            "run_id": state.get("run_id"),
+            "workspace_id": state.get("workspace_id"),
+            "positioning_snapshot": state.get("positioning_snapshot"),
+            "historical_posts_material_id": state.get("historical_posts_material_id"),
+            "comments_material_id": state.get("comments_material_id"),
+            "profile": state.get("profile"),
+            "pain_points": state.get("pain_points"),
+            "topics": state.get("topics"),
+            "titles": state.get("titles"),
+            "stage_errors": state.get("stage_errors", {}),
+        }
+        with self.service.database.transaction() as connection:
+            self.service.checkpoint_repository.save(
+                connection,
+                analysis_run_id=self.run_id,
+                workflow_type=WorkflowType.ACCOUNT_DIAGNOSIS.value,
+                node_key=node_key,
+                state=checkpoint_state,
+                now=utc_now(),
+            )
+        if self.stop_after_node == node_key:
+            raise GraphExecutionPaused()
+
+    async def emit(
+        self,
+        event_type: str,
+        stage_key: str | None,
+        status: str,
+        data: dict[str, Any],
+    ) -> None:
+        self.sequence += 1
+        await self.queue.put(
+            ActivityEvent(
+                eventId=str(uuid4()),
+                runId=self.run_id,
+                runType=WorkflowType.ACCOUNT_DIAGNOSIS.value,
+                stageKey=stage_key,
+                status=status,
+                sequence=self.sequence,
+                occurredAt=utc_now(),
+                data={"eventType": event_type, **data},
+            )
+        )
+
+    async def _emit_existing_terminal_run(self, run) -> None:
+        for stage_key in ACCOUNT_STAGE_ORDER:
+            if stage_key in run.stage_results:
+                await self.emit(
+                    "stage.succeeded",
+                    stage_key,
+                    "completed",
+                    run.stage_results[stage_key],
+                )
+            if stage_key in run.stage_errors:
+                await self.emit(
+                    "stage.failed",
+                    stage_key,
+                    "failed",
+                    {"error": run.stage_errors[stage_key]},
+                )
+        event_type = (
+            "run.succeeded"
+            if run.status == AnalysisRunStatus.COMPLETED
+            else "run.partial"
+            if run.status == AnalysisRunStatus.PARTIALLY_COMPLETED
+            else "run.failed"
+        )
+        await self.emit(
+            event_type,
+            None,
+            run.status.value,
+            {"stageResults": run.stage_results, "stageErrors": run.stage_errors},
+        )
+
+    @staticmethod
+    def error_message(error: Exception) -> str:
+        if isinstance(error, PydanticValidationError):
+            return "Model response failed structured validation"
+        if isinstance(error, (ValidationError, ConflictError)):
+            return str(error)
+        return str(error) or error.__class__.__name__

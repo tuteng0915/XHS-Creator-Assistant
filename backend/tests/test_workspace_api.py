@@ -1,0 +1,160 @@
+import asyncio
+from pathlib import Path
+
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+
+
+async def request(app: FastAPI, method: str, path: str, **kwargs):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        return await client.request(method, path, **kwargs)
+
+
+def send(app: FastAPI, method: str, path: str, **kwargs):
+    return asyncio.run(request(app, method, path, **kwargs))
+
+
+def create_workspace(app: FastAPI) -> dict:
+    response = send(
+        app,
+        "POST",
+        "/api/workspaces",
+        json={
+            "name": "留学内容工作区",
+            "accountPositioning": "服务正在准备出国读研的文科生。",
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_workspace_crud_and_optimistic_update(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+
+    listed = send(app, "GET", "/api/workspaces")
+    assert listed.status_code == 200
+    assert listed.json() == [workspace]
+
+    retrieved = send(app, "GET", f"/api/workspaces/{workspace['id']}")
+    assert retrieved.json()["accountPositioning"] == "服务正在准备出国读研的文科生。"
+
+    updated = send(
+        app,
+        "PATCH",
+        f"/api/workspaces/{workspace['id']}",
+        json={
+            "name": "QSheep 留学工作区",
+            "accountPositioning": "真实反思、决策方法，不贩卖焦虑。",
+            "expectedUpdatedAt": workspace["updatedAt"],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "QSheep 留学工作区"
+    assert updated.json()["accountPositioning"] == "真实反思、决策方法，不贩卖焦虑。"
+    assert updated.json()["positioningVersion"] == 2
+
+    stale = send(
+        app,
+        "PATCH",
+        f"/api/workspaces/{workspace['id']}",
+        json={
+            "name": "静默覆盖不应成功",
+            "expectedUpdatedAt": workspace["updatedAt"],
+        },
+    )
+    assert stale.status_code == 409
+
+
+def test_text_source_material_lifecycle_preserves_utf8(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    content = "二本逆袭G5？别再被这种标题骗了｜赞1.4k 藏980｜爆\n留学中介值不值？"
+    created = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials",
+        json={
+            "type": "historical_posts",
+            "name": "历史笔记（中文）",
+            "content": content,
+        },
+    )
+    assert created.status_code == 201
+    material = created.json()
+    assert material["content"] == content
+
+    listed = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/source-materials?type=historical_posts",
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["content"] == content
+
+    retrieved = send(app, "GET", f"/api/source-materials/{material['id']}")
+    assert retrieved.json() == material
+
+    updated_content = "想问双非背景冲英国前30有戏吗，真的好焦虑。"
+    updated = send(
+        app,
+        "PATCH",
+        f"/api/source-materials/{material['id']}",
+        json={
+            "content": updated_content,
+            "expectedUpdatedAt": material["updatedAt"],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["content"] == updated_content
+
+    stale = send(
+        app,
+        "PATCH",
+        f"/api/source-materials/{material['id']}",
+        json={
+            "content": "不应覆盖",
+            "expectedUpdatedAt": material["updatedAt"],
+        },
+    )
+    assert stale.status_code == 409
+
+
+def test_trend_csv_upload_uses_server_path_and_returns_preview(
+    app: FastAPI, settings
+) -> None:
+    workspace = create_workspace(app)
+    csv_content = (
+        "标题,点赞,收藏,标签\n"
+        "普通人如何开始数字游民,45,57,#远程工作\n"
+        "不会英语如何在泰国生活,286,221,#泰国\n"
+        "第三条只计数不进预览,3,2,#测试\n"
+    ).encode()
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials/trend-csv",
+        data={"name": "数字游民热帖", "keyword": "数字游民"},
+        files={"file": ("../../秘密.csv", csv_content, "text/csv")},
+    )
+    assert response.status_code == 201
+    material = response.json()
+    assert material["type"] == "trend_csv"
+    assert material["originalFilename"] == "秘密.csv"
+    assert material["rowCount"] == 3
+    assert material["preview"] == [
+        {"标题": "普通人如何开始数字游民", "点赞": "45", "收藏": "57", "标签": "#远程工作"},
+        {"标题": "不会英语如何在泰国生活", "点赞": "286", "收藏": "221", "标签": "#泰国"},
+    ]
+
+    stored_files = list(Path(settings.upload_directory).rglob("source.csv"))
+    assert len(stored_files) == 1
+    assert stored_files[0].read_bytes() == csv_content
+    assert "秘密.csv" not in str(stored_files[0])
+
+    listed = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/source-materials",
+    )
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [material["id"]]
