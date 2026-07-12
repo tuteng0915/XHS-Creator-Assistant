@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from app.db.database import SQLiteDatabase
@@ -28,10 +29,10 @@ BUILTIN_AGENTS = [
     BuiltinAgentDefinition(
         agent_id="creator_material_curator",
         display_name="Creator Material Curator",
-        purpose="Keeps creator profile and source materials ready for workflow use.",
+        purpose="Keeps creator profile and input assets ready for workflow use.",
         system_prompt=(
             "You manage creator workspace materials. Preserve user-provided content, "
-            "avoid inventing source material, and prepare only product-specific "
+            "avoid inventing input asset content, and prepare only product-specific "
             "inputs needed by downstream creator workflows."
         ),
         skill_ids=[
@@ -42,7 +43,7 @@ BUILTIN_AGENTS = [
             "trend.rank_posts",
         ],
         default_context_policy={
-            "may_read": ["workspace profile", "source material metadata"],
+            "may_read": ["workspace profile", "input asset metadata"],
             "must_not_read": ["unrelated workspace artifacts"],
         },
     ),
@@ -65,7 +66,7 @@ BUILTIN_AGENTS = [
         ],
         default_context_policy={
             "may_read": ["positioning snapshot", "selected historical posts", "selected comments"],
-            "must_not_read": ["drafts", "simulations", "unselected source materials"],
+            "must_not_read": ["drafts", "simulations", "unselected input assets"],
         },
     ),
     BuiltinAgentDefinition(
@@ -88,6 +89,35 @@ BUILTIN_AGENTS = [
         },
     ),
     BuiltinAgentDefinition(
+        agent_id="video_creator_quality_analyst",
+        display_name="Video Creator Quality Analyst",
+        purpose=(
+            "Profiles AIGC video creators, diagnoses video quality, and judges "
+            "fit for creator incentive programs."
+        ),
+        system_prompt=(
+            "You are an AIGC video creator operations analyst. Use collected video "
+            "samples, transcripts, observation notes, and metrics to classify the "
+            "creator's operating motivation, diagnose video quality, and recommend "
+            "whether they fit an incentive program. Treat script-driven creators as "
+            "usually better incentive fits, commercial-driven creators as hard to "
+            "move with incentives, and tech-exploration creators as conditional."
+        ),
+        skill_ids=[
+            "analysis.video_creator_profile",
+            "analysis.video_quality",
+            "analysis.incentive_fit",
+        ],
+        default_context_policy={
+            "may_read": [
+                "positioning snapshot",
+                "selected video creator samples",
+                "related analysis history",
+            ],
+            "must_not_read": ["unrelated input assets", "raw uploaded video files"],
+        },
+    ),
+    BuiltinAgentDefinition(
         agent_id="topic_draft_editor",
         display_name="Topic and Draft Editor",
         purpose="Turns selected topics into content structures and preserves user edits.",
@@ -104,7 +134,7 @@ BUILTIN_AGENTS = [
         ],
         default_context_policy={
             "may_read": ["selected topic", "compact source analysis context"],
-            "must_not_read": ["raw source materials unless explicitly provided"],
+            "must_not_read": ["raw input assets unless explicitly provided"],
         },
     ),
     BuiltinAgentDefinition(
@@ -149,7 +179,7 @@ BUILTIN_AGENTS = [
         default_context_policy={
             "may_read": [
                 "workspace profile",
-                "source material overview",
+                "input asset overview",
                 "existing skills",
                 "existing agents",
                 "existing workflows",
@@ -210,7 +240,7 @@ BUILTIN_AGENTS = [
         default_context_policy={
             "may_read": [
                 "workspace profile",
-                "source material overview",
+                "input asset overview",
                 "existing skills",
                 "existing agents",
                 "existing workflows",
@@ -267,26 +297,59 @@ class AgentService:
         with self.database.transaction() as connection:
             self.workspace_repository.get(connection, workspace_id)
             for definition in BUILTIN_AGENTS:
-                if self.repository.get_by_agent_id(
+                definition_hash = self._definition_hash(definition)
+                existing = self.repository.get_by_agent_id(
                     connection,
                     workspace_id=workspace_id,
                     agent_id=definition.agent_id,
-                ):
+                )
+                payload = {
+                    "workspace_id": workspace_id,
+                    "agent_id": definition.agent_id,
+                    "display_name": definition.display_name,
+                    "purpose": definition.purpose,
+                    "system_prompt": definition.system_prompt,
+                    "skill_ids_json": json.dumps(
+                        definition.skill_ids, ensure_ascii=False
+                    ),
+                    "default_context_policy_json": json.dumps(
+                        definition.default_context_policy, ensure_ascii=False
+                    ),
+                    "version": definition.version,
+                    "definition_hash": definition_hash,
+                }
+                if existing:
+                    if (
+                        existing["source"] == "builtin"
+                        and existing.get("definition_hash") != definition_hash
+                    ):
+                        self.repository.update_builtin_definition(
+                            connection,
+                            agent_asset_id=existing["id"],
+                            display_name=payload["display_name"],
+                            purpose=payload["purpose"],
+                            system_prompt=payload["system_prompt"],
+                            skill_ids_json=payload["skill_ids_json"],
+                            default_context_policy_json=payload[
+                                "default_context_policy_json"
+                            ],
+                            version=payload["version"],
+                            definition_hash=payload["definition_hash"],
+                            now=now,
+                        )
                     continue
                 self.repository.create(
                     connection,
-                    workspace_id=workspace_id,
-                    agent_id=definition.agent_id,
-                    display_name=definition.display_name,
-                    purpose=definition.purpose,
-                    system_prompt=definition.system_prompt,
-                    skill_ids_json=json.dumps(definition.skill_ids, ensure_ascii=False),
-                    default_context_policy_json=json.dumps(
-                        definition.default_context_policy, ensure_ascii=False
-                    ),
-                    version=definition.version,
+                    **payload,
                     now=now,
                 )
+
+    @staticmethod
+    def _definition_hash(definition: BuiltinAgentDefinition) -> str:
+        encoded = json.dumps(
+            asdict(definition), ensure_ascii=False, sort_keys=True
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
     def _to_summary(row: dict) -> AgentSummary:

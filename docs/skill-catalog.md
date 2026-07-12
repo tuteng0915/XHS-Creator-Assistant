@@ -167,9 +167,12 @@ Current implementation:
 
 #### `source.save_historical_posts`
 
+Stable ID note: this keeps the legacy `source.*` ID for compatibility, but the
+product artifact is an `InputAsset`.
+
 Purpose:
 
-- persist reusable historical post material.
+- persist reusable Historical Posts input asset.
 
 Inputs:
 
@@ -178,11 +181,11 @@ Inputs:
 
 Output:
 
-- SourceMaterial of type `historical_posts`.
+- InputAsset of type `historical_posts`.
 
 Artifact effect:
 
-- creates or updates text source material.
+- creates or updates text input asset.
 
 Composition:
 
@@ -195,9 +198,12 @@ Current implementation:
 
 #### `source.save_comments`
 
+Stable ID note: this keeps the legacy `source.*` ID for compatibility, but the
+product artifact is an `InputAsset`.
+
 Purpose:
 
-- persist reusable comment sample material.
+- persist reusable Comment Samples input asset.
 
 Inputs:
 
@@ -206,11 +212,11 @@ Inputs:
 
 Output:
 
-- SourceMaterial of type `comments`.
+- InputAsset of type `comments`.
 
 Artifact effect:
 
-- creates or updates text source material.
+- creates or updates text input asset.
 
 Composition:
 
@@ -223,9 +229,12 @@ Current implementation:
 
 #### `source.upload_trend_csv`
 
+Stable ID note: this keeps the legacy `source.*` ID for compatibility, but the
+product artifact is an `InputAsset`.
+
 Purpose:
 
-- persist uploaded trend CSV / TSV source material.
+- persist uploaded Trend CSV / TSV input asset.
 
 Inputs:
 
@@ -235,7 +244,7 @@ Inputs:
 
 Output:
 
-- SourceMaterial of type `trend_csv` with preview metadata.
+- InputAsset of type `trend_csv` with preview metadata.
 
 Artifact effect:
 
@@ -258,7 +267,7 @@ Purpose:
 
 Inputs:
 
-- trend CSV source material ID.
+- trend CSV input asset ID.
 
 Output:
 

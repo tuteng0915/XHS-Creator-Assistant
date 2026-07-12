@@ -3,11 +3,13 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections.abc import Iterable
 
 from app.config import Settings
 from app.db.database import SQLiteDatabase
 from app.errors import ValidationError
 from app.models import (
+    AnalysisRunBatchCreate,
     AnalysisRunCreate,
     AnalysisRunResponse,
     AnalysisRunStatus,
@@ -36,6 +38,11 @@ STAGE_KEYS = {
         "topics",
         "titles",
         "structure",
+    },
+    WorkflowType.VIDEO_CREATOR_QUALITY.value: {
+        "creator_profile",
+        "video_quality",
+        "incentive_fit",
     },
 }
 
@@ -71,6 +78,80 @@ class AnalysisRunService:
                 now=utc_now(),
             )
         return self._to_response(row)
+
+    def create_batch(
+        self, workspace_id: str, payload: AnalysisRunBatchCreate
+    ) -> list[AnalysisRunResponse]:
+        if not payload.account_profile_material_ids:
+            raise ValidationError("At least one account profile material is required")
+        runs: list[AnalysisRunResponse] = []
+        for profile_material_id in payload.account_profile_material_ids:
+            runs.append(
+                self.create(
+                    workspace_id,
+                    AnalysisRunCreate(
+                        workflow_type=payload.workflow_type,
+                        account_profile_material_id=profile_material_id,
+                        historical_posts_material_id=payload.historical_posts_material_id,
+                        comments_material_id=payload.comments_material_id,
+                        trend_csv_material_id=payload.trend_csv_material_id,
+                        video_creator_samples_material_id=(
+                            payload.video_creator_samples_material_id
+                        ),
+                        mode=payload.mode,
+                    ),
+                )
+            )
+        return runs
+
+    def export_csv(
+        self,
+        workspace_id: str,
+        *,
+        workflow_type: WorkflowType | None = None,
+        run_ids: Iterable[str] | None = None,
+    ) -> str:
+        selected_ids = set(run_ids or [])
+        with self.database.read() as connection:
+            self.workspace_repository.get(connection, workspace_id)
+            rows = self.repository.list(connection, workspace_id)
+        output = io.StringIO()
+        writer = csv.DictWriter(
+            output,
+            fieldnames=[
+                "run_id",
+                "workflow_type",
+                "status",
+                "profile_source",
+                "profile_name",
+                "created_at",
+                "completed_at",
+                "stage_results_json",
+                "stage_errors_json",
+            ],
+        )
+        writer.writeheader()
+        for row in rows:
+            if workflow_type is not None and row["workflow_type"] != workflow_type.value:
+                continue
+            if selected_ids and row["id"] not in selected_ids:
+                continue
+            snapshot = json.loads(row["input_snapshot_json"])
+            profile = snapshot.get("accountProfile", {})
+            writer.writerow(
+                {
+                    "run_id": row["id"],
+                    "workflow_type": row["workflow_type"],
+                    "status": row["status"],
+                    "profile_source": profile.get("source", "workspace"),
+                    "profile_name": profile.get("name", ""),
+                    "created_at": row["created_at"],
+                    "completed_at": row["completed_at"] or "",
+                    "stage_results_json": row["stage_results_json"],
+                    "stage_errors_json": row["stage_errors_json"],
+                }
+            )
+        return output.getvalue()
 
     def list(self, workspace_id: str) -> list[AnalysisRunSummary]:
         with self.database.read() as connection:
@@ -144,11 +225,13 @@ class AnalysisRunService:
         workspace: dict,
         payload: AnalysisRunCreate,
     ) -> dict:
+        profile = self._resolve_account_profile(connection, workspace, payload)
         base = {
             "mode": payload.mode,
             "workspaceId": workspace["id"],
             "workspaceName": workspace["name"],
-            "accountPositioning": workspace["account_positioning"],
+            "accountPositioning": profile["content"],
+            "accountProfile": profile,
             "positioningVersion": workspace["positioning_version"],
         }
         if payload.workflow_type == WorkflowType.ACCOUNT_DIAGNOSIS:
@@ -195,7 +278,7 @@ class AnalysisRunService:
                         "account_positioning",
                         "historical_posts_text",
                         "comment_samples_text",
-                        "source_materials_overview",
+                        "input_assets_overview",
                         "analysis_history_overview",
                         "topic_library_overview",
                         "draft_history_overview",
@@ -204,7 +287,7 @@ class AnalysisRunService:
                     deep_items=[
                         self.context_access_service.deep_item(
                             key="selected_historical_posts",
-                            asset_type="source_material",
+                            asset_type="input_asset",
                             asset_id=historical["id"],
                             selector="historical_posts_text",
                             role="historical_posts",
@@ -219,7 +302,7 @@ class AnalysisRunService:
                         ),
                         self.context_access_service.deep_item(
                             key="selected_comment_samples",
-                            asset_type="source_material",
+                            asset_type="input_asset",
                             asset_id=comments["id"],
                             selector="comment_samples_text",
                             role="comments",
@@ -237,30 +320,92 @@ class AnalysisRunService:
             )
             return workflow_snapshot
 
-        trend_csv = self._require_material(
+        if payload.workflow_type == WorkflowType.TREND_ANALYSIS:
+            trend_csv = self._require_material(
+                connection,
+                payload.trend_csv_material_id,
+                workspace["id"],
+                SourceMaterialType.TREND_CSV.value,
+                "Trend CSV material is required",
+            )
+            ranked_posts = self._rank_trend_posts(
+                self._read_upload_text(trend_csv["stored_key"])
+            )
+            workflow_snapshot = {
+                **base,
+                "trendCsv": {
+                    "materialId": trend_csv["id"],
+                    "name": trend_csv["name"],
+                    "keyword": trend_csv["keyword"],
+                    "originalFilename": trend_csv["original_filename"],
+                    "rowCount": trend_csv["row_count"],
+                    "updatedAt": trend_csv["updated_at"],
+                    "rankedPosts": ranked_posts,
+                    "ranking": {
+                        "method": "likes_plus_collects_desc",
+                        "limit": 50,
+                    },
+                },
+            }
+            workflow_snapshot["contextPack"] = (
+                self.context_access_service.build_workspace_pack(
+                    connection,
+                    workspace=workspace,
+                    requester={
+                        "workflowId": payload.workflow_type.value,
+                        "agentId": "trend_analysis_workflow",
+                        "skillId": "analysis.trend_analysis",
+                    },
+                    purpose="create_trend_analysis_run",
+                    selectors=[
+                        "account_positioning",
+                        "trend_top_ranked_posts",
+                        "input_assets_overview",
+                        "analysis_history_overview",
+                        "topic_library_overview",
+                        "draft_history_overview",
+                        "simulation_history_overview",
+                    ],
+                    deep_items=[
+                        self.context_access_service.deep_item(
+                            key="selected_trend_top_ranked_posts",
+                            asset_type="input_asset",
+                            asset_id=trend_csv["id"],
+                            selector="trend_top_ranked_posts",
+                            role="trend_csv",
+                            data={
+                                "workspaceId": workspace["id"],
+                                "materialId": trend_csv["id"],
+                                "name": trend_csv["name"],
+                                "keyword": trend_csv["keyword"],
+                                "originalFilename": trend_csv["original_filename"],
+                                "rowCount": trend_csv["row_count"],
+                                "ranking": {
+                                    "method": "likes_plus_collects_desc",
+                                    "limit": 50,
+                                },
+                                "rankedPosts": ranked_posts,
+                            },
+                        )
+                    ],
+                )
+            )
+            return workflow_snapshot
+
+        video_samples = self._require_material(
             connection,
-            payload.trend_csv_material_id,
+            payload.video_creator_samples_material_id,
             workspace["id"],
-            SourceMaterialType.TREND_CSV.value,
-            "Trend CSV material is required",
-        )
-        ranked_posts = self._rank_trend_posts(
-            self._read_upload_text(trend_csv["stored_key"])
+            SourceMaterialType.VIDEO_CREATOR_SAMPLES.value,
+            "Video creator samples material is required",
         )
         workflow_snapshot = {
             **base,
-            "trendCsv": {
-                "materialId": trend_csv["id"],
-                "name": trend_csv["name"],
-                "keyword": trend_csv["keyword"],
-                "originalFilename": trend_csv["original_filename"],
-                "rowCount": trend_csv["row_count"],
-                "updatedAt": trend_csv["updated_at"],
-                "rankedPosts": ranked_posts,
-                "ranking": {
-                    "method": "likes_plus_collects_desc",
-                    "limit": 50,
-                },
+            "videoCreatorSamples": {
+                "materialId": video_samples["id"],
+                "name": video_samples["name"],
+                "content": video_samples["text_content"],
+                "updatedAt": video_samples["updated_at"],
             },
         }
         workflow_snapshot["contextPack"] = (
@@ -269,14 +414,14 @@ class AnalysisRunService:
                 workspace=workspace,
                 requester={
                     "workflowId": payload.workflow_type.value,
-                    "agentId": "trend_analysis_workflow",
-                    "skillId": "analysis.trend_analysis",
+                    "agentId": "video_creator_quality_workflow",
+                    "skillId": "analysis.video_creator_quality",
                 },
-                purpose="create_trend_analysis_run",
+                purpose="create_video_creator_quality_analysis_run",
                 selectors=[
                     "account_positioning",
-                    "trend_top_ranked_posts",
-                    "source_materials_overview",
+                    "video_creator_samples_text",
+                    "input_assets_overview",
                     "analysis_history_overview",
                     "topic_library_overview",
                     "draft_history_overview",
@@ -284,24 +429,19 @@ class AnalysisRunService:
                 ],
                 deep_items=[
                     self.context_access_service.deep_item(
-                        key="selected_trend_top_ranked_posts",
-                        asset_type="source_material",
-                        asset_id=trend_csv["id"],
-                        selector="trend_top_ranked_posts",
-                        role="trend_csv",
+                        key="selected_video_creator_samples",
+                        asset_type="input_asset",
+                        asset_id=video_samples["id"],
+                        selector="video_creator_samples_text",
+                        role="video_creator_samples",
                         data={
                             "workspaceId": workspace["id"],
-                            "materialId": trend_csv["id"],
-                            "name": trend_csv["name"],
-                            "keyword": trend_csv["keyword"],
-                            "originalFilename": trend_csv["original_filename"],
-                            "rowCount": trend_csv["row_count"],
-                            "ranking": {
-                                "method": "likes_plus_collects_desc",
-                                "limit": 50,
-                            },
-                            "rankedPosts": ranked_posts,
+                            "materialId": video_samples["id"],
+                            "name": video_samples["name"],
+                            "updatedAt": video_samples["updated_at"],
+                            "charCount": len(video_samples["text_content"] or ""),
                         },
+                        text=video_samples["text_content"] or "",
                     )
                 ],
             )
@@ -324,6 +464,50 @@ class AnalysisRunService:
         if row["type"] != material_type:
             raise ValidationError("Source material type does not match this workflow")
         return row
+
+    def _resolve_account_profile(
+        self,
+        connection,
+        workspace: dict,
+        payload: AnalysisRunCreate,
+    ) -> dict:
+        if payload.manual_account_profile and payload.account_profile_material_id:
+            raise ValidationError(
+                "Use either manual account profile or account profile material"
+            )
+        if payload.manual_account_profile is not None:
+            content = payload.manual_account_profile.strip()
+            if not content:
+                raise ValidationError("Manual account profile cannot be blank")
+            return {
+                "source": "manual",
+                "materialId": None,
+                "name": "Manual profile",
+                "content": content,
+                "updatedAt": None,
+            }
+        if payload.account_profile_material_id is not None:
+            material = self._require_material(
+                connection,
+                payload.account_profile_material_id,
+                workspace["id"],
+                SourceMaterialType.ACCOUNT_PROFILE.value,
+                "Account profile material is required",
+            )
+            return {
+                "source": "source_material",
+                "materialId": material["id"],
+                "name": material["name"],
+                "content": material["text_content"] or "",
+                "updatedAt": material["updated_at"],
+            }
+        return {
+            "source": "workspace",
+            "materialId": None,
+            "name": workspace["name"],
+            "content": workspace["account_positioning"],
+            "updatedAt": workspace["updated_at"],
+        }
 
     def _read_upload_text(self, stored_key: str) -> str:
         root = self.settings.upload_directory.resolve()

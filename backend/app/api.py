@@ -1,12 +1,12 @@
 import asyncio
 import json
 from typing import Annotated
-from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, Query, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile, status
+from fastapi.responses import Response, StreamingResponse
 
 from app.models import (
+    AccountProfileCsvImportResponse,
     AgentConversationCreate,
     AgentConversationResponse,
     AgentConversationSummary,
@@ -14,9 +14,11 @@ from app.models import (
     AgentResponse,
     AgentSummary,
     AgentUpdate,
+    AnalysisRunBatchCreate,
     AnalysisRunCreate,
     AnalysisRunResponse,
     AnalysisRunSummary,
+    AssetProposalResponse,
     DraftGenerateRequest,
     DraftResponse,
     DraftSummary,
@@ -39,6 +41,7 @@ from app.models import (
     WorkflowAssetResponse,
     WorkflowAssetSummary,
     WorkflowAssetUpdate,
+    WorkflowType,
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspaceUpdate,
@@ -47,6 +50,7 @@ from app.services import (
     AgentConversationService,
     AgentService,
     AnalysisRunService,
+    AssetProposalService,
     DraftGenerationService,
     DraftService,
     SimulationRunService,
@@ -62,6 +66,7 @@ from app.workflows import (
     ACCOUNT_STAGE_ORDER,
     SIMULATION_STAGE_ORDER,
     TREND_STAGE_ORDER,
+    VIDEO_CREATOR_QUALITY_STAGE_ORDER,
 )
 
 
@@ -84,7 +89,7 @@ def _sse_event(
     data: dict,
 ) -> str:
     event = {
-        "eventId": str(uuid4()),
+        "eventId": str(sequence),
         "runId": run_id,
         "runType": run_type,
         "stageKey": stage_key,
@@ -111,6 +116,7 @@ def create_api_router(
     skill_service: SkillService,
     agent_service: AgentService,
     agent_conversation_service: AgentConversationService,
+    asset_proposal_service: AssetProposalService,
     workflow_asset_service: WorkflowAssetService,
     workflow_worker: WorkflowWorkerService,
 ) -> APIRouter:
@@ -164,6 +170,21 @@ def create_api_router(
             name=name,
             keyword=keyword,
             filename=file.filename or "upload.csv",
+            content=await file.read(),
+        )
+
+    @router.post(
+        "/workspaces/{workspace_id}/source-materials/account-profiles-csv",
+        response_model=AccountProfileCsvImportResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_account_profiles_csv(
+        workspace_id: str,
+        file: Annotated[UploadFile, File()],
+    ) -> AccountProfileCsvImportResponse:
+        return source_service.import_account_profiles_csv(
+            workspace_id,
+            filename=file.filename or "account-profiles.csv",
             content=await file.read(),
         )
 
@@ -263,6 +284,38 @@ def create_api_router(
         return await agent_conversation_service.send_message(conversation_id, payload)
 
     @router.get(
+        "/workspaces/{workspace_id}/asset-proposals",
+        response_model=list[AssetProposalResponse],
+    )
+    def list_workspace_asset_proposals(
+        workspace_id: str,
+    ) -> list[AssetProposalResponse]:
+        return asset_proposal_service.list(workspace_id=workspace_id)
+
+    @router.get(
+        "/agent-conversations/{conversation_id}/asset-proposals",
+        response_model=list[AssetProposalResponse],
+    )
+    def list_conversation_asset_proposals(
+        conversation_id: str,
+    ) -> list[AssetProposalResponse]:
+        return asset_proposal_service.list(conversation_id=conversation_id)
+
+    @router.post(
+        "/asset-proposals/{proposal_id}/apply",
+        response_model=AssetProposalResponse,
+    )
+    def apply_asset_proposal(proposal_id: str) -> AssetProposalResponse:
+        return asset_proposal_service.apply(proposal_id)
+
+    @router.post(
+        "/asset-proposals/{proposal_id}/reject",
+        response_model=AssetProposalResponse,
+    )
+    def reject_asset_proposal(proposal_id: str) -> AssetProposalResponse:
+        return asset_proposal_service.reject(proposal_id)
+
+    @router.get(
         "/workspaces/{workspace_id}/workflows",
         response_model=list[WorkflowAssetSummary],
     )
@@ -295,6 +348,19 @@ def create_api_router(
         await workflow_worker.enqueue_analysis_run(run.id)
         return run
 
+    @router.post(
+        "/workspaces/{workspace_id}/analysis-runs/batch",
+        response_model=list[AnalysisRunResponse],
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_analysis_runs_batch(
+        workspace_id: str, payload: AnalysisRunBatchCreate
+    ) -> list[AnalysisRunResponse]:
+        runs = analysis_service.create_batch(workspace_id, payload)
+        for run in runs:
+            await workflow_worker.enqueue_analysis_run(run.id)
+        return runs
+
     @router.get(
         "/workspaces/{workspace_id}/analysis-runs",
         response_model=list[AnalysisRunSummary],
@@ -302,12 +368,45 @@ def create_api_router(
     def list_analysis_runs(workspace_id: str) -> list[AnalysisRunSummary]:
         return analysis_service.list(workspace_id)
 
+    @router.get("/workspaces/{workspace_id}/analysis-runs/export.csv")
+    def export_analysis_runs_csv(
+        workspace_id: str,
+        workflow_type: Annotated[
+            WorkflowType | None, Query(alias="workflowType")
+        ] = None,
+        ids: Annotated[str | None, Query()] = None,
+    ) -> Response:
+        run_ids = [item.strip() for item in ids.split(",") if item.strip()] if ids else None
+        csv_text = analysis_service.export_csv(
+            workspace_id,
+            workflow_type=workflow_type,
+            run_ids=run_ids,
+        )
+        return Response(
+            content=csv_text,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="analysis-runs.csv"'
+            },
+        )
+
     @router.get("/analysis-runs/{run_id}", response_model=AnalysisRunResponse)
     def get_analysis_run(run_id: str) -> AnalysisRunResponse:
         return analysis_service.get(run_id)
 
     @router.get("/analysis-runs/{run_id}/events")
-    async def stream_analysis_run_events(run_id: str) -> StreamingResponse:
+    async def stream_analysis_run_events(
+        run_id: str,
+        request: Request,
+        after: Annotated[int | None, Query()] = None,
+    ) -> StreamingResponse:
+        last_event_id = request.headers.get("last-event-id")
+        min_sequence = after or (
+            int(last_event_id)
+            if last_event_id and last_event_id.isdigit()
+            else 0
+        )
+
         async def event_stream():
             emitted_stages: set[tuple[str, str]] = set()
             emitted_terminal = False
@@ -317,11 +416,13 @@ def create_api_router(
                 stage_order = (
                     ACCOUNT_STAGE_ORDER
                     if run.workflow_type.value == "account_diagnosis"
+                    else VIDEO_CREATOR_QUALITY_STAGE_ORDER
+                    if run.workflow_type.value == "video_creator_quality"
                     else TREND_STAGE_ORDER
                 )
                 if sequence == 0:
                     sequence += 1
-                    yield _sse_event(
+                    event = _sse_event(
                         run_id=run.id,
                         run_type=run.workflow_type.value,
                         stage_key=None,
@@ -330,6 +431,8 @@ def create_api_router(
                         event_type="run.created",
                         data={},
                     )
+                    if sequence > min_sequence:
+                        yield event
                 for stage_key in stage_order:
                     if (
                         run.status.value == "running"
@@ -339,7 +442,7 @@ def create_api_router(
                     ):
                         emitted_stages.add(("started", stage_key))
                         sequence += 1
-                        yield _sse_event(
+                        event = _sse_event(
                             run_id=run.id,
                             run_type=run.workflow_type.value,
                             stage_key=stage_key,
@@ -348,10 +451,12 @@ def create_api_router(
                             event_type="stage.started",
                             data={},
                         )
+                        if sequence > min_sequence:
+                            yield event
                     if stage_key in run.stage_results and ("ok", stage_key) not in emitted_stages:
                         emitted_stages.add(("ok", stage_key))
                         sequence += 1
-                        yield _sse_event(
+                        event = _sse_event(
                             run_id=run.id,
                             run_type=run.workflow_type.value,
                             stage_key=stage_key,
@@ -360,10 +465,12 @@ def create_api_router(
                             event_type="stage.succeeded",
                             data=run.stage_results[stage_key],
                         )
+                        if sequence > min_sequence:
+                            yield event
                     if stage_key in run.stage_errors and ("err", stage_key) not in emitted_stages:
                         emitted_stages.add(("err", stage_key))
                         sequence += 1
-                        yield _sse_event(
+                        event = _sse_event(
                             run_id=run.id,
                             run_type=run.workflow_type.value,
                             stage_key=stage_key,
@@ -372,11 +479,13 @@ def create_api_router(
                             event_type="stage.failed",
                             data={"error": run.stage_errors[stage_key]},
                         )
+                        if sequence > min_sequence:
+                            yield event
                 if run.status.value in {"completed", "partially_completed", "failed"}:
                     if not emitted_terminal:
                         emitted_terminal = True
                         sequence += 1
-                        yield _sse_event(
+                        event = _sse_event(
                             run_id=run.id,
                             run_type=run.workflow_type.value,
                             stage_key=None,
@@ -388,6 +497,8 @@ def create_api_router(
                                 "stageErrors": run.stage_errors,
                             },
                         )
+                        if sequence > min_sequence:
+                            yield event
                     break
                 await asyncio.sleep(0.2)
 
@@ -421,7 +532,18 @@ def create_api_router(
         return simulation_service.get(simulation_id)
 
     @router.get("/simulation-runs/{simulation_id}/events")
-    async def stream_simulation_run_events(simulation_id: str) -> StreamingResponse:
+    async def stream_simulation_run_events(
+        simulation_id: str,
+        request: Request,
+        after: Annotated[int | None, Query()] = None,
+    ) -> StreamingResponse:
+        last_event_id = request.headers.get("last-event-id")
+        min_sequence = after or (
+            int(last_event_id)
+            if last_event_id and last_event_id.isdigit()
+            else 0
+        )
+
         async def event_stream():
             emitted_stages: set[tuple[str, str]] = set()
             emitted_terminal = False
@@ -430,7 +552,7 @@ def create_api_router(
                 run = simulation_service.get(simulation_id)
                 if sequence == 0:
                     sequence += 1
-                    yield _sse_event(
+                    event = _sse_event(
                         run_id=run.id,
                         run_type="audience_simulation",
                         stage_key=None,
@@ -439,6 +561,8 @@ def create_api_router(
                         event_type="run.created",
                         data={},
                     )
+                    if sequence > min_sequence:
+                        yield event
                 stage_data = {
                     "personas": {"personas": run.persona_definitions},
                     "initial_reactions": {"reactions": run.reaction_results},
@@ -463,7 +587,7 @@ def create_api_router(
                     ):
                         emitted_stages.add(("started", stage_key))
                         sequence += 1
-                        yield _sse_event(
+                        event = _sse_event(
                             run_id=run.id,
                             run_type="audience_simulation",
                             stage_key=stage_key,
@@ -472,10 +596,12 @@ def create_api_router(
                             event_type="stage.started",
                             data={},
                         )
+                        if sequence > min_sequence:
+                            yield event
                     if stage_has_result[stage_key] and ("ok", stage_key) not in emitted_stages:
                         emitted_stages.add(("ok", stage_key))
                         sequence += 1
-                        yield _sse_event(
+                        event = _sse_event(
                             run_id=run.id,
                             run_type="audience_simulation",
                             stage_key=stage_key,
@@ -484,6 +610,8 @@ def create_api_router(
                             event_type="stage.succeeded",
                             data=stage_data[stage_key],
                         )
+                        if sequence > min_sequence:
+                            yield event
                     stage_errors = [
                         (key, message)
                         for key, message in run.stage_errors.items()
@@ -492,7 +620,7 @@ def create_api_router(
                     if stage_errors and ("err", stage_key) not in emitted_stages:
                         emitted_stages.add(("err", stage_key))
                         sequence += 1
-                        yield _sse_event(
+                        event = _sse_event(
                             run_id=run.id,
                             run_type="audience_simulation",
                             stage_key=stage_key,
@@ -501,11 +629,13 @@ def create_api_router(
                             event_type="stage.failed",
                             data={"error": "; ".join(message for _, message in stage_errors)},
                         )
+                        if sequence > min_sequence:
+                            yield event
                 if run.status.value in {"completed", "partially_completed", "failed"}:
                     if not emitted_terminal:
                         emitted_terminal = True
                         sequence += 1
-                        yield _sse_event(
+                        event = _sse_event(
                             run_id=run.id,
                             run_type="audience_simulation",
                             stage_key=None,
@@ -520,6 +650,8 @@ def create_api_router(
                                 "stageErrors": run.stage_errors,
                             },
                         )
+                        if sequence > min_sequence:
+                            yield event
                     break
                 await asyncio.sleep(0.2)
 

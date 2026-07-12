@@ -11,6 +11,7 @@ from app.config import Settings
 from app.db.database import SQLiteDatabase
 from app.errors import ValidationError
 from app.models import (
+    AccountProfileCsvImportResponse,
     SourceMaterialResponse,
     SourceMaterialType,
     SourceMaterialUpdate,
@@ -55,6 +56,67 @@ class SourceMaterialService:
         return TextSourceMaterialResponse.model_validate(
             {**row, "content": row["text_content"]}
         )
+
+    def import_account_profiles_csv(
+        self,
+        workspace_id: str,
+        *,
+        filename: str,
+        content: bytes,
+    ) -> AccountProfileCsvImportResponse:
+        safe_filename = PurePosixPath(filename.replace("\\", "/")).name
+        extension = Path(safe_filename).suffix.lower()
+        if extension not in {".csv", ".tsv"}:
+            raise ValidationError("Only .csv and .tsv files are supported")
+        if not content:
+            raise ValidationError("CSV file cannot be empty")
+        if len(content) > self.settings.max_upload_bytes:
+            raise ValidationError("CSV file exceeds the upload size limit")
+        delimiter = "\t" if extension == ".tsv" else ","
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise ValidationError("CSV file must use UTF-8 encoding") from error
+        reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
+        if not reader.fieldnames:
+            raise ValidationError("CSV file must contain a header row")
+        created: list[TextSourceMaterialResponse] = []
+        with self.database.transaction() as connection:
+            self.workspace_repository.get(connection, workspace_id)
+            for index, row in enumerate(reader, start=1):
+                name = (
+                    row.get("name")
+                    or row.get("profile_name")
+                    or row.get("账号")
+                    or row.get("名称")
+                    or f"Profile {index}"
+                ).strip()
+                profile = (
+                    row.get("profile")
+                    or row.get("account_profile")
+                    or row.get("accountPositioning")
+                    or row.get("账号定位")
+                    or row.get("定位")
+                    or ""
+                ).strip()
+                if not profile:
+                    continue
+                material = self.repository.create_text(
+                    connection,
+                    workspace_id=workspace_id,
+                    material_type=SourceMaterialType.ACCOUNT_PROFILE.value,
+                    name=name or f"Profile {index}",
+                    content=profile,
+                    now=utc_now(),
+                )
+                created.append(
+                    TextSourceMaterialResponse.model_validate(
+                        {**material, "content": material["text_content"]}
+                    )
+                )
+        if not created:
+            raise ValidationError("CSV did not contain any account profile rows")
+        return AccountProfileCsvImportResponse(materials=created)
 
     def create_csv(
         self,

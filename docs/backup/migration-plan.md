@@ -22,7 +22,7 @@ LangGraph graph 作为普通 Python 代码维护。需要调整工作流时直�
 - 逐阶段 loading、成功和错误反馈。
 - 当前 prompts、模型参数、tool schemas、demo fixtures 和中文文案。
 
-`docs/current-prototype.md` 已记录的已知不一致也属于基准证据。迁移切片不顺手修复它们；是否修复应作为独立产品变更，有单独验收。这样可以区分“架构迁移造成的回归”和“主动改变产品行为”。
+`docs/backup/current-prototype.md` 已记录的已知不一致也属于基准证据。迁移切片不顺手修复它们；是否修复应作为独立产品变更，有单独验收。这样可以区分“架构迁移造成的回归”和“主动改变产品行为”。
 
 ### 1.2 原型永久保留
 

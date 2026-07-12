@@ -1,164 +1,397 @@
 # Architecture Review: Creator Asset Workspace
 
-## Current direction
+Reviewed on 2026-07-12 against the current codebase after commit
+`40cca28 Add provider-backed conversations and maker assets`.
 
-The product is no longer just a migrated single-page workflow demo. It is becoming a creator asset workspace with two asset families:
+This report replaces older review notes. The product direction is now clear:
+the app is a creator workspace with context assets and capability assets, not a
+generic agent platform.
 
-- **Context assets**: account profile, source materials, analysis runs, topics, drafts/structures, audience simulations.
-- **Capability assets**: skills, agents, workflows, and workflow calls.
+## Current implementation snapshot
 
-The important boundary is not “users can never edit workflows.” The boundary is:
+### Context assets
 
-- these assets are product-specific, not a generic filesystem or generic agent platform;
-- skill/agent/workflow definitions are treated by the codebase as composable assets;
-- for now, capability assets are inspectable in the UI but not user-editable from the frontend;
-- execution remains fixed and controlled by backend product services.
+Implemented and product-specific:
 
-The current layout direction is aligned:
+- Workspace / account profile
+- Source materials:
+  - historical posts
+  - comment samples
+  - uploaded trend CSV
+- Analysis runs:
+  - account diagnosis
+  - trend analysis
+- Topic library
+- Draft / content structure records
+- Audience simulation runs
 
-- left column: context/output assets;
-- right column: workflow calls and capability assets;
-- main panel: focused management or execution surface;
-- combining a left-side asset with a right-side call should become the product interaction model.
+### Capability assets
 
-## What is already aligned
+Implemented as internal workspace assets:
 
-- Workspaces are creator/account scoped.
-- Account profile has become a first-class workspace input rather than only a form field.
-- Source materials are product-specific: historical posts, comments, trend CSV.
-- Analysis runs are persisted and reopenable.
-- Topic Library stores reusable topics from account diagnosis, trend analysis, and manual entry.
-- Draft/structure records exist and separate generated snapshots from editable content.
-- Audience simulations are persisted and reopenable.
-- Skill, Agent, and Workflow assets exist as internal product assets.
-- The UI no longer presents Content Drafts as a primary navigation destination.
-- Workflow Calls are on the right-side capability column.
-- Demo mode persists fixture inputs through the same integrated path instead of bypassing storage.
-- LangGraph is used as an internal executor, not exposed as a frontend concept.
+- Skills
+- Agents
+- Workflow assets
+- Agent conversations
 
-## Corrections from older review notes
+The newest addition is a maker layer:
 
-The following older conclusions are no longer valid and should not guide future work:
+- `Skill Maker`
+- `Agent Maker`
+- `Workflow Maker`
 
-- “There is no draft/content asset model.” Drafts now exist.
-- “Content Drafts is only a placeholder.” It is no longer a primary nav item; drafts remain a backend artifact.
-- “Do not add Agents or Workflows to the UI.” Capability assets are now part of the internal product model and right-side inspection surface.
-- “Keep the sidebar restricted to only creator objects.” The revised layout intentionally separates creator context assets and capability assets.
-- “The repository is untracked.” A baseline commit now exists.
-- “README says product functionality is not implemented.” This must be kept current as implementation evolves.
+These currently generate proposals through the existing conversation surface.
+They do not directly mutate Skill, Agent, or Workflow definitions.
 
-## Current high-priority risks
+### Execution model
 
-### P0 — workflow execution lifecycle
+Current workflow execution is no longer owned by opening an SSE connection:
 
-Execution must not be owned by an SSE connection.
+- `POST /api/workspaces/{workspace_id}/analysis-runs` creates a persisted run.
+- `POST /api/workspaces/{workspace_id}/simulation-runs` creates a persisted run.
+- `WorkflowWorkerService` enqueues backend execution independently.
+- SSE endpoints observe persisted run state and rebuild progressive events.
+- `WorkflowWorkerService.resume_unfinished()` runs during app startup.
 
-Target behavior:
+This is a substantial correction from the original prototype.
 
-- `POST` creates a run.
-- Backend worker executes independently.
-- Frontend observes status.
-- Reconnects and refreshes do not duplicate paid/model calls.
-- SSE, if retained, is observation-only.
+### Model provider boundary
 
-This remains the most important backend correctness boundary.
+Live model calls now go through backend `ModelCallService`.
 
-### P0 — public mutation/model-call surfaces
+Supported providers:
 
-Browser-accessible endpoints must not be able to forge run history or call arbitrary model operations.
+- Anthropic Messages API
+- Qwen / DashScope OpenAI-compatible chat completions
 
-Product API should expose:
+The browser no longer receives model API keys.
 
-- create run;
-- get run;
-- list history;
-- create/select/edit/archive product artifacts.
+## What is aligned
 
-Only backend workflow services should mutate stage results or invoke providers.
+- The product is workspace-first and creator-specific.
+- Account profile is treated as a reusable workspace input.
+- Source materials are constrained to product types, not arbitrary files.
+- Analysis, topic, draft, and simulation outputs are persisted.
+- Generated draft snapshots are separated from user-editable draft content.
+- Topic and draft records carry relationships back to source runs where available.
+- Public arbitrary model-call and stage-mutation endpoints are removed.
+- LangGraph remains internal; frontend sees product-level runs and stages.
+- Demo mode uses the integrated persistence/execution path.
+- Capability assets are visible and composable without becoming a generic builder.
+- Maker agents reuse the conversation UI instead of adding more forms.
+- Qwen provider support reduces live debugging cost without changing workflow code.
 
-### P0 — asset relationship integrity
+## Resolved or improved risks
 
-The durable product chain must remain explicit:
+### Workflow lifecycle
 
-```text
-Workspace
- -> SourceMaterial / AccountProfile
- -> AnalysisRun
- -> Topic
- -> Draft
- -> SimulationRun
-```
+Older risk: opening an SSE connection started execution.
 
-Avoid text matching or implicit “current tab” inference when linking artifacts. Use IDs and immutable input snapshots.
+Current status: materially improved.
 
-### P1 — context access layer
+Execution starts from POST-created runs and the backend worker owns execution.
+SSE is now observation-oriented.
 
-Agents/workflows need broad access to creator context assets, but not arbitrary filesystem access.
+Remaining gap: duplicate user POSTs can still create multiple distinct runs.
+The worker prevents duplicate execution for the same run ID, but the API does
+not yet accept an idempotency key or client request ID.
 
-The right model is a product-specific context access layer that gives agents a global workspace view:
+### Public execution mutation
 
-- lookup account profile by workspace ID;
-- retrieve selected source material by product type/ID;
-- retrieve analysis run summaries/results;
-- retrieve selected topic/draft;
-- persist generated artifact through domain services;
-- build broad workspace context packs with exact deep asset content where useful;
-- record source refs, hashes, omissions, and budget decisions.
+Older risk: browser endpoints could forge model calls or mutate stage results.
 
-This can look MCP-like internally, but it should remain product-scoped and should not become a generic tool marketplace or filesystem bridge.
+Current status: improved.
 
-### P1 — skill/agent/workflow asset semantics
+Tests verify these routes are not public:
 
-Current skill assets are still close to “prompted capability definitions.” The target model should be stronger:
+- `PATCH /api/analysis-runs/{run_id}`
+- `PUT /api/analysis-runs/{run_id}/stages/{stage_key}`
+- `POST /api/model-calls`
 
-- **Skill**: a reusable bounded capability with name, purpose, input contract, output contract, prompt/instructions, model policy, context requirements, and validation rules.
-- **Agent**: a role with a system prompt plus an allowed skill set.
-- **Workflow**: a product-specific multi-agent/multi-skill task graph with fixed code-owned execution semantics.
+Remaining gap: there is no authentication by design, so a local caller with an
+object ID can still operate on records. This is acceptable for the current
+single-user local product, but it is not a deployable security boundary.
 
-For now these are editable by developers through code/database seed/migrations, not by end users in the frontend.
+### Provider key handling
 
-### P1 — per-node context minimization
+Older prototype risk: browser-side Anthropic key.
 
-Every model call should declare:
+Current status: fixed for migrated app.
 
-- input fields;
-- source asset IDs;
-- included global workspace context;
-- deep exact asset requests;
-- summarization/truncation rule;
-- output schema;
-- downstream consumers.
+Live generation keys now stay in backend environment variables.
 
-The graph state should hold compact structured data and references, not complete workspace state or raw uploaded files. The model-call context pack may be broad; the durable graph state should remain compact.
+## Recently resolved findings
 
-### P1 — frontend state isolation
+### Resolved — maker agents receive capability catalog context
 
-The UI must not share one global stage view across account diagnosis, trend analysis, and audience simulation. Each product execution surface needs its own state keyed by workflow/run identity.
+`ContextAccessService` now includes a `capability_catalog` item in broad
+workspace packs.
 
-This prevents results from one run appearing in the wrong panel after switching pages, reopening history, or running simulations from drafts.
+The catalog contains:
 
-### P1 — demo mode parity
+- Skill summaries;
+- Agent summaries;
+- Workflow asset summaries and task plans.
 
-Demo mode should approximate the original prototype’s examples, but it must use the same persistence and execution paths as live mode. Demo fixtures should never masquerade as live generated artifacts.
+`AgentConversationService` also ensures built-in Skills, Agents, and Workflows
+are materialized before building the conversation context pack. Maker agents no
+longer depend on the user manually opening the capability pages first.
 
-### P2 — componentization
+Remaining gap: when a maker is launched from a specific selected
+Skill/Agent/Workflow detail page, that selected asset detail is not yet passed
+as a first-class conversation context target.
 
-`frontend/src/App.tsx` is still too large. The next maintainability step is to split by product surface:
+### Resolved — proposed actions have an executable proposal loop
 
-- workspace shell/layout;
-- account profile/materials;
-- workflow calls;
-- analysis history;
-- topic library;
-- capability asset inspectors;
-- simulation history;
-- shared renderers for profile/pain/topic/structure/simulation outputs.
+Agent conversation `proposedActions` are now converted into persisted
+`AssetProposal` rows.
 
-This is important, but less urgent than execution lifecycle and artifact correctness.
+Implemented:
+
+- proposal source tracking: workspace, conversation, message;
+- `apply` and `reject` endpoints;
+- frontend review/apply/reject controls in the Agent conversation panel;
+- product-specific apply logic for:
+  - `workspace.update_profile`;
+  - `topic.create_or_update`;
+  - `skill.propose_definition`;
+  - `agent.propose_definition`;
+  - `workflow.propose_definition`.
+
+Capability assets created from maker proposals are stored as `source =
+generated`, separate from built-in assets.
+
+Remaining gap: proposal editing before apply is still minimal. The current path
+assumes the model returns a valid structured payload and lets the user apply or
+reject it.
+
+### Resolved — capability asset seed updates are no longer append-only
+
+Built-in Skills, Agents, and Workflow assets now store `definition_hash`.
+
+On sync:
+
+- missing built-ins are inserted;
+- changed built-ins with `source = builtin` are updated in place;
+- user-editable `status` and `user_notes` are preserved;
+- generated assets are not overwritten by built-in sync.
+
+This resolves stale prompts, skill lists, context policies, and workflow task
+plans for existing workspaces after code-defined catalog changes.
+
+### Improved — SSE observation now supports reconnect/poll fallback
+
+SSE endpoints still rebuild events from persisted run snapshots rather than a
+durable event log. However:
+
+- event IDs now use stable sequence numbers;
+- endpoints accept `Last-Event-ID` and `?after=sequence`;
+- frontend falls back to polling the persisted run snapshot after SSE failure.
+
+Remaining gap: this is still observation replay, not a durable event log.
+
+### Improved — conversation provider failure is now auditable
+
+Live conversation model failures now create an assistant failure message instead
+of leaving only the user message. The failure is recorded in message
+`modelMetadata`.
+
+Remaining gaps:
+
+- conversation calls are still synchronous HTTP requests;
+- there is no conversation-level queued/running state;
+- retrying can still create another user message.
+
+## Current high-priority findings
+
+### P1 — in-process worker is good for local use but not durable execution
+
+`WorkflowWorkerService` is currently an in-process asyncio task runner.
+
+Strengths:
+
+- prevents duplicate execution for the same in-process run key;
+- resumes unfinished runs at app startup;
+- is simple and aligned with local SQLite.
+
+Remaining risks:
+
+- process crash during an external model call may repeat the current stage on
+  restart;
+- no durable job claim/lease is stored in SQLite;
+- no per-run idempotency key protects against repeated POSTs;
+- no retry policy is stored per stage;
+- no structured worker failure record separate from workflow stage failure.
+
+Recommended next step:
+
+- Keep the in-process worker, but add SQLite job claim metadata:
+  `claimed_at`, `claim_owner`, `attempt_count`, `last_heartbeat_at`.
+- Add API-level idempotency for run creation.
+
+### P1 — SSE observation is reconnectable but not durable replay
+
+SSE endpoints rebuild events from persisted run snapshots.
+
+This is acceptable for progressive rendering, but it is not a durable event log.
+
+Current gaps:
+
+- no stored event IDs;
+- sequence IDs are replay-friendly but derived from current snapshot order;
+- no event payload is persisted for audit/debug replay.
+
+Recommended fix:
+
+- Keep snapshot-first loading.
+- Only add durable event log if debugging or audit requirements justify it.
+
+### P1 — conversations execute live model calls synchronously in request
+
+Agent conversation message sending persists the user message, builds context,
+calls the provider, then persists the assistant message.
+
+This is acceptable for a first conversation slice, but differs from workflow
+execution.
+
+Risks:
+
+- long live calls hold the HTTP request;
+- if the model call fails, the user message remains without an assistant error
+- there is no conversation-level `running` or `failed` status;
+- retrying from the UI can create repeated user messages.
+
+Recommended fix:
+
+- Add message-level status for assistant generation.
+- Consider moving live conversation responses to the same worker/observe pattern
+  if conversations become central.
+
+### P1 — context packs favor breadth but need explicit budget policy
+
+The broad Context Access Layer matches the current product philosophy:
+give agents enough global workspace vision instead of starving them.
+
+Current gaps:
+
+- budget is per text material (`max_summary_chars`) rather than per full pack;
+- `selectors` are recorded but not enforced;
+- no model-specific token budget policy;
+- no warning when the pack becomes too large for the selected provider/model.
+
+Recommended fix:
+
+- Add pack-level budget metadata:
+  - estimated characters/tokens;
+  - included exact items;
+  - summarized items;
+  - omitted items;
+  - provider/model budget hint.
+- Keep the broad default, but make truncation auditable and deterministic.
+
+### P1 — Qwen provider needs model-specific structured-output hardening
+
+Qwen support is correctly isolated behind `ModelCallService`, but structured
+output still relies on prompt-only JSON.
+
+Risks:
+
+- OpenAI-compatible providers may return non-JSON prose or fenced JSON;
+- Qwen model variants may differ in tool/JSON support;
+- error responses are reduced to status code, which is safe but weak for local
+  debugging.
+
+Recommended fix:
+
+- Add provider-specific structured output options where supported.
+- Keep current JSON parser fallback.
+- Log sanitized provider error body in backend logs, not in frontend responses.
+- Add integration fixtures for realistic Qwen responses.
+
+### P1 — `frontend/src/App.tsx` is now a bottleneck
+
+`App.tsx` contains:
+
+- workspace loading;
+- source material editing;
+- workflow execution;
+- SSE state reducers;
+- topic/draft/simulation UI;
+- skill/agent/workflow inspectors;
+- conversation UI;
+- maker shortcuts.
+
+The file is still manageable but fragile.
+
+Recommended split:
+
+- `WorkspaceShell`
+- `ContextAssetSidebar`
+- `CapabilitySidebar`
+- `WorkflowCallPanel`
+- `AnalysisOutputPanel`
+- `TopicLibraryPage`
+- `CapabilityAssetsPage`
+- `AgentConversationPanel`
+- shared hooks:
+  - `useWorkspaceData`
+  - `useAnalysisRunObserver`
+  - `useSimulationRunObserver`
+  - `useAgentConversation`
+
+Do this after the next product behavior stabilizes, not before.
+
+## Medium-priority findings
+
+### P2 — Draft generation is synchronous
+
+Draft generation creates a persisted Draft, but the endpoint itself awaits live
+model generation.
+
+This is acceptable for now because draft generation is smaller than full
+workflows, but if live structure generation becomes slow or expensive, it
+should follow the same create-run/observe pattern.
+
+### P2 — no capability asset detail in context-aware UI shortcuts
+
+Maker CTA buttons prefill useful prompts, but they do not pass the selected
+Skill/Agent/Workflow ID as structured context.
+
+Recommended fix:
+
+- When starting from a selected capability asset, pass a structured
+  `conversationContext` or initial message metadata.
+- Let the backend include the selected asset detail in the context pack.
+
+### P2 — proposed action validation is too loose
+
+`RealAgentConversationModelProvider` validates only:
+
+- `type` is a non-empty string;
+- `description` is a non-empty string;
+- status is forced to `requires_confirmation`.
+
+Recommended fix:
+
+- Define allowed action types.
+- Define schema per action type.
+- Reject or downgrade unknown action types to plain text recommendations.
+
+### P2 — demo conversation is deterministic but shallow
+
+Demo provider is useful for tests and local UI, but maker demo output is not a
+real proposal. It only returns a generic reply plus proposed action hints.
+
+Recommended fix:
+
+- Add richer deterministic demo replies for maker agents.
+- Keep them obviously labeled as demo proposals.
 
 ## Product model to preserve
 
 ### Context assets
+
+These are user-facing creator records:
 
 - Workspace
 - Account Profile
@@ -168,22 +401,30 @@ This is important, but less urgent than execution lifecycle and artifact correct
 - Draft / Content Structure
 - Simulation Run
 
-These are user-facing product records.
-
 ### Capability assets
+
+These are product-owned capability records:
 
 - Skill
 - Agent
 - Workflow Asset
 - Workflow Call
+- Agent Conversation
+- Asset Proposal (recommended next)
 
-These are product-owned capability records. They may be rendered for inspection and internal management, but they are not a generic builder surface.
+Capability assets should be inspectable and composable. They should not become:
 
-## Skill interpretation
+- a generic filesystem;
+- a plugin marketplace;
+- a VS Code clone;
+- a general workflow editor;
+- a generic agent builder.
 
-A prompt alone is not a full skill.
+## Skill, Agent, Workflow semantics
 
-A proper product skill should include:
+### Skill
+
+A skill should be more than a prompt. It should include:
 
 - stable ID and version;
 - product purpose;
@@ -196,89 +437,48 @@ A proper product skill should include:
 - allowed downstream artifact writes;
 - provenance metadata.
 
-This lets skills be composed by agents and workflows without letting them access arbitrary workspace data.
+### Agent
 
-## Agent interpretation
+An agent is a reusable product role:
 
-An agent is not a permanent autonomous user-configured bot. In this product it is a reusable runtime role:
-
-- system prompt/personality/decision frame;
+- system prompt;
 - allowed skill list;
 - context access policy;
 - output obligations;
 - failure behavior.
 
-Audience simulation personas are not the same as configurable platform agents. They are product-specific runtime roles generated inside a simulation run.
+Audience simulation personas are not the same as configurable platform agents.
+They are runtime roles generated inside one simulation workflow.
 
-## Workflow interpretation
+### Workflow
 
-A workflow is a product-owned node graph over agents/skills/tasks.
-
-It should store:
+A workflow is a product-owned task graph:
 
 - workflow key;
 - version;
 - product purpose;
-- node definitions;
-- fixed edges/routing policy;
+- entry agents;
+- task/node definitions;
+- dependencies and parallel sections;
 - required input assets;
 - generated output assets;
 - visible stage mapping.
 
-It should not expose arbitrary frontend editing yet.
-
-## Context access design
-
-Preferred direction:
-
-```text
-Workflow node
-  -> requests broad workspace context + deep asset refs
-  -> Context Access service resolves product assets
-  -> node receives a global but budget-aware context pack
-  -> node returns structured output
-  -> Domain service persists product artifact
-```
-
-Examples:
-
-- Account profile analysis receives the workspace profile, historical post content/projection, and broader topic/history context.
-- Comment pain-point analysis receives comments plus workspace profile and relevant prior audience context.
-- Trend analysis receives ranked top-50 CSV projection, keyword, account profile, and related topic/history context.
-- Topic generation receives prior structured results plus topic library and draft/simulation history to avoid repetition.
-- Draft generation receives selected topic plus relevant voice/structure signals and surrounding topic/draft history.
-- Audience reaction receives one persona, the topic/draft target, and a simulation-specific workspace context pack.
-
-## What not to add now
-
-- Generic filesystem
-- Generic folder tree
-- Arbitrary file editing
-- Monaco editor
-- Plugin marketplace
-- User-editable workflow builder
-- Generic MCP exposure to the frontend
-- Authentication/multi-tenancy/organization management
-- Cloud object storage
-- Vector database
-- VS Code-like workspace
-
 ## Recommended priority order
 
-1. Finish execution lifecycle refactor: create run, worker executes, UI observes.
-2. Remove or lock public execution mutation/model-call endpoints.
-3. Enforce explicit artifact relationships by ID.
-4. Build the product-specific context access layer for broad workspace packs.
-5. Strengthen Skill/Agent/Workflow asset schemas and seed/version strategy.
-6. Keep demo mode on the same persistence path as live mode.
-7. Split the large frontend file after behavior is stable.
-8. Add stronger restart, duplicate-run, and context-exclusion tests.
+1. Add idempotency key support for workflow run creation.
+2. Add pack-level context budget metadata.
+3. Add selected capability asset detail to maker conversation context.
+4. Harden Qwen structured-output handling with provider-specific fixtures.
+5. Add conversation-level queued/running/failed state if conversations become
+   central.
+6. Split `frontend/src/App.tsx` after the above behavior stabilizes.
 
 ## Acceptance criteria for the next architecture pass
 
-- A browser refresh cannot start duplicate execution.
-- Reopening a history item cannot route output to the wrong workflow panel.
-- Running simulation from a draft does not require unrelated source material inputs.
-- Every generated user-visible artifact has a database record.
-- Every model call can prove which context assets it received, which assets were summarized, and which were omitted due to budget or product boundary.
-- Skill/Agent/Workflow assets are inspectable and internally composable, without becoming a generic builder.
+- Retrying a workflow POST with the same client request ID does not create a
+  duplicate run.
+- Context packs show total size, source refs, exact/summarized/omitted assets,
+  and provider/model budget assumptions.
+- Maker conversations launched from a selected Skill/Agent/Workflow include that
+  selected asset detail explicitly.

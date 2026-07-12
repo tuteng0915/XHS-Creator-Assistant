@@ -5,11 +5,14 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from app.repositories.agents import AgentRepository
 from app.repositories.analysis_runs import AnalysisRunRepository
 from app.repositories.drafts import DraftRepository
 from app.repositories.simulation_runs import SimulationRunRepository
+from app.repositories.skills import SkillRepository
 from app.repositories.source_materials import SourceMaterialRepository
 from app.repositories.topics import TopicRepository
+from app.repositories.workflow_assets import WorkflowAssetRepository
 from app.services.common import utc_now
 
 
@@ -30,12 +33,18 @@ class ContextAccessService:
         topic_repository: TopicRepository,
         draft_repository: DraftRepository,
         simulation_repository: SimulationRunRepository,
+        skill_repository: SkillRepository,
+        agent_repository: AgentRepository,
+        workflow_repository: WorkflowAssetRepository,
     ) -> None:
         self.source_repository = source_repository
         self.analysis_repository = analysis_repository
         self.topic_repository = topic_repository
         self.draft_repository = draft_repository
         self.simulation_repository = simulation_repository
+        self.skill_repository = skill_repository
+        self.agent_repository = agent_repository
+        self.workflow_repository = workflow_repository
 
     def build_workspace_pack(
         self,
@@ -70,11 +79,11 @@ class ContextAccessService:
 
         items.append(
             self._item(
-                key="source_materials_overview",
+                key="input_assets_overview",
                 asset_type="workspace",
                 asset_id=workspace_id,
                 workspace_id=workspace_id,
-                selector="source_materials_overview",
+                selector="input_assets_overview",
                 role="global_context",
                 data=[
                     self._summarize_material(row, max_summary_chars, omitted)
@@ -142,6 +151,30 @@ class ContextAccessService:
                         :10
                     ]
                 ],
+            )
+        )
+        items.append(
+            self._item(
+                key="capability_catalog",
+                asset_type="workspace",
+                asset_id=workspace_id,
+                workspace_id=workspace_id,
+                selector="capability_catalog",
+                role="capability_catalog",
+                data={
+                    "skills": [
+                        self._summarize_skill(row)
+                        for row in self.skill_repository.list(connection, workspace_id)
+                    ],
+                    "agents": [
+                        self._summarize_agent(row)
+                        for row in self.agent_repository.list(connection, workspace_id)
+                    ],
+                    "workflows": [
+                        self._summarize_workflow(row)
+                        for row in self.workflow_repository.list(connection, workspace_id)
+                    ],
+                },
             )
         )
 
@@ -249,7 +282,8 @@ class ContextAccessService:
                 {
                     "assetRef": {
                         "workspaceId": row["workspace_id"],
-                        "assetType": "source_material",
+                        "assetType": "input_asset",
+                        "assetSubType": row["type"],
                         "assetId": row["id"],
                         "role": row["type"],
                     },
@@ -312,6 +346,50 @@ class ContextAccessService:
             "updatedAt": row["updated_at"],
             "completedAt": row["completed_at"],
             "errorStages": list(stage_errors.keys()),
+        }
+
+    def _summarize_skill(self, row: dict) -> dict[str, Any]:
+        return {
+            "assetId": row["id"],
+            "skillId": row["skill_id"],
+            "displayName": row["display_name"],
+            "category": row["category"],
+            "purpose": row["purpose"],
+            "requiredInputs": json.loads(row["required_inputs_json"]),
+            "optionalInputs": json.loads(row["optional_inputs_json"]),
+            "artifactEffect": row["artifact_effect"],
+            "failureMode": row["failure_mode"],
+            "composableWith": json.loads(row["composable_with_json"]),
+            "status": row["status"],
+            "source": row["source"],
+            "version": row["version"],
+        }
+
+    def _summarize_agent(self, row: dict) -> dict[str, Any]:
+        return {
+            "assetId": row["id"],
+            "agentId": row["agent_id"],
+            "displayName": row["display_name"],
+            "purpose": row["purpose"],
+            "skillIds": json.loads(row["skill_ids_json"]),
+            "defaultContextPolicy": json.loads(row["default_context_policy_json"]),
+            "status": row["status"],
+            "source": row["source"],
+            "version": row["version"],
+        }
+
+    def _summarize_workflow(self, row: dict) -> dict[str, Any]:
+        return {
+            "assetId": row["id"],
+            "workflowId": row["workflow_id"],
+            "displayName": row["display_name"],
+            "purpose": row["purpose"],
+            "entryAgentIds": json.loads(row["entry_agent_ids_json"]),
+            "artifactEffect": row["artifact_effect"],
+            "agentPlan": json.loads(row["agent_plan_json"]),
+            "status": row["status"],
+            "source": row["source"],
+            "version": row["version"],
         }
 
     def _hash(self, value: Any) -> str:

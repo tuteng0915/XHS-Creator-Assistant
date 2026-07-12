@@ -117,3 +117,21 @@ def test_unfinished_run_resumes_after_app_restart(app: FastAPI) -> None:
     completed = send(restarted, "GET", f"/api/analysis-runs/{run['id']}").json()
     assert completed["status"] == "completed"
     assert completed["stageResults"]["topics"]["topics"]
+
+
+def test_analysis_sse_replay_can_skip_seen_sequence(app: FastAPI) -> None:
+    run = create_pending_account_run(app)
+
+    async def execute() -> None:
+        await app.state.workflow_worker.enqueue_analysis_run(run["id"])
+        await app.state.workflow_worker.wait_for_idle()
+
+    asyncio.run(execute())
+
+    response = send(app, "GET", f"/api/analysis-runs/{run['id']}/events?after=2")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "id: 1" not in body
+    assert "id: 2" not in body
+    assert "run.succeeded" in body

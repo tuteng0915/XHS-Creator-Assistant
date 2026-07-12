@@ -551,62 +551,60 @@ These should extend current product workflows rather than replace them with a ge
 7. Structured context over unlimited history.
 8. Persistent value over one-time generation.
 
-## 13. Proposed Near-Term Implementation Sequence
+## 13. Current Conversation / Capability Implementation Status
 
-### Slice A: Conversation domain model
+### Implemented
 
-Add product-specific conversation persistence:
+The project now has the first conversation and capability-asset layer:
 
-- `conversation_threads`
-- `conversation_messages`
-- optional `conversation_actions`
+- workspace-scoped agent conversations;
+- persisted user and assistant messages;
+- assistant message `proposedActions`;
+- provider-backed live replies through `ModelCallService`;
+- deterministic demo replies for local testing;
+- Skill, Agent, and Workflow assets;
+- maker agents:
+  - `Skill Maker`;
+  - `Agent Maker`;
+  - `Workflow Maker`.
 
-Keep it workspace-scoped.
+Conversation is still not the source of truth for artifacts. It is an interface
+for proposing or triggering product actions.
 
-Do not store conversation as the source of truth for artifacts.
+### Current gap: proposals are not yet assets
 
-### Slice B: Intent recognition service
+Maker agents currently produce chat replies and `proposedActions`, but those
+actions are not structured proposal records.
 
-Add a backend service that maps a message to a product action:
+Next step:
 
-- deterministic rules first;
-- LLM classifier later if needed;
-- output must be a typed action enum plus structured arguments.
+- add `AssetProposal`;
+- store proposal kind: `skill`, `agent`, or `workflow`;
+- store source conversation/message ID;
+- validate proposal JSON through product-specific schemas;
+- allow confirm/apply through domain services.
 
-### Slice C: Action dispatcher
+### Current gap: capability context is incomplete
 
-Map recognized actions to existing services:
+Maker agents should see the existing capability catalog, but current broad
+workspace context packs focus on creator context assets.
 
-- create AnalysisRun;
-- create SimulationRun;
-- generate Draft;
-- create/update/select Topic;
-- fetch history.
+Next step:
 
-No arbitrary filesystem or generic tool execution.
+- add Skill / Agent / Workflow overviews to `ContextAccessService`;
+- include selected capability asset details when a maker is launched from a
+  detail page;
+- cite capability assets with source refs and hashes.
 
-### Slice D: Conversation UI
+### Still future
 
-Add a right or bottom conversation panel inside the workspace:
-
-- messages;
-- detected action preview;
-- created artifact links;
-- run progress summaries.
-
-Do not replace the current workspace UI.
-
-### Slice E: Workflow configs
-
-Introduce static workflow config files:
+Static workflow config files are still future:
 
 - load and validate at startup;
 - record config version in AnalysisRun / SimulationRun / Draft metadata;
 - keep graph topology in code.
 
-### Slice F: Refinement workflows
-
-Add first artifact update workflows:
+Artifact refinement workflows are also still future:
 
 - refine Topic;
 - rewrite Draft from simulation feedback.

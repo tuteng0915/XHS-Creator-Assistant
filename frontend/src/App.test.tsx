@@ -94,6 +94,15 @@ const materials: Record<string, SourceMaterial[]> = {
       createdAt: '2026-07-11T11:00:00Z',
       updatedAt: '2026-07-11T11:00:00Z',
     },
+    {
+      id: 'video-samples-2',
+      workspaceId: 'workspace-2',
+      type: 'video_creator_samples',
+      name: '视频创作者样本',
+      content: '创作者：@AI短剧研究所\n运营备注：剧情内容催更多，商单互动低。',
+      createdAt: '2026-07-11T11:00:00Z',
+      updatedAt: '2026-07-11T11:00:00Z',
+    },
   ],
 }
 
@@ -608,14 +617,16 @@ describe('workspace UI', () => {
     installWorkspaceApiMock()
     render(<App />)
 
-    fireEvent.click((await screen.findAllByRole('button', { name: /Account Profile/ }))[0])
+    await screen.findByText('账号诊断待运行')
+    fireEvent.click((await screen.findAllByRole('button', { name: /Account Profiles/ }))[0])
     expect(
       await screen.findByDisplayValue('帮助文科生做留学决策。'),
     ).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: /Source Materials/ })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: /Historical Posts/ })[0])
     expect(
       await screen.findByDisplayValue('留学中介到底值不值｜赞1.1k｜爆'),
     ).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: /Comment Samples/ })[0])
     expect(
       screen.getByDisplayValue('双非背景冲英国前30有戏吗？'),
     ).toBeInTheDocument()
@@ -624,25 +635,33 @@ describe('workspace UI', () => {
       target: { value: 'workspace-2' },
     })
 
-    fireEvent.click((await screen.findAllByRole('button', { name: /Account Profile/ }))[0])
+    fireEvent.click((await screen.findAllByRole('button', { name: /Account Profiles/ }))[0])
     expect(
       await screen.findByDisplayValue('记录真实的数字游民转型路径。'),
     ).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: /Source Materials/ })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: /Historical Posts/ })[0])
     expect(
       await screen.findByDisplayValue('普通小孩不要轻易尝试数字游民｜赞953｜爆'),
     ).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: /Comment Samples/ })[0])
     expect(
       screen.getByDisplayValue('文科生能做数字游民吗？'),
     ).toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole('button', { name: /Trend CSV Data/ }))
     expect(screen.getByDisplayValue('数字游民')).toBeInTheDocument()
     expect(screen.getAllByText('数字游民趋势.csv').length).toBeGreaterThan(0)
     expect(screen.getByText('普通人如何开始数字游民')).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: /Video Creator Samples/ })[0])
+    expect(screen.getByDisplayValue(/@AI短剧研究所/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Trend Analysis/ }))
     expect(await screen.findByText('Trend CSV')).toBeInTheDocument()
-    expect(screen.getByText(/数字游民趋势.csv/)).toBeInTheDocument()
+    expect(screen.getAllByText(/数字游民趋势.csv/).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: /Video Creator Quality/ }))
+    await screen.findByText('视频创作者诊断待运行')
+    expect(screen.getAllByText('Video Creator Samples').length).toBeGreaterThan(0)
+    expect(screen.getByText(/2 行/)).toBeInTheDocument()
   })
 
   it('shows workspace skills as product assets', async () => {
@@ -858,20 +877,23 @@ describe('workspace UI', () => {
       })
 
     render(<App />)
-    fireEvent.click((await screen.findAllByRole('button', { name: /Source Materials/ }))[0])
+    fireEvent.click((await screen.findAllByRole('button', { name: /Historical Posts/ }))[0])
     const historicalEditor = await screen.findByLabelText(
       '主页 / 历史笔记 + 数据（格式：标题 ｜ 数据 ｜ 爆/平/差）',
     )
-    const commentsEditor = await screen.findByLabelText('评论区原文（一行一条）')
     fireEvent.change(historicalEditor, {
       target: { value: '留学中介到底值不值｜赞1.1k｜爆' },
     })
+    fireEvent.click(screen.getAllByRole('button', { name: /Comment Samples/ })[0])
+    const commentsEditor = await screen.findByLabelText('评论区原文（一行一条）')
     fireEvent.change(commentsEditor, { target: { value: '这是一条新评论' } })
 
     expect(
       fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST'),
     ).toHaveLength(0)
-    expect(screen.queryByRole('button', { name: '保存评论' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /保存.*评论样本/ }),
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Account Diagnosis/ }))
     fireEvent.click(screen.getByRole('button', { name: '⚡ 生成账号诊断' }))
@@ -883,11 +905,196 @@ describe('workspace UI', () => {
     })
   })
 
+  it('auto-saves video creator samples before creating a video quality run', async () => {
+    class MockEventSource {
+      private listeners = new Map<string, EventListener[]>()
+
+      constructor(readonly url: string) {
+        setTimeout(() => {
+          this.dispatch('run.succeeded', {
+            eventId: 'event-video',
+            runId: 'run-video',
+            runType: 'video_creator_quality',
+            stageKey: null,
+            status: 'completed',
+            sequence: 1,
+            occurredAt: '2026-07-11T12:00:01Z',
+            data: { eventType: 'run.succeeded' },
+          })
+        }, 0)
+      }
+
+      addEventListener(type: string, listener: EventListener) {
+        this.listeners.set(type, [...(this.listeners.get(type) || []), listener])
+      }
+
+      close() {
+        // Test double does not keep an open network connection.
+      }
+
+      private dispatch(type: string, payload: unknown) {
+        const event = new MessageEvent(type, { data: JSON.stringify(payload) })
+        ;(this.listeners.get(type) || []).forEach((listener) => listener(event))
+      }
+    }
+
+    vi.stubGlobal('EventSource', MockEventSource)
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input, init) => {
+        const url = String(input)
+        const method = init?.method || 'GET'
+        if (url === '/api/workspaces' && method === 'GET') {
+          return jsonResponse([workspaceOne])
+        }
+        if (url === '/api/workspaces/workspace-1' && method === 'GET') {
+          return jsonResponse(workspaceOne)
+        }
+        if (
+          url === '/api/workspaces/workspace-1/source-materials' &&
+          method === 'GET'
+        ) {
+          return jsonResponse([])
+        }
+        if (
+          url === '/api/workspaces/workspace-1/analysis-runs' &&
+          method === 'GET'
+        ) {
+          return jsonResponse([])
+        }
+        if (
+          url === '/api/workspaces/workspace-1/simulation-runs' &&
+          method === 'GET'
+        ) {
+          return jsonResponse([])
+        }
+        if (url === '/api/workspaces/workspace-1/skills' && method === 'GET') {
+          return jsonResponse([])
+        }
+        if (url === '/api/workspaces/workspace-1/agents' && method === 'GET') {
+          return jsonResponse([])
+        }
+        if (
+          url === '/api/workspaces/workspace-1/agent-conversations' &&
+          method === 'GET'
+        ) {
+          return jsonResponse([])
+        }
+        if (url === '/api/workspaces/workspace-1/workflows' && method === 'GET') {
+          return jsonResponse([])
+        }
+        if (url === '/api/workspaces/workspace-1/drafts' && method === 'GET') {
+          return jsonResponse([])
+        }
+        if (url === '/api/workspaces/workspace-1/topics' && method === 'GET') {
+          return jsonResponse([])
+        }
+        if (
+          url === '/api/workspaces/workspace-1/source-materials' &&
+          method === 'POST'
+        ) {
+          const body = JSON.parse(String(init?.body)) as {
+            type: 'video_creator_samples'
+            name: string
+            content: string
+          }
+          expect(body.type).toBe('video_creator_samples')
+          expect(body.content).toContain('@AI短剧研究所')
+          return jsonResponse(
+            {
+              id: 'new-video-samples',
+              workspaceId: 'workspace-1',
+              type: body.type,
+              name: body.name,
+              content: body.content,
+              createdAt: '2026-07-11T12:00:00Z',
+              updatedAt: '2026-07-11T12:00:00Z',
+            },
+            201,
+          )
+        }
+        if (
+          url === '/api/workspaces/workspace-1/analysis-runs' &&
+          method === 'POST'
+        ) {
+          const body = JSON.parse(String(init?.body)) as {
+            workflowType?: string
+            videoCreatorSamplesMaterialId?: string
+          }
+          expect(body.workflowType).toBe('video_creator_quality')
+          expect(body.videoCreatorSamplesMaterialId).toBe('new-video-samples')
+          return jsonResponse(
+            {
+              id: 'run-video',
+              workspaceId: 'workspace-1',
+              workflowType: 'video_creator_quality',
+              status: 'running',
+              inputSnapshot: {},
+              stageResults: {},
+              stageErrors: {},
+              modelMetadata: { mode: 'demo' },
+              createdAt: '2026-07-11T12:00:00Z',
+              startedAt: null,
+              completedAt: null,
+              updatedAt: '2026-07-11T12:00:00Z',
+            },
+            201,
+          )
+        }
+        if (url === '/api/analysis-runs/run-video' && method === 'GET') {
+          return jsonResponse({
+            id: 'run-video',
+            workspaceId: 'workspace-1',
+            workflowType: 'video_creator_quality',
+            status: 'completed',
+            inputSnapshot: {},
+            stageResults: {},
+            stageErrors: {},
+            modelMetadata: { mode: 'demo' },
+            createdAt: '2026-07-11T12:00:00Z',
+            startedAt: '2026-07-11T12:00:00Z',
+            completedAt: '2026-07-11T12:00:01Z',
+            updatedAt: '2026-07-11T12:00:01Z',
+          })
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`)
+      })
+
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /Video Creator Samples/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Video Creator Samples/ }),
+    )
+    fireEvent.change(
+      await screen.findByLabelText(
+        '视频创作者样本（创作者背景、视频样本、互动数据、运营备注）',
+      ),
+      {
+        target: {
+          value: '创作者：@AI短剧研究所\n运营备注：剧情内容催更多。',
+        },
+      },
+    )
+
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST'),
+    ).toHaveLength(0)
+
+    fireEvent.click(screen.getByRole('button', { name: /Video Creator Quality/ }))
+    fireEvent.click(screen.getByRole('button', { name: '⚡ 生成视频创作者诊断' }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST'),
+      ).toHaveLength(2)
+    })
+  })
+
   it('opens a saved analysis run from history', async () => {
     installWorkspaceApiMock()
     render(<App />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /Analysis History/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Analysis Results/ }))
     fireEvent.click(await screen.findByRole('button', { name: /账号诊断/ }))
 
     expect(await screen.findByText('原始输入快照')).toBeInTheDocument()
@@ -916,16 +1123,18 @@ describe('workspace UI', () => {
     installWorkspaceApiMock()
     render(<App />)
 
-    expect(await screen.findByText('Context Assets')).toBeInTheDocument()
+    expect(await screen.findByText('Input Assets')).toBeInTheDocument()
+    expect(screen.getByText('Reusable Outputs')).toBeInTheDocument()
     expect(screen.getByText('Capability Assets')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Account Profile/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Analysis History/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Account Profiles/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Analysis Results/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Skills/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Agents/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Workflows/ })).toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: /Content Drafts/ }),
     ).not.toBeInTheDocument()
+    expect(screen.queryByText('Content Drafts')).not.toBeInTheDocument()
   })
 
   it('opens a saved audience simulation from history', async () => {

@@ -16,6 +16,12 @@ from app.workflows.trend_analysis import (
     RealTrendAnalysisModelProvider,
     TrendAnalysisWorkflowService,
 )
+from app.workflows.video_creator_quality import (
+    VIDEO_CREATOR_QUALITY_STAGE_ORDER,
+    FakeVideoCreatorQualityModelProvider,
+    RealVideoCreatorQualityModelProvider,
+    VideoCreatorQualityWorkflowService,
+)
 
 __all__ = [
     "AccountDiagnosisWorkflowService",
@@ -24,10 +30,14 @@ __all__ = [
     "FakeAccountDiagnosisModelProvider",
     "FakeAudienceSimulationModelProvider",
     "FakeTrendAnalysisModelProvider",
+    "FakeVideoCreatorQualityModelProvider",
     "RealAccountDiagnosisModelProvider",
     "RealAudienceSimulationModelProvider",
     "RealTrendAnalysisModelProvider",
+    "RealVideoCreatorQualityModelProvider",
     "SIMULATION_STAGE_ORDER",
     "TREND_STAGE_ORDER",
+    "VIDEO_CREATOR_QUALITY_STAGE_ORDER",
     "TrendAnalysisWorkflowService",
+    "VideoCreatorQualityWorkflowService",
 ]

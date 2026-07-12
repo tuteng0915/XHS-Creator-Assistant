@@ -20,6 +20,8 @@ class WorkflowAssetRepository:
         artifact_effect: str,
         version: str,
         now: str,
+        source: str = "builtin",
+        definition_hash: str = "",
     ) -> dict:
         asset_id = str(uuid4())
         connection.execute(
@@ -28,8 +30,9 @@ class WorkflowAssetRepository:
                 id, workspace_id, workflow_id, display_name, purpose,
                 entry_agent_ids_json, agent_plan_json, artifact_effect,
                 source, status, version, user_notes, created_at, updated_at
+                , definition_hash
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'builtin', 'enabled', ?, '', ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'enabled', ?, '', ?, ?, ?)
             """,
             (
                 asset_id,
@@ -40,9 +43,11 @@ class WorkflowAssetRepository:
                 entry_agent_ids_json,
                 agent_plan_json,
                 artifact_effect,
+                source,
                 version,
                 now,
                 now,
+                definition_hash,
             ),
         )
         return self.get(connection, asset_id)
@@ -111,4 +116,43 @@ class WorkflowAssetRepository:
         )
         if cursor.rowcount != 1:
             raise ConflictError("Workflow changed since it was loaded")
+        return self.get(connection, workflow_asset_id)
+
+    def update_builtin_definition(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        workflow_asset_id: str,
+        display_name: str,
+        purpose: str,
+        entry_agent_ids_json: str,
+        agent_plan_json: str,
+        artifact_effect: str,
+        version: str,
+        definition_hash: str,
+        now: str,
+    ) -> dict:
+        current = self.get(connection, workflow_asset_id)
+        if current["source"] != "builtin":
+            return current
+        connection.execute(
+            """
+            UPDATE workspace_workflows
+            SET display_name = ?, purpose = ?, entry_agent_ids_json = ?,
+                agent_plan_json = ?, artifact_effect = ?, version = ?,
+                definition_hash = ?, updated_at = ?
+            WHERE id = ? AND source = 'builtin'
+            """,
+            (
+                display_name,
+                purpose,
+                entry_agent_ids_json,
+                agent_plan_json,
+                artifact_effect,
+                version,
+                definition_hash,
+                now,
+                workflow_asset_id,
+            ),
+        )
         return self.get(connection, workflow_asset_id)

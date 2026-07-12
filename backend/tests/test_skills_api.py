@@ -70,3 +70,40 @@ def test_skill_detail_and_editable_asset_fields(app: FastAPI) -> None:
         },
     )
     assert stale.status_code == 409
+
+
+def test_builtin_skill_definition_updates_preserve_editable_fields(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    skill = next(
+        item for item in send(
+            app, "GET", f"/api/workspaces/{workspace['id']}/skills"
+        ).json()
+        if item["skillId"] == "analysis.profile_from_history"
+    )
+
+    with app.state.database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE workspace_skills
+            SET display_name = 'Stale Skill Name',
+                definition_hash = 'stale',
+                status = 'disabled',
+                user_notes = 'keep this note'
+            WHERE id = ?
+            """,
+            (skill["id"],),
+        )
+
+    refreshed = next(
+        item for item in send(
+            app, "GET", f"/api/workspaces/{workspace['id']}/skills"
+        ).json()
+        if item["skillId"] == "analysis.profile_from_history"
+    )
+
+    assert refreshed["displayName"] == "Analyze Account Profile"
+    assert refreshed["status"] == "disabled"
+    detail = send(app, "GET", f"/api/skills/{skill['id']}").json()
+    assert detail["userNotes"] == "keep this note"

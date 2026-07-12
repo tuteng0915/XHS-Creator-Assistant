@@ -78,7 +78,7 @@ PROMPT_SIMULATION_SYNTHESIS = """你是内容策略师。基于完整受众模�
 PROMPT_AGENT_CHAT = """你是创作者 workspace 中的产品内 Agent。
 你会收到：
 - agent 定义：包括名称、用途、system prompt、关联 skill
-- workspace context pack：账号资料、素材、分析、选题、草稿、受众模拟的全局视野
+- workspace context pack：账号资料、素材、分析、选题、草稿、受众模拟、Skills、Agents、Workflows 的全局视野
 - conversation history：当前对话历史
 - user message：用户最新消息
 
@@ -86,11 +86,58 @@ PROMPT_AGENT_CHAT = """你是创作者 workspace 中的产品内 Agent。
 - 充分利用 workspace context pack 中的资产，但不要编造不存在的资产。
 - 可以提出修改资产、创建选题、生成草稿等建议，但不能声称已经执行写入。
 - 若用户表达修改意图，放入 proposedActions，status 必须是 requires_confirmation。
+- proposedActions 可以包含 payload。只有你能明确字段时才给 payload；不要伪造资产 id。
+- 常用类型：
+  - workspace.update_profile payload: {"name":"","accountPositioning":""}
+  - topic.create_or_update payload: {"title":"","angle":"","associatedPainPoint":"","whyItFits":""}
+  - skill.propose_definition / agent.propose_definition / workflow.propose_definition payload: {"definition":{...}}
 - 回复要直接、具体、中文优先。
 - 不要输出 markdown 代码块。
 
 只输出 JSON。schema:
-{"reply":"","proposedActions":[{"type":"","status":"requires_confirmation","description":""}]}"""
+{"reply":"","proposedActions":[{"type":"","status":"requires_confirmation","description":"","payload":{}}]}"""
+
+PROMPT_VIDEO_CREATOR_PROFILE = """你是 AIGC 视频创作者运营分析师。基于创作者的视频样本记录、链接备注、转写、画面观察和数据线索，给出创作者画像。
+重点判断创作者主要驱动类型：
+- script_driven：剧本/叙事/角色设定驱动，适合被激励计划放大
+- commercial_driven：商单/带货/品牌合作驱动，平台激励计划通常很难改变行为
+- tech_exploration_driven：技术探索/模型实验驱动，需要具体分类讨论
+- mixed：多种驱动混合
+- unclear：证据不足
+要求：
+- evidence 必须引用输入中的具体观察，不要编造视频内容
+- 不要把单个爆款等同于长期能力
+- 输出中文
+只输出 JSON，不要解释。schema:
+{"creatorProfile":{"creatorType":"","typeConfidence":"高/中/低","summary":"","audiencePositioning":"","contentPillars":[],"motivationSignals":[],"evidence":[],"uncertainties":[]}}"""
+
+PROMPT_VIDEO_QUALITY_ANALYSIS = """你是 AIGC 视频质量评审。基于视频创作者样本，评估其内容质量、可持续生产能力和可被运营放大的程度。
+评估维度：
+- scriptAndNarrative：剧本、叙事、冲突、完播潜力
+- visualExecution：画面完成度、镜头、剪辑、审美一致性
+- aigcTechniqueUse：AIGC 技术使用是否服务内容，而不是只展示技术
+- originality：原创表达与差异化
+- consistency：账号连续性和系列化潜力
+- audienceFit：目标人群清晰度
+- productionRepeatability：稳定产能和复制能力
+score 为 0-100 的整数。必须给出 strengths、weaknesses 和 evidence。
+只输出 JSON，不要解释。schema:
+{"videoQuality":{"overallScore":0,"level":"高/中/低","dimensionScores":[{"dimension":"","score":0,"reason":""}],"strengths":[],"weaknesses":[],"evidence":[]}}"""
+
+PROMPT_INCENTIVE_FIT_ANALYSIS = """你是创作者激励计划策略负责人。基于创作者画像和视频质量诊断，判断该 AIGC 视频创作者是否适配平台激励计划。
+判断逻辑：
+- 剧本驱动型：通常更适合激励计划，因为激励能放大持续生产与系列化
+- 商单驱动型：通常不适合，激励很难改变其主要收益函数
+- 技术探索驱动型：需要分类讨论；如果能转化为稳定内容栏目则条件适配，否则只适合技术共创或专项活动
+- 混合型：给出主导驱动和可运营抓手
+输出必须给出 recommendation：
+- strong_fit
+- conditional_fit
+- weak_fit
+- not_fit
+并给出 rationale、conditions、risks、operatorActions。
+只输出 JSON，不要解释。schema:
+{"incentiveFit":{"recommendation":"","fitScore":0,"rationale":"","conditions":[],"risks":[],"operatorActions":[],"programMatch":{"bestProgramType":"","why":"","avoid":""}}}"""
 
 
 MAX_TOKENS = {
@@ -105,6 +152,9 @@ MAX_TOKENS = {
     ModelOperation.SIMULATION_DEBATE: 1200,
     ModelOperation.SIMULATION_SYNTHESIS: 1600,
     ModelOperation.AGENT_CHAT: 2000,
+    ModelOperation.VIDEO_CREATOR_PROFILE: 1800,
+    ModelOperation.VIDEO_QUALITY_ANALYSIS: 2200,
+    ModelOperation.INCENTIVE_FIT_ANALYSIS: 1800,
 }
 
 
@@ -302,6 +352,30 @@ class ModelCallService:
                     },
                     ensure_ascii=False,
                 ),
+            )
+        if operation == ModelOperation.VIDEO_CREATOR_PROFILE:
+            return (
+                PROMPT_VIDEO_CREATOR_PROFILE,
+                f"激励计划/运营目标：\n{positioning}\n\n视频创作者样本：\n"
+                f"{context.get('videoCreatorSamples', '')}",
+            )
+        if operation == ModelOperation.VIDEO_QUALITY_ANALYSIS:
+            return (
+                PROMPT_VIDEO_QUALITY_ANALYSIS,
+                "激励计划/运营目标：\n"
+                f"{positioning}\n\n创作者画像：\n"
+                f"{json.dumps(context.get('creatorProfile'), ensure_ascii=False)}\n\n"
+                "视频创作者样本：\n"
+                f"{context.get('videoCreatorSamples', '')}",
+            )
+        if operation == ModelOperation.INCENTIVE_FIT_ANALYSIS:
+            return (
+                PROMPT_INCENTIVE_FIT_ANALYSIS,
+                "激励计划/运营目标：\n"
+                f"{positioning}\n\n创作者画像：\n"
+                f"{json.dumps(context.get('creatorProfile'), ensure_ascii=False)}\n\n"
+                "视频质量诊断：\n"
+                f"{json.dumps(context.get('videoQuality'), ensure_ascii=False)}",
             )
         raise ValidationError("Unsupported model operation")
 

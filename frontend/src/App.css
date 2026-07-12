@@ -249,6 +249,10 @@ th { position: sticky; top: 0; background: #fff; }
   margin-bottom: 8px; padding: 11px 12px; border: 1px solid var(--line);
   border-radius: 10px; background: #fff;
 }
+.source-material-row {
+  width: 100%; display: block; text-align: left; cursor: pointer;
+}
+.source-material-row:hover { border-color: #ffd9de; }
 .asset-card.active { border-color: #ffd9de; background: var(--red-soft); }
 .asset-card b, .asset-requirement b { display: block; font-size: 12.5px; }
 .asset-card span, .asset-card small, .asset-requirement span {
@@ -257,6 +261,29 @@ th { position: sticky; top: 0; background: #fff; }
 .source-editor-stack { display: flex; flex-direction: column; gap: 14px; }
 .source-editor-card {
   padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff;
+}
+.source-editor-card.compact { margin-top: 12px; }
+.asset-mini-list {
+  display: grid; gap: 8px; margin-top: 10px;
+}
+.asset-mini-list button {
+  width: 100%; padding: 9px 10px; border: 1px solid var(--line);
+  border-radius: 9px; background: #fff; text-align: left;
+}
+.asset-mini-list button.active { border-color: #ffd9de; background: var(--red-soft); }
+.asset-mini-list b, .asset-mini-list small { display: block; }
+.asset-mini-list small {
+  margin-top: 4px; color: var(--sub); font-size: 11px; line-height: 1.35;
+}
+.asset-type-contract {
+  margin-top: 14px; padding: 10px; display: grid; gap: 5px;
+  border: 1px dashed #d7d9e0; border-radius: 10px; background: #fafafa;
+}
+.asset-type-contract label {
+  margin: 0; color: var(--sub); font-size: 11px; font-weight: 800;
+}
+.asset-type-contract span {
+  color: #4b5563; font-size: 11px; line-height: 1.35;
 }
 .workflow-call-panel .btn-fill { width: 100%; margin-top: 12px; }
 .asset-requirements { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }

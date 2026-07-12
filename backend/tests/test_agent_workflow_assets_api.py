@@ -14,6 +14,7 @@ def test_workspace_agents_are_materialized_from_builtin_assets(
     agent_ids = {agent["agentId"] for agent in agents}
     assert "account_diagnosis_strategist" in agent_ids
     assert "audience_simulation_researcher" in agent_ids
+    assert "video_creator_quality_analyst" in agent_ids
     assert "skill_maker" in agent_ids
     assert "agent_maker" in agent_ids
     assert "workflow_maker" in agent_ids
@@ -73,6 +74,43 @@ def test_agent_detail_and_editable_asset_fields(app: FastAPI) -> None:
     assert stale.status_code == 409
 
 
+def test_builtin_agent_definition_updates_preserve_editable_fields(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    agent = next(
+        item for item in send(
+            app, "GET", f"/api/workspaces/{workspace['id']}/agents"
+        ).json()
+        if item["agentId"] == "account_diagnosis_strategist"
+    )
+
+    with app.state.database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE workspace_agents
+            SET display_name = 'Stale Agent Name',
+                definition_hash = 'stale',
+                status = 'disabled',
+                user_notes = 'keep agent note'
+            WHERE id = ?
+            """,
+            (agent["id"],),
+        )
+
+    refreshed = next(
+        item for item in send(
+            app, "GET", f"/api/workspaces/{workspace['id']}/agents"
+        ).json()
+        if item["agentId"] == "account_diagnosis_strategist"
+    )
+
+    assert refreshed["displayName"] == "Account Diagnosis Strategist"
+    assert refreshed["status"] == "disabled"
+    detail = send(app, "GET", f"/api/agents/{agent['id']}").json()
+    assert detail["userNotes"] == "keep agent note"
+
+
 def test_workspace_workflows_are_materialized_from_builtin_assets(
     app: FastAPI,
 ) -> None:
@@ -85,6 +123,7 @@ def test_workspace_workflows_are_materialized_from_builtin_assets(
     workflow_ids = {workflow["workflowId"] for workflow in workflows}
     assert "account_diagnosis" in workflow_ids
     assert "audience_simulation" in workflow_ids
+    assert "video_creator_quality" in workflow_ids
     account_workflow = next(
         workflow for workflow in workflows if workflow["workflowId"] == "account_diagnosis"
     )
@@ -140,3 +179,40 @@ def test_workflow_detail_and_editable_asset_fields(app: FastAPI) -> None:
         },
     )
     assert stale.status_code == 409
+
+
+def test_builtin_workflow_definition_updates_preserve_editable_fields(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    workflow = next(
+        item for item in send(
+            app, "GET", f"/api/workspaces/{workspace['id']}/workflows"
+        ).json()
+        if item["workflowId"] == "account_diagnosis"
+    )
+
+    with app.state.database.transaction() as connection:
+        connection.execute(
+            """
+            UPDATE workspace_workflows
+            SET display_name = 'Stale Workflow Name',
+                definition_hash = 'stale',
+                status = 'disabled',
+                user_notes = 'keep workflow note'
+            WHERE id = ?
+            """,
+            (workflow["id"],),
+        )
+
+    refreshed = next(
+        item for item in send(
+            app, "GET", f"/api/workspaces/{workspace['id']}/workflows"
+        ).json()
+        if item["workflowId"] == "account_diagnosis"
+    )
+
+    assert refreshed["displayName"] == "Account Diagnosis Workflow"
+    assert refreshed["status"] == "disabled"
+    detail = send(app, "GET", f"/api/workflows/{workflow['id']}").json()
+    assert detail["userNotes"] == "keep workflow note"

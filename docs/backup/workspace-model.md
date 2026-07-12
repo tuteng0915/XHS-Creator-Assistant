@@ -1,6 +1,6 @@
 # Minimum Creator Workspace Model
 
-本文基于 `index.html` 和 `docs/current-prototype.md`，定义当前产品迁移所需的最小 workspace。目标是把账号诊断、热点分析、选题、内容结构和受众模拟从浏览器临时状态变成可保存、可恢复、可追溯的产品流程。
+本文基于 `index.html` 和 `docs/backup/current-prototype.md`，定义早期产品迁移所需的最小 workspace。目标是把账号诊断、热点分析、选题、内容结构和受众模拟从浏览器临时状态变成可保存、可恢复、可追溯的产品流程。
 
 这不是文件系统。workspace 只包含创作者业务对象，不提供目录树、任意文件编辑或任意路径访问。
 

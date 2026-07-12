@@ -20,6 +20,8 @@ class AgentRepository:
         default_context_policy_json: str,
         version: str,
         now: str,
+        source: str = "builtin",
+        definition_hash: str = "",
     ) -> dict:
         asset_id = str(uuid4())
         connection.execute(
@@ -27,9 +29,9 @@ class AgentRepository:
             INSERT INTO workspace_agents(
                 id, workspace_id, agent_id, display_name, purpose, system_prompt,
                 skill_ids_json, default_context_policy_json, source, status, version,
-                user_notes, created_at, updated_at
+                user_notes, created_at, updated_at, definition_hash
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'builtin', 'enabled', ?, '', ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'enabled', ?, '', ?, ?, ?)
             """,
             (
                 asset_id,
@@ -40,9 +42,11 @@ class AgentRepository:
                 system_prompt,
                 skill_ids_json,
                 default_context_policy_json,
+                source,
                 version,
                 now,
                 now,
+                definition_hash,
             ),
         )
         return self.get(connection, asset_id)
@@ -111,4 +115,43 @@ class AgentRepository:
         )
         if cursor.rowcount != 1:
             raise ConflictError("Agent changed since it was loaded")
+        return self.get(connection, agent_asset_id)
+
+    def update_builtin_definition(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        agent_asset_id: str,
+        display_name: str,
+        purpose: str,
+        system_prompt: str,
+        skill_ids_json: str,
+        default_context_policy_json: str,
+        version: str,
+        definition_hash: str,
+        now: str,
+    ) -> dict:
+        current = self.get(connection, agent_asset_id)
+        if current["source"] != "builtin":
+            return current
+        connection.execute(
+            """
+            UPDATE workspace_agents
+            SET display_name = ?, purpose = ?, system_prompt = ?,
+                skill_ids_json = ?, default_context_policy_json = ?,
+                version = ?, definition_hash = ?, updated_at = ?
+            WHERE id = ? AND source = 'builtin'
+            """,
+            (
+                display_name,
+                purpose,
+                system_prompt,
+                skill_ids_json,
+                default_context_policy_json,
+                version,
+                definition_hash,
+                now,
+                agent_asset_id,
+            ),
+        )
         return self.get(connection, agent_asset_id)

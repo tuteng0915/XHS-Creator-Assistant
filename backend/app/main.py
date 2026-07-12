@@ -12,6 +12,7 @@ from app.repositories import (
     AgentConversationRepository,
     AgentRepository,
     AnalysisRunRepository,
+    AssetProposalRepository,
     DraftRepository,
     GraphCheckpointRepository,
     SimulationRunRepository,
@@ -25,6 +26,7 @@ from app.services import (
     AgentConversationService,
     AgentService,
     AnalysisRunService,
+    AssetProposalService,
     ContextAccessService,
     DraftGenerationService,
     DraftService,
@@ -47,10 +49,13 @@ from app.workflows import (
     FakeAccountDiagnosisModelProvider,
     FakeAudienceSimulationModelProvider,
     FakeTrendAnalysisModelProvider,
+    FakeVideoCreatorQualityModelProvider,
     RealAccountDiagnosisModelProvider,
     RealAudienceSimulationModelProvider,
     RealTrendAnalysisModelProvider,
+    RealVideoCreatorQualityModelProvider,
     TrendAnalysisWorkflowService,
+    VideoCreatorQualityWorkflowService,
 )
 
 
@@ -68,6 +73,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     skill_repository = SkillRepository()
     agent_repository = AgentRepository()
     agent_conversation_repository = AgentConversationRepository()
+    asset_proposal_repository = AssetProposalRepository()
     workflow_asset_repository = WorkflowAssetRepository()
     checkpoint_repository = GraphCheckpointRepository()
     context_access_service = ContextAccessService(
@@ -76,6 +82,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         topic_repository=topic_repository,
         draft_repository=draft_repository,
         simulation_repository=simulation_repository,
+        skill_repository=skill_repository,
+        agent_repository=agent_repository,
+        workflow_repository=workflow_asset_repository,
     )
     workspace_service = WorkspaceService(database, workspace_repository)
     source_service = SourceMaterialService(
@@ -132,20 +141,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         workspace_repository,
         skill_service,
     )
-    agent_conversation_service = AgentConversationService(
-        database,
-        agent_conversation_repository,
-        workspace_repository,
-        agent_repository,
-        context_access_service,
-        fake_provider=FakeAgentConversationModelProvider(),
-        live_provider=RealAgentConversationModelProvider(model_call_service),
-    )
     workflow_asset_service = WorkflowAssetService(
         database,
         workflow_asset_repository,
         workspace_repository,
         agent_service,
+    )
+    agent_conversation_service = AgentConversationService(
+        database,
+        agent_conversation_repository,
+        asset_proposal_repository,
+        workspace_repository,
+        agent_repository,
+        context_access_service,
+        fake_provider=FakeAgentConversationModelProvider(),
+        live_provider=RealAgentConversationModelProvider(model_call_service),
+        capability_catalog_ensurers=[
+            skill_service.list,
+            agent_service.list,
+            workflow_asset_service.list,
+        ],
+    )
+    asset_proposal_service = AssetProposalService(
+        database=database,
+        repository=asset_proposal_repository,
+        workspace_repository=workspace_repository,
+        topic_repository=topic_repository,
+        skill_repository=skill_repository,
+        agent_repository=agent_repository,
+        workflow_repository=workflow_asset_repository,
     )
     account_workflow_service = AccountDiagnosisWorkflowService(
         database=database,
@@ -162,6 +186,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         fake_provider=FakeTrendAnalysisModelProvider(),
         live_provider=RealTrendAnalysisModelProvider(model_call_service),
     )
+    video_workflow_service = VideoCreatorQualityWorkflowService(
+        database=database,
+        checkpoint_repository=checkpoint_repository,
+        analysis_service=analysis_service,
+        fake_provider=FakeVideoCreatorQualityModelProvider(),
+        live_provider=RealVideoCreatorQualityModelProvider(model_call_service),
+    )
     simulation_workflow_service = AudienceSimulationWorkflowService(
         database=database,
         checkpoint_repository=checkpoint_repository,
@@ -175,6 +206,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         simulation_repository=simulation_repository,
         account_workflow_service=account_workflow_service,
         trend_workflow_service=trend_workflow_service,
+        video_workflow_service=video_workflow_service,
         simulation_workflow_service=simulation_workflow_service,
     )
 
@@ -204,11 +236,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.skill_service = skill_service
     application.state.agent_service = agent_service
     application.state.agent_conversation_service = agent_conversation_service
+    application.state.asset_proposal_service = asset_proposal_service
     application.state.workflow_asset_service = workflow_asset_service
     application.state.model_call_service = model_call_service
     application.state.context_access_service = context_access_service
     application.state.account_workflow_service = account_workflow_service
     application.state.trend_workflow_service = trend_workflow_service
+    application.state.video_workflow_service = video_workflow_service
     application.state.simulation_workflow_service = simulation_workflow_service
     application.state.workflow_worker = workflow_worker
 
@@ -244,6 +278,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             skill_service,
             agent_service,
             agent_conversation_service,
+            asset_proposal_service,
             workflow_asset_service,
             workflow_worker,
         )

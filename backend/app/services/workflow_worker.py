@@ -15,6 +15,7 @@ from app.workflows import (
     AccountDiagnosisWorkflowService,
     AudienceSimulationWorkflowService,
     TrendAnalysisWorkflowService,
+    VideoCreatorQualityWorkflowService,
 )
 
 
@@ -27,6 +28,7 @@ class WorkflowWorkerService:
         simulation_repository: SimulationRunRepository,
         account_workflow_service: AccountDiagnosisWorkflowService,
         trend_workflow_service: TrendAnalysisWorkflowService,
+        video_workflow_service: VideoCreatorQualityWorkflowService,
         simulation_workflow_service: AudienceSimulationWorkflowService,
     ) -> None:
         self.database = database
@@ -34,6 +36,7 @@ class WorkflowWorkerService:
         self.simulation_repository = simulation_repository
         self.account_workflow_service = account_workflow_service
         self.trend_workflow_service = trend_workflow_service
+        self.video_workflow_service = video_workflow_service
         self.simulation_workflow_service = simulation_workflow_service
         self._tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._lock = asyncio.Lock()
@@ -46,8 +49,10 @@ class WorkflowWorkerService:
         workflow_type = WorkflowType(row["workflow_type"])
         if workflow_type == WorkflowType.ACCOUNT_DIAGNOSIS:
             execute = self.account_workflow_service.collect_events
-        else:
+        elif workflow_type == WorkflowType.TREND_ANALYSIS:
             execute = self.trend_workflow_service.collect_events
+        else:
+            execute = self.video_workflow_service.collect_events
         return await self._enqueue(("analysis", run_id), lambda: execute(run_id))
 
     async def enqueue_simulation_run(self, simulation_id: str) -> bool:

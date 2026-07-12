@@ -1,7 +1,11 @@
 export type SourceMaterialType =
+  | 'account_profile'
   | 'historical_posts'
   | 'comments'
   | 'trend_csv'
+  | 'video_creator_samples'
+
+export type InputAssetType = SourceMaterialType
 
 export interface Workspace {
   id: string
@@ -22,7 +26,11 @@ interface SourceMaterialBase {
 }
 
 export interface TextSourceMaterial extends SourceMaterialBase {
-  type: 'historical_posts' | 'comments'
+  type:
+    | 'account_profile'
+    | 'historical_posts'
+    | 'comments'
+    | 'video_creator_samples'
   content: string
 }
 
@@ -38,10 +46,13 @@ export interface TrendCsvSourceMaterial extends SourceMaterialBase {
 }
 
 export type SourceMaterial = TextSourceMaterial | TrendCsvSourceMaterial
+export type InputAsset = SourceMaterial
+export type TextInputAsset = TextSourceMaterial
+export type TrendCsvInputAsset = TrendCsvSourceMaterial
 export type SavePhase = 'idle' | 'saving' | 'saved' | 'error'
 
 export type SkillStatus = 'enabled' | 'disabled'
-export type SkillSource = 'builtin'
+export type SkillSource = 'builtin' | 'generated'
 
 export interface SkillSummary {
   id: string
@@ -71,7 +82,7 @@ export interface Skill extends SkillSummary {
 }
 
 export type AgentStatus = 'enabled' | 'disabled'
-export type AgentSource = 'builtin'
+export type AgentSource = 'builtin' | 'generated'
 
 export interface AgentSummary {
   id: string
@@ -120,8 +131,27 @@ export interface AgentConversation extends AgentConversationSummary {
   messages: AgentMessage[]
 }
 
+export type AssetProposalStatus = 'pending' | 'applied' | 'rejected' | 'failed'
+
+export interface AssetProposal {
+  id: string
+  workspaceId: string
+  conversationId: string
+  messageId: string
+  actionType: string
+  title: string
+  description: string
+  status: AssetProposalStatus
+  proposedAction: Record<string, unknown>
+  result: Record<string, unknown>
+  error: string
+  createdAt: string
+  updatedAt: string
+  appliedAt: string | null
+}
+
 export type WorkflowAssetStatus = 'enabled' | 'disabled'
-export type WorkflowAssetSource = 'builtin'
+export type WorkflowAssetSource = 'builtin' | 'generated'
 
 export interface WorkflowAssetSummary {
   id: string
@@ -142,7 +172,10 @@ export interface WorkflowAsset extends WorkflowAssetSummary {
   userNotes: string
 }
 
-export type WorkflowType = 'account_diagnosis' | 'trend_analysis'
+export type WorkflowType =
+  | 'account_diagnosis'
+  | 'trend_analysis'
+  | 'video_creator_quality'
 export type ActivityRunType = WorkflowType | 'audience_simulation'
 export type RunStatus =
   | 'pending'
@@ -214,7 +247,7 @@ export interface Draft extends DraftSummary {
 }
 
 export type TopicStatus = 'candidate' | 'selected' | 'archived'
-export type TopicSourceWorkflow = WorkflowType | 'manual'
+export type TopicSourceWorkflow = 'account_diagnosis' | 'trend_analysis' | 'manual'
 
 export interface Topic {
   id: string

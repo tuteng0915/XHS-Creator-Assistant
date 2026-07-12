@@ -5,6 +5,7 @@ from app.services.agent_conversations import (
 )
 from app.services.agents import AgentService
 from app.services.analysis_runs import AnalysisRunService
+from app.services.asset_proposals import AssetProposalService
 from app.services.context_access import ContextAccessService
 from app.services.draft_generation import (
     DraftGenerationService,
@@ -25,6 +26,7 @@ __all__ = [
     "AgentService",
     "AgentConversationService",
     "AnalysisRunService",
+    "AssetProposalService",
     "ContextAccessService",
     "DraftGenerationService",
     "DraftService",

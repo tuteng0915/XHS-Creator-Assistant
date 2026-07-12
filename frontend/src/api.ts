@@ -2,6 +2,7 @@ import type {
   Agent,
   AgentConversation,
   AgentConversationSummary,
+  AssetProposal,
   AgentStatus,
   AgentSummary,
   AnalysisRun,
@@ -94,7 +95,11 @@ export const sourceMaterialApi = {
 
   createText: (
     workspaceId: string,
-    type: 'historical_posts' | 'comments',
+    type:
+      | 'account_profile'
+      | 'historical_posts'
+      | 'comments'
+      | 'video_creator_samples',
     name: string,
     content: string,
   ) =>
@@ -134,6 +139,15 @@ export const sourceMaterialApi = {
     form.set('file', file)
     return request<TrendCsvSourceMaterial>(
       `/api/workspaces/${workspaceId}/source-materials/trend-csv`,
+      { method: 'POST', body: form },
+    )
+  },
+
+  uploadAccountProfilesCsv: (workspaceId: string, file: File) => {
+    const form = new FormData()
+    form.set('file', file)
+    return request<{ materials: TextSourceMaterial[] }>(
+      `/api/workspaces/${workspaceId}/source-materials/account-profiles-csv`,
       { method: 'POST', body: form },
     )
   },
@@ -215,6 +229,23 @@ export const agentConversationApi = {
     ),
 }
 
+export const assetProposalApi = {
+  listForConversation: (conversationId: string) =>
+    request<AssetProposal[]>(
+      `/api/agent-conversations/${conversationId}/asset-proposals`,
+    ),
+
+  apply: (proposalId: string) =>
+    request<AssetProposal>(`/api/asset-proposals/${proposalId}/apply`, {
+      method: 'POST',
+    }),
+
+  reject: (proposalId: string) =>
+    request<AssetProposal>(`/api/asset-proposals/${proposalId}/reject`, {
+      method: 'POST',
+    }),
+}
+
 export const workflowAssetApi = {
   list: (workspaceId: string) =>
     request<WorkflowAssetSummary[]>(`/api/workspaces/${workspaceId}/workflows`),
@@ -242,13 +273,34 @@ export const analysisRunApi = {
     workspaceId: string,
     payload: {
       workflowType: WorkflowType
+      accountProfileMaterialId?: string
+      manualAccountProfile?: string
       historicalPostsMaterialId?: string
       commentsMaterialId?: string
       trendCsvMaterialId?: string
+      videoCreatorSamplesMaterialId?: string
       mode: 'demo' | 'live'
     },
   ) =>
     request<AnalysisRun>(`/api/workspaces/${workspaceId}/analysis-runs`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+
+  createBatch: (
+    workspaceId: string,
+    payload: {
+      workflowType: WorkflowType
+      accountProfileMaterialIds: string[]
+      historicalPostsMaterialId?: string
+      commentsMaterialId?: string
+      trendCsvMaterialId?: string
+      videoCreatorSamplesMaterialId?: string
+      mode: 'demo' | 'live'
+    },
+  ) =>
+    request<AnalysisRun[]>(`/api/workspaces/${workspaceId}/analysis-runs/batch`, {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify(payload),
@@ -260,6 +312,11 @@ export const analysisRunApi = {
     ),
 
   get: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${runId}`),
+
+  exportCsvUrl: (workspaceId: string, workflowType?: WorkflowType) => {
+    const query = workflowType ? `?workflowType=${workflowType}` : ''
+    return `/api/workspaces/${workspaceId}/analysis-runs/export.csv${query}`
+  },
 }
 
 export const simulationRunApi = {

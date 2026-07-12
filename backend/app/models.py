@@ -45,15 +45,19 @@ class WorkspaceResponse(APIModel):
 
 
 class SourceMaterialType(StrEnum):
+    ACCOUNT_PROFILE = "account_profile"
     HISTORICAL_POSTS = "historical_posts"
     COMMENTS = "comments"
     TREND_CSV = "trend_csv"
+    VIDEO_CREATOR_SAMPLES = "video_creator_samples"
 
 
 class TextSourceMaterialCreate(APIModel):
     type: Literal[
+        SourceMaterialType.ACCOUNT_PROFILE,
         SourceMaterialType.HISTORICAL_POSTS,
         SourceMaterialType.COMMENTS,
+        SourceMaterialType.VIDEO_CREATOR_SAMPLES,
     ]
     name: str = Field(min_length=1, max_length=160)
     content: str = Field(default="", max_length=1_000_000)
@@ -76,8 +80,10 @@ class SourceMaterialBase(APIModel):
 
 class TextSourceMaterialResponse(SourceMaterialBase):
     type: Literal[
+        SourceMaterialType.ACCOUNT_PROFILE,
         SourceMaterialType.HISTORICAL_POSTS,
         SourceMaterialType.COMMENTS,
+        SourceMaterialType.VIDEO_CREATOR_SAMPLES,
     ]
     content: str
 
@@ -106,6 +112,7 @@ class SkillStatus(StrEnum):
 
 class SkillSource(StrEnum):
     BUILTIN = "builtin"
+    GENERATED = "generated"
 
 
 class SkillSummary(APIModel):
@@ -148,6 +155,7 @@ class AgentStatus(StrEnum):
 
 class AgentSource(StrEnum):
     BUILTIN = "builtin"
+    GENERATED = "generated"
 
 
 class AgentSummary(APIModel):
@@ -216,6 +224,30 @@ class AgentConversationResponse(AgentConversationSummary):
     messages: list[AgentMessageResponse]
 
 
+class AssetProposalStatus(StrEnum):
+    PENDING = "pending"
+    APPLIED = "applied"
+    REJECTED = "rejected"
+    FAILED = "failed"
+
+
+class AssetProposalResponse(APIModel):
+    id: str
+    workspace_id: str
+    conversation_id: str
+    message_id: str
+    action_type: str
+    title: str
+    description: str
+    status: AssetProposalStatus
+    proposed_action: dict[str, Any]
+    result: dict[str, Any]
+    error: str
+    created_at: datetime
+    updated_at: datetime
+    applied_at: datetime | None = None
+
+
 class WorkflowAssetStatus(StrEnum):
     ENABLED = "enabled"
     DISABLED = "disabled"
@@ -223,6 +255,7 @@ class WorkflowAssetStatus(StrEnum):
 
 class WorkflowAssetSource(StrEnum):
     BUILTIN = "builtin"
+    GENERATED = "generated"
 
 
 class WorkflowAssetSummary(APIModel):
@@ -253,6 +286,7 @@ class WorkflowAssetUpdate(APIModel):
 class WorkflowType(StrEnum):
     ACCOUNT_DIAGNOSIS = "account_diagnosis"
     TREND_ANALYSIS = "trend_analysis"
+    VIDEO_CREATOR_QUALITY = "video_creator_quality"
 
 
 class AnalysisRunStatus(StrEnum):
@@ -265,10 +299,27 @@ class AnalysisRunStatus(StrEnum):
 
 class AnalysisRunCreate(APIModel):
     workflow_type: WorkflowType
+    account_profile_material_id: str | None = None
+    manual_account_profile: str | None = Field(default=None, max_length=100_000)
     historical_posts_material_id: str | None = None
     comments_material_id: str | None = None
     trend_csv_material_id: str | None = None
+    video_creator_samples_material_id: str | None = None
     mode: Literal["demo", "live"] = "demo"
+
+
+class AnalysisRunBatchCreate(APIModel):
+    workflow_type: WorkflowType
+    account_profile_material_ids: list[str] = Field(default_factory=list)
+    historical_posts_material_id: str | None = None
+    comments_material_id: str | None = None
+    trend_csv_material_id: str | None = None
+    video_creator_samples_material_id: str | None = None
+    mode: Literal["demo", "live"] = "demo"
+
+
+class AccountProfileCsvImportResponse(APIModel):
+    materials: list[TextSourceMaterialResponse]
 
 
 class AnalysisRunTransition(APIModel):
@@ -392,6 +443,9 @@ class ModelOperation(StrEnum):
     SIMULATION_DEBATE = "simulation_debate"
     SIMULATION_SYNTHESIS = "simulation_synthesis"
     AGENT_CHAT = "agent_chat"
+    VIDEO_CREATOR_PROFILE = "video_creator_profile"
+    VIDEO_QUALITY_ANALYSIS = "video_quality_analysis"
+    INCENTIVE_FIT_ANALYSIS = "incentive_fit_analysis"
 
 
 class ModelCallRequest(APIModel):

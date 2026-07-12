@@ -17,14 +17,15 @@ MCP can be one adapter over this layer later, but the product contract should no
 
 Agents need controlled access to:
 
-- Account Profile
-- Source Materials
+- Input Asset instances:
+  - account profiles
   - historical posts
   - comment samples
   - uploaded trend CSV data
+  - video creator samples
 - AnalysisRun snapshots and stage results
 - Topic Library
-- Drafts / generated content structures
+- generated content structures
 - SimulationRun results
 - Skill, Agent, Workflow asset metadata when needed for planning/debugging
 
@@ -85,11 +86,14 @@ Every readable asset should be referenced by a typed reference, not by path or t
 ```ts
 type ContextAssetType =
   | "account_profile"
-  | "source_material"
+  | "historical_posts"
+  | "comment_samples"
+  | "trend_csv"
+  | "video_creator_samples"
   | "analysis_run"
   | "analysis_stage"
   | "topic"
-  | "draft"
+  | "generated_structure"
   | "simulation_run"
   | "skill_asset"
   | "agent_asset"
@@ -109,11 +113,17 @@ Examples:
 ```json
 {
   "workspaceId": "ws_123",
-  "assetType": "source_material",
+  "assetType": "comment_samples",
   "assetId": "mat_comments_123",
   "role": "comments"
 }
 ```
+
+Implementation note: the current backend may still store historical posts,
+comments, trend CSV, and video samples through the legacy `source_materials`
+repository/table. That name is a storage/API compatibility detail. The product
+model and UI should treat them as peer Input Asset categories, not as children
+of a user-facing legacy bucket.
 
 ```json
 {
@@ -155,12 +165,13 @@ type ContextSelector =
   | "historical_posts_text"
   | "comment_samples_text"
   | "trend_top_ranked_posts"
+  | "video_creator_samples_text"
   | "analysis_profile"
   | "analysis_pain_points"
   | "analysis_trend_patterns"
   | "topic_core_fields"
-  | "draft_generated_snapshot"
-  | "draft_editable_content"
+  | "generated_structure_snapshot"
+  | "generated_structure_editable_content"
   | "simulation_personas"
   | "simulation_reactions"
   | "simulation_synthesis"
@@ -192,9 +203,9 @@ Most workflow nodes should start from a broad workspace pack:
 - account profile / positioning snapshot;
 - current selected topic if one exists;
 - relevant recent analysis summaries;
-- relevant source material summaries and IDs;
+- relevant Input Asset summaries and IDs;
 - topic library highlights;
-- available draft/simulation context where relevant;
+- available generated-structure/simulation context where relevant;
 - capability metadata for the active skill/agent/workflow.
 
 Then the node can request deep exact context for specific assets, such as the selected comments material or top-ranked trend posts.
@@ -241,8 +252,8 @@ Example: account topic generation may read:
 - profile stage result;
 - pain-point stage result.
 - selected/current topic if present;
-- recent related topics and drafts;
-- summaries of source materials used by the source run.
+- recent related topics and generated structures;
+- summaries of Input Assets used by the source run.
 
 It should not read:
 
@@ -283,7 +294,7 @@ Output:
       "role": "account_profile"
     },
     {
-      "assetType": "source_material",
+      "assetType": "historical_posts",
       "assetId": "mat_history_123",
       "role": "historical_posts"
     }
@@ -316,7 +327,7 @@ This is the preferred API for LLM nodes because it produces a stable, logged, ha
 
 Purpose:
 
-- Freeze the context pack used to create an AnalysisRun, Draft, or SimulationRun.
+- Freeze the context pack used to create an AnalysisRun, generated structure, or SimulationRun.
 
 The snapshot is immutable execution history and should be saved on the run record.
 
@@ -329,8 +340,8 @@ Purpose:
 Examples:
 
 - Topic → source AnalysisRun → profile and pain point stage results.
-- Draft → Topic → source AnalysisRun.
-- SimulationRun → target Topic/Draft → synthesis.
+- GeneratedStructure → Topic → source AnalysisRun.
+- SimulationRun → target Topic/GeneratedStructure → synthesis.
 
 This should not become generic graph traversal. It should expose product-specific relationship names.
 
@@ -372,7 +383,7 @@ Default broad context:
 - Historical posts material or selected summary/projection.
 - Topic library highlights.
 - Recent analysis summaries for the workspace.
-- Current selected topic/draft if present.
+- Current selected topic/generated structure if present.
 
 Deep context:
 
@@ -394,7 +405,7 @@ Default broad context:
 
 - Account Profile positioning snapshot.
 - Comment samples material.
-- Recent topics/drafts/simulations that reveal audience assumptions.
+- Recent topics/generated structures/simulations that reveal audience assumptions.
 
 Deep context:
 
@@ -418,8 +429,8 @@ Default broad context:
 - Profile stage result.
 - Pain point stage result.
 - Topic library highlights to avoid repetition.
-- Prior drafts and simulations when they help understand what has already been explored.
-- Source material summaries/provenance from the source run.
+- Prior generated structures and simulations when they help understand what has already been explored.
+- Input Asset summaries/provenance from the source run.
 
 Deep context:
 
@@ -431,14 +442,14 @@ Deep context:
 
 Allowed context:
 
-- uploaded trend CSV source material ID;
+- uploaded trend CSV Input Asset ID;
 - file content through controlled storage only inside backend service.
 
 Output:
 
 - compact top-50 ranked posts snapshot.
 
-The graph state should store only the source material ID and ranked compact snapshot, not the complete CSV. The agent-facing context may include the ranked projection plus workspace-wide creator context.
+The graph state should store only the trend CSV Input Asset ID and ranked compact snapshot, not the complete CSV. The agent-facing context may include the ranked projection plus workspace-wide creator context.
 
 #### `trend_pattern_analysis`
 
@@ -464,9 +475,9 @@ Default broad context:
 - Account Profile positioning snapshot.
 - trend pattern result.
 - trend pain point result.
-- current topic library and draft history.
+- current topic library and generated-structure history.
 
-### Draft generation
+### Generated structure generation
 
 Default broad context:
 
@@ -475,7 +486,7 @@ Default broad context:
   - voice fingerprint;
   - viral structure;
   - trend pattern summary if topic came from trend analysis.
-- prior drafts and selected simulation summaries;
+- prior generated structures and selected simulation summaries;
 - topic library context to avoid duplicating old structures.
 
 Deep context:
@@ -487,22 +498,22 @@ Deep context:
 
 Default broad context:
 
-- target Topic or Draft;
+- target Topic or GeneratedStructure;
 - Account Profile positioning snapshot;
 - relevant analysis context;
 - relevant prior simulations;
-- topic/draft lineage.
+- topic/generated-structure lineage.
 
 Persona reaction nodes receive:
 
 - persona definition;
-- target topic/draft;
+- target topic/generated structure;
 - workspace pack selected by the simulation workflow.
 
 Debate response nodes receive:
 
 - persona definition;
-- topic/draft target;
+- topic/generated-structure target;
 - other initial reactions.
 
 ## 10. Write access
@@ -518,14 +529,16 @@ Read tools:
 Write tools should map to explicit product operations:
 
 - `workspace.update_profile`
-- `source.save_historical_posts`
-- `source.save_comments`
-- `source.upload_trend_csv`
+- `input_asset.save_account_profile`
+- `input_asset.save_historical_posts`
+- `input_asset.save_comments`
+- `input_asset.upload_trend_csv`
+- `input_asset.save_video_creator_samples`
 - `topic.create`
 - `topic.update`
 - `topic.select`
-- `draft.create_from_topic`
-- `draft.update_editable_content`
+- `generated_structure.create_from_topic`
+- `generated_structure.update_editable_content`
 - `simulation.create_run`
 
 Agents should never write arbitrary JSON into arbitrary asset records.
@@ -568,64 +581,68 @@ If a policy or budget excludes content:
 
 Do not include hidden asset content in the error.
 
-## 13. Implementation slices
+## 13. Implementation status and next steps
 
-### Slice 1: In-process Context Access Layer
+### Implemented
 
-Add backend service:
+The backend now has an in-process `ContextAccessService` that builds auditable
+workspace context packs.
 
-- `ContextAccessService`
-- `ContextPackBuilder`
-- `ContextBudgetService`
+Implemented behavior:
 
-Use existing repositories. No MCP yet.
+- account profile is always included;
+- Input Asset overview is included;
+- analysis history overview is included;
+- topic library overview is included;
+- generated-structure history overview is included;
+- simulation history overview is included;
+- deep Input Asset items can be attached by callers;
+- context packs include source refs, content hashes, omissions, requester, and
+  purpose;
+- AnalysisRun input snapshots include broad context packs.
+
+### Current gaps
+
+The current implementation does not yet include:
+
+- Skill catalog overview;
+- Agent catalog overview;
+- Workflow asset overview;
+- selected capability asset detail;
+- pack-level token/character budget metadata;
+- model-specific budget policy.
+
+This is now the most important Context Access gap because maker agents need the
+capability catalog to generate useful Skill/Agent/Workflow proposals.
+
+### Next step 1: Capability context
+
+Extend `ContextAccessService` to include:
+
+- `skill_catalog_overview`;
+- `agent_catalog_overview`;
+- `workflow_catalog_overview`;
+- selected Skill / Agent / Workflow detail when launched from a detail page.
 
 Acceptance:
 
-- account diagnosis nodes get context through `ContextAccessService`;
-- existing visible behavior unchanged;
-- tests assert nodes receive broad workspace context plus the deep assets needed for the stage;
-- tests assert context packs record omissions, hashes, and source refs.
+- maker conversations receive existing capability assets without user copy/paste;
+- capability assets are cited with source refs and hashes;
+- no arbitrary filesystem or database access is exposed.
 
-### Slice 2: Replace ad hoc input snapshot builders
+### Next step 2: Relationship tracing
 
-Move current snapshot construction from individual workflow services into context pack builders where practical.
-
-Acceptance:
-
-- AnalysisRun input snapshots include source refs, selectors, hashes, and compact payloads.
-
-### Slice 3: Add relationship tracing
-
-Support:
+Support richer traversal:
 
 - Topic → AnalysisRun → stage results.
-- Draft → Topic → AnalysisRun.
-- SimulationRun → target Topic/Draft.
+- GeneratedStructure → Topic → AnalysisRun.
+- SimulationRun → target Topic/GeneratedStructure.
+- AssetProposal → source conversation message → applied Skill/Agent/Workflow.
 
-Acceptance:
+### Later: Adapter exposure
 
-- draft generation uses relationship tracing instead of manually reaching across repositories.
-
-### Slice 4: MCP-compatible adapter
-
-Expose product-specific tools over an internal MCP server or equivalent adapter.
-
-Acceptance:
-
-- tool calls return the same context packs as backend workflows;
-- no direct file path, SQL, or generic search tool exists.
-
-### Slice 5: Admin/internal asset authoring
-
-Later, internal tools can create or edit:
-
-- Skill assets;
-- Agent assets;
-- Workflow assets;
-- context policies.
-
-This is not a creator-facing builder.
+An MCP-compatible or similar adapter can be added later, but it should call this
+same Context Access Layer and remain product-specific.
 
 ## 14. Design rule
 

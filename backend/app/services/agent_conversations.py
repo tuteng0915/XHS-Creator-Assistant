@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -16,6 +17,7 @@ from app.models import (
 )
 from app.repositories.agent_conversations import AgentConversationRepository
 from app.repositories.agents import AgentRepository
+from app.repositories.asset_proposals import AssetProposalRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.common import utc_now
 from app.services.context_access import ContextAccessService
@@ -85,6 +87,7 @@ class FakeAgentConversationModelProvider:
                         "用户可能希望调整 Account Profile；当前版本只提出建议，"
                         "不自动写入。"
                     ),
+                    "payload": {"accountPositioning": content},
                 }
             )
         if any(keyword in normalized for keyword in ["选题", "topic"]):
@@ -93,6 +96,7 @@ class FakeAgentConversationModelProvider:
                     "type": "topic.create_or_update",
                     "status": "requires_confirmation",
                     "description": "用户可能希望新增或调整 Topic；当前版本只提出建议，不自动写入。",
+                    "payload": {"title": content, "angle": ""},
                 }
             )
         if any(keyword in normalized for keyword in ["草稿", "draft", "结构"]):
@@ -206,6 +210,7 @@ class RealAgentConversationModelProvider:
                     "type": action_type,
                     "status": "requires_confirmation",
                     "description": description,
+                    "payload": item.get("payload") if isinstance(item.get("payload"), dict) else {},
                 }
             )
         return actions
@@ -216,19 +221,23 @@ class AgentConversationService:
         self,
         database: SQLiteDatabase,
         repository: AgentConversationRepository,
+        proposal_repository: AssetProposalRepository,
         workspace_repository: WorkspaceRepository,
         agent_repository: AgentRepository,
         context_access_service: ContextAccessService,
         fake_provider: AgentConversationModelProvider,
         live_provider: AgentConversationModelProvider,
+        capability_catalog_ensurers: list[Callable[[str], object]] | None = None,
     ) -> None:
         self.database = database
         self.repository = repository
+        self.proposal_repository = proposal_repository
         self.workspace_repository = workspace_repository
         self.agent_repository = agent_repository
         self.context_access_service = context_access_service
         self.fake_provider = fake_provider
         self.live_provider = live_provider
+        self.capability_catalog_ensurers = capability_catalog_ensurers or []
 
     def create(
         self, workspace_id: str, payload: AgentConversationCreate
@@ -286,6 +295,12 @@ class AgentConversationService:
 
         with self.database.read() as connection:
             conversation = self.repository.get(connection, conversation_id)
+
+        for ensure_catalog in self.capability_catalog_ensurers:
+            ensure_catalog(conversation["workspace_id"])
+
+        with self.database.read() as connection:
+            conversation = self.repository.get(connection, conversation_id)
             workspace = self.workspace_repository.get(
                 connection, conversation["workspace_id"]
             )
@@ -302,11 +317,12 @@ class AgentConversationService:
                 purpose="agent_conversation_reply",
                 selectors=[
                     "account_positioning",
-                    "source_materials_overview",
+                    "input_assets_overview",
                     "analysis_history_overview",
                     "topic_library_overview",
                     "draft_history_overview",
                     "simulation_history_overview",
+                    "capability_catalog",
                     "agent_system_prompt",
                 ],
             )
@@ -314,15 +330,30 @@ class AgentConversationService:
             messages = self.repository.list_messages(connection, conversation_id)
 
         provider = self.live_provider if payload.mode == "live" else self.fake_provider
-        reply = await provider.reply(
-            agent=agent,
-            user_content=payload.content,
-            context_pack=context_pack,
-            messages=messages,
-        )
+        try:
+            reply = await provider.reply(
+                agent=agent,
+                user_content=payload.content,
+                context_pack=context_pack,
+                messages=messages,
+            )
+        except Exception as error:
+            reply = AgentConversationReply(
+                reply=(
+                    "模型调用失败，已保留你的消息。请稍后重试，或切换到演示模式继续。"
+                    f"\n\n错误：{str(error) or error.__class__.__name__}"
+                ),
+                proposed_actions=[],
+                model_metadata={
+                    "provider": "live" if payload.mode == "live" else "fake",
+                    "operation": ModelOperation.AGENT_CHAT.value,
+                    "status": "failed",
+                    "error": str(error) or error.__class__.__name__,
+                },
+            )
 
         with self.database.transaction() as connection:
-            self.repository.create_message(
+            assistant_message = self.repository.create_message(
                 connection,
                 conversation_id=conversation_id,
                 role="assistant",
@@ -335,9 +366,60 @@ class AgentConversationService:
                 model_metadata_json=json.dumps(reply.model_metadata, ensure_ascii=False),
                 now=utc_now(),
             )
+            for action in reply.proposed_actions:
+                self._create_proposal_for_action(
+                    connection,
+                    conversation=conversation,
+                    message_id=assistant_message["id"],
+                    action=action,
+                )
             row = self.repository.get(connection, conversation_id)
             messages = self.repository.list_messages(connection, conversation_id)
         return self._to_response(row, messages)
+
+    def _create_proposal_for_action(
+        self,
+        connection,
+        *,
+        conversation: dict,
+        message_id: str,
+        action: dict[str, Any],
+    ) -> None:
+        action_type = str(action.get("type") or "").strip()
+        if not action_type:
+            return
+        description = str(action.get("description") or action_type)
+        title = str(action.get("title") or self._proposal_title(action_type))
+        normalized = {
+            **action,
+            "type": action_type,
+            "status": "requires_confirmation",
+            "description": description,
+            "payload": action.get("payload") if isinstance(action.get("payload"), dict) else {},
+        }
+        self.proposal_repository.create(
+            connection,
+            workspace_id=conversation["workspace_id"],
+            conversation_id=conversation["id"],
+            message_id=message_id,
+            action_type=action_type,
+            title=title,
+            description=description,
+            proposed_action_json=json.dumps(normalized, ensure_ascii=False),
+            now=utc_now(),
+        )
+
+    @staticmethod
+    def _proposal_title(action_type: str) -> str:
+        labels = {
+            "workspace.update_profile": "更新 Account Profile",
+            "topic.create_or_update": "创建或更新 Topic",
+            "draft.update_editable_content": "更新 Draft",
+            "skill.propose_definition": "新增或修改 Skill",
+            "agent.propose_definition": "新增或修改 Agent",
+            "workflow.propose_definition": "新增或修改 Workflow",
+        }
+        return labels.get(action_type, action_type)
 
     def _to_response(
         self, row: dict, messages: list[dict]

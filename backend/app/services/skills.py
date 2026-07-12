@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from app.db.database import SQLiteDatabase
@@ -52,12 +53,12 @@ BUILTIN_SKILLS = [
     BuiltinSkillDefinition(
         skill_id="source.save_historical_posts",
         display_name="Save Historical Posts",
-        category="source",
-        purpose="Persist reusable historical post material for account diagnosis.",
+        category="input_asset",
+        purpose="Persist a reusable Historical Posts input asset for account diagnosis.",
         required_inputs=["workspace_id", "historical_posts_text"],
-        output_schema={"type": "SourceMaterial", "material_type": "historical_posts"},
-        artifact_effect="SourceMaterial.historical_posts",
-        side_effects=["creates or updates source material"],
+        output_schema={"type": "InputAsset", "asset_type": "historical_posts"},
+        artifact_effect="InputAsset.historical_posts",
+        side_effects=["creates or updates input asset"],
         failure_mode="atomic",
         composable_with=["analysis.profile_from_history"],
         implementation_refs=[
@@ -68,12 +69,12 @@ BUILTIN_SKILLS = [
     BuiltinSkillDefinition(
         skill_id="source.save_comments",
         display_name="Save Comment Samples",
-        category="source",
-        purpose="Persist reusable comment samples for pain-point analysis.",
+        category="input_asset",
+        purpose="Persist reusable Comment Samples input assets for pain-point analysis.",
         required_inputs=["workspace_id", "comments_text"],
-        output_schema={"type": "SourceMaterial", "material_type": "comments"},
-        artifact_effect="SourceMaterial.comments",
-        side_effects=["creates or updates source material"],
+        output_schema={"type": "InputAsset", "asset_type": "comments"},
+        artifact_effect="InputAsset.comments",
+        side_effects=["creates or updates input asset"],
         failure_mode="atomic",
         composable_with=["analysis.pain_points_from_comments"],
         implementation_refs=[
@@ -84,11 +85,11 @@ BUILTIN_SKILLS = [
     BuiltinSkillDefinition(
         skill_id="source.upload_trend_csv",
         display_name="Upload Trend CSV",
-        category="source",
-        purpose="Persist uploaded trend CSV or TSV data with controlled server storage.",
+        category="input_asset",
+        purpose="Persist uploaded Trend CSV input assets with controlled server storage.",
         required_inputs=["workspace_id", "keyword", "csv_or_tsv_file"],
-        output_schema={"type": "SourceMaterial", "material_type": "trend_csv"},
-        artifact_effect="SourceMaterial.trend_csv",
+        output_schema={"type": "InputAsset", "asset_type": "trend_csv"},
+        artifact_effect="InputAsset.trend_csv",
         side_effects=["stores upload on disk", "stores metadata in SQLite"],
         failure_mode="atomic",
         composable_with=["trend.rank_posts"],
@@ -140,7 +141,7 @@ BUILTIN_SKILLS = [
         skill_id="analysis.pain_points_from_comments",
         display_name="Extract Comment Pain Points",
         category="analysis",
-        purpose="Extract audience pain points from comment source material.",
+        purpose="Extract audience pain points from selected Comment Samples input assets.",
         required_inputs=["comments_material_id"],
         context_policy={
             "allowed_fields": ["sourceText"],
@@ -197,6 +198,82 @@ BUILTIN_SKILLS = [
         implementation_refs=[
             "ModelOperation.PAIN_POINTS",
             "TrendAnalysisWorkflowService.pain_point_analysis",
+        ],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="analysis.video_creator_profile",
+        display_name="Profile AIGC Video Creator",
+        category="analysis",
+        purpose=(
+            "Classify an AIGC video creator by motivation and content operating "
+            "pattern from collected video samples."
+        ),
+        required_inputs=["positioning_snapshot", "video_creator_samples_material_id"],
+        context_policy={
+            "allowed_fields": ["positioning", "videoCreatorSamples"],
+            "disallowed_fields": ["full_workspace", "unrelated input assets"],
+        },
+        output_schema={"root": "creatorProfile"},
+        artifact_effect="AnalysisRun.stageResults.creator_profile",
+        side_effects=["writes stage result"],
+        failure_mode="partial_allowed",
+        composable_with=[
+            "analysis.video_quality",
+            "analysis.incentive_fit",
+        ],
+        implementation_refs=[
+            "ModelOperation.VIDEO_CREATOR_PROFILE",
+            "VideoCreatorQualityWorkflowService.creator_profile",
+        ],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="analysis.video_quality",
+        display_name="Analyze AIGC Video Quality",
+        category="analysis",
+        purpose=(
+            "Score and explain AIGC video quality across narrative, visuals, "
+            "technique use, originality, consistency, audience fit, and repeatability."
+        ),
+        required_inputs=[
+            "positioning_snapshot",
+            "video_creator_samples_material_id",
+            "creatorProfile",
+        ],
+        context_policy={
+            "allowed_fields": ["positioning", "videoCreatorSamples", "creatorProfile"],
+            "disallowed_fields": ["full_workspace", "unrelated input assets"],
+        },
+        output_schema={"root": "videoQuality"},
+        artifact_effect="AnalysisRun.stageResults.video_quality",
+        side_effects=["writes stage result"],
+        failure_mode="partial_allowed",
+        composable_with=["analysis.incentive_fit"],
+        implementation_refs=[
+            "ModelOperation.VIDEO_QUALITY_ANALYSIS",
+            "VideoCreatorQualityWorkflowService.video_quality",
+        ],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="analysis.incentive_fit",
+        display_name="Assess Incentive Program Fit",
+        category="analysis",
+        purpose=(
+            "Decide whether an AIGC video creator fits an incentive plan based on "
+            "creator profile and video quality diagnosis."
+        ),
+        required_inputs=["positioning_snapshot", "creatorProfile", "videoQuality"],
+        context_policy={
+            "allowed_fields": ["positioning", "creatorProfile", "videoQuality"],
+            "disallowed_fields": ["raw video samples when structured diagnosis exists"],
+        },
+        output_schema={"root": "incentiveFit"},
+        artifact_effect="AnalysisRun.stageResults.incentive_fit",
+        side_effects=["writes stage result"],
+        failure_mode="partial_allowed",
+        composable_with=[],
+        implementation_refs=[
+            "ModelOperation.INCENTIVE_FIT_ANALYSIS",
+            "VideoCreatorQualityWorkflowService.incentive_fit",
         ],
     ),
     BuiltinSkillDefinition(
@@ -274,7 +351,7 @@ BUILTIN_SKILLS = [
         optional_inputs=["compact_analysis_context"],
         context_policy={
             "allowed_fields": ["positioning", "topic", "background"],
-            "disallowed_fields": ["raw_source_materials", "full_workspace"],
+            "disallowed_fields": ["raw_input_assets", "full_workspace"],
         },
         output_schema={"root": "structure"},
         artifact_effect="Draft",
@@ -382,7 +459,7 @@ BUILTIN_SKILLS = [
         ],
         context_policy={
             "allowed_fields": ["topic", "personas", "reactions", "debateResponses"],
-            "disallowed_fields": ["raw_source_materials", "full_workspace"],
+            "disallowed_fields": ["raw_input_assets", "full_workspace"],
         },
         output_schema={"root": "synthesis"},
         artifact_effect="SimulationRun.synthesis",
@@ -405,7 +482,7 @@ BUILTIN_SKILLS = [
         context_policy={
             "allowed_fields": [
                 "workspace profile",
-                "source material overview",
+                "input asset overview",
                 "existing skills",
                 "existing agents",
                 "existing workflows",
@@ -495,7 +572,7 @@ BUILTIN_SKILLS = [
         context_policy={
             "allowed_fields": [
                 "workspace profile",
-                "source material overview",
+                "input asset overview",
                 "existing skills",
                 "existing agents",
                 "existing workflows",
@@ -566,48 +643,87 @@ class SkillService:
         with self.database.transaction() as connection:
             self.workspace_repository.get(connection, workspace_id)
             for definition in BUILTIN_SKILLS:
-                if self.repository.get_by_skill_id(
+                definition_hash = self._definition_hash(definition)
+                existing = self.repository.get_by_skill_id(
                     connection,
                     workspace_id=workspace_id,
                     skill_id=definition.skill_id,
-                ):
+                )
+                payload = {
+                    "workspace_id": workspace_id,
+                    "skill_id": definition.skill_id,
+                    "display_name": definition.display_name,
+                    "category": definition.category,
+                    "purpose": definition.purpose,
+                    "trigger_intents_json": json.dumps(
+                        definition.trigger_intents, ensure_ascii=False
+                    ),
+                    "required_inputs_json": json.dumps(
+                        definition.required_inputs, ensure_ascii=False
+                    ),
+                    "optional_inputs_json": json.dumps(
+                        definition.optional_inputs, ensure_ascii=False
+                    ),
+                    "context_policy_json": json.dumps(
+                        definition.context_policy, ensure_ascii=False
+                    ),
+                    "output_schema_json": json.dumps(
+                        definition.output_schema, ensure_ascii=False
+                    ),
+                    "artifact_effect": definition.artifact_effect,
+                    "side_effects_json": json.dumps(
+                        definition.side_effects, ensure_ascii=False
+                    ),
+                    "failure_mode": definition.failure_mode,
+                    "composable_with_json": json.dumps(
+                        definition.composable_with, ensure_ascii=False
+                    ),
+                    "implementation_refs_json": json.dumps(
+                        definition.implementation_refs, ensure_ascii=False
+                    ),
+                    "version": definition.version,
+                    "definition_hash": definition_hash,
+                }
+                if existing:
+                    if (
+                        existing["source"] == "builtin"
+                        and existing.get("definition_hash") != definition_hash
+                    ):
+                        self.repository.update_builtin_definition(
+                            connection,
+                            skill_asset_id=existing["id"],
+                            display_name=payload["display_name"],
+                            category=payload["category"],
+                            purpose=payload["purpose"],
+                            trigger_intents_json=payload["trigger_intents_json"],
+                            required_inputs_json=payload["required_inputs_json"],
+                            optional_inputs_json=payload["optional_inputs_json"],
+                            context_policy_json=payload["context_policy_json"],
+                            output_schema_json=payload["output_schema_json"],
+                            artifact_effect=payload["artifact_effect"],
+                            side_effects_json=payload["side_effects_json"],
+                            failure_mode=payload["failure_mode"],
+                            composable_with_json=payload["composable_with_json"],
+                            implementation_refs_json=payload[
+                                "implementation_refs_json"
+                            ],
+                            version=payload["version"],
+                            definition_hash=payload["definition_hash"],
+                            now=now,
+                        )
                     continue
                 self.repository.create(
                     connection,
-                    workspace_id=workspace_id,
-                    skill_id=definition.skill_id,
-                    display_name=definition.display_name,
-                    category=definition.category,
-                    purpose=definition.purpose,
-                    trigger_intents_json=json.dumps(
-                        definition.trigger_intents, ensure_ascii=False
-                    ),
-                    required_inputs_json=json.dumps(
-                        definition.required_inputs, ensure_ascii=False
-                    ),
-                    optional_inputs_json=json.dumps(
-                        definition.optional_inputs, ensure_ascii=False
-                    ),
-                    context_policy_json=json.dumps(
-                        definition.context_policy, ensure_ascii=False
-                    ),
-                    output_schema_json=json.dumps(
-                        definition.output_schema, ensure_ascii=False
-                    ),
-                    artifact_effect=definition.artifact_effect,
-                    side_effects_json=json.dumps(
-                        definition.side_effects, ensure_ascii=False
-                    ),
-                    failure_mode=definition.failure_mode,
-                    composable_with_json=json.dumps(
-                        definition.composable_with, ensure_ascii=False
-                    ),
-                    implementation_refs_json=json.dumps(
-                        definition.implementation_refs, ensure_ascii=False
-                    ),
-                    version=definition.version,
+                    **payload,
                     now=now,
                 )
+
+    @staticmethod
+    def _definition_hash(definition: BuiltinSkillDefinition) -> str:
+        encoded = json.dumps(
+            asdict(definition), ensure_ascii=False, sort_keys=True
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
     def _to_response(row: dict) -> SkillResponse:

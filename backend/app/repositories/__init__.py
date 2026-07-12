@@ -1,6 +1,7 @@
 from app.repositories.agent_conversations import AgentConversationRepository
 from app.repositories.agents import AgentRepository
 from app.repositories.analysis_runs import AnalysisRunRepository
+from app.repositories.asset_proposals import AssetProposalRepository
 from app.repositories.drafts import DraftRepository
 from app.repositories.graph_checkpoints import GraphCheckpointRepository
 from app.repositories.simulation_runs import SimulationRunRepository
@@ -14,6 +15,7 @@ __all__ = [
     "AgentRepository",
     "AgentConversationRepository",
     "AnalysisRunRepository",
+    "AssetProposalRepository",
     "DraftRepository",
     "GraphCheckpointRepository",
     "SimulationRunRepository",

@@ -58,7 +58,7 @@ def test_account_analysis_run_lifecycle_preserves_input_snapshot(
     item_keys = {item["key"] for item in context_pack["items"]}
     assert {
         "account_profile",
-        "source_materials_overview",
+        "input_assets_overview",
         "analysis_history_overview",
         "topic_library_overview",
         "draft_history_overview",

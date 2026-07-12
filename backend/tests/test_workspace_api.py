@@ -119,6 +119,37 @@ def test_text_source_material_lifecycle_preserves_utf8(app: FastAPI) -> None:
     assert stale.status_code == 409
 
 
+def test_video_creator_samples_material_lifecycle_preserves_utf8(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    content = "创作者：@AI短剧研究所\n样本：AIGC短剧｜赞2.3w｜评论区催更。"
+
+    created = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials",
+        json={
+            "type": "video_creator_samples",
+            "name": "视频创作者样本",
+            "content": content,
+        },
+    )
+
+    assert created.status_code == 201
+    material = created.json()
+    assert material["type"] == "video_creator_samples"
+    assert material["content"] == content
+
+    listed = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/source-materials?type=video_creator_samples",
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["content"] == content
+
+
 def test_trend_csv_upload_uses_server_path_and_returns_preview(
     app: FastAPI, settings
 ) -> None:
@@ -158,3 +189,168 @@ def test_trend_csv_upload_uses_server_path_and_returns_preview(
     )
     assert listed.status_code == 200
     assert [item["id"] for item in listed.json()] == [material["id"]]
+
+
+def test_account_profiles_csv_import_preserves_utf8(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    csv_content = (
+        "name,profile\n"
+        "剧本型创作者,账号定位：AIGC 短剧，剧情连续更新。\n"
+        "技术探索型,账号定位：AI 工具链拆解，教程与实验混合。\n"
+    ).encode()
+
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials/account-profiles-csv",
+        files={"file": ("profiles.csv", csv_content, "text/csv")},
+    )
+
+    assert response.status_code == 201
+    materials = response.json()["materials"]
+    assert [item["type"] for item in materials] == [
+        "account_profile",
+        "account_profile",
+    ]
+    assert materials[0]["name"] == "剧本型创作者"
+    assert materials[0]["content"] == "账号定位：AIGC 短剧，剧情连续更新。"
+
+    listed = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/source-materials?type=account_profile",
+    )
+    assert listed.status_code == 200
+    assert sorted(item["content"] for item in listed.json()) == sorted(
+        [
+        "账号定位：AIGC 短剧，剧情连续更新。",
+        "账号定位：AI 工具链拆解，教程与实验混合。",
+        ]
+    )
+
+
+def test_analysis_run_can_use_saved_or_manual_account_profile(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    profile = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials",
+        json={
+            "type": "account_profile",
+            "name": "商单驱动型创作者",
+            "content": "账号定位：商单驱动，内容围绕品牌brief。",
+        },
+    ).json()
+    historical = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials",
+        json={"type": "historical_posts", "name": "历史", "content": "爆款短剧｜赞2w"},
+    ).json()
+    comments = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials",
+        json={"type": "comments", "name": "评论", "content": "想继续看下一集。"},
+    ).json()
+
+    saved_profile_run = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+        json={
+            "workflowType": "account_diagnosis",
+            "accountProfileMaterialId": profile["id"],
+            "historicalPostsMaterialId": historical["id"],
+            "commentsMaterialId": comments["id"],
+            "mode": "demo",
+        },
+    )
+    assert saved_profile_run.status_code == 201
+    snapshot = saved_profile_run.json()["inputSnapshot"]
+    assert snapshot["accountPositioning"] == "账号定位：商单驱动，内容围绕品牌brief。"
+    assert snapshot["accountProfile"]["source"] == "source_material"
+    assert snapshot["accountProfile"]["materialId"] == profile["id"]
+
+    manual_profile_run = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+        json={
+            "workflowType": "account_diagnosis",
+            "manualAccountProfile": "账号定位：手动临时输入，不覆盖 workspace。",
+            "historicalPostsMaterialId": historical["id"],
+            "commentsMaterialId": comments["id"],
+            "mode": "demo",
+        },
+    )
+    assert manual_profile_run.status_code == 201
+    manual_snapshot = manual_profile_run.json()["inputSnapshot"]
+    assert manual_snapshot["accountProfile"]["source"] == "manual"
+    assert manual_snapshot["accountPositioning"] == "账号定位：手动临时输入，不覆盖 workspace。"
+
+
+def test_batch_analysis_runs_and_export_csv(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    historical = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials",
+        json={"type": "historical_posts", "name": "历史", "content": "爆款短剧｜赞2w"},
+    ).json()
+    comments = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials",
+        json={"type": "comments", "name": "评论", "content": "想继续看下一集。"},
+    ).json()
+    profile_a = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials",
+        json={
+            "type": "account_profile",
+            "name": "剧本驱动型",
+            "content": "账号定位：剧本驱动型，连续剧情。",
+        },
+    ).json()
+    profile_b = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/source-materials",
+        json={
+            "type": "account_profile",
+            "name": "技术探索型",
+            "content": "账号定位：技术探索型，教程实验。",
+        },
+    ).json()
+
+    created = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs/batch",
+        json={
+            "workflowType": "account_diagnosis",
+            "accountProfileMaterialIds": [profile_a["id"], profile_b["id"]],
+            "historicalPostsMaterialId": historical["id"],
+            "commentsMaterialId": comments["id"],
+            "mode": "demo",
+        },
+    )
+    assert created.status_code == 201
+    runs = created.json()
+    assert len(runs) == 2
+    assert runs[0]["inputSnapshot"]["accountProfile"]["name"] == "剧本驱动型"
+    assert runs[1]["inputSnapshot"]["accountProfile"]["name"] == "技术探索型"
+
+    exported = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/analysis-runs/export.csv?workflowType=account_diagnosis",
+    )
+    assert exported.status_code == 200
+    assert "profile_name" in exported.text
+    assert "剧本驱动型" in exported.text
+    assert "技术探索型" in exported.text

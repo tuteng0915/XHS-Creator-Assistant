@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from app.db.database import SQLiteDatabase
@@ -95,6 +96,44 @@ BUILTIN_WORKFLOW_ASSETS = [
                     "agentId": "trend_opportunity_strategist",
                     "skillIds": ["topic.generate_from_trend_analysis"],
                     "dependsOn": ["analyze_trend"],
+                },
+            ]
+        },
+    ),
+    BuiltinWorkflowAssetDefinition(
+        workflow_id="video_creator_quality",
+        display_name="Video Creator Quality Workflow",
+        purpose=(
+            "Profile AIGC video creators, diagnose video quality, and judge "
+            "whether they fit an incentive program."
+        ),
+        entry_agent_ids=["creator_material_curator", "video_creator_quality_analyst"],
+        artifact_effect="AnalysisRun.video_creator_quality",
+        agent_plan={
+            "tasks": [
+                {
+                    "taskId": "prepare_video_creator_samples",
+                    "agentId": "creator_material_curator",
+                    "skillIds": ["workspace.update_profile"],
+                    "dependsOn": [],
+                },
+                {
+                    "taskId": "profile_video_creator",
+                    "agentId": "video_creator_quality_analyst",
+                    "skillIds": ["analysis.video_creator_profile"],
+                    "dependsOn": ["prepare_video_creator_samples"],
+                },
+                {
+                    "taskId": "diagnose_video_quality",
+                    "agentId": "video_creator_quality_analyst",
+                    "skillIds": ["analysis.video_quality"],
+                    "dependsOn": ["profile_video_creator"],
+                },
+                {
+                    "taskId": "assess_incentive_fit",
+                    "agentId": "video_creator_quality_analyst",
+                    "skillIds": ["analysis.incentive_fit"],
+                    "dependsOn": ["diagnose_video_quality"],
                 },
             ]
         },
@@ -214,28 +253,57 @@ class WorkflowAssetService:
         with self.database.transaction() as connection:
             self.workspace_repository.get(connection, workspace_id)
             for definition in BUILTIN_WORKFLOW_ASSETS:
-                if self.repository.get_by_workflow_id(
+                definition_hash = self._definition_hash(definition)
+                existing = self.repository.get_by_workflow_id(
                     connection,
                     workspace_id=workspace_id,
                     workflow_id=definition.workflow_id,
-                ):
+                )
+                payload = {
+                    "workspace_id": workspace_id,
+                    "workflow_id": definition.workflow_id,
+                    "display_name": definition.display_name,
+                    "purpose": definition.purpose,
+                    "entry_agent_ids_json": json.dumps(
+                        definition.entry_agent_ids, ensure_ascii=False
+                    ),
+                    "agent_plan_json": json.dumps(
+                        definition.agent_plan, ensure_ascii=False
+                    ),
+                    "artifact_effect": definition.artifact_effect,
+                    "version": definition.version,
+                    "definition_hash": definition_hash,
+                }
+                if existing:
+                    if (
+                        existing["source"] == "builtin"
+                        and existing.get("definition_hash") != definition_hash
+                    ):
+                        self.repository.update_builtin_definition(
+                            connection,
+                            workflow_asset_id=existing["id"],
+                            display_name=payload["display_name"],
+                            purpose=payload["purpose"],
+                            entry_agent_ids_json=payload["entry_agent_ids_json"],
+                            agent_plan_json=payload["agent_plan_json"],
+                            artifact_effect=payload["artifact_effect"],
+                            version=payload["version"],
+                            definition_hash=payload["definition_hash"],
+                            now=now,
+                        )
                     continue
                 self.repository.create(
                     connection,
-                    workspace_id=workspace_id,
-                    workflow_id=definition.workflow_id,
-                    display_name=definition.display_name,
-                    purpose=definition.purpose,
-                    entry_agent_ids_json=json.dumps(
-                        definition.entry_agent_ids, ensure_ascii=False
-                    ),
-                    agent_plan_json=json.dumps(
-                        definition.agent_plan, ensure_ascii=False
-                    ),
-                    artifact_effect=definition.artifact_effect,
-                    version=definition.version,
+                    **payload,
                     now=now,
                 )
+
+    @staticmethod
+    def _definition_hash(definition: BuiltinWorkflowAssetDefinition) -> str:
+        encoded = json.dumps(
+            asdict(definition), ensure_ascii=False, sort_keys=True
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
     def _to_summary(row: dict) -> WorkflowAssetSummary:
