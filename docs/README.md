@@ -1,11 +1,19 @@
 # 文档索引
 
-顶层只保留当前仍然有效的产品、架构和实现文档。已经完成或明显过时的迁移文档放在 `docs/backup/`，作为历史参考。
+顶层只保留当前仍然有效的产品、设计、架构和实现文档。已经完成或明显过时的迁移文档统一放在 `docs/backup/`，作为历史参考，不再作为当前实现依据。
+
+## 推荐阅读顺序
+
+1. `product-design.md` — 先理解产品功能、设计思想和核心抽象。
+2. `product-requirements.md` — 再看更细的 PRD、流程、验收清单和非目标。
+3. `status-and-todo.md` — 查看当前完成状态、明确限制和下一步 TODO。
+4. `architecture-review.md` — 查看当前架构风险、已解决问题和工程优先级。
 
 ## 当前有效文档
 
+- `product-design.md` — 当前产品的主设计说明，集中解释功能全貌、设计思想、内容资产、能力资产、workflow、Context Access Layer、Demo/Live、多模态和设计边界。
 - `product-requirements.md` — 基于当前实现反向整理的产品 PRD，描述产品定位、资产模型、核心流程、非目标和验收清单。
-- `status-and-todo.md` — 当前实现状态、已完成事项、部署/API 路径说明和 TODO。
+- `status-and-todo.md` — 当前实现状态、已完成事项、明确限制、部署/API 路径说明和 TODO。
 - `architecture-review.md` — 当前架构 review 与优先风险。
 
 ## 历史参考

@@ -161,5 +161,7 @@ Anthropic backend model providers.
 The app still intentionally does not include Docker, authentication,
 multi-tenancy, Redis, Postgres, or deployment infrastructure.
 
-See [`docs/status-and-todo.md`](./docs/status-and-todo.md) for the current
+Start with [`docs/product-design.md`](./docs/product-design.md) for the product
+design, capability model, and current feature map. See
+[`docs/status-and-todo.md`](./docs/status-and-todo.md) for the current
 implementation summary and TODO list.

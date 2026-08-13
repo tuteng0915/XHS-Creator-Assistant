@@ -2,6 +2,8 @@
 
 更新日期：2026-08-13
 
+本文档只记录当前实现状态、明确限制和 TODO。产品设计思想和功能全貌见 `docs/product-design.md`；更细的 PRD 和验收标准见 `docs/product-requirements.md`。
+
 ## API 路径与 VPS 分享结论
 
 前端业务请求已经使用相对路径：
