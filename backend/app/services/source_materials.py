@@ -15,6 +15,7 @@ from app.models import (
     SourceMaterialResponse,
     SourceMaterialType,
     SourceMaterialUpdate,
+    TextInputAssetCsvImportResponse,
     TextSourceMaterialCreate,
     TextSourceMaterialResponse,
     TrendCsvSourceMaterialResponse,
@@ -64,6 +65,29 @@ class SourceMaterialService:
         filename: str,
         content: bytes,
     ) -> AccountProfileCsvImportResponse:
+        imported = self.import_text_assets_csv(
+            workspace_id,
+            material_type=SourceMaterialType.ACCOUNT_PROFILE,
+            filename=filename,
+            content=content,
+        )
+        return AccountProfileCsvImportResponse(materials=imported.materials)
+
+    def import_text_assets_csv(
+        self,
+        workspace_id: str,
+        *,
+        material_type: SourceMaterialType,
+        filename: str,
+        content: bytes,
+    ) -> TextInputAssetCsvImportResponse:
+        if material_type not in {
+            SourceMaterialType.ACCOUNT_PROFILE,
+            SourceMaterialType.HISTORICAL_POSTS,
+            SourceMaterialType.COMMENTS,
+            SourceMaterialType.VIDEO_CREATOR_SAMPLES,
+        }:
+            raise ValidationError("Only text input asset types support batch import")
         safe_filename = PurePosixPath(filename.replace("\\", "/")).name
         extension = Path(safe_filename).suffix.lower()
         if extension not in {".csv", ".tsv"}:
@@ -84,29 +108,16 @@ class SourceMaterialService:
         with self.database.transaction() as connection:
             self.workspace_repository.get(connection, workspace_id)
             for index, row in enumerate(reader, start=1):
-                name = (
-                    row.get("name")
-                    or row.get("profile_name")
-                    or row.get("账号")
-                    or row.get("名称")
-                    or f"Profile {index}"
-                ).strip()
-                profile = (
-                    row.get("profile")
-                    or row.get("account_profile")
-                    or row.get("accountPositioning")
-                    or row.get("账号定位")
-                    or row.get("定位")
-                    or ""
-                ).strip()
-                if not profile:
+                name = self._csv_row_name(row, material_type, index)
+                asset_content = self._csv_row_content(row, material_type).strip()
+                if not asset_content:
                     continue
                 material = self.repository.create_text(
                     connection,
                     workspace_id=workspace_id,
-                    material_type=SourceMaterialType.ACCOUNT_PROFILE.value,
-                    name=name or f"Profile {index}",
-                    content=profile,
+                    material_type=material_type.value,
+                    name=name,
+                    content=asset_content,
                     now=utc_now(),
                 )
                 created.append(
@@ -115,8 +126,79 @@ class SourceMaterialService:
                     )
                 )
         if not created:
-            raise ValidationError("CSV did not contain any account profile rows")
-        return AccountProfileCsvImportResponse(materials=created)
+            raise ValidationError("CSV did not contain any importable text rows")
+        return TextInputAssetCsvImportResponse(materials=created)
+
+    @staticmethod
+    def _csv_row_name(
+        row: dict[str, str | None], material_type: SourceMaterialType, index: int
+    ) -> str:
+        fallback = {
+            SourceMaterialType.ACCOUNT_PROFILE: "账号概况",
+            SourceMaterialType.HISTORICAL_POSTS: "历史笔记",
+            SourceMaterialType.COMMENTS: "评论样本",
+            SourceMaterialType.VIDEO_CREATOR_SAMPLES: "视频创作者样本",
+        }[material_type]
+        value = (
+            row.get("name")
+            or row.get("title")
+            or row.get("profile_name")
+            or row.get("账号")
+            or row.get("名称")
+            or row.get("标题")
+            or f"{fallback} {index}"
+        )
+        return value.strip() or f"{fallback} {index}"
+
+    @staticmethod
+    def _csv_row_content(
+        row: dict[str, str | None], material_type: SourceMaterialType
+    ) -> str:
+        common = (
+            row.get("content")
+            or row.get("text")
+            or row.get("body")
+            or row.get("内容")
+            or row.get("正文")
+            or ""
+        )
+        if common:
+            return common
+        if material_type == SourceMaterialType.ACCOUNT_PROFILE:
+            return (
+                row.get("profile")
+                or row.get("account_profile")
+                or row.get("accountPositioning")
+                or row.get("账号定位")
+                or row.get("定位")
+                or ""
+            )
+        if material_type == SourceMaterialType.HISTORICAL_POSTS:
+            return (
+                row.get("historical_posts")
+                or row.get("posts")
+                or row.get("历史笔记")
+                or row.get("笔记")
+                or ""
+            )
+        if material_type == SourceMaterialType.COMMENTS:
+            return (
+                row.get("comments")
+                or row.get("comment_samples")
+                or row.get("评论")
+                or row.get("评论样本")
+                or ""
+            )
+        if material_type == SourceMaterialType.VIDEO_CREATOR_SAMPLES:
+            return (
+                row.get("video_creator_samples")
+                or row.get("video_samples")
+                or row.get("creator_samples")
+                or row.get("视频创作者样本")
+                or row.get("创作者样本")
+                or ""
+            )
+        return ""
 
     def create_csv(
         self,

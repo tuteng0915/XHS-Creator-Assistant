@@ -1,11 +1,11 @@
-export type SourceMaterialType =
+export type InputAssetType =
   | 'account_profile'
   | 'historical_posts'
   | 'comments'
   | 'trend_csv'
   | 'video_creator_samples'
 
-export type InputAssetType = SourceMaterialType
+export type SourceMaterialType = InputAssetType
 
 export interface Workspace {
   id: string
@@ -17,7 +17,7 @@ export interface Workspace {
   updatedAt: string
 }
 
-interface SourceMaterialBase {
+interface InputAssetBase {
   id: string
   workspaceId: string
   name: string
@@ -25,7 +25,7 @@ interface SourceMaterialBase {
   updatedAt: string
 }
 
-export interface TextSourceMaterial extends SourceMaterialBase {
+export interface TextInputAsset extends InputAssetBase {
   type:
     | 'account_profile'
     | 'historical_posts'
@@ -34,7 +34,7 @@ export interface TextSourceMaterial extends SourceMaterialBase {
   content: string
 }
 
-export interface TrendCsvSourceMaterial extends SourceMaterialBase {
+export interface TrendCsvInputAsset extends InputAssetBase {
   type: 'trend_csv'
   keyword: string
   originalFilename: string
@@ -45,11 +45,39 @@ export interface TrendCsvSourceMaterial extends SourceMaterialBase {
   preview: Array<Record<string, string>>
 }
 
-export type SourceMaterial = TextSourceMaterial | TrendCsvSourceMaterial
-export type InputAsset = SourceMaterial
-export type TextInputAsset = TextSourceMaterial
-export type TrendCsvInputAsset = TrendCsvSourceMaterial
+export type InputAsset = TextInputAsset | TrendCsvInputAsset
+export type SourceMaterial = InputAsset
+export type TextSourceMaterial = TextInputAsset
+export type TrendCsvSourceMaterial = TrendCsvInputAsset
 export type SavePhase = 'idle' | 'saving' | 'saved' | 'error'
+
+export type MediaAssetType = 'image' | 'video'
+export type MediaAssetSourceType = 'upload' | 'url' | 'generated' | 'extracted_frame'
+
+export interface MediaAsset {
+  id: string
+  workspaceId: string
+  type: MediaAssetType
+  name: string
+  purpose: string
+  sourceType: MediaAssetSourceType
+  originalFilename: string
+  mediaType: string
+  byteSize: number
+  sha256: string
+  metadata: Record<string, unknown>
+  derived: Record<string, unknown>
+  userNotes: string
+  fileUrl: string
+  externalUrl?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface VideoPreviewDeriveResponse {
+  videoAsset: MediaAsset
+  frames: MediaAsset[]
+}
 
 export type SkillStatus = 'enabled' | 'disabled'
 export type SkillSource = 'builtin' | 'generated'
@@ -79,6 +107,14 @@ export interface Skill extends SkillSummary {
   composableWith: string[]
   implementationRefs: string[]
   userNotes: string
+}
+
+export interface SkillInvokeResponse {
+  skillAssetId: string
+  skillId: string
+  status: 'completed'
+  output: Record<string, unknown>
+  modelMetadata: Record<string, unknown>
 }
 
 export type AgentStatus = 'enabled' | 'disabled'
@@ -111,6 +147,7 @@ export interface AgentConversationSummary {
   agentAssetId: string
   title: string
   status: AgentConversationStatus
+  contextTarget: Record<string, unknown>
   createdAt: string
   updatedAt: string
 }

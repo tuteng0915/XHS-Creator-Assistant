@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -238,6 +239,7 @@ class AgentConversationService:
         self.fake_provider = fake_provider
         self.live_provider = live_provider
         self.capability_catalog_ensurers = capability_catalog_ensurers or []
+        self._tasks: dict[str, asyncio.Task] = {}
 
     def create(
         self, workspace_id: str, payload: AgentConversationCreate
@@ -251,11 +253,17 @@ class AgentConversationService:
             if agent["status"] != "enabled":
                 raise ValidationError("Agent is disabled")
             title = payload.title or f"与 {agent['display_name']} 对话"
+            context_target = (
+                payload.context_target.model_dump(mode="json", by_alias=True)
+                if payload.context_target is not None
+                else {}
+            )
             row = self.repository.create(
                 connection,
                 workspace_id=workspace_id,
                 agent_asset_id=payload.agent_asset_id,
                 title=title,
+                context_target_json=json.dumps(context_target, ensure_ascii=False),
                 now=now,
             )
         return self._to_response(row, [])
@@ -292,6 +300,124 @@ class AgentConversationService:
                 model_metadata_json="{}",
                 now=now,
             )
+            assistant_message = self.repository.create_message(
+                connection,
+                conversation_id=conversation_id,
+                role="assistant",
+                content="Agent 正在生成回复…",
+                context_pack_json="{}",
+                asset_refs_json="[]",
+                proposed_actions_json="[]",
+                model_metadata_json=json.dumps(
+                    {
+                        "operation": ModelOperation.AGENT_CHAT.value,
+                        "mode": payload.mode,
+                        "status": "queued",
+                    },
+                    ensure_ascii=False,
+                ),
+                now=utc_now(),
+            )
+            row = self.repository.get(connection, conversation_id)
+            messages = self.repository.list_messages(connection, conversation_id)
+
+        task = self._enqueue_reply(
+            conversation_id=conversation_id,
+            assistant_message_id=assistant_message["id"],
+            user_content=payload.content,
+            mode=payload.mode,
+        )
+        await asyncio.wait({task}, timeout=0.001)
+        with self.database.read() as connection:
+            row = self.repository.get(connection, conversation_id)
+            messages = self.repository.list_messages(connection, conversation_id)
+        return self._to_response(row, messages)
+
+    def resume_unfinished(self) -> None:
+        with self.database.read() as connection:
+            rows = connection.execute(
+                """
+                SELECT m.*, c.id AS conversation_id
+                FROM agent_messages m
+                JOIN agent_conversations c ON c.id = m.conversation_id
+                WHERE m.role = 'assistant'
+                ORDER BY m.created_at ASC, m.id ASC
+                """
+            ).fetchall()
+        for row in rows:
+            message = dict(row)
+            try:
+                metadata = json.loads(message["model_metadata_json"])
+            except json.JSONDecodeError:
+                continue
+            if metadata.get("status") not in {"queued", "running"}:
+                continue
+            user_content = self._previous_user_message(message["conversation_id"], message["id"])
+            if user_content:
+                self._enqueue_reply(
+                    conversation_id=message["conversation_id"],
+                    assistant_message_id=message["id"],
+                    user_content=user_content,
+                    mode=str(metadata.get("mode") or "demo"),
+                )
+
+    async def shutdown(self) -> None:
+        tasks = list(self._tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._tasks.clear()
+
+    def _enqueue_reply(
+        self,
+        *,
+        conversation_id: str,
+        assistant_message_id: str,
+        user_content: str,
+        mode: str,
+    ) -> asyncio.Task:
+        existing = self._tasks.get(assistant_message_id)
+        if existing and not existing.done():
+            return existing
+        task = asyncio.create_task(
+            self._execute_reply(
+                conversation_id=conversation_id,
+                assistant_message_id=assistant_message_id,
+                user_content=user_content,
+                mode=mode,
+            )
+        )
+        self._tasks[assistant_message_id] = task
+        task.add_done_callback(lambda _task: self._tasks.pop(assistant_message_id, None))
+        return task
+
+    async def _execute_reply(
+        self,
+        *,
+        conversation_id: str,
+        assistant_message_id: str,
+        user_content: str,
+        mode: str,
+    ) -> None:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            current = self.repository.get_message(connection, assistant_message_id)
+            metadata = json.loads(current["model_metadata_json"])
+            if metadata.get("status") not in {"queued", "running"}:
+                return
+            self.repository.update_message(
+                connection,
+                message_id=assistant_message_id,
+                content=current["content"],
+                context_pack_json=current["context_pack_json"],
+                asset_refs_json=current["asset_refs_json"],
+                proposed_actions_json=current["proposed_actions_json"],
+                model_metadata_json=json.dumps(
+                    {**metadata, "status": "running"}, ensure_ascii=False
+                ),
+                now=now,
+            )
 
         with self.database.read() as connection:
             conversation = self.repository.get(connection, conversation_id)
@@ -305,6 +431,16 @@ class AgentConversationService:
                 connection, conversation["workspace_id"]
             )
             agent = self.agent_repository.get(connection, conversation["agent_asset_id"])
+            context_target = json.loads(conversation["context_target_json"] or "{}")
+            selected_asset_item = (
+                self.context_access_service.capability_asset_detail_item(
+                    connection,
+                    workspace_id=conversation["workspace_id"],
+                    context_target=context_target,
+                )
+                if context_target
+                else None
+            )
             context_pack = self.context_access_service.build_workspace_pack(
                 connection,
                 workspace=workspace,
@@ -324,19 +460,26 @@ class AgentConversationService:
                     "simulation_history_overview",
                     "capability_catalog",
                     "agent_system_prompt",
+                    "selected_capability_asset",
                 ],
+                deep_items=[selected_asset_item] if selected_asset_item else None,
             )
             asset_refs = context_pack["snapshot"]["sourceRefs"]
-            messages = self.repository.list_messages(connection, conversation_id)
+            messages = [
+                message
+                for message in self.repository.list_messages(connection, conversation_id)
+                if message["id"] != assistant_message_id
+            ]
 
-        provider = self.live_provider if payload.mode == "live" else self.fake_provider
+        provider = self.live_provider if mode == "live" else self.fake_provider
         try:
             reply = await provider.reply(
                 agent=agent,
-                user_content=payload.content,
+                user_content=user_content,
                 context_pack=context_pack,
                 messages=messages,
             )
+            reply_metadata = {**reply.model_metadata, "status": "completed"}
         except Exception as error:
             reply = AgentConversationReply(
                 reply=(
@@ -345,25 +488,25 @@ class AgentConversationService:
                 ),
                 proposed_actions=[],
                 model_metadata={
-                    "provider": "live" if payload.mode == "live" else "fake",
+                    "provider": "live" if mode == "live" else "fake",
                     "operation": ModelOperation.AGENT_CHAT.value,
                     "status": "failed",
                     "error": str(error) or error.__class__.__name__,
                 },
             )
+            reply_metadata = reply.model_metadata
 
         with self.database.transaction() as connection:
-            assistant_message = self.repository.create_message(
+            assistant_message = self.repository.update_message(
                 connection,
-                conversation_id=conversation_id,
-                role="assistant",
+                message_id=assistant_message_id,
                 content=reply.reply,
                 context_pack_json=json.dumps(context_pack, ensure_ascii=False),
                 asset_refs_json=json.dumps(asset_refs, ensure_ascii=False),
                 proposed_actions_json=json.dumps(
                     reply.proposed_actions, ensure_ascii=False
                 ),
-                model_metadata_json=json.dumps(reply.model_metadata, ensure_ascii=False),
+                model_metadata_json=json.dumps(reply_metadata, ensure_ascii=False),
                 now=utc_now(),
             )
             for action in reply.proposed_actions:
@@ -373,9 +516,20 @@ class AgentConversationService:
                     message_id=assistant_message["id"],
                     action=action,
                 )
-            row = self.repository.get(connection, conversation_id)
+
+    def _previous_user_message(self, conversation_id: str, assistant_message_id: str) -> str:
+        with self.database.read() as connection:
             messages = self.repository.list_messages(connection, conversation_id)
-        return self._to_response(row, messages)
+        previous_users = []
+        for message in messages:
+            if message["id"] == assistant_message_id:
+                break
+            if message["role"] == "user":
+                previous_users.append(message)
+        if not previous_users:
+            return ""
+        latest = previous_users[-1]
+        return str(latest["content"])
 
     def _create_proposal_for_action(
         self,
@@ -427,6 +581,7 @@ class AgentConversationService:
         return AgentConversationResponse.model_validate(
             {
                 **row,
+                "context_target": json.loads(row.get("context_target_json") or "{}"),
                 "messages": [self._to_message(message) for message in messages],
             }
         )

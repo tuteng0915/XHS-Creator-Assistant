@@ -20,7 +20,9 @@ from app.models import (
     WorkflowType,
 )
 from app.repositories.analysis_runs import AnalysisRunRepository
+from app.repositories.media_assets import MediaAssetRepository
 from app.repositories.source_materials import SourceMaterialRepository
+from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.common import utc_now
 from app.services.context_access import ContextAccessService
@@ -54,6 +56,8 @@ class AnalysisRunService:
         repository: AnalysisRunRepository,
         workspace_repository: WorkspaceRepository,
         source_repository: SourceMaterialRepository,
+        media_asset_repository: MediaAssetRepository,
+        topic_repository: TopicRepository,
         settings: Settings,
         context_access_service: ContextAccessService,
     ) -> None:
@@ -61,6 +65,8 @@ class AnalysisRunService:
         self.repository = repository
         self.workspace_repository = workspace_repository
         self.source_repository = source_repository
+        self.media_asset_repository = media_asset_repository
+        self.topic_repository = topic_repository
         self.settings = settings
         self.context_access_service = context_access_service
 
@@ -69,12 +75,26 @@ class AnalysisRunService:
     ) -> AnalysisRunResponse:
         with self.database.transaction() as connection:
             workspace = self.workspace_repository.get(connection, workspace_id)
+            idempotency_key = (
+                payload.idempotency_key.strip()
+                if payload.idempotency_key is not None
+                else None
+            )
+            if idempotency_key:
+                existing = self.repository.get_by_idempotency_key(
+                    connection,
+                    workspace_id=workspace_id,
+                    idempotency_key=idempotency_key,
+                )
+                if existing is not None:
+                    return self._to_response(existing)
             snapshot = self._build_input_snapshot(connection, workspace, payload)
             row = self.repository.create(
                 connection,
                 workspace_id=workspace_id,
                 workflow_type=payload.workflow_type.value,
                 input_snapshot_json=json.dumps(snapshot, ensure_ascii=False),
+                idempotency_key=idempotency_key,
                 now=utc_now(),
             )
         return self._to_response(row)
@@ -82,22 +102,42 @@ class AnalysisRunService:
     def create_batch(
         self, workspace_id: str, payload: AnalysisRunBatchCreate
     ) -> list[AnalysisRunResponse]:
-        if not payload.account_profile_material_ids:
-            raise ValidationError("At least one account profile material is required")
+        profile_asset_ids = (
+            payload.account_profile_input_asset_ids
+            or payload.account_profile_material_ids
+        )
+        if not profile_asset_ids:
+            raise ValidationError("At least one account profile input asset is required")
         runs: list[AnalysisRunResponse] = []
-        for profile_material_id in payload.account_profile_material_ids:
+        for index, profile_asset_id in enumerate(profile_asset_ids):
             runs.append(
                 self.create(
                     workspace_id,
                     AnalysisRunCreate(
                         workflow_type=payload.workflow_type,
-                        account_profile_material_id=profile_material_id,
-                        historical_posts_material_id=payload.historical_posts_material_id,
-                        comments_material_id=payload.comments_material_id,
-                        trend_csv_material_id=payload.trend_csv_material_id,
-                        video_creator_samples_material_id=(
-                            payload.video_creator_samples_material_id
+                        idempotency_key=(
+                            f"{payload.idempotency_key}:{index}"
+                            if payload.idempotency_key
+                            else None
                         ),
+                        account_profile_input_asset_id=profile_asset_id,
+                        historical_posts_input_asset_id=(
+                            payload.historical_posts_input_asset_id
+                            or payload.historical_posts_material_id
+                        ),
+                        comments_input_asset_id=(
+                            payload.comments_input_asset_id
+                            or payload.comments_material_id
+                        ),
+                        trend_csv_input_asset_id=(
+                            payload.trend_csv_input_asset_id
+                            or payload.trend_csv_material_id
+                        ),
+                        video_creator_samples_input_asset_id=(
+                            payload.video_creator_samples_input_asset_id
+                            or payload.video_creator_samples_material_id
+                        ),
+                        media_asset_ids=payload.media_asset_ids,
                         mode=payload.mode,
                     ),
                 )
@@ -217,7 +257,71 @@ class AnalysisRunService:
                 model_metadata_json=json.dumps(metadata, ensure_ascii=False),
                 now=utc_now(),
             )
+            if (
+                stage_key == "topics"
+                and payload.status == AnalysisRunStatus.COMPLETED
+            ):
+                self._materialize_topics_from_stage_result(
+                    connection,
+                    run=current,
+                    topics_result=results.get("topics", {}),
+                )
         return self._to_response(row)
+
+    def _materialize_topics_from_stage_result(
+        self,
+        connection,
+        *,
+        run: dict,
+        topics_result: dict,
+    ) -> None:
+        source_workflow = run["workflow_type"]
+        if source_workflow not in {
+            WorkflowType.ACCOUNT_DIAGNOSIS.value,
+            WorkflowType.TREND_ANALYSIS.value,
+        }:
+            return
+        if self.topic_repository.list_by_source_analysis_run(connection, run["id"]):
+            return
+        topic_items = topics_result.get("topics") if isinstance(topics_result, dict) else None
+        if not isinstance(topic_items, list):
+            return
+        now = utc_now()
+        for index, item in enumerate(topic_items):
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or item.get("topic") or "").strip()
+            if not title:
+                continue
+            why_parts = [
+                str(item.get("whyFit") or item.get("whyItFits") or "").strip(),
+                str(item.get("whyTrending") or "").strip(),
+            ]
+            self.topic_repository.create(
+                connection,
+                workspace_id=run["workspace_id"],
+                title=title,
+                angle=str(item.get("angle") or ""),
+                associated_pain_point=str(
+                    item.get("pain")
+                    or item.get("associatedPainPoint")
+                    or item.get("painPoint")
+                    or ""
+                ),
+                why_it_fits="\n".join(part for part in why_parts if part),
+                generated_snapshot_json=json.dumps(
+                    {
+                        **item,
+                        "sourceAnalysisRunId": run["id"],
+                        "sourceWorkflow": source_workflow,
+                        "sourceTopicIndex": index,
+                    },
+                    ensure_ascii=False,
+                ),
+                source_analysis_run_id=run["id"],
+                source_workflow=source_workflow,
+                now=now,
+            )
 
     def _build_input_snapshot(
         self,
@@ -237,27 +341,30 @@ class AnalysisRunService:
         if payload.workflow_type == WorkflowType.ACCOUNT_DIAGNOSIS:
             historical = self._require_material(
                 connection,
-                payload.historical_posts_material_id,
+                payload.historical_posts_input_asset_id
+                or payload.historical_posts_material_id,
                 workspace["id"],
                 SourceMaterialType.HISTORICAL_POSTS.value,
-                "Historical posts material is required",
+                "Historical posts input asset is required",
             )
             comments = self._require_material(
                 connection,
-                payload.comments_material_id,
+                payload.comments_input_asset_id or payload.comments_material_id,
                 workspace["id"],
                 SourceMaterialType.COMMENTS.value,
-                "Comments material is required",
+                "Comments input asset is required",
             )
             workflow_snapshot = {
                 **base,
                 "historicalPosts": {
+                    "inputAssetId": historical["id"],
                     "materialId": historical["id"],
                     "name": historical["name"],
                     "content": historical["text_content"],
                     "updatedAt": historical["updated_at"],
                 },
                 "comments": {
+                    "inputAssetId": comments["id"],
                     "materialId": comments["id"],
                     "name": comments["name"],
                     "content": comments["text_content"],
@@ -323,10 +430,10 @@ class AnalysisRunService:
         if payload.workflow_type == WorkflowType.TREND_ANALYSIS:
             trend_csv = self._require_material(
                 connection,
-                payload.trend_csv_material_id,
+                payload.trend_csv_input_asset_id or payload.trend_csv_material_id,
                 workspace["id"],
                 SourceMaterialType.TREND_CSV.value,
-                "Trend CSV material is required",
+                "Trend CSV input asset is required",
             )
             ranked_posts = self._rank_trend_posts(
                 self._read_upload_text(trend_csv["stored_key"])
@@ -334,6 +441,7 @@ class AnalysisRunService:
             workflow_snapshot = {
                 **base,
                 "trendCsv": {
+                    "inputAssetId": trend_csv["id"],
                     "materialId": trend_csv["id"],
                     "name": trend_csv["name"],
                     "keyword": trend_csv["keyword"],
@@ -394,19 +502,26 @@ class AnalysisRunService:
 
         video_samples = self._require_material(
             connection,
-            payload.video_creator_samples_material_id,
+            payload.video_creator_samples_input_asset_id
+            or payload.video_creator_samples_material_id,
             workspace["id"],
             SourceMaterialType.VIDEO_CREATOR_SAMPLES.value,
-            "Video creator samples material is required",
+            "Video creator samples input asset is required",
         )
         workflow_snapshot = {
             **base,
             "videoCreatorSamples": {
+                "inputAssetId": video_samples["id"],
                 "materialId": video_samples["id"],
                 "name": video_samples["name"],
                 "content": video_samples["text_content"],
                 "updatedAt": video_samples["updated_at"],
             },
+            "mediaAssets": self._resolve_media_asset_snapshots(
+                connection,
+                workspace["id"],
+                payload.media_asset_ids,
+            ),
         }
         workflow_snapshot["contextPack"] = (
             self.context_access_service.build_workspace_pack(
@@ -426,6 +541,7 @@ class AnalysisRunService:
                     "topic_library_overview",
                     "draft_history_overview",
                     "simulation_history_overview",
+                    "media_assets_overview",
                 ],
                 deep_items=[
                     self.context_access_service.deep_item(
@@ -443,10 +559,40 @@ class AnalysisRunService:
                         },
                         text=video_samples["text_content"] or "",
                     )
+                ]
+                + [
+                    self.context_access_service.deep_item(
+                        key=f"selected_media_asset_{media['mediaAssetId']}",
+                        asset_type="media_asset",
+                        asset_id=media["mediaAssetId"],
+                        selector="media_asset_derived_snapshot",
+                        role="media_asset",
+                        data=media,
+                    )
+                    for media in workflow_snapshot["mediaAssets"]
                 ],
             )
         )
         return workflow_snapshot
+
+    def _resolve_media_asset_snapshots(
+        self,
+        connection,
+        workspace_id: str,
+        media_asset_ids: list[str],
+    ) -> list[dict]:
+        compact_assets: list[dict] = []
+        seen: set[str] = set()
+        for asset_id in media_asset_ids:
+            clean_id = asset_id.strip()
+            if not clean_id or clean_id in seen:
+                continue
+            seen.add(clean_id)
+            row = self.media_asset_repository.get(connection, clean_id)
+            if row["workspace_id"] != workspace_id:
+                raise ValidationError("Media asset does not belong to this workspace")
+            compact_assets.append(self.context_access_service._summarize_media_asset(row))
+        return compact_assets
 
     def _require_material(
         self,
@@ -481,21 +627,27 @@ class AnalysisRunService:
                 raise ValidationError("Manual account profile cannot be blank")
             return {
                 "source": "manual",
+                "inputAssetId": None,
                 "materialId": None,
                 "name": "Manual profile",
                 "content": content,
                 "updatedAt": None,
             }
-        if payload.account_profile_material_id is not None:
+        account_profile_asset_id = (
+            payload.account_profile_input_asset_id
+            or payload.account_profile_material_id
+        )
+        if account_profile_asset_id is not None:
             material = self._require_material(
                 connection,
-                payload.account_profile_material_id,
+                account_profile_asset_id,
                 workspace["id"],
                 SourceMaterialType.ACCOUNT_PROFILE.value,
-                "Account profile material is required",
+                "Account profile input asset is required",
             )
             return {
-                "source": "source_material",
+                "source": "input_asset",
+                "inputAssetId": material["id"],
                 "materialId": material["id"],
                 "name": material["name"],
                 "content": material["text_content"] or "",
@@ -503,6 +655,7 @@ class AnalysisRunService:
             }
         return {
             "source": "workspace",
+            "inputAssetId": None,
             "materialId": None,
             "name": workspace["name"],
             "content": workspace["account_positioning"],

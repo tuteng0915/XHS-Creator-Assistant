@@ -1,6 +1,6 @@
 # Creator Content Workspace
 
-This repository contains the original single-file creator-content prototype and the initial frontend/backend migration shell.
+This repository contains the original single-file creator-content prototype and the migrated creator workspace application.
 
 ## Open the original prototype
 
@@ -33,9 +33,19 @@ npm run dev
 Open `http://localhost:5173`. The frontend health page remains available at
 `http://localhost:5173/health`.
 
-Run the FastAPI backend at the same time to use workspace creation, account
-positioning, text source materials, and trend CSV uploads. Vite proxies `/api`
-requests to `http://127.0.0.1:8000`.
+Run the FastAPI backend at the same time. The frontend application calls the
+backend through relative `/api/...` paths. In local development only, Vite
+proxies those `/api` requests to `http://127.0.0.1:8000`.
+
+For VPS sharing, serve the frontend and backend under the same public origin:
+
+```text
+https://your-domain/
+https://your-domain/api/...
+```
+
+Do not expose a frontend build that still depends on a viewer's local
+`localhost:8000`.
 
 Checks:
 
@@ -48,6 +58,19 @@ npm run build
 ## Backend health endpoint
 
 Requirements: Python 3.11 or newer.
+
+Local uploaded video preview extraction additionally requires `ffmpeg` on the
+backend machine:
+
+```bash
+ffmpeg -version
+```
+
+If it is installed under a non-default path, set:
+
+```bash
+export FFMPEG_PATH=/absolute/path/to/ffmpeg
+```
 
 ```bash
 cd backend
@@ -67,6 +90,32 @@ export ANTHROPIC_API_KEY=...
 export ANTHROPIC_MODEL=claude-sonnet-4-20250514
 ```
 
+If you use Codex from an editor plugin and cannot inject shell environment
+variables into this process, create a local env file at the repository root
+or under `backend/`:
+
+```text
+.env.local
+backend/.env.local
+```
+
+This file is ignored by git. Put local model credentials there using the same
+`export KEY=value` format:
+
+```bash
+export MODEL_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=...
+export ANTHROPIC_BASE_URL=https://your-qwen-host/apps/anthropic
+export ANTHROPIC_MODEL=qwen-plus
+```
+
+The smoke script reads `.env.local` and then `backend/.env.local`
+automatically:
+
+```bash
+backend/.venv/bin/python scripts/smoke_model_api.py
+```
+
 To use Qwen through DashScope's OpenAI-compatible API:
 
 ```bash
@@ -79,6 +128,22 @@ export QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 `DASHSCOPE_API_KEY` and `DASHSCOPE_BASE_URL` are also accepted aliases.
 
+Some Qwen deployments also expose an Anthropic-compatible endpoint. Use it
+through the same backend proxy by overriding the Anthropic endpoint:
+
+```bash
+export MODEL_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=...
+export ANTHROPIC_MODEL=...
+export ANTHROPIC_BASE_URL=https://your-qwen-host/apps/anthropic
+# If the deployment requires an exact messages endpoint, use this instead:
+export ANTHROPIC_MESSAGES_URL=https://your-qwen-host/apps/anthropic/v1/messages
+```
+
+For Qwen's Anthropic-compatible `/apps/anthropic` endpoint, the backend derives
+`/apps/anthropic/v1/messages` automatically when `ANTHROPIC_MESSAGES_URL` is
+not set.
+
 Checks:
 
 ```bash
@@ -88,8 +153,13 @@ python -m pytest
 
 ## Current scope
 
-The React and FastAPI applications currently implement the first workspace
-persistence slice: workspace selection, account positioning, historical-post
-and comment text, and trend CSV upload/preview. Diagnosis, topic generation,
-content generation, audience simulation execution, LangGraph, deployment
-infrastructure, and authentication are intentionally not implemented yet.
+The migrated app now includes creator content assets, capability assets,
+workspace persistence, workflow execution, LangGraph-backed workflows, topic
+and simulation history, batch account-profile import, batch workflow runs, and Qwen /
+Anthropic backend model providers.
+
+The app still intentionally does not include Docker, authentication,
+multi-tenancy, Redis, Postgres, or deployment infrastructure.
+
+See [`docs/status-and-todo.md`](./docs/status-and-todo.md) for the current
+implementation summary and TODO list.

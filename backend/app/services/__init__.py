@@ -13,7 +13,10 @@ from app.services.draft_generation import (
     RealStructureModelProvider,
 )
 from app.services.drafts import DraftService
+from app.services.input_assets import InputAssetService
+from app.services.media_assets import MediaAssetService
 from app.services.model_calls import ModelCallService
+from app.services.qwen_media import QwenMediaService
 from app.services.simulation_runs import SimulationRunService
 from app.services.skills import SkillService
 from app.services.source_materials import SourceMaterialService
@@ -32,7 +35,10 @@ __all__ = [
     "DraftService",
     "FakeStructureModelProvider",
     "FakeAgentConversationModelProvider",
+    "InputAssetService",
+    "MediaAssetService",
     "ModelCallService",
+    "QwenMediaService",
     "RealStructureModelProvider",
     "RealAgentConversationModelProvider",
     "SimulationRunService",

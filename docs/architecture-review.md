@@ -1,7 +1,6 @@
 # Architecture Review: Creator Asset Workspace
 
-Reviewed on 2026-07-12 against the current codebase after commit
-`40cca28 Add provider-backed conversations and maker assets`.
+Reviewed on 2026-08-13 against the current codebase.
 
 This report replaces older review notes. The product direction is now clear:
 the app is a creator workspace with context assets and capability assets, not a
@@ -9,21 +8,30 @@ generic agent platform.
 
 ## Current implementation snapshot
 
-### Context assets
+### 内容资产
 
 Implemented and product-specific:
 
-- Workspace / account profile
-- Source materials:
+- Default workspace
+- Input assets:
+  - 账号概况
   - historical posts
   - comment samples
   - uploaded trend CSV
+  - video creator samples
+  - image assets
+  - video assets
 - Analysis runs:
   - account diagnosis
   - trend analysis
+  - video creator quality diagnosis
 - Topic library
 - Draft / content structure records
 - Audience simulation runs
+
+The frontend now groups InputAsset categories and reusable outputs together as
+内容资产. It no longer exposes Input Assets and Reusable Outputs as separate
+sidebar section titles.
 
 ### Capability assets
 
@@ -34,14 +42,15 @@ Implemented as internal workspace assets:
 - Workflow assets
 - Agent conversations
 
-The newest addition is a maker layer:
+The newest capability additions are:
 
-- `Skill Maker`
-- `Agent Maker`
-- `Workflow Maker`
+- one `Capability Maker` agent with Skill / Agent / Workflow design skills;
+- one `Input Asset Formatter` agent with formatter skills for product input assets;
+- one `Media Generation Operator` agent with Qwen media understanding and
+  generation skills.
 
-These currently generate proposals through the existing conversation surface.
-They do not directly mutate Skill, Agent, or Workflow definitions.
+Capability Maker currently generates proposals through the existing conversation
+surface. It does not directly mutate Skill, Agent, or Workflow definitions.
 
 ### Execution model
 
@@ -63,14 +72,24 @@ Supported providers:
 
 - Anthropic Messages API
 - Qwen / DashScope OpenAI-compatible chat completions
+- Qwen vision chat completions for controlled image/video understanding skills
+- DashScope async media tasks for controlled image/video generation skills
+- Local ffmpeg-based preview-frame extraction for uploaded video assets
 
 The browser no longer receives model API keys.
+
+### Frontend API path
+
+Frontend API calls use relative `/api/...` paths. Local Vite development
+proxies `/api` to `http://127.0.0.1:8000`; production/VPS sharing must serve
+frontend and backend under the same public origin or reverse-proxy `/api` to
+FastAPI.
 
 ## What is aligned
 
 - The product is workspace-first and creator-specific.
-- Account profile is treated as a reusable workspace input.
-- Source materials are constrained to product types, not arbitrary files.
+- 账号概况 is treated as a reusable input asset.
+- Input assets are constrained to product types, not arbitrary files.
 - Analysis, topic, draft, and simulation outputs are persisted.
 - Generated draft snapshots are separated from user-editable draft content.
 - Topic and draft records carry relationships back to source runs where available.
@@ -92,9 +111,14 @@ Current status: materially improved.
 Execution starts from POST-created runs and the backend worker owns execution.
 SSE is now observation-oriented.
 
-Remaining gap: duplicate user POSTs can still create multiple distinct runs.
-The worker prevents duplicate execution for the same run ID, but the API does
-not yet accept an idempotency key or client request ID.
+Current status: improved.
+
+Analysis run creation now accepts an `idempotencyKey`. Repeating the same
+workspace + key returns the existing run instead of creating another one. The
+frontend sends a client-generated key for single and batch workflow creation.
+
+Remaining gap: the in-process worker still has no durable SQLite claim/lease
+metadata.
 
 ### Public execution mutation
 
@@ -137,9 +161,11 @@ The catalog contains:
 are materialized before building the conversation context pack. Maker agents no
 longer depend on the user manually opening the capability pages first.
 
-Remaining gap: when a maker is launched from a specific selected
-Skill/Agent/Workflow detail page, that selected asset detail is not yet passed
-as a first-class conversation context target.
+Current status: improved.
+
+When a maker conversation is launched from a selected Skill/Agent/Workflow
+detail page, the frontend sends a `contextTarget` and the backend injects a
+`selected_capability_asset` item into the context pack.
 
 ### Resolved — proposed actions have an executable proposal loop
 
@@ -196,11 +222,56 @@ Live conversation model failures now create an assistant failure message instead
 of leaving only the user message. The failure is recorded in message
 `modelMetadata`.
 
-Remaining gaps:
+Recent update:
 
-- conversation calls are still synchronous HTTP requests;
-- there is no conversation-level queued/running state;
-- retrying can still create another user message.
+- sending a message now creates the user message and an assistant placeholder;
+- the placeholder records `queued`, `running`, `completed`, or `failed` in
+  message metadata;
+- backend in-process tasks generate the assistant reply after the request
+  returns;
+- startup recovery attempts to resume assistant messages left in `queued` or
+  `running`;
+- frontend observes pending replies by polling the conversation.
+
+Remaining gap: this is still an in-process task model, not a durable
+conversation job table with persisted leases or idempotency keys.
+
+### Improved — input asset formatter is now a backend skill invocation
+
+Older risk: the Input Asset Formatter agent existed in the UI, but pasted input
+was transformed by local frontend helper logic.
+
+Current status: improved.
+
+The formatter path now uses:
+
+- `Input Asset Formatter` agent as the product role;
+- `input_asset.format_*` skills as the callable capability contracts;
+- `POST /api/skills/{skill_asset_id}/invoke` as the backend invocation path;
+- deterministic backend formatter implementations for the current product
+  input asset types.
+- `Media Generation Operator` agent as the product role for media inspection
+  and generation;
+- `media.understand_image`, `media.understand_video`,
+  `media.generate_image`, and `media.generate_video` as directly callable
+  Qwen media skills.
+
+Remaining gap: formatter skills are deterministic code implementations today.
+They are real backend skill calls, but not yet model-backed formatters.
+
+### Improved — skills have a controlled invocation surface
+
+Older risk: Skills were only descriptive capability contracts.
+
+Current status: improved.
+
+The backend now exposes a controlled skill invocation endpoint for directly
+callable product skills. Current direct invocation is intentionally limited to
+input asset formatter skills and Qwen media skills. Non-callable skills return
+a clear 422 response.
+
+Remaining gap: this is not a general code tool runtime. That is intentional for
+the current product version.
 
 ## Current high-priority findings
 
@@ -219,7 +290,6 @@ Remaining risks:
 - process crash during an external model call may repeat the current stage on
   restart;
 - no durable job claim/lease is stored in SQLite;
-- no per-run idempotency key protects against repeated POSTs;
 - no retry policy is stored per stage;
 - no structured worker failure record separate from workflow stage failure.
 
@@ -227,7 +297,6 @@ Recommended next step:
 
 - Keep the in-process worker, but add SQLite job claim metadata:
   `claimed_at`, `claim_owner`, `attempt_count`, `last_heartbeat_at`.
-- Add API-level idempotency for run creation.
 
 ### P1 — SSE observation is reconnectable but not durable replay
 
@@ -246,26 +315,24 @@ Recommended fix:
 - Keep snapshot-first loading.
 - Only add durable event log if debugging or audit requirements justify it.
 
-### P1 — conversations execute live model calls synchronously in request
+### P1 — conversation execution is async but not durably queued
 
-Agent conversation message sending persists the user message, builds context,
-calls the provider, then persists the assistant message.
+Agent conversation message sending now returns before the live model call
+finishes. The assistant placeholder carries message-level status and the
+frontend observes it.
 
-This is acceptable for a first conversation slice, but differs from workflow
-execution.
+Remaining risks:
 
-Risks:
-
-- long live calls hold the HTTP request;
-- if the model call fails, the user message remains without an assistant error
-- there is no conversation-level `running` or `failed` status;
-- retrying from the UI can create repeated user messages.
+- in-process task loss on process crash;
+- no SQLite claim/lease table for conversation replies;
+- no per-message idempotency key;
+- retrying from the UI can still create repeated user messages.
 
 Recommended fix:
 
-- Add message-level status for assistant generation.
-- Consider moving live conversation responses to the same worker/observe pattern
-  if conversations become central.
+- Keep the current lightweight implementation for local use.
+- Add a small persisted conversation job table only if conversation becomes a
+  central long-running execution path.
 
 ### P1 — context packs favor breadth but need explicit budget policy
 
@@ -289,24 +356,34 @@ Recommended fix:
   - provider/model budget hint.
 - Keep the broad default, but make truncation auditable and deterministic.
 
-### P1 — Qwen provider needs model-specific structured-output hardening
+### P1 — Qwen provider structured-output hardening is improved but incomplete
 
 Qwen support is correctly isolated behind `ModelCallService`, but structured
 output still relies on prompt-only JSON.
 
-Risks:
+Implemented:
 
-- OpenAI-compatible providers may return non-JSON prose or fenced JSON;
+- Qwen requests include `response_format: {"type": "json_object"}`;
+- parser handles fenced JSON;
+- parser extracts the first JSON object from responses with surrounding prose;
+- Qwen media understanding requests require structured `imageUnderstanding` /
+  `videoUnderstanding` output;
+- local uploaded video understanding derives preview frames first and sends those
+  frame images to Qwen instead of uploading the full video file;
+- media understanding results are staged as user-confirmed derived JSON before
+  being reused by workflows;
+- tests cover realistic qwen-compatible response shapes.
+
+Remaining risks:
+
 - Qwen model variants may differ in tool/JSON support;
 - error responses are reduced to status code, which is safe but weak for local
   debugging.
 
 Recommended fix:
 
-- Add provider-specific structured output options where supported.
-- Keep current JSON parser fallback.
 - Log sanitized provider error body in backend logs, not in frontend responses.
-- Add integration fixtures for realistic Qwen responses.
+- Add more integration fixtures for real qwen edge cases.
 
 ### P1 — `frontend/src/App.tsx` is now a bottleneck
 
@@ -321,17 +398,16 @@ Recommended fix:
 - conversation UI;
 - maker shortcuts.
 
-The file is still manageable but fragile.
+The file is still large. Several pure or semi-contained pieces have been
+extracted, including workspace shell, media assets page, input assets page,
+account profile page, workflow output panel, stage/result presentation
+components, and pending conversation polling. The main workspace state machine
+and several page renderers still live in `App.tsx`.
 
 Recommended split:
 
-- `WorkspaceShell`
-- `ContextAssetSidebar`
-- `CapabilitySidebar`
 - `WorkflowCallPanel`
-- `AnalysisOutputPanel`
 - `TopicLibraryPage`
-- `CapabilityAssetsPage`
 - `AgentConversationPanel`
 - shared hooks:
   - `useWorkspaceData`
@@ -351,17 +427,6 @@ model generation.
 This is acceptable for now because draft generation is smaller than full
 workflows, but if live structure generation becomes slow or expensive, it
 should follow the same create-run/observe pattern.
-
-### P2 — no capability asset detail in context-aware UI shortcuts
-
-Maker CTA buttons prefill useful prompts, but they do not pass the selected
-Skill/Agent/Workflow ID as structured context.
-
-Recommended fix:
-
-- When starting from a selected capability asset, pass a structured
-  `conversationContext` or initial message metadata.
-- Let the backend include the selected asset detail in the context pack.
 
 ### P2 — proposed action validation is too loose
 
@@ -394,8 +459,12 @@ Recommended fix:
 These are user-facing creator records:
 
 - Workspace
-- Account Profile
-- Source Material
+- Input Asset
+  - 账号概况
+  - historical posts
+  - comment samples
+  - trend CSV
+  - video creator samples
 - Analysis Run
 - Topic
 - Draft / Content Structure
@@ -466,19 +535,15 @@ A workflow is a product-owned task graph:
 
 ## Recommended priority order
 
-1. Add idempotency key support for workflow run creation.
-2. Add pack-level context budget metadata.
-3. Add selected capability asset detail to maker conversation context.
-4. Harden Qwen structured-output handling with provider-specific fixtures.
-5. Add conversation-level queued/running/failed state if conversations become
-   central.
-6. Split `frontend/src/App.tsx` after the above behavior stabilizes.
+1. Add pack-level context budget metadata.
+2. Add durable worker claim/lease metadata if repeated external calls become a
+   practical problem.
+3. Add durable conversation job records if conversations become central.
+4. Add proposal editing and per-action schema validation.
+5. Continue splitting `frontend/src/App.tsx` into shell/page/hooks modules.
 
 ## Acceptance criteria for the next architecture pass
 
-- Retrying a workflow POST with the same client request ID does not create a
-  duplicate run.
 - Context packs show total size, source refs, exact/summarized/omitted assets,
   and provider/model budget assumptions.
-- Maker conversations launched from a selected Skill/Agent/Workflow include that
-  selected asset detail explicitly.
+- Proposal payloads are editable before apply and validated per action type.

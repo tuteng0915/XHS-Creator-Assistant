@@ -20,10 +20,24 @@ This keeps the system extensible without becoming a generic filesystem.
 ## Current implementation boundary
 
 The backend still stores these records through the legacy `source_materials`
-table, repository, service, and API paths.
+table, repository, and low-level service implementation.
 
 That is an implementation compatibility layer. Product code, UI language,
 workflow contracts, and context packs should use `InputAsset` terminology.
+
+Formal API paths now exist:
+
+```text
+POST  /api/workspaces/{workspace_id}/input-assets
+GET   /api/workspaces/{workspace_id}/input-assets
+GET   /api/input-assets/{asset_id}
+PATCH /api/input-assets/{asset_id}
+POST  /api/workspaces/{workspace_id}/input-assets/trend-csv
+POST  /api/workspaces/{workspace_id}/input-assets/account-profiles-csv
+POST  /api/workspaces/{workspace_id}/input-assets/text-csv
+```
+
+Legacy `source-materials` paths remain active as compatibility aliases.
 
 Do not split these into many tables yet. We expect more product-specific input
 asset types later, so a typed asset table plus registry is the better direction.
@@ -32,7 +46,7 @@ asset types later, so a typed asset table plus registry is the better direction.
 
 | Type | Label | Content kind | Primary workflow roles |
 | --- | --- | --- | --- |
-| `account_profile` | Account Profiles | text | account profile snapshot |
+| `account_profile` | 账号概况 | text | account profile snapshot |
 | `historical_posts` | Historical Posts | text | account diagnosis profile analysis |
 | `comments` | Comment Samples | text | account diagnosis pain-point analysis |
 | `trend_csv` | Trend CSV Data | file + metadata | trend analysis deterministic ranking |
@@ -57,6 +71,16 @@ The frontend now has a lightweight registry in
 `frontend/src/inputAssets.ts`. Backend registry extraction should follow when
 API naming is migrated.
 
+Batch import currently supports text input asset CSV/TSV for:
+
+- `account_profile`;
+- `historical_posts`;
+- `comments`;
+- `video_creator_samples`.
+
+`trend_csv` remains a dedicated file upload because it stores original upload
+metadata and deterministic ranking context.
+
 ## Relationship to workflows
 
 Workflows should declare required input asset types, not generic materials.
@@ -78,6 +102,19 @@ video_creator_quality
 
 Each workflow call should bind concrete asset instance IDs or explicitly choose
 manual input that will be saved into an input asset before execution.
+
+New workflow request fields should prefer `InputAssetId` naming, for example:
+
+```json
+{
+  "workflowType": "account_diagnosis",
+  "accountProfileInputAssetId": "profile_123",
+  "historicalPostsInputAssetId": "history_123",
+  "commentsInputAssetId": "comments_123"
+}
+```
+
+Legacy `MaterialId` fields remain accepted for compatibility.
 
 ## Relationship to skills
 

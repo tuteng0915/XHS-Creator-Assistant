@@ -3,7 +3,7 @@ import json
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from app.models import (
     AccountProfileCsvImportResponse,
@@ -23,21 +23,33 @@ from app.models import (
     DraftResponse,
     DraftSummary,
     DraftUpdate,
+    InputAssetResponse,
+    InputAssetType,
+    InputAssetUpdate,
+    MediaAssetResponse,
+    MediaAssetType,
+    MediaAssetUpdate,
     SimulationRunCreate,
     SimulationRunResponse,
     SimulationRunSummary,
+    SkillInvokeRequest,
+    SkillInvokeResponse,
     SkillResponse,
     SkillSummary,
     SkillUpdate,
     SourceMaterialResponse,
     SourceMaterialType,
     SourceMaterialUpdate,
+    TextInputAssetCreate,
+    TextInputAssetCsvImportResponse,
     TextSourceMaterialCreate,
     TopicCreate,
     TopicResponse,
     TopicSourceWorkflow,
     TopicStatus,
     TopicUpdate,
+    VideoPreviewDeriveRequest,
+    VideoPreviewDeriveResponse,
     WorkflowAssetResponse,
     WorkflowAssetSummary,
     WorkflowAssetUpdate,
@@ -53,9 +65,10 @@ from app.services import (
     AssetProposalService,
     DraftGenerationService,
     DraftService,
+    InputAssetService,
+    MediaAssetService,
     SimulationRunService,
     SkillService,
-    SourceMaterialService,
     TopicService,
     WorkflowAssetService,
     WorkflowWorkerService,
@@ -107,7 +120,8 @@ def _sse_event(
 
 def create_api_router(
     workspace_service: WorkspaceService,
-    source_service: SourceMaterialService,
+    input_asset_service: InputAssetService,
+    media_asset_service: MediaAssetService,
     analysis_service: AnalysisRunService,
     topic_service: TopicService,
     draft_service: DraftService,
@@ -152,7 +166,17 @@ def create_api_router(
     def create_text_source_material(
         workspace_id: str, payload: TextSourceMaterialCreate
     ) -> SourceMaterialResponse:
-        return source_service.create_text(workspace_id, payload)
+        return input_asset_service.create_text(workspace_id, payload)
+
+    @router.post(
+        "/workspaces/{workspace_id}/input-assets",
+        response_model=InputAssetResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_text_input_asset(
+        workspace_id: str, payload: TextInputAssetCreate
+    ) -> InputAssetResponse:
+        return input_asset_service.create_text(workspace_id, payload)
 
     @router.post(
         "/workspaces/{workspace_id}/source-materials/trend-csv",
@@ -165,7 +189,26 @@ def create_api_router(
         keyword: Annotated[str, Form()],
         file: Annotated[UploadFile, File()],
     ) -> SourceMaterialResponse:
-        return source_service.create_csv(
+        return input_asset_service.create_csv(
+            workspace_id,
+            name=name,
+            keyword=keyword,
+            filename=file.filename or "upload.csv",
+            content=await file.read(),
+        )
+
+    @router.post(
+        "/workspaces/{workspace_id}/input-assets/trend-csv",
+        response_model=InputAssetResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_input_asset_trend_csv(
+        workspace_id: str,
+        name: Annotated[str, Form()],
+        keyword: Annotated[str, Form()],
+        file: Annotated[UploadFile, File()],
+    ) -> InputAssetResponse:
+        return input_asset_service.create_csv(
             workspace_id,
             name=name,
             keyword=keyword,
@@ -182,9 +225,45 @@ def create_api_router(
         workspace_id: str,
         file: Annotated[UploadFile, File()],
     ) -> AccountProfileCsvImportResponse:
-        return source_service.import_account_profiles_csv(
+        return input_asset_service.import_account_profiles_csv(
             workspace_id,
             filename=file.filename or "account-profiles.csv",
+            content=await file.read(),
+        )
+
+    @router.post(
+        "/workspaces/{workspace_id}/input-assets/account-profiles-csv",
+        response_model=AccountProfileCsvImportResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_input_asset_account_profiles_csv(
+        workspace_id: str,
+        file: Annotated[UploadFile, File()],
+    ) -> AccountProfileCsvImportResponse:
+        return input_asset_service.import_account_profiles_csv(
+            workspace_id,
+            filename=file.filename or "account-profiles.csv",
+            content=await file.read(),
+        )
+
+    @router.post(
+        "/workspaces/{workspace_id}/input-assets/text-csv",
+        response_model=TextInputAssetCsvImportResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_input_asset_text_csv(
+        workspace_id: str,
+        type: Annotated[str, Form()],
+        file: Annotated[UploadFile, File()],
+    ) -> TextInputAssetCsvImportResponse:
+        try:
+            material_type = SourceMaterialType(type)
+        except ValueError:
+            material_type = SourceMaterialType.TREND_CSV
+        return input_asset_service.import_text_assets_csv(
+            workspace_id,
+            material_type=material_type,
+            filename=file.filename or "input-assets.csv",
             content=await file.read(),
         )
 
@@ -198,13 +277,27 @@ def create_api_router(
             SourceMaterialType | None, Query(alias="type")
         ] = None,
     ) -> list[SourceMaterialResponse]:
-        return source_service.list(workspace_id, material_type)
+        return input_asset_service.list(workspace_id, material_type)
+
+    @router.get(
+        "/workspaces/{workspace_id}/input-assets",
+        response_model=list[InputAssetResponse],
+    )
+    def list_input_assets(
+        workspace_id: str,
+        asset_type: Annotated[InputAssetType | None, Query(alias="type")] = None,
+    ) -> list[InputAssetResponse]:
+        return input_asset_service.list(workspace_id, asset_type)
 
     @router.get(
         "/source-materials/{material_id}", response_model=SourceMaterialResponse
     )
     def get_source_material(material_id: str) -> SourceMaterialResponse:
-        return source_service.get(material_id)
+        return input_asset_service.get(material_id)
+
+    @router.get("/input-assets/{asset_id}", response_model=InputAssetResponse)
+    def get_input_asset(asset_id: str) -> InputAssetResponse:
+        return input_asset_service.get(asset_id)
 
     @router.patch(
         "/source-materials/{material_id}", response_model=SourceMaterialResponse
@@ -212,7 +305,74 @@ def create_api_router(
     def update_source_material(
         material_id: str, payload: SourceMaterialUpdate
     ) -> SourceMaterialResponse:
-        return source_service.update(material_id, payload)
+        return input_asset_service.update(material_id, payload)
+
+    @router.patch("/input-assets/{asset_id}", response_model=InputAssetResponse)
+    def update_input_asset(
+        asset_id: str, payload: InputAssetUpdate
+    ) -> InputAssetResponse:
+        return input_asset_service.update(asset_id, payload)
+
+    @router.post(
+        "/workspaces/{workspace_id}/media-assets/upload",
+        response_model=MediaAssetResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_media_asset(
+        workspace_id: str,
+        type: Annotated[MediaAssetType, Form()],
+        name: Annotated[str, Form()],
+        file: Annotated[UploadFile, File()],
+        purpose: Annotated[str, Form()] = "",
+    ) -> MediaAssetResponse:
+        return media_asset_service.create_upload(
+            workspace_id,
+            asset_type=type,
+            name=name,
+            purpose=purpose,
+            filename=file.filename or "upload",
+            media_type=file.content_type or "",
+            content=await file.read(),
+        )
+
+    @router.get(
+        "/workspaces/{workspace_id}/media-assets",
+        response_model=list[MediaAssetResponse],
+    )
+    def list_media_assets(
+        workspace_id: str,
+        asset_type: Annotated[MediaAssetType | None, Query(alias="type")] = None,
+    ) -> list[MediaAssetResponse]:
+        return media_asset_service.list(workspace_id, asset_type)
+
+    @router.get("/media-assets/{asset_id}", response_model=MediaAssetResponse)
+    def get_media_asset(asset_id: str) -> MediaAssetResponse:
+        return media_asset_service.get(asset_id)
+
+    @router.patch("/media-assets/{asset_id}", response_model=MediaAssetResponse)
+    def update_media_asset(
+        asset_id: str, payload: MediaAssetUpdate
+    ) -> MediaAssetResponse:
+        return media_asset_service.update(asset_id, payload)
+
+    @router.post(
+        "/media-assets/{asset_id}/derive-video-preview",
+        response_model=VideoPreviewDeriveResponse,
+    )
+    def derive_video_preview(
+        asset_id: str, payload: VideoPreviewDeriveRequest | None = None
+    ) -> VideoPreviewDeriveResponse:
+        request_payload = payload or VideoPreviewDeriveRequest()
+        return media_asset_service.derive_video_preview(
+            asset_id,
+            frame_count=request_payload.frame_count,
+            force=request_payload.force,
+        )
+
+    @router.get("/media-assets/{asset_id}/file")
+    def get_media_asset_file(asset_id: str) -> FileResponse:
+        path, media_type, filename = media_asset_service.get_file(asset_id)
+        return FileResponse(path, media_type=media_type, filename=filename)
 
     @router.get(
         "/workspaces/{workspace_id}/skills",
@@ -230,6 +390,15 @@ def create_api_router(
         skill_asset_id: str, payload: SkillUpdate
     ) -> SkillResponse:
         return skill_service.update(skill_asset_id, payload)
+
+    @router.post(
+        "/skills/{skill_asset_id}/invoke",
+        response_model=SkillInvokeResponse,
+    )
+    def invoke_skill(
+        skill_asset_id: str, payload: SkillInvokeRequest
+    ) -> SkillInvokeResponse:
+        return skill_service.invoke(skill_asset_id, payload)
 
     @router.get(
         "/workspaces/{workspace_id}/agents",

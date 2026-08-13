@@ -61,6 +61,53 @@ def test_worker_completes_without_sse_connection(app: FastAPI) -> None:
     assert completed["stageResults"]["topics"]["topics"]
 
 
+def test_analysis_run_creation_is_idempotent_for_same_client_key(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    historical = create_text_material(
+        app,
+        workspace["id"],
+        SourceMaterialType.HISTORICAL_POSTS.value,
+        "二本逆袭G5?别再被这种标题骗了",
+    )
+    comments = create_text_material(
+        app,
+        workspace["id"],
+        SourceMaterialType.COMMENTS.value,
+        "中介那部分太真实了。",
+    )
+    payload = {
+        "workflowType": "account_diagnosis",
+        "historicalPostsMaterialId": historical["id"],
+        "commentsMaterialId": comments["id"],
+        "mode": "demo",
+        "idempotencyKey": "workflow-click-001",
+    }
+
+    first = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+        json=payload,
+    )
+    second = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+        json=payload,
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json()["id"] == first.json()["id"]
+    listed = send(
+        app, "GET", f"/api/workspaces/{workspace['id']}/analysis-runs"
+    ).json()
+    assert [run["id"] for run in listed].count(first.json()["id"]) == 1
+    assert len(listed) == 1
+
+
 def test_duplicate_enqueue_does_not_duplicate_execution(app: FastAPI) -> None:
     class SlowProvider(FakeAccountDiagnosisModelProvider):
         async def profile(self, **kwargs):

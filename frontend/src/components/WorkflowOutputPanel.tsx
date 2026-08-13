@@ -1,0 +1,78 @@
+import type { ReactNode } from 'react'
+
+import type { WorkflowTab } from '../workflows'
+
+export type StageView = {
+  key: string
+  n: string
+  title: string
+  status: 'waiting' | 'running' | 'completed' | 'failed'
+  result?: unknown
+  error?: string
+}
+
+export type WorkflowOutputKind = 'analysis' | 'simulation'
+
+type WorkflowOutputPanelProps = {
+  targetTab: WorkflowTab
+  views: StageView[]
+  outputKind: WorkflowOutputKind
+  runError: string
+  renderStageResult: (stage: StageView) => ReactNode
+}
+
+export function WorkflowOutputPanel({
+  targetTab,
+  views,
+  outputKind,
+  runError,
+  renderStageResult,
+}: WorkflowOutputPanelProps) {
+  const isSimulation = outputKind === 'simulation'
+  return (
+    <section className="output-panel">
+      {runError && <div className="error-banner">⚠ {runError}</div>}
+      {!views.length ? (
+        <div className="output-empty">
+          <span>✓</span>
+          <h2>
+            {isSimulation
+              ? '受众模拟待运行'
+              : targetTab === 'account'
+                ? '账号诊断待运行'
+                : targetTab === 'video'
+                  ? '视频创作者诊断待运行'
+                  : '热点分析待运行'}
+          </h2>
+          <p>运行后结果会渐进渲染，并保存到分析结果。</p>
+        </div>
+      ) : (
+        views.map((stage) => (
+          <div className="stage" key={stage.key}>
+            <div className="stage-h">
+              <div className="stage-n">{stage.n}</div>
+              <h3>{stage.title}</h3>
+              <div className={`stage-status ${stage.status}`}>
+                {stage.status === 'running'
+                  ? '分析中…'
+                  : stage.status === 'completed'
+                    ? '已完成'
+                    : stage.status === 'failed'
+                      ? '失败'
+                      : '等待中'}
+              </div>
+            </div>
+            {stage.status === 'running' && (
+              <div className="stage-loading">
+                <span className="spinner" />
+                分析中…
+              </div>
+            )}
+            {stage.error && <div className="err">{stage.error}</div>}
+            {renderStageResult(stage)}
+          </div>
+        ))
+      )}
+    </section>
+  )
+}

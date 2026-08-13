@@ -15,15 +15,32 @@ def test_workspace_agents_are_materialized_from_builtin_assets(
     assert "account_diagnosis_strategist" in agent_ids
     assert "audience_simulation_researcher" in agent_ids
     assert "video_creator_quality_analyst" in agent_ids
-    assert "skill_maker" in agent_ids
-    assert "agent_maker" in agent_ids
-    assert "workflow_maker" in agent_ids
+    assert "media_generation_operator" in agent_ids
+    assert "capability_maker" in agent_ids
+    assert "input_asset_formatter" in agent_ids
+    assert "skill_maker" not in agent_ids
+    assert "agent_maker" not in agent_ids
+    assert "workflow_maker" not in agent_ids
     account_agent = next(
         agent for agent in agents if agent["agentId"] == "account_diagnosis_strategist"
     )
     assert "analysis.profile_from_history" in account_agent["skillIds"]
-    workflow_maker = next(agent for agent in agents if agent["agentId"] == "workflow_maker")
-    assert "meta.design_workflow_asset" in workflow_maker["skillIds"]
+    capability_maker = next(agent for agent in agents if agent["agentId"] == "capability_maker")
+    assert capability_maker["skillIds"] == [
+        "meta.design_skill_asset",
+        "meta.design_agent_asset",
+        "meta.design_workflow_asset",
+    ]
+    formatter = next(agent for agent in agents if agent["agentId"] == "input_asset_formatter")
+    assert "input_asset.format_profile" in formatter["skillIds"]
+    assert "input_asset.format_comments" in formatter["skillIds"]
+    media_agent = next(agent for agent in agents if agent["agentId"] == "media_generation_operator")
+    assert media_agent["skillIds"] == [
+        "media.understand_image",
+        "media.understand_video",
+        "media.generate_image",
+        "media.generate_video",
+    ]
     assert all(agent["workspaceId"] == workspace["id"] for agent in agents)
     assert all(agent["source"] == "builtin" for agent in agents)
 

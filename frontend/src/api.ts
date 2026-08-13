@@ -9,18 +9,22 @@ import type {
   AnalysisRunSummary,
   Draft,
   DraftSummary,
+  InputAsset,
+  InputAssetType,
+  MediaAsset,
+  MediaAssetType,
+  VideoPreviewDeriveResponse,
   SimulationRun,
   SimulationRunSummary,
   Skill,
+  SkillInvokeResponse,
   SkillSummary,
   SkillStatus,
-  SourceMaterial,
-  SourceMaterialType,
-  TextSourceMaterial,
+  TextInputAsset,
   Topic,
   TopicSourceWorkflow,
   TopicStatus,
-  TrendCsvSourceMaterial,
+  TrendCsvInputAsset,
   Workspace,
   WorkflowAsset,
   WorkflowAssetStatus,
@@ -82,16 +86,15 @@ export const workspaceApi = {
     }),
 }
 
-export const sourceMaterialApi = {
-  list: (workspaceId: string, type?: SourceMaterialType) => {
+export const inputAssetApi = {
+  list: (workspaceId: string, type?: InputAssetType) => {
     const query = type ? `?type=${type}` : ''
-    return request<SourceMaterial[]>(
-      `/api/workspaces/${workspaceId}/source-materials${query}`,
+    return request<InputAsset[]>(
+      `/api/workspaces/${workspaceId}/input-assets${query}`,
     )
   },
 
-  get: (materialId: string) =>
-    request<SourceMaterial>(`/api/source-materials/${materialId}`),
+  get: (assetId: string) => request<InputAsset>(`/api/input-assets/${assetId}`),
 
   createText: (
     workspaceId: string,
@@ -103,17 +106,17 @@ export const sourceMaterialApi = {
     name: string,
     content: string,
   ) =>
-    request<TextSourceMaterial>(
-      `/api/workspaces/${workspaceId}/source-materials`,
+    request<TextInputAsset>(
+      `/api/workspaces/${workspaceId}/input-assets`,
       {
         method: 'POST',
         headers: jsonHeaders,
         body: JSON.stringify({ type, name, content }),
       },
-    ),
+  ),
 
   update: (
-    materialId: string,
+    assetId: string,
     payload: {
       name?: string
       content?: string
@@ -121,7 +124,7 @@ export const sourceMaterialApi = {
       expectedUpdatedAt: string
     },
   ) =>
-    request<SourceMaterial>(`/api/source-materials/${materialId}`, {
+    request<InputAsset>(`/api/input-assets/${assetId}`, {
       method: 'PATCH',
       headers: jsonHeaders,
       body: JSON.stringify(payload),
@@ -137,8 +140,8 @@ export const sourceMaterialApi = {
     form.set('name', name)
     form.set('keyword', keyword)
     form.set('file', file)
-    return request<TrendCsvSourceMaterial>(
-      `/api/workspaces/${workspaceId}/source-materials/trend-csv`,
+    return request<TrendCsvInputAsset>(
+      `/api/workspaces/${workspaceId}/input-assets/trend-csv`,
       { method: 'POST', body: form },
     )
   },
@@ -146,11 +149,91 @@ export const sourceMaterialApi = {
   uploadAccountProfilesCsv: (workspaceId: string, file: File) => {
     const form = new FormData()
     form.set('file', file)
-    return request<{ materials: TextSourceMaterial[] }>(
-      `/api/workspaces/${workspaceId}/source-materials/account-profiles-csv`,
+    return request<{ materials: TextInputAsset[] }>(
+      `/api/workspaces/${workspaceId}/input-assets/account-profiles-csv`,
       { method: 'POST', body: form },
     )
   },
+
+  uploadTextCsv: (
+    workspaceId: string,
+    type:
+      | 'account_profile'
+      | 'historical_posts'
+      | 'comments'
+      | 'video_creator_samples',
+    file: File,
+  ) => {
+    const form = new FormData()
+    form.set('type', type)
+    form.set('file', file)
+    return request<{ materials: TextInputAsset[] }>(
+      `/api/workspaces/${workspaceId}/input-assets/text-csv`,
+      { method: 'POST', body: form },
+    )
+  },
+}
+
+export const sourceMaterialApi = inputAssetApi
+
+export const mediaAssetApi = {
+  list: (workspaceId: string, type?: MediaAssetType) => {
+    const query = type ? `?type=${type}` : ''
+    return request<MediaAsset[]>(
+      `/api/workspaces/${workspaceId}/media-assets${query}`,
+    )
+  },
+
+  get: (assetId: string) =>
+    request<MediaAsset>(`/api/media-assets/${assetId}`),
+
+  upload: (
+    workspaceId: string,
+    type: MediaAssetType,
+    name: string,
+    purpose: string,
+    file: File,
+  ) => {
+    const form = new FormData()
+    form.set('type', type)
+    form.set('name', name)
+    form.set('purpose', purpose)
+    form.set('file', file)
+    return request<MediaAsset>(
+      `/api/workspaces/${workspaceId}/media-assets/upload`,
+      { method: 'POST', body: form },
+    )
+  },
+
+  update: (
+    assetId: string,
+    payload: {
+      name?: string
+      purpose?: string
+      metadata?: Record<string, unknown>
+      derived?: Record<string, unknown>
+      userNotes?: string
+      expectedUpdatedAt: string
+    },
+  ) =>
+    request<MediaAsset>(`/api/media-assets/${assetId}`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+
+  deriveVideoPreview: (
+    assetId: string,
+    payload: { frameCount?: number; force?: boolean } = {},
+  ) =>
+    request<VideoPreviewDeriveResponse>(
+      `/api/media-assets/${assetId}/derive-video-preview`,
+      {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(payload),
+      },
+    ),
 }
 
 export const skillApi = {
@@ -169,6 +252,19 @@ export const skillApi = {
   ) =>
     request<Skill>(`/api/skills/${skillAssetId}`, {
       method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+
+  invoke: (
+    skillAssetId: string,
+    payload: {
+      input: Record<string, unknown>
+      mode: 'demo' | 'live'
+    },
+  ) =>
+    request<SkillInvokeResponse>(`/api/skills/${skillAssetId}/invoke`, {
+      method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify(payload),
     }),
@@ -201,13 +297,18 @@ export const agentConversationApi = {
       `/api/workspaces/${workspaceId}/agent-conversations`,
     ),
 
-  create: (workspaceId: string, agentAssetId: string, title?: string) =>
+  create: (
+    workspaceId: string,
+    agentAssetId: string,
+    title?: string,
+    contextTarget?: { assetType: 'skill' | 'agent' | 'workflow'; assetId: string },
+  ) =>
     request<AgentConversation>(
       `/api/workspaces/${workspaceId}/agent-conversations`,
       {
         method: 'POST',
         headers: jsonHeaders,
-        body: JSON.stringify({ agentAssetId, title }),
+        body: JSON.stringify({ agentAssetId, title, contextTarget }),
       },
     ),
 
@@ -273,13 +374,15 @@ export const analysisRunApi = {
     workspaceId: string,
     payload: {
       workflowType: WorkflowType
-      accountProfileMaterialId?: string
+      accountProfileInputAssetId?: string
       manualAccountProfile?: string
-      historicalPostsMaterialId?: string
-      commentsMaterialId?: string
-      trendCsvMaterialId?: string
-      videoCreatorSamplesMaterialId?: string
+      historicalPostsInputAssetId?: string
+      commentsInputAssetId?: string
+      trendCsvInputAssetId?: string
+      videoCreatorSamplesInputAssetId?: string
+      mediaAssetIds?: string[]
       mode: 'demo' | 'live'
+      idempotencyKey?: string
     },
   ) =>
     request<AnalysisRun>(`/api/workspaces/${workspaceId}/analysis-runs`, {
@@ -292,12 +395,14 @@ export const analysisRunApi = {
     workspaceId: string,
     payload: {
       workflowType: WorkflowType
-      accountProfileMaterialIds: string[]
-      historicalPostsMaterialId?: string
-      commentsMaterialId?: string
-      trendCsvMaterialId?: string
-      videoCreatorSamplesMaterialId?: string
+      accountProfileInputAssetIds: string[]
+      historicalPostsInputAssetId?: string
+      commentsInputAssetId?: string
+      trendCsvInputAssetId?: string
+      videoCreatorSamplesInputAssetId?: string
+      mediaAssetIds?: string[]
       mode: 'demo' | 'live'
+      idempotencyKey?: string
     },
   ) =>
     request<AnalysisRun[]>(`/api/workspaces/${workspaceId}/analysis-runs/batch`, {

@@ -1,6 +1,36 @@
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
+
+ENV_LINE_RE = re.compile(
+    r"^(?:export\s+)?(?P<key>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.*)$"
+)
+
+
+def load_env_file_defaults(path: Path) -> None:
+    """Load simple KEY=value lines without overriding explicit environment.
+
+    This intentionally supports only the .env.local format used by this repo.
+    It does not print values, and it ignores malformed/comment lines.
+    """
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = ENV_LINE_RE.match(line)
+        if not match:
+            continue
+        key = match.group("key")
+        value = match.group("value").strip()
+        if (
+            (value.startswith("'") and value.endswith("'"))
+            or (value.startswith('"') and value.endswith('"'))
+        ):
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
 
 
 @dataclass(frozen=True)
@@ -12,13 +42,25 @@ class Settings:
     model_provider: str = "anthropic"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
+    anthropic_base_url: str = "https://api.anthropic.com/v1"
+    anthropic_messages_url: str = ""
     qwen_api_key: str = ""
     qwen_model: str = "qwen-plus"
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    qwen_dashscope_base_url: str = "https://dashscope.aliyuncs.com/api/v1"
+    qwen_vision_model: str = "qwen-vl-plus"
+    qwen_image_model: str = "wanx-v1"
+    qwen_video_model: str = "wan2.7-t2v-2026-06-12"
+    qwen_task_poll_interval_seconds: float = 1.0
+    qwen_task_poll_attempts: int = 30
+    ffmpeg_path: str = "ffmpeg"
+    video_preview_frame_count: int = 8
 
     @classmethod
     def from_environment(cls) -> "Settings":
         repository_root = Path(__file__).resolve().parents[2]
+        load_env_file_defaults(repository_root / ".env.local")
+        load_env_file_defaults(repository_root / "backend/.env.local")
         return cls(
             database_path=Path(
                 os.getenv("DATABASE_PATH", repository_root / "data/app.sqlite3")
@@ -31,6 +73,10 @@ class Settings:
             model_provider=os.getenv("MODEL_PROVIDER", "anthropic"),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
+            anthropic_base_url=os.getenv(
+                "ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"
+            ),
+            anthropic_messages_url=os.getenv("ANTHROPIC_MESSAGES_URL", ""),
             qwen_api_key=os.getenv("QWEN_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
             qwen_model=os.getenv("QWEN_MODEL", "qwen-plus"),
             qwen_base_url=os.getenv(
@@ -39,5 +85,25 @@ class Settings:
                     "DASHSCOPE_BASE_URL",
                     "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 ),
+            ),
+            qwen_dashscope_base_url=os.getenv(
+                "QWEN_DASHSCOPE_BASE_URL",
+                os.getenv(
+                    "DASHSCOPE_API_BASE_URL",
+                    "https://dashscope.aliyuncs.com/api/v1",
+                ),
+            ),
+            qwen_vision_model=os.getenv("QWEN_VISION_MODEL", "qwen-vl-plus"),
+            qwen_image_model=os.getenv("QWEN_IMAGE_MODEL", "wanx-v1"),
+            qwen_video_model=os.getenv(
+                "QWEN_VIDEO_MODEL", "wan2.7-t2v-2026-06-12"
+            ),
+            qwen_task_poll_interval_seconds=float(
+                os.getenv("QWEN_TASK_POLL_INTERVAL_SECONDS", "1.0")
+            ),
+            qwen_task_poll_attempts=int(os.getenv("QWEN_TASK_POLL_ATTEMPTS", "30")),
+            ffmpeg_path=os.getenv("FFMPEG_PATH", "ffmpeg"),
+            video_preview_frame_count=int(
+                os.getenv("VIDEO_PREVIEW_FRAME_COUNT", "8")
             ),
         )

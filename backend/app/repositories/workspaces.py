@@ -58,7 +58,36 @@ class WorkspaceRepository:
 
     def list(self, connection: sqlite3.Connection) -> list[dict]:
         rows = connection.execute(
-            f"{self.SELECT} ORDER BY workspace.updated_at DESC, workspace.id"
+            f"""
+            {self.SELECT}
+            ORDER BY
+                CASE
+                    WHEN EXISTS (
+                        SELECT 1 FROM source_materials AS material
+                        WHERE material.workspace_id = workspace.id
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM analysis_runs AS analysis
+                        WHERE analysis.workspace_id = workspace.id
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM topics AS topic
+                        WHERE topic.workspace_id = workspace.id
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM drafts AS draft
+                        WHERE draft.workspace_id = workspace.id
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM simulation_runs AS simulation
+                        WHERE simulation.workspace_id = workspace.id
+                    )
+                    THEN 0
+                    ELSE 1
+                END,
+                workspace.updated_at DESC,
+                workspace.id
+            """
         ).fetchall()
         return [dict(row) for row in rows]
 

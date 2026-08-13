@@ -563,26 +563,29 @@ The project now has the first conversation and capability-asset layer:
 - provider-backed live replies through `ModelCallService`;
 - deterministic demo replies for local testing;
 - Skill, Agent, and Workflow assets;
-- maker agents:
-  - `Skill Maker`;
-  - `Agent Maker`;
-  - `Workflow Maker`.
+- one `Capability Maker` agent that uses three skills:
+  - `meta.design_skill_asset`;
+  - `meta.design_agent_asset`;
+  - `meta.design_workflow_asset`;
+- one `Input Asset Formatter` agent with formatter skills for product input assets;
+- persisted `AssetProposal` records with apply/reject flow.
 
 Conversation is still not the source of truth for artifacts. It is an interface
 for proposing or triggering product actions.
 
-### Current gap: proposals are not yet assets
+### Current gap: proposal editing is still minimal
 
-Maker agents currently produce chat replies and `proposedActions`, but those
-actions are not structured proposal records.
+Capability Maker produces chat replies and `proposedActions`, and those actions
+are converted into persisted `AssetProposal` records. Users can apply or reject
+them.
 
 Next step:
 
-- add `AssetProposal`;
-- store proposal kind: `skill`, `agent`, or `workflow`;
-- store source conversation/message ID;
-- validate proposal JSON through product-specific schemas;
-- allow confirm/apply through domain services.
+- allow proposal payload editing before apply;
+- pass the currently selected asset detail as explicit context when launching a
+  maker conversation from a detail page;
+- make input asset formatting call the backend agent instead of only using the
+  current frontend deterministic formatter.
 
 ### Current gap: capability context is incomplete
 

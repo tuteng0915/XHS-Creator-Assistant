@@ -14,22 +14,46 @@ import {
   analysisRunApi,
   assetProposalApi,
   draftApi,
+  mediaAssetApi,
   simulationRunApi,
   skillApi,
-  sourceMaterialApi,
+  inputAssetApi,
   topicApi,
   workspaceApi,
   workflowAssetApi,
 } from './api'
 import { HealthPage } from './HealthPage'
+import { AccountProfilePage } from './components/AccountProfilePage'
+import { InputAssetsPage } from './components/InputAssetsPage'
+import { MediaAssetsPage } from './components/MediaAssetsPage'
+import {
+  IncentiveFitView,
+  ListBlock,
+  PainPointsView,
+  PersonaListView,
+  ProfileView,
+  ReactionListView,
+  SaveIndicator,
+  StructureView,
+  SynthesisView,
+  TitlesView,
+  TrendAnalysisView,
+  VideoCreatorProfileView,
+  VideoQualityView,
+  type SaveState,
+} from './components/StageResultViews'
+import { WorkspaceShell, type ActivePage } from './components/WorkspaceShell'
+import {
+  WorkflowOutputPanel,
+  type StageView,
+  type WorkflowOutputKind,
+} from './components/WorkflowOutputPanel'
 import {
   INPUT_ASSET_DEFINITION_BY_PANEL,
-  INPUT_ASSET_DEFINITIONS,
   inputAssetPreview,
-  inputAssetUpdatedLabel,
-  isTrendCsvInputAsset,
   type InputAssetPanel,
 } from './inputAssets'
+import { usePendingAgentConversationPolling } from './hooks/usePendingAgentConversationPolling'
 import type {
   Agent,
   AgentConversation,
@@ -41,16 +65,16 @@ import type {
   AssetProposal,
   Draft,
   DraftSummary,
-  SavePhase,
   SimulationRun,
   SimulationRunSummary,
   Skill,
   SkillSummary,
-  SourceMaterial,
-  TextSourceMaterial,
+  InputAsset,
+  MediaAsset,
+  TextInputAsset,
   Topic,
   TopicSourceWorkflow,
-  TrendCsvSourceMaterial,
+  TrendCsvInputAsset,
   Workspace,
   WorkflowAsset,
   WorkflowAssetSummary,
@@ -75,38 +99,46 @@ type SaveKey =
   | 'manualTopic'
   | 'topic'
   | 'draft'
-type SaveState = { phase: SavePhase; message?: string }
-type ActivePage =
-  | 'account-profile'
-  | 'source-materials'
-  | 'account-diagnosis'
-  | 'trend-analysis'
-  | 'video-quality'
-  | 'history'
-  | 'topics'
-  | 'drafts'
-  | 'simulations'
-  | 'skills'
-  | 'agents'
-  | 'workflows'
-type ProfileSourceMode = 'workspace' | 'saved' | 'manual'
-type StageView = {
-  key: string
-  n: string
-  title: string
-  status: 'waiting' | 'running' | 'completed' | 'failed'
-  result?: unknown
-  error?: string
-}
-type WorkflowOutputKind = 'analysis' | 'simulation'
 type WorkflowStageViews = Record<WorkflowTab, StageView[]>
 type WorkflowOutputKinds = Record<WorkflowTab, WorkflowOutputKind>
+type TextInputAssetPanel = Exclude<InputAssetPanel, 'trend_csv'>
+type ConversationContextTarget = {
+  assetType: 'skill' | 'agent' | 'workflow'
+  assetId: string
+}
 const MAKER_AGENT_IDS = {
-  skill: 'skill_maker',
-  agent: 'agent_maker',
-  workflow: 'workflow_maker',
+  skill: 'capability_maker',
+  agent: 'capability_maker',
+  workflow: 'capability_maker',
 } as const
 const NEW_INPUT_ASSET_ID = '__new_input_asset__'
+const DEFAULT_WORKSPACE_NAME = '默认创作者工作区'
+
+const TEXT_INPUT_ASSET_TYPE_BY_PANEL: Record<TextInputAssetPanel, TextInputAsset['type']> = {
+  account_profiles: 'account_profile',
+  historical_posts: 'historical_posts',
+  comments: 'comments',
+  video_creator_samples: 'video_creator_samples',
+}
+const SAVE_KEY_BY_TEXT_INPUT_PANEL: Record<TextInputAssetPanel, SaveKey> = {
+  account_profiles: 'accountProfiles',
+  historical_posts: 'historical',
+  comments: 'comments',
+  video_creator_samples: 'video',
+}
+const FORMATTER_SKILL_ID_BY_PANEL: Record<InputAssetPanel, string> = {
+  account_profiles: 'input_asset.format_profile',
+  historical_posts: 'input_asset.format_historical_posts',
+  comments: 'input_asset.format_comments',
+  trend_csv: 'input_asset.format_trend_csv_brief',
+  video_creator_samples: 'input_asset.format_video_creator_samples',
+}
+const emptyTextInputAssetBatchFiles = (): Record<TextInputAssetPanel, File | null> => ({
+  account_profiles: null,
+  historical_posts: null,
+  comments: null,
+  video_creator_samples: null,
+})
 
 const idleState: SaveState = { phase: 'idle' }
 const emptyWorkflowStageViews = (): WorkflowStageViews => ({
@@ -125,6 +157,22 @@ const SIMULATION_STAGES = [
   { key: 'debate_responses', n: '03', title: '第二轮交叉回应' },
   { key: 'synthesis', n: '04', title: '策略合成' },
 ]
+const SAMPLE_ASSET_NAMES = {
+  qsheepProfile: 'Qsheep 留学账号',
+  nomadProfile: '数字游民生活方式账号',
+  videoProgramProfile: 'AIGC视频创作者激励计划',
+  historicalPosts: '留学帖子数据合集',
+  comments: '留学评论区合集',
+  trendCsv: '数字游民趋势.csv',
+  videoCreatorSamples: 'AI短剧创作者样本',
+} as const
+const EMPTY_INPUT_ASSET_NAMES = {
+  account_profile: '',
+  historical_posts: '',
+  comments: '',
+  trend_csv: '',
+  video_creator_samples: '',
+} as const
 const SAMPLE_ACCOUNT_INPUT = {
   positioning: `账号:@QSheep｜留学内容创作者,1.4K 粉。核心人群=正在准备/纠结出国读研的文科生(传媒、社科、人类学),目标英港新前30。
 内容主张:真实反思 + 决策方法,不贩卖焦虑、不灌鸡汤。
@@ -153,9 +201,9 @@ DIY申请时间线:从大三暑假到递交我每个月都干了啥 ｜ 赞60 �
 }
 const SAMPLE_TREND_INPUT = {
   positioning: `账号：数字游民生活方式推广者
-核心人群：想从城市职场转向远程工作/自由职业的年轻人，尤其是非技术背景、文科生、运营/内容/教育从业者。
-内容主张：真实记录转型路径，不神化自由职业，强调技能、现金流和风险边界。
-目标：找到兼具热度和可执行性的数字游民选题。`,
+核心人群：想从城市职场转向远程工作/自由职业的年轻人，尤其是文科生、非技术背景人群
+内容主张：真实、可执行，不贩卖自由幻觉；强调技能准备、成本意识和风险管理
+目标：围绕「如何开始数字游民生活」「旅居地选择与成本」「远程收入来源」持续产出`,
   keyword: '数字游民',
   simulationTopic:
     '文科生/非技术背景，靠什么开始数字游民？6条真实路径\n切入角度：把「没有可以远程的技能」这个最大卡点，拆成6个具体可行的技能转换方向',
@@ -199,36 +247,39 @@ function errorMessage(error: unknown): string {
     : '操作失败，请重试。'
 }
 
-function SaveIndicator({ state }: { state: SaveState }) {
-  if (state.phase === 'idle') return null
-  const labels = {
-    saving: '保存中…',
-    saved: '已保存',
-    error: state.message || '保存失败',
-    idle: '',
-  }
-  return (
-    <span className={`save-state ${state.phase}`} role="status">
-      {labels[state.phase]}
-    </span>
-  )
-}
-
 function latestTextMaterial(
-  materials: SourceMaterial[],
+  materials: InputAsset[],
   type: 'account_profile' | 'historical_posts' | 'comments' | 'video_creator_samples',
-): TextSourceMaterial | undefined {
+): TextInputAsset | undefined {
   return materials.find(
-    (material): material is TextSourceMaterial => material.type === type,
+    (material): material is TextInputAsset => material.type === type,
   )
 }
 
 function latestTrendMaterial(
-  materials: SourceMaterial[],
-): TrendCsvSourceMaterial | undefined {
+  materials: InputAsset[],
+): TrendCsvInputAsset | undefined {
   return materials.find(
-    (material): material is TrendCsvSourceMaterial =>
+    (material): material is TrendCsvInputAsset =>
       material.type === 'trend_csv',
+  )
+}
+
+async function chooseDefaultWorkspaceId(items: Workspace[]): Promise<string> {
+  if (items.length === 1) return items[0].id
+  const assetChecks = await Promise.all(
+    items.map(async (item) => {
+      try {
+        const assets = await inputAssetApi.list(item.id)
+        return { workspaceId: item.id, assetCount: assets.length }
+      } catch {
+        return { workspaceId: item.id, assetCount: 0 }
+      }
+    }),
+  )
+  return (
+    assetChecks.find((item) => item.assetCount > 0)?.workspaceId ||
+    items[0].id
   )
 }
 
@@ -253,6 +304,18 @@ function workflowLabel(type: WorkflowType): string {
   if (type === 'account_diagnosis') return '账号诊断'
   if (type === 'video_creator_quality') return '视频创作者质量诊断'
   return '热点分析'
+}
+
+function capabilityStatusClass(status: 'enabled' | 'disabled'): string {
+  return `capability-status ${status}`
+}
+
+function newClientRequestKey(prefix: string): string {
+  const randomId =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  return `${prefix}-${randomId}`
 }
 
 function activePageForWorkflowTab(tab: WorkflowTab): ActivePage {
@@ -326,432 +389,11 @@ function getTopicsFromStage(result: unknown): TopicCandidate[] {
   return Array.isArray(topics) ? (topics as TopicCandidate[]) : []
 }
 
-function ProfileView({ data }: { data: Record<string, unknown> }) {
-  const pillars = Array.isArray(data.pillars) ? data.pillars : []
-  const formulas = Array.isArray(data.titleFormulas) ? data.titleFormulas : []
-  const hooks = Array.isArray(data.hookStyles) ? data.hookStyles : []
-  const structure = (data.viralStructure || {}) as {
-    name?: string
-    steps?: string[]
-  }
-  const contrast = data.contrast as
-    | {
-        winners?: Array<{ title: string; metric: string }>
-        losers?: Array<{ title: string; metric: string }>
-        winFactors?: string[]
-        loseFactors?: string[]
-        takeaways?: string[]
-      }
-    | undefined
-  return (
-    <div className="stage-block">
-      {contrast && (
-        <>
-          <label>📊 高表现 vs 低表现 · 对比诊断</label>
-          <div className="cmp">
-            <div className="cmp-col cmp-win">
-              <h5>✅ 高表现共性</h5>
-              {(contrast.winners || []).map((item) => (
-                <div className="cmp-item" key={item.title}>
-                  <b>{item.title}</b> · {item.metric}
-                </div>
-              ))}
-              <ul>{(contrast.winFactors || []).map((item) => <li key={item}>{item}</li>)}</ul>
-            </div>
-            <div className="cmp-col cmp-lose">
-              <h5>⚠️ 低表现共性</h5>
-              {(contrast.losers || []).map((item) => (
-                <div className="cmp-item" key={item.title}>
-                  <b>{item.title}</b> · {item.metric}
-                </div>
-              ))}
-              <ul>{(contrast.loseFactors || []).map((item) => <li key={item}>{item}</li>)}</ul>
-            </div>
-          </div>
-          <div className="takeaway">
-            <b>→ 可执行结论：</b>
-            <ol>{(contrast.takeaways || []).map((item) => <li key={item}>{item}</li>)}</ol>
-          </div>
-        </>
-      )}
-      <label>📚 内容支柱</label>
-      <div className="pill-row">
-        {pillars.map((pillar) => (
-          <span className="quote red" key={String(pillar)}>
-            {String(pillar)}
-          </span>
-        ))}
-      </div>
-      <label>✍️ 惯用标题公式</label>
-      <div className="outline">
-        {formulas.map((formula) => {
-          const item = formula as { formula?: string; examples?: string[] }
-          return (
-            <div className="ol" key={item.formula}>
-              <div className="sec">公式</div>
-              <div className="ct">
-                <b>{item.formula}</b>
-                {(item.examples || []).map((example) => (
-                  <div className="quote" key={example}>
-                    例：{example}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      <label>🪝 开头钩子习惯</label>
-      <ul>{hooks.map((hook) => <li key={String(hook)}>{String(hook)}</li>)}</ul>
-      <label>🧱 惯用爆款结构 · {structure.name}</label>
-      <div className="titles">
-        {(structure.steps || []).map((step, index) => (
-          <div className="titlev" key={step}>
-            <span>{index + 1}</span>
-            {step}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function PainPointsView({ items }: { items: unknown }) {
-  const painPoints = Array.isArray(items) ? items : []
-  return (
-    <>
-      {painPoints.map((item) => {
-        const point = item as {
-          theme?: string
-          intensity?: string
-          count?: number
-          evidence?: string[]
-        }
-        return (
-          <div className="pp" key={point.theme}>
-            <div className="pp-top">
-              <b>{point.theme}</b>
-              <span className={`tag ${point.intensity === '高' ? 'high' : 'mid'}`}>
-                强度 {point.intensity}
-              </span>
-              <span className="tag cnt">{point.count || 0} 条相关</span>
-            </div>
-            <div>
-              {(point.evidence || []).map((quote) => (
-                <span className="quote" key={quote}>
-                  “{quote}”
-                </span>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-    </>
-  )
-}
-
-function TrendAnalysisView({ data }: { data: Record<string, unknown> }) {
-  const themes = Array.isArray(data.themes) ? data.themes : []
-  const patterns = Array.isArray(data.viralPatterns) ? data.viralPatterns : []
-  const windows = Array.isArray(data.opportunityWindows)
-    ? data.opportunityWindows
-    : []
-  return (
-    <div className="stage-block">
-      <label>🔥 高频内容主题</label>
-      {themes.map((item) => {
-        const theme = item as {
-          theme?: string
-          engagement?: string
-          count?: number
-          topPost?: string
-          summary?: string
-        }
-        return (
-          <div className="trend-theme" key={theme.theme}>
-            <div className="trend-theme-top">
-              <b>{theme.theme}</b>
-              <span className={`tag ${theme.engagement === '高' ? 'high' : 'mid'}`}>
-                热度 {theme.engagement}
-              </span>
-              <span className="tag cnt">{theme.count || 0} 篇相关</span>
-            </div>
-            <div>
-              <span className="quote">代表帖：{theme.topPost}</span>
-            </div>
-            <div className="subline">{theme.summary}</div>
-          </div>
-        )
-      })}
-      <label>✨ 爆款规律</label>
-      <ul>{patterns.map((item) => <li key={String(item)}>{String(item)}</li>)}</ul>
-      <label>🎯 内容机会窗口</label>
-      {windows.map((item) => (
-        <div className="opportunity" key={String(item)}>
-          <b>🪟</b> {String(item)}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function StructureView({ data }: { data: Record<string, unknown> }) {
-  const outline = Array.isArray(data.outline) ? data.outline : []
-  return (
-    <div className="stage-block">
-      <div className="outline">
-        {outline.map((item) => {
-          const part = item as { sec?: string; ct?: string }
-          return (
-            <div className="ol" key={`${part.sec}-${part.ct}`}>
-              <div className="sec">{part.sec}</div>
-              <div className="ct">{part.ct}</div>
-            </div>
-          )
-        })}
-      </div>
-      <div className="reuse">
-        <b>♻ 可复用表达结构：</b> {String(data.reuse || '')}
-      </div>
-    </div>
-  )
-}
-
-function TitlesView({ items }: { items: unknown }) {
-  const titles = Array.isArray(items) ? items : []
-  return (
-    <>
-      {titles.map((item) => {
-        const title = item as { topic?: string; variants?: string[] }
-        return (
-          <div className="topic" key={title.topic}>
-            <h4>📌 {title.topic}</h4>
-            <div className="titles">
-              {(title.variants || []).map((variant, index) => (
-                <div className="titlev" key={variant}>
-                  <span>{String.fromCharCode(65 + index)}</span>
-                  {variant}
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-    </>
-  )
-}
-
-function ListBlock({ title, items }: { title: string; items: unknown }) {
-  const values = Array.isArray(items) ? items : []
-  if (values.length === 0) return null
-  return (
-    <>
-      <b>{title}：</b>
-      <ul>{values.map((item) => <li key={String(item)}>{String(item)}</li>)}</ul>
-    </>
-  )
-}
-
-function PersonaListView({ items }: { items: unknown }) {
-  if (!Array.isArray(items) || items.length === 0) return null
-  return (
-    <div className="persona-list">
-      {(items as Array<Record<string, unknown>>).map((persona) => {
-        const title = String(
-          persona.archetype || persona.name || persona.id || 'Persona',
-        )
-        const profile = String(persona.profile || persona.background || '')
-        const personality = String(persona.personality || '')
-        const concern = String(persona.concerns || persona.coreConcern || '')
-        const preference = String(persona.contentPreference || '')
-        return (
-          <div className="topic" key={String(persona.id || persona.name)}>
-            <h4>{title}</h4>
-            <div className="angle">{profile}</div>
-            <div className="why">
-              {personality && (
-                <>
-                  <b>性格：</b> {personality}
-                  <br />
-                </>
-              )}
-              <b>关注：</b> {concern}
-              {preference && (
-                <>
-                  <br />
-                  <b>内容偏好：</b> {preference}
-                </>
-              )}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function ReactionListView({
-  items,
-  type,
-}: {
-  items: unknown
-  type: 'reaction' | 'debate'
-}) {
-  if (!Array.isArray(items) || items.length === 0) return null
-  return (
-    <div className="persona-list">
-      {(items as Array<Record<string, unknown>>).map((item) => (
-        <div className="topic" key={String(item.personaId)}>
-          <h4>Persona {String(item.personaId)}</h4>
-          {type === 'reaction' ? (
-            <>
-              <div className="angle">
-                {String(item.stance || item.sentiment || '')} ·{' '}
-                {String(item.quote || item.text || '')}
-              </div>
-              <ListBlock title="顾虑" items={item.concerns} />
-              <ListBlock title="机会" items={item.opportunities} />
-            </>
-          ) : (
-            <>
-              <div className="angle">{String(item.response || item.text || '')}</div>
-              {item.stance && (
-                <div className="why">
-                  <b>立场：</b> {String(item.stance)}
-                  {Boolean(item.targetedAt) && (
-                    <>
-                      <br />
-                      <b>回应对象：</b> {String(item.targetedAt)}
-                    </>
-                  )}
-                </div>
-              )}
-              <ListBlock title="新顾虑" items={item.newConcerns} />
-              <ListBlock title="更强信号" items={item.strongerSignals} />
-            </>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function SynthesisView({ data }: { data: Record<string, unknown> }) {
-  const topResonance = data.topResonance as
-    | { persona?: string; reason?: string; expectedBehavior?: string }
-    | undefined
-  return (
-    <div className="structure-card">
-      <h4>{String(data.verdict || '模拟结论')}</h4>
-      {topResonance && Object.keys(topResonance).length > 0 && (
-        <div className="why">
-          <b>🎯 最有共鸣受众：</b> {String(topResonance.persona || '')}
-          <br />
-          {String(topResonance.reason || '')}
-          <br />
-          <b>预期行为：</b> {String(topResonance.expectedBehavior || '')}
-        </div>
-      )}
-      <p>
-        <b>最大阻力：</b> {String(data.mainResistance || '')}
-      </p>
-      <p>
-        <b>最强切角：</b> {String(data.strongestAngle || '')}
-      </p>
-      <ListBlock title="内容调整" items={data.contentAdjustments} />
-      <ListBlock title="风险提醒" items={data.riskWarnings} />
-      <ListBlock title="潜在争议点" items={data.controversyPoints} />
-      <ListBlock title="优化建议" items={data.suggestions} />
-    </div>
-  )
-}
-
-function VideoCreatorProfileView({ data }: { data: Record<string, unknown> }) {
-  return (
-    <div className="stage-block">
-      <div className="structure-card">
-        <h4>{String(data.creatorType || '创作者类型待判断')}</h4>
-        <p>
-          <b>置信度：</b> {String(data.typeConfidence || '')}
-        </p>
-        <p>{String(data.summary || '')}</p>
-        <p>
-          <b>受众定位：</b> {String(data.audiencePositioning || '')}
-        </p>
-      </div>
-      <ListBlock title="内容支柱" items={data.contentPillars} />
-      <ListBlock title="驱动信号" items={data.motivationSignals} />
-      <ListBlock title="证据" items={data.evidence} />
-      <ListBlock title="不确定项" items={data.uncertainties} />
-    </div>
-  )
-}
-
-function VideoQualityView({ data }: { data: Record<string, unknown> }) {
-  const dimensions = Array.isArray(data.dimensionScores)
-    ? data.dimensionScores
-    : []
-  return (
-    <div className="stage-block">
-      <div className="structure-card">
-        <h4>
-          质量评级：{String(data.level || '')} · {String(data.overallScore || '')}
-        </h4>
-      </div>
-      <div className="outline">
-        {dimensions.map((item) => {
-          const dimension = item as {
-            dimension?: string
-            score?: number
-            reason?: string
-          }
-          return (
-            <div className="ol" key={dimension.dimension}>
-              <div className="sec">{dimension.dimension}</div>
-              <div className="ct">
-                <b>{dimension.score ?? ''}</b> · {dimension.reason}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      <ListBlock title="优势" items={data.strengths} />
-      <ListBlock title="短板" items={data.weaknesses} />
-      <ListBlock title="证据" items={data.evidence} />
-    </div>
-  )
-}
-
-function IncentiveFitView({ data }: { data: Record<string, unknown> }) {
-  const programMatch = (data.programMatch || {}) as Record<string, unknown>
-  return (
-    <div className="stage-block">
-      <div className="structure-card">
-        <h4>
-          激励适配：{String(data.recommendation || '')} ·{' '}
-          {String(data.fitScore || '')}
-        </h4>
-        <p>{String(data.rationale || '')}</p>
-        <div className="why">
-          <b>适合计划：</b> {String(programMatch.bestProgramType || '')}
-          <br />
-          <b>原因：</b> {String(programMatch.why || '')}
-          <br />
-          <b>避免：</b> {String(programMatch.avoid || '')}
-        </div>
-      </div>
-      <ListBlock title="适配条件" items={data.conditions} />
-      <ListBlock title="风险" items={data.risks} />
-      <ListBlock title="运营动作" items={data.operatorActions} />
-    </div>
-  )
-}
-
 function WorkspaceApp() {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('')
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
-  const [materials, setMaterials] = useState<SourceMaterial[]>([])
+  const [materials, setMaterials] = useState<InputAsset[]>([])
+  const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([])
   const [analysisRuns, setAnalysisRuns] = useState<AnalysisRunSummary[]>([])
   const [selectedRun, setSelectedRun] = useState<AnalysisRun | null>(null)
   const [simulationRuns, setSimulationRuns] = useState<SimulationRunSummary[]>([])
@@ -781,32 +423,46 @@ function WorkspaceApp() {
   const [topicFilter, setTopicFilter] = useState<TopicSourceWorkflow | 'all'>('all')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [showCreate, setShowCreate] = useState(false)
-  const [createName, setCreateName] = useState('')
-  const [createPositioning, setCreatePositioning] = useState('')
-  const [creating, setCreating] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const [activePage, setActivePage] = useState<ActivePage>('account-diagnosis')
   const [workflowTab, setWorkflowTab] = useState<WorkflowTab>('account')
   const [mode, setMode] = useState<GenerationMode>('demo')
   const [workspaceName, setWorkspaceName] = useState('')
   const [positioning, setPositioning] = useState('')
-  const [profileSourceMode, setProfileSourceMode] =
-    useState<ProfileSourceMode>('workspace')
-  const [selectedProfileMaterialId, setSelectedProfileMaterialId] = useState('')
-  const [manualWorkflowProfile, setManualWorkflowProfile] = useState('')
-  const [accountProfilesFile, setAccountProfilesFile] = useState<File | null>(null)
+  const [accountProfileDraftName, setAccountProfileDraftName] = useState<string>(
+    SAMPLE_ASSET_NAMES.qsheepProfile,
+  )
+  const [historicalPostsDraftName, setHistoricalPostsDraftName] = useState<string>(
+    SAMPLE_ASSET_NAMES.historicalPosts,
+  )
+  const [commentsDraftName, setCommentsDraftName] = useState<string>(
+    SAMPLE_ASSET_NAMES.comments,
+  )
+  const [trendCsvDraftName, setTrendCsvDraftName] = useState<string>(
+    SAMPLE_ASSET_NAMES.trendCsv,
+  )
+  const [videoCreatorSamplesDraftName, setVideoCreatorSamplesDraftName] =
+    useState<string>(SAMPLE_ASSET_NAMES.videoCreatorSamples)
+  const [selectedProfileInputAssetId, setSelectedProfileInputAssetId] = useState('')
+  const [inputAssetBatchFiles, setInputAssetBatchFiles] = useState<
+    Record<TextInputAssetPanel, File | null>
+  >(emptyTextInputAssetBatchFiles)
   const [inputAssetPanel, setInputAssetPanel] =
     useState<InputAssetPanel>('historical_posts')
-  const [selectedHistoricalMaterialId, setSelectedHistoricalMaterialId] =
+  const [selectedHistoricalInputAssetId, setSelectedHistoricalInputAssetId] =
     useState('')
-  const [selectedCommentsMaterialId, setSelectedCommentsMaterialId] = useState('')
-  const [selectedTrendMaterialId, setSelectedTrendMaterialId] = useState('')
-  const [selectedVideoMaterialId, setSelectedVideoMaterialId] = useState('')
+  const [selectedCommentsInputAssetId, setSelectedCommentsInputAssetId] = useState('')
+  const [selectedTrendInputAssetId, setSelectedTrendInputAssetId] = useState('')
+  const [selectedVideoInputAssetId, setSelectedVideoInputAssetId] = useState('')
+  const [selectedVideoWorkflowMediaAssetIds, setSelectedVideoWorkflowMediaAssetIds] =
+    useState<string[]>([])
   const [historicalPosts, setHistoricalPosts] = useState('')
   const [comments, setComments] = useState('')
   const [trendKeyword, setTrendKeyword] = useState('')
   const [trendFile, setTrendFile] = useState<File | null>(null)
   const [videoCreatorSamples, setVideoCreatorSamples] = useState('')
+  const [inputAssetFormatterDraft, setInputAssetFormatterDraft] = useState('')
+  const [inputAssetFormatterStatus, setInputAssetFormatterStatus] = useState('')
   const [simulationTopic, setSimulationTopic] = useState('')
   const [analysisStageViewsByWorkflow, setAnalysisStageViewsByWorkflow] =
     useState<WorkflowStageViews>(emptyWorkflowStageViews)
@@ -834,28 +490,28 @@ function WorkspaceApp() {
   const accountProfileMaterials = useMemo(
     () =>
       materials.filter(
-        (material): material is TextSourceMaterial =>
+        (material): material is TextInputAsset =>
           material.type === 'account_profile',
       ),
     [materials],
   )
   const selectedProfileMaterial = useMemo(
     () => {
-      if (selectedProfileMaterialId === NEW_INPUT_ASSET_ID) return null
+      if (selectedProfileInputAssetId === NEW_INPUT_ASSET_ID) return null
       return (
         accountProfileMaterials.find(
-        (material) => material.id === selectedProfileMaterialId,
+        (material) => material.id === selectedProfileInputAssetId,
         ) ||
         accountProfileMaterials[0] ||
         null
       )
     },
-    [accountProfileMaterials, selectedProfileMaterialId],
+    [accountProfileMaterials, selectedProfileInputAssetId],
   )
   const historicalMaterials = useMemo(
     () =>
       materials.filter(
-        (material): material is TextSourceMaterial =>
+        (material): material is TextInputAsset =>
           material.type === 'historical_posts',
       ),
     [materials],
@@ -863,14 +519,14 @@ function WorkspaceApp() {
   const commentsMaterials = useMemo(
     () =>
       materials.filter(
-        (material): material is TextSourceMaterial => material.type === 'comments',
+        (material): material is TextInputAsset => material.type === 'comments',
       ),
     [materials],
   )
   const trendMaterials = useMemo(
     () =>
       materials.filter(
-        (material): material is TrendCsvSourceMaterial =>
+        (material): material is TrendCsvInputAsset =>
           material.type === 'trend_csv',
       ),
     [materials],
@@ -878,60 +534,67 @@ function WorkspaceApp() {
   const videoCreatorSamplesMaterials = useMemo(
     () =>
       materials.filter(
-        (material): material is TextSourceMaterial =>
+        (material): material is TextInputAsset =>
           material.type === 'video_creator_samples',
       ),
     [materials],
   )
   const historicalMaterial = useMemo(
     () => {
-      if (selectedHistoricalMaterialId === NEW_INPUT_ASSET_ID) return undefined
+      if (selectedHistoricalInputAssetId === NEW_INPUT_ASSET_ID) return undefined
       return (
         historicalMaterials.find(
-        (material) => material.id === selectedHistoricalMaterialId,
+        (material) => material.id === selectedHistoricalInputAssetId,
         ) ||
         historicalMaterials[0] ||
         undefined
       )
     },
-    [historicalMaterials, selectedHistoricalMaterialId],
+    [historicalMaterials, selectedHistoricalInputAssetId],
   )
   const commentsMaterial = useMemo(
     () => {
-      if (selectedCommentsMaterialId === NEW_INPUT_ASSET_ID) return undefined
+      if (selectedCommentsInputAssetId === NEW_INPUT_ASSET_ID) return undefined
       return (
         commentsMaterials.find(
-          (material) => material.id === selectedCommentsMaterialId,
+          (material) => material.id === selectedCommentsInputAssetId,
         ) ||
         commentsMaterials[0] ||
         undefined
       )
     },
-    [commentsMaterials, selectedCommentsMaterialId],
+    [commentsMaterials, selectedCommentsInputAssetId],
   )
   const videoCreatorSamplesMaterial = useMemo(
     () => {
-      if (selectedVideoMaterialId === NEW_INPUT_ASSET_ID) return undefined
+      if (selectedVideoInputAssetId === NEW_INPUT_ASSET_ID) return undefined
       return (
         videoCreatorSamplesMaterials.find(
-        (material) => material.id === selectedVideoMaterialId,
+        (material) => material.id === selectedVideoInputAssetId,
         ) ||
         videoCreatorSamplesMaterials[0] ||
         undefined
       )
     },
-    [videoCreatorSamplesMaterials, selectedVideoMaterialId],
+    [videoCreatorSamplesMaterials, selectedVideoInputAssetId],
   )
   const trendMaterial = useMemo(
     () => {
-      if (selectedTrendMaterialId === NEW_INPUT_ASSET_ID) return undefined
+      if (selectedTrendInputAssetId === NEW_INPUT_ASSET_ID) return undefined
       return (
-        trendMaterials.find((material) => material.id === selectedTrendMaterialId) ||
+        trendMaterials.find((material) => material.id === selectedTrendInputAssetId) ||
         trendMaterials[0] ||
         undefined
       )
     },
-    [trendMaterials, selectedTrendMaterialId],
+    [trendMaterials, selectedTrendInputAssetId],
+  )
+  const videoWorkflowMediaAssets = useMemo(
+    () =>
+      selectedVideoWorkflowMediaAssetIds
+        .map((assetId) => mediaAssets.find((asset) => asset.id === assetId))
+        .filter((asset): asset is MediaAsset => Boolean(asset)),
+    [mediaAssets, selectedVideoWorkflowMediaAssetIds],
   )
   const agentChatComposerRef = useRef<HTMLTextAreaElement | null>(null)
   const selectedAgentConversationId = selectedAgentConversation?.id
@@ -948,21 +611,36 @@ function WorkspaceApp() {
     }, 0)
   }, [activePage, selectedAgentConversationId])
 
+  usePendingAgentConversationPolling({
+    selectedAgentConversation,
+    selectedAgentConversationId,
+    setSelectedAgentConversation,
+    setAgentConversations,
+    setAssetProposals,
+  })
+
   useEffect(() => {
     let active = true
-    workspaceApi
-      .list()
-      .then((items) => {
+    async function loadDefaultWorkspace() {
+      try {
+        const items = await workspaceApi.list()
         if (!active) return
-        setWorkspaces(items)
-        setSelectedWorkspaceId((current) => current || items[0]?.id || '')
-        setLoading(false)
-      })
-      .catch((error: unknown) => {
+        if (items.length > 0) {
+          const workspaceId = await chooseDefaultWorkspaceId(items)
+          if (!active) return
+          setSelectedWorkspaceId((current) => current || workspaceId)
+          return
+        }
+        const created = await workspaceApi.create(DEFAULT_WORKSPACE_NAME, '')
+        if (!active) return
+        setSelectedWorkspaceId(created.id)
+      } catch (error: unknown) {
         if (!active) return
         setLoadError(errorMessage(error))
         setLoading(false)
-      })
+      }
+    }
+    void loadDefaultWorkspace()
     return () => {
       active = false
     }
@@ -978,7 +656,8 @@ function WorkspaceApp() {
     setLoadError('')
     Promise.all([
       workspaceApi.get(selectedWorkspaceId),
-      sourceMaterialApi.list(selectedWorkspaceId),
+      inputAssetApi.list(selectedWorkspaceId),
+      mediaAssetApi.list(selectedWorkspaceId),
       analysisRunApi.list(selectedWorkspaceId),
       simulationRunApi.list(selectedWorkspaceId),
       skillApi.list(selectedWorkspaceId),
@@ -992,6 +671,7 @@ function WorkspaceApp() {
         ([
           loadedWorkspace,
           loadedMaterials,
+          loadedMediaAssets,
           loadedRuns,
           loadedSimulationRuns,
           loadedSkills,
@@ -1004,6 +684,7 @@ function WorkspaceApp() {
         if (!active) return
         setWorkspace(loadedWorkspace)
         setMaterials(loadedMaterials)
+        setMediaAssets(loadedMediaAssets)
         setAnalysisRuns(loadedRuns)
         setSimulationRuns(loadedSimulationRuns)
         setSkills(loadedSkills)
@@ -1019,22 +700,39 @@ function WorkspaceApp() {
         )
         setWorkspaceName(loadedWorkspace.name)
         setPositioning(loadedWorkspace.accountPositioning)
-        setProfileSourceMode('workspace')
-        setSelectedProfileMaterialId(
+        setSelectedProfileInputAssetId(
           latestTextMaterial(loadedMaterials, 'account_profile')?.id || '',
         )
-        setManualWorkflowProfile('')
-        setAccountProfilesFile(null)
-        setInputAssetPanel('historical_posts')
-        setSelectedHistoricalMaterialId(
+        setAccountProfileDraftName(
+          latestTextMaterial(loadedMaterials, 'account_profile')?.name ||
+            SAMPLE_ASSET_NAMES.qsheepProfile,
+        )
+        setInputAssetBatchFiles(emptyTextInputAssetBatchFiles())
+        setSelectedHistoricalInputAssetId(
           latestTextMaterial(loadedMaterials, 'historical_posts')?.id || '',
         )
-        setSelectedCommentsMaterialId(
+        setHistoricalPostsDraftName(
+          latestTextMaterial(loadedMaterials, 'historical_posts')?.name ||
+            SAMPLE_ASSET_NAMES.historicalPosts,
+        )
+        setSelectedCommentsInputAssetId(
           latestTextMaterial(loadedMaterials, 'comments')?.id || '',
         )
-        setSelectedTrendMaterialId(latestTrendMaterial(loadedMaterials)?.id || '')
-        setSelectedVideoMaterialId(
+        setCommentsDraftName(
+          latestTextMaterial(loadedMaterials, 'comments')?.name ||
+            SAMPLE_ASSET_NAMES.comments,
+        )
+        setSelectedTrendInputAssetId(latestTrendMaterial(loadedMaterials)?.id || '')
+        setTrendCsvDraftName(
+          latestTrendMaterial(loadedMaterials)?.name || SAMPLE_ASSET_NAMES.trendCsv,
+        )
+        setSelectedVideoInputAssetId(
           latestTextMaterial(loadedMaterials, 'video_creator_samples')?.id || '',
+        )
+        setSelectedVideoWorkflowMediaAssetIds([])
+        setVideoCreatorSamplesDraftName(
+          latestTextMaterial(loadedMaterials, 'video_creator_samples')?.name ||
+            SAMPLE_ASSET_NAMES.videoCreatorSamples,
         )
         setHistoricalPosts(
           latestTextMaterial(loadedMaterials, 'historical_posts')?.content || '',
@@ -1086,6 +784,7 @@ function WorkspaceApp() {
   function resetWorkspaceState() {
     setWorkspace(null)
     setMaterials([])
+    setMediaAssets([])
     setAnalysisRuns([])
     setSimulationRuns([])
     setSkills([])
@@ -1096,15 +795,19 @@ function WorkspaceApp() {
     setSelectedTopic(null)
     setWorkspaceName('')
     setPositioning('')
-    setProfileSourceMode('workspace')
-    setSelectedProfileMaterialId('')
-    setManualWorkflowProfile('')
-    setAccountProfilesFile(null)
+    setAccountProfileDraftName(SAMPLE_ASSET_NAMES.qsheepProfile)
+    setHistoricalPostsDraftName(SAMPLE_ASSET_NAMES.historicalPosts)
+    setCommentsDraftName(SAMPLE_ASSET_NAMES.comments)
+    setTrendCsvDraftName(SAMPLE_ASSET_NAMES.trendCsv)
+    setVideoCreatorSamplesDraftName(SAMPLE_ASSET_NAMES.videoCreatorSamples)
+    setSelectedProfileInputAssetId('')
+    setInputAssetBatchFiles(emptyTextInputAssetBatchFiles())
     setInputAssetPanel('historical_posts')
-    setSelectedHistoricalMaterialId('')
-    setSelectedCommentsMaterialId('')
-    setSelectedTrendMaterialId('')
-    setSelectedVideoMaterialId('')
+    setSelectedHistoricalInputAssetId('')
+    setSelectedCommentsInputAssetId('')
+    setSelectedTrendInputAssetId('')
+    setSelectedVideoInputAssetId('')
+    setSelectedVideoWorkflowMediaAssetIds([])
     setHistoricalPosts('')
     setComments('')
     setVideoCreatorSamples('')
@@ -1132,39 +835,45 @@ function WorkspaceApp() {
 
   function openInputAsset(panel: InputAssetPanel) {
     setInputAssetPanel(panel)
+    setInputAssetFormatterDraft('')
+    setInputAssetFormatterStatus('')
     setActivePage('source-materials')
   }
 
-  function chooseTextMaterial(material: TextSourceMaterial) {
+  function chooseTextMaterial(material: TextInputAsset) {
     if (material.type === 'account_profile') {
-      setSelectedProfileMaterialId(material.id)
+      setSelectedProfileInputAssetId(material.id)
       setPositioning(material.content)
-      setProfileSourceMode('saved')
+      setAccountProfileDraftName(material.name)
       setSaveState('workspace', idleState)
       setSaveState('accountProfiles', idleState)
       return
     }
     if (material.type === 'historical_posts') {
-      setSelectedHistoricalMaterialId(material.id)
+      setSelectedHistoricalInputAssetId(material.id)
+      setHistoricalPostsDraftName(material.name)
       setHistoricalPosts(material.content)
       setSaveState('historical', idleState)
       return
     }
     if (material.type === 'comments') {
-      setSelectedCommentsMaterialId(material.id)
+      setSelectedCommentsInputAssetId(material.id)
+      setCommentsDraftName(material.name)
       setComments(material.content)
       setSaveState('comments', idleState)
       return
     }
     if (material.type === 'video_creator_samples') {
-      setSelectedVideoMaterialId(material.id)
+      setSelectedVideoInputAssetId(material.id)
+      setVideoCreatorSamplesDraftName(material.name)
       setVideoCreatorSamples(material.content)
       setSaveState('video', idleState)
     }
   }
 
-  function chooseTrendMaterial(material: TrendCsvSourceMaterial) {
-    setSelectedTrendMaterialId(material.id)
+  function chooseTrendMaterial(material: TrendCsvInputAsset) {
+    setSelectedTrendInputAssetId(material.id)
+    setTrendCsvDraftName(material.name)
     setTrendKeyword(material.keyword)
     setTrendFile(null)
     setSaveState('trend', idleState)
@@ -1172,35 +881,108 @@ function WorkspaceApp() {
 
   function startNewInputAsset(panel: InputAssetPanel) {
     if (panel === 'account_profiles') {
-      setSelectedProfileMaterialId(NEW_INPUT_ASSET_ID)
-      setProfileSourceMode('workspace')
+      setSelectedProfileInputAssetId(NEW_INPUT_ASSET_ID)
       setPositioning('')
+      setAccountProfileDraftName(EMPTY_INPUT_ASSET_NAMES.account_profile)
       setSaveState('workspace', idleState)
       setSaveState('accountProfiles', idleState)
       return
     }
     if (panel === 'historical_posts') {
-      setSelectedHistoricalMaterialId(NEW_INPUT_ASSET_ID)
+      setSelectedHistoricalInputAssetId(NEW_INPUT_ASSET_ID)
+      setHistoricalPostsDraftName(EMPTY_INPUT_ASSET_NAMES.historical_posts)
       setHistoricalPosts('')
       setSaveState('historical', idleState)
       return
     }
     if (panel === 'comments') {
-      setSelectedCommentsMaterialId(NEW_INPUT_ASSET_ID)
+      setSelectedCommentsInputAssetId(NEW_INPUT_ASSET_ID)
+      setCommentsDraftName(EMPTY_INPUT_ASSET_NAMES.comments)
       setComments('')
       setSaveState('comments', idleState)
       return
     }
     if (panel === 'trend_csv') {
-      setSelectedTrendMaterialId(NEW_INPUT_ASSET_ID)
+      setSelectedTrendInputAssetId(NEW_INPUT_ASSET_ID)
+      setTrendCsvDraftName(EMPTY_INPUT_ASSET_NAMES.trend_csv)
       setTrendKeyword('')
       setTrendFile(null)
       setSaveState('trend', idleState)
       return
     }
-    setSelectedVideoMaterialId(NEW_INPUT_ASSET_ID)
+    setSelectedVideoInputAssetId(NEW_INPUT_ASSET_ID)
+    setVideoCreatorSamplesDraftName(EMPTY_INPUT_ASSET_NAMES.video_creator_samples)
     setVideoCreatorSamples('')
     setSaveState('video', idleState)
+  }
+
+  async function applyInputAssetFormatter() {
+    const raw = inputAssetFormatterDraft.trim()
+    if (!raw) {
+      setInputAssetFormatterStatus('请先粘贴需要整理的信息。')
+      return
+    }
+    const skillId = FORMATTER_SKILL_ID_BY_PANEL[inputAssetPanel]
+    const formatterSkill = skills.find((skill) => skill.skillId === skillId)
+    if (!formatterSkill) {
+      setInputAssetFormatterStatus('当前 workspace 还没有同步输入素材整理 skill，请刷新后重试。')
+      return
+    }
+    setInputAssetFormatterStatus('整理中…')
+    try {
+      const result = await skillApi.invoke(formatterSkill.id, {
+        input: {
+          rawText: raw,
+          targetAssetType: INPUT_ASSET_DEFINITION_BY_PANEL[inputAssetPanel].type,
+        },
+        mode,
+      })
+      const output = result.output
+      const name = typeof output.name === 'string' ? output.name : ''
+      const content = typeof output.content === 'string' ? output.content : ''
+      const keyword = typeof output.keyword === 'string' ? output.keyword : ''
+      const notes = typeof output.notes === 'string' ? output.notes : '已整理为草稿，请确认后保存。'
+      if (inputAssetPanel === 'account_profiles') {
+        setSelectedProfileInputAssetId(NEW_INPUT_ASSET_ID)
+        setAccountProfileDraftName(name || '整理后的账号概况')
+        setPositioning(content)
+        setSaveState('workspace', idleState)
+        setSaveState('accountProfiles', idleState)
+        setInputAssetFormatterStatus(notes)
+        return
+      }
+      if (inputAssetPanel === 'historical_posts') {
+        setSelectedHistoricalInputAssetId(NEW_INPUT_ASSET_ID)
+        setHistoricalPostsDraftName(name || '整理后的历史笔记合集')
+        setHistoricalPosts(content)
+        setSaveState('historical', idleState)
+        setInputAssetFormatterStatus(notes)
+        return
+      }
+      if (inputAssetPanel === 'comments') {
+        setSelectedCommentsInputAssetId(NEW_INPUT_ASSET_ID)
+        setCommentsDraftName(name || '整理后的评论样本合集')
+        setComments(content)
+        setSaveState('comments', idleState)
+        setInputAssetFormatterStatus(notes)
+        return
+      }
+      if (inputAssetPanel === 'trend_csv') {
+        setSelectedTrendInputAssetId(NEW_INPUT_ASSET_ID)
+        setTrendCsvDraftName(name || '整理后的趋势数据')
+        setTrendKeyword(keyword)
+        setSaveState('trend', idleState)
+        setInputAssetFormatterStatus(notes)
+        return
+      }
+      setSelectedVideoInputAssetId(NEW_INPUT_ASSET_ID)
+      setVideoCreatorSamplesDraftName(name || '整理后的视频创作者样本')
+      setVideoCreatorSamples(content)
+      setSaveState('video', idleState)
+      setInputAssetFormatterStatus(notes)
+    } catch (error) {
+      setInputAssetFormatterStatus(`整理失败：${errorMessage(error)}`)
+    }
   }
 
   async function refreshWorkspaceSummary() {
@@ -1228,9 +1010,6 @@ function WorkspaceApp() {
       topicApi.list(workspace.id),
     ])
     setWorkspace(loadedWorkspace)
-    setWorkspaces((current) =>
-      current.map((item) => (item.id === loadedWorkspace.id ? loadedWorkspace : item)),
-    )
     setAnalysisRuns(loadedRuns)
     setSimulationRuns(loadedSimulationRuns)
     setSkills(loadedSkills)
@@ -1246,40 +1025,37 @@ function WorkspaceApp() {
     )
   }
 
-  async function createWorkspace(event: FormEvent) {
-    event.preventDefault()
-    if (!createName.trim()) return
-    setCreating(true)
-    setLoadError('')
-    try {
-      const created = await workspaceApi.create(createName.trim(), createPositioning)
-      setWorkspaces((current) => [created, ...current])
-      setSelectedWorkspaceId(created.id)
-      setCreateName('')
-      setCreatePositioning('')
-      setShowCreate(false)
-    } catch (error) {
-      setLoadError(errorMessage(error))
-    } finally {
-      setCreating(false)
-    }
-  }
-
   function applyDemoSample(force = false, targetTab: WorkflowTab = workflowTab) {
     if (targetTab === 'account') {
-      if (force || !positioning.trim()) setPositioning(SAMPLE_ACCOUNT_INPUT.positioning)
+      if (force || !positioning.trim()) {
+        setSelectedProfileInputAssetId(NEW_INPUT_ASSET_ID)
+        setAccountProfileDraftName(SAMPLE_ASSET_NAMES.qsheepProfile)
+        setPositioning(SAMPLE_ACCOUNT_INPUT.positioning)
+      }
       if (force || !historicalPosts.trim()) {
+        setSelectedHistoricalInputAssetId(NEW_INPUT_ASSET_ID)
+        setHistoricalPostsDraftName(SAMPLE_ASSET_NAMES.historicalPosts)
         setHistoricalPosts(SAMPLE_ACCOUNT_INPUT.historicalPosts)
       }
-      if (force || !comments.trim()) setComments(SAMPLE_ACCOUNT_INPUT.comments)
+      if (force || !comments.trim()) {
+        setSelectedCommentsInputAssetId(NEW_INPUT_ASSET_ID)
+        setCommentsDraftName(SAMPLE_ASSET_NAMES.comments)
+        setComments(SAMPLE_ACCOUNT_INPUT.comments)
+      }
       if (force || !simulationTopic.trim()) {
         setSimulationTopic(SAMPLE_ACCOUNT_INPUT.simulationTopic)
       }
       return
     }
     if (targetTab === 'video') {
-      if (force || !positioning.trim()) setPositioning(SAMPLE_VIDEO_INPUT.positioning)
+      if (force || !positioning.trim()) {
+        setSelectedProfileInputAssetId(NEW_INPUT_ASSET_ID)
+        setAccountProfileDraftName(SAMPLE_ASSET_NAMES.videoProgramProfile)
+        setPositioning(SAMPLE_VIDEO_INPUT.positioning)
+      }
       if (force || !videoCreatorSamples.trim()) {
+        setSelectedVideoInputAssetId(NEW_INPUT_ASSET_ID)
+        setVideoCreatorSamplesDraftName(SAMPLE_ASSET_NAMES.videoCreatorSamples)
         setVideoCreatorSamples(SAMPLE_VIDEO_INPUT.videoCreatorSamples)
       }
       if (force || !simulationTopic.trim()) {
@@ -1287,8 +1063,16 @@ function WorkspaceApp() {
       }
       return
     }
-    if (force || !positioning.trim()) setPositioning(SAMPLE_TREND_INPUT.positioning)
-    if (force || !trendKeyword.trim()) setTrendKeyword(SAMPLE_TREND_INPUT.keyword)
+    if (force || !positioning.trim()) {
+      setSelectedProfileInputAssetId(NEW_INPUT_ASSET_ID)
+      setAccountProfileDraftName(SAMPLE_ASSET_NAMES.nomadProfile)
+      setPositioning(SAMPLE_TREND_INPUT.positioning)
+    }
+    if (force || !trendKeyword.trim()) {
+      setSelectedTrendInputAssetId(NEW_INPUT_ASSET_ID)
+      setTrendCsvDraftName(SAMPLE_ASSET_NAMES.trendCsv)
+      setTrendKeyword(SAMPLE_TREND_INPUT.keyword)
+    }
     if (force || !simulationTopic.trim()) {
       setSimulationTopic(SAMPLE_TREND_INPUT.simulationTopic)
     }
@@ -1311,9 +1095,6 @@ function WorkspaceApp() {
       expectedUpdatedAt: workspace.updatedAt,
     })
     setWorkspace(updated)
-    setWorkspaces((current) =>
-      current.map((item) => (item.id === updated.id ? updated : item)),
-    )
     return updated
   }
 
@@ -1324,54 +1105,78 @@ function WorkspaceApp() {
       | 'comments'
       | 'video_creator_samples',
     content: string,
-    existing?: TextSourceMaterial,
-  ): Promise<TextSourceMaterial> {
+    existing?: TextInputAsset,
+    nameOverride?: string,
+  ): Promise<TextInputAsset> {
     if (!workspace) throw new Error('No workspace selected')
-    if (existing && existing.content === content) return existing
+    const fallbackName =
+      type === 'historical_posts'
+        ? SAMPLE_ASSET_NAMES.historicalPosts
+        : type === 'comments'
+          ? SAMPLE_ASSET_NAMES.comments
+          : type === 'account_profile'
+            ? SAMPLE_ASSET_NAMES.qsheepProfile
+            : SAMPLE_ASSET_NAMES.videoCreatorSamples
+    const nextName = (nameOverride || existing?.name || fallbackName).trim()
+    if (!nextName) throw new Error('请填写输入资产名称。')
+    if (existing && existing.content === content && existing.name === nextName) {
+      return existing
+    }
     const saved = existing
-      ? await sourceMaterialApi.update(existing.id, {
+      ? await inputAssetApi.update(existing.id, {
+          name: nextName,
           content,
           expectedUpdatedAt: existing.updatedAt,
         })
-      : await sourceMaterialApi.createText(
+      : await inputAssetApi.createText(
           workspace.id,
           type,
-          type === 'historical_posts'
-            ? '历史笔记'
-            : type === 'comments'
-              ? '评论样本'
-              : type === 'account_profile'
-                ? 'Account Profile'
-                : '视频创作者样本',
+          nextName,
           content,
         )
     if (saved.type !== type) {
-      throw new Error('Saved source material type did not match request')
+      throw new Error('Saved input asset type did not match request')
     }
     setMaterials((current) => [
       saved,
       ...current.filter((item) => item.id !== saved.id),
     ])
-    if (type === 'account_profile') setSelectedProfileMaterialId(saved.id)
-    if (type === 'historical_posts') setSelectedHistoricalMaterialId(saved.id)
-    if (type === 'comments') setSelectedCommentsMaterialId(saved.id)
-    if (type === 'video_creator_samples') setSelectedVideoMaterialId(saved.id)
+    if (type === 'account_profile') {
+      setSelectedProfileInputAssetId(saved.id)
+      setAccountProfileDraftName(saved.name)
+    }
+    if (type === 'historical_posts') {
+      setSelectedHistoricalInputAssetId(saved.id)
+      setHistoricalPostsDraftName(saved.name)
+    }
+    if (type === 'comments') {
+      setSelectedCommentsInputAssetId(saved.id)
+      setCommentsDraftName(saved.name)
+    }
+    if (type === 'video_creator_samples') {
+      setSelectedVideoInputAssetId(saved.id)
+      setVideoCreatorSamplesDraftName(saved.name)
+    }
     return saved
   }
 
   async function persistTrendCsv(
     file: File,
     keyword: string,
-  ): Promise<TrendCsvSourceMaterial> {
+    name = trendCsvDraftName,
+  ): Promise<TrendCsvInputAsset> {
     if (!workspace) throw new Error('No workspace selected')
-    const uploaded = await sourceMaterialApi.uploadTrendCsv(
+    const cleanName = name.trim()
+    if (!cleanName) throw new Error('请填写趋势 CSV 名称。')
+    const uploaded = await inputAssetApi.uploadTrendCsv(
       workspace.id,
-      file.name,
+      cleanName,
       keyword,
       file,
     )
     setMaterials((current) => [uploaded, ...current])
-    setSelectedTrendMaterialId(uploaded.id)
+    setSelectedTrendInputAssetId(uploaded.id)
+    setTrendCsvDraftName(uploaded.name)
     setTrendKeyword(uploaded.keyword)
     setTrendFile(null)
     return uploaded
@@ -1384,33 +1189,42 @@ function WorkspaceApp() {
     }
     setSaveState('trend', { phase: 'saving' })
     try {
-      await persistTrendCsv(trendFile, trendKeyword)
+      await persistTrendCsv(trendFile, trendKeyword, trendCsvDraftName)
       setSaveState('trend', { phase: 'saved' })
     } catch (error) {
       setSaveState('trend', { phase: 'error', message: errorMessage(error) })
     }
   }
 
-  async function uploadAccountProfilesCsv() {
-    if (!workspace || !accountProfilesFile) {
-      setSaveState('accountProfiles', {
+  function setInputAssetBatchFile(panel: TextInputAssetPanel, file: File | null) {
+    setInputAssetBatchFiles((current) => ({ ...current, [panel]: file }))
+    setSaveState(SAVE_KEY_BY_TEXT_INPUT_PANEL[panel], idleState)
+  }
+
+  async function uploadTextInputAssetsCsv(panel: TextInputAssetPanel) {
+    const file = inputAssetBatchFiles[panel]
+    const saveKey = SAVE_KEY_BY_TEXT_INPUT_PANEL[panel]
+    if (!workspace || !file) {
+      setSaveState(saveKey, {
         phase: 'error',
-        message: '请选择包含 profile 的 CSV / TSV 文件。',
+        message: '请选择 CSV / TSV 文件。',
       })
       return
     }
-    setSaveState('accountProfiles', { phase: 'saving' })
+    setSaveState(saveKey, { phase: 'saving' })
     try {
-      const imported = await sourceMaterialApi.uploadAccountProfilesCsv(
+      const imported = await inputAssetApi.uploadTextCsv(
         workspace.id,
-        accountProfilesFile,
+        TEXT_INPUT_ASSET_TYPE_BY_PANEL[panel],
+        file,
       )
       setMaterials((current) => [...imported.materials, ...current])
-      setSelectedProfileMaterialId(imported.materials[0]?.id || '')
-      setAccountProfilesFile(null)
-      setSaveState('accountProfiles', { phase: 'saved' })
+      const first = imported.materials[0]
+      if (first) chooseTextMaterial(first)
+      setInputAssetBatchFiles((current) => ({ ...current, [panel]: null }))
+      setSaveState(saveKey, { phase: 'saved' })
     } catch (error) {
-      setSaveState('accountProfiles', {
+      setSaveState(saveKey, {
         phase: 'error',
         message: errorMessage(error),
       })
@@ -1421,12 +1235,12 @@ function WorkspaceApp() {
     targetTab: WorkflowTab = workflowTab,
     includeProfile = true,
   ): Promise<{
-    accountProfileMaterialId?: string
+    accountProfileInputAssetId?: string
     manualAccountProfile?: string
-    historical?: TextSourceMaterial
-    comments?: TextSourceMaterial
-    trend?: TrendCsvSourceMaterial
-    video?: TextSourceMaterial
+    historical?: TextInputAsset
+    comments?: TextInputAsset
+    trend?: TrendCsvInputAsset
+    video?: TextInputAsset
     simulationTopic: string
   }> {
     if (!workspace) throw new Error('No workspace selected')
@@ -1436,41 +1250,41 @@ function WorkspaceApp() {
         : targetTab === 'video'
           ? SAMPLE_VIDEO_INPUT
           : SAMPLE_TREND_INPUT
-    const nextPositioning =
-      mode === 'demo' && !positioning.trim() ? sample.positioning : positioning
     const nextSimulationTopic =
       mode === 'demo' && !simulationTopic.trim()
         ? sample.simulationTopic
         : simulationTopic
-    if (nextPositioning !== positioning) setPositioning(nextPositioning)
     if (nextSimulationTopic !== simulationTopic) {
       setSimulationTopic(nextSimulationTopic)
     }
 
-    setSaveState('workspace', { phase: 'saving' })
-    await persistWorkspace(workspaceName, nextPositioning)
-    setSaveState('workspace', { phase: 'saved' })
-
     const profileInput: {
-      accountProfileMaterialId?: string
+      accountProfileInputAssetId?: string
       manualAccountProfile?: string
     } = {}
     if (!includeProfile) {
-      // Batch runs provide profile material IDs explicitly below.
-    } else if (profileSourceMode === 'saved') {
-      const material = selectedProfileMaterial
-      if (!material) throw new Error('请选择一个已保存的 Account Profile。')
-      profileInput.accountProfileMaterialId = material.id
-    } else if (profileSourceMode === 'manual') {
-      const manualProfile =
-        mode === 'demo' && !manualWorkflowProfile.trim()
-          ? sample.positioning
-          : manualWorkflowProfile
-      if (!manualProfile.trim()) throw new Error('请填写手动 Account Profile。')
-      if (manualProfile !== manualWorkflowProfile) {
-        setManualWorkflowProfile(manualProfile)
+      // Batch runs provide profile input asset IDs explicitly below.
+    } else {
+      let material = selectedProfileMaterial
+      if (!material && mode === 'demo') {
+        setSaveState('accountProfiles', { phase: 'saving' })
+        const sampleName =
+          targetTab === 'trend'
+            ? SAMPLE_ASSET_NAMES.nomadProfile
+            : targetTab === 'video'
+              ? SAMPLE_ASSET_NAMES.videoProgramProfile
+            : SAMPLE_ASSET_NAMES.qsheepProfile
+        material = await persistTextMaterial(
+          'account_profile',
+          sample.positioning,
+          undefined,
+          sampleName,
+        )
+        setPositioning(sample.positioning)
+        setSaveState('accountProfiles', { phase: 'saved' })
       }
-      profileInput.manualAccountProfile = manualProfile
+      if (!material) throw new Error('请先在账号概况中选择或保存一个账号概况。')
+      profileInput.accountProfileInputAssetId = material.id
     }
 
     if (targetTab === 'account') {
@@ -1491,6 +1305,7 @@ function WorkspaceApp() {
         'historical_posts',
         nextHistoricalPosts,
         historicalMaterial,
+        historicalPostsDraftName || SAMPLE_ASSET_NAMES.historicalPosts,
       )
       setSaveState('historical', { phase: 'saved' })
 
@@ -1499,6 +1314,7 @@ function WorkspaceApp() {
         'comments',
         nextComments,
         commentsMaterial,
+        commentsDraftName || SAMPLE_ASSET_NAMES.comments,
       )
       setSaveState('comments', { phase: 'saved' })
       return {
@@ -1526,6 +1342,7 @@ function WorkspaceApp() {
         'video_creator_samples',
         nextVideoCreatorSamples,
         videoCreatorSamplesMaterial,
+        videoCreatorSamplesDraftName || SAMPLE_ASSET_NAMES.videoCreatorSamples,
       )
       setSaveState('video', { phase: 'saved' })
       return {
@@ -1538,30 +1355,37 @@ function WorkspaceApp() {
     let savedTrend = trendMaterial
     if (trendFile) {
       setSaveState('trend', { phase: 'saving' })
-      savedTrend = await persistTrendCsv(trendFile, trendKeyword)
+      savedTrend = await persistTrendCsv(trendFile, trendKeyword, trendCsvDraftName)
       setSaveState('trend', { phase: 'saved' })
     } else if (mode === 'demo' && !savedTrend) {
       setSaveState('trend', { phase: 'saving' })
-      const sampleFile = new File([SAMPLE_TREND_CSV], '数字游民趋势.csv', {
+      const sampleFile = new File([SAMPLE_TREND_CSV], SAMPLE_ASSET_NAMES.trendCsv, {
         type: 'text/csv',
       })
       savedTrend = await persistTrendCsv(
         sampleFile,
         trendKeyword || SAMPLE_TREND_INPUT.keyword,
+        trendCsvDraftName || SAMPLE_ASSET_NAMES.trendCsv,
       )
       setSaveState('trend', { phase: 'saved' })
     }
     if (!savedTrend) throw new Error('请上传热点 CSV。')
-    if (trendKeyword.trim() && trendKeyword !== savedTrend.keyword) {
+    const nextTrendName = (trendCsvDraftName || savedTrend.name).trim()
+    if (
+      (trendKeyword.trim() && trendKeyword !== savedTrend.keyword) ||
+      nextTrendName !== savedTrend.name
+    ) {
       setSaveState('trend', { phase: 'saving' })
-      const updated = await sourceMaterialApi.update(savedTrend.id, {
-        keyword: trendKeyword,
+      const updated = await inputAssetApi.update(savedTrend.id, {
+        name: nextTrendName,
+        keyword: trendKeyword || savedTrend.keyword,
         expectedUpdatedAt: savedTrend.updatedAt,
       })
       if (updated.type !== 'trend_csv') {
-        throw new Error('Updated source material type did not match request')
+        throw new Error('Updated input asset type did not match request')
       }
       savedTrend = updated
+      setTrendCsvDraftName(updated.name)
       setMaterials((current) => [
         updated,
         ...current.filter((item) => item.id !== updated.id),
@@ -1615,12 +1439,15 @@ function WorkspaceApp() {
       const savedInputs = await ensureInputsSavedForRun(targetTab)
       const created = await analysisRunApi.create(workspace.id, {
         workflowType: workflowFromTab(targetTab),
-        accountProfileMaterialId: savedInputs.accountProfileMaterialId,
+        idempotencyKey: newClientRequestKey(`analysis-${targetTab}`),
+        accountProfileInputAssetId: savedInputs.accountProfileInputAssetId,
         manualAccountProfile: savedInputs.manualAccountProfile,
-        historicalPostsMaterialId: savedInputs.historical?.id,
-        commentsMaterialId: savedInputs.comments?.id,
-        trendCsvMaterialId: savedInputs.trend?.id,
-        videoCreatorSamplesMaterialId: savedInputs.video?.id,
+        historicalPostsInputAssetId: savedInputs.historical?.id,
+        commentsInputAssetId: savedInputs.comments?.id,
+        trendCsvInputAssetId: savedInputs.trend?.id,
+        videoCreatorSamplesInputAssetId: savedInputs.video?.id,
+        mediaAssetIds:
+          targetTab === 'video' ? selectedVideoWorkflowMediaAssetIds : undefined,
         mode,
       })
       setCurrentRun(created)
@@ -1645,7 +1472,7 @@ function WorkspaceApp() {
   async function runBatchWorkflow(targetTab: WorkflowTab = workflowTab) {
     if (!workspace) return
     if (accountProfileMaterials.length === 0) {
-      setRunError('请先在 Account Profiles 中上传或保存至少一个 Profile。')
+      setRunError('请先在账号概况中上传或保存至少一个账号概况。')
       return
     }
     setWorkflowTab(targetTab)
@@ -1655,11 +1482,16 @@ function WorkspaceApp() {
       const savedInputs = await ensureInputsSavedForRun(targetTab, false)
       await analysisRunApi.createBatch(workspace.id, {
         workflowType: workflowFromTab(targetTab),
-        accountProfileMaterialIds: accountProfileMaterials.map((material) => material.id),
-        historicalPostsMaterialId: savedInputs.historical?.id,
-        commentsMaterialId: savedInputs.comments?.id,
-        trendCsvMaterialId: savedInputs.trend?.id,
-        videoCreatorSamplesMaterialId: savedInputs.video?.id,
+        idempotencyKey: newClientRequestKey(`analysis-batch-${targetTab}`),
+        accountProfileInputAssetIds: accountProfileMaterials.map(
+          (material) => material.id,
+        ),
+        historicalPostsInputAssetId: savedInputs.historical?.id,
+        commentsInputAssetId: savedInputs.comments?.id,
+        trendCsvInputAssetId: savedInputs.trend?.id,
+        videoCreatorSamplesInputAssetId: savedInputs.video?.id,
+        mediaAssetIds:
+          targetTab === 'video' ? selectedVideoWorkflowMediaAssetIds : undefined,
         mode,
       })
       await refreshWorkspaceSummary()
@@ -2068,6 +1900,7 @@ function WorkspaceApp() {
     agent: Agent,
     title = `与 ${agent.displayName} 对话`,
     initialDraft = '',
+    contextTarget?: ConversationContextTarget,
   ) {
     if (!workspace) return
     setRunError('')
@@ -2078,6 +1911,7 @@ function WorkspaceApp() {
         workspace.id,
         agent.id,
         title,
+        contextTarget,
       )
       setAgentConversations((current) => [
         conversation,
@@ -2097,6 +1931,7 @@ function WorkspaceApp() {
   async function startMakerConversation(
     agentId: string,
     initialDraft: string,
+    contextTarget?: ConversationContextTarget,
   ) {
     setRunError('')
     setActivePage('agents')
@@ -2113,6 +1948,7 @@ function WorkspaceApp() {
         agent,
         `与 ${agent.displayName} 对话`,
         initialDraft,
+        contextTarget,
       )
     } catch (error) {
       setRunError(errorMessage(error))
@@ -2318,221 +2154,284 @@ function WorkspaceApp() {
     }
   }, [selectedTopic])
 
+  function getHelpContent(): {
+    title: string
+    description: string
+    bullets: string[]
+  } {
+    if (activePage === 'source-materials') {
+      const definition = INPUT_ASSET_DEFINITION_BY_PANEL[inputAssetPanel]
+      return {
+        title: `${definition.label} 帮助`,
+        description:
+          '输入素材是 workflow 可复用的内容资产实例。每一种资产类型都有固定 contract，不是通用文件夹。',
+        bullets: [
+          definition.description,
+          `当前类型：${definition.type}，内容形态：${definition.contentKind}。`,
+          `Workflow role：${definition.workflowRoles.join(', ')}。`,
+          `Context selector：${definition.contextSelectors.join(', ')}。`,
+          '左侧列表选择已有实例；点击新建或上传可以创建新的输入实例。',
+          '保存是显式动作；运行 workflow 前，当前编辑内容也会自动保存为对应输入素材。',
+        ],
+      }
+    }
+
+    if (activePage === 'image-assets' || activePage === 'video-assets') {
+      const isImage = activePage === 'image-assets'
+      return {
+        title: `${isImage ? '图片素材' : '视频素材'}帮助`,
+        description:
+          '媒体素材是内容资产的一部分，用于保存创作者图片/视频材料和后续可复用的派生信息。',
+        bullets: [
+          '当前版本只做上传、metadata、derived JSON 和用户备注，不做视频理解或图片理解。',
+          '原始文件由后端受控保存，前端通过 /api/media-assets/{id}/file 预览。',
+          'metadata 和 derived 字段先允许手动编辑，为后续 OCR、ASR、视觉摘要、生成链路预留结构。',
+          '后续视频博主质量诊断可以读取媒体资产的 compact snapshot，而不是直接读取完整二进制。',
+        ],
+      }
+    }
+
+    if (
+      activePage === 'account-diagnosis' ||
+      activePage === 'trend-analysis' ||
+      activePage === 'video-quality'
+    ) {
+      const workflowHelp = {
+        account: {
+          title: '账号诊断帮助',
+          description:
+            '账号诊断会读取账号概况、历史笔记和评论样本，生成账号画像、痛点分析和候选选题。',
+          bullets: [
+            '账号概况、历史笔记和评论样本都以已保存实例形式传入 workflow。',
+            '历史笔记和评论样本会绑定为本次 run 的 immutable input snapshot。',
+            'Demo 模式会在缺少输入时填入示例数据；Live 模式使用真实模型配置。',
+            '批量运行会对多个账号概况逐个创建 run。',
+          ],
+        },
+        trend: {
+          title: '热点分析帮助',
+          description:
+            '热点分析会读取账号概况和趋势 CSV 数据，先确定性解析排名，再生成趋势洞察和候选选题。',
+          bullets: [
+            '趋势 CSV 上传后保存为输入素材；原始文件由后端托管，前端只展示 preview。',
+            'Workflow 会保留 top-50 engagement ranking 行为。',
+            '运行时保存的是 compact input snapshot，不把完整 CSV 放进 graph state。',
+            '适合用来把热点内容转成适配当前账号定位的选题。',
+          ],
+        },
+        video: {
+          title: '视频博主质量诊断帮助',
+          description:
+            '视频博主质量诊断会读取账号概况和视频创作者样本，判断创作者画像、视频质量和激励计划适配度。',
+          bullets: [
+            '样本应包含创作者背景、视频标题/数据、内容观察和运营备注。',
+            '适合创作者运营批量评估 AIGC 视频创作者。',
+            '输出会区分剧本驱动、商单驱动、技术探索等不同激励适配路径。',
+            '后续可结合批量账号概况和输入素材做批量诊断和 CSV 导出。',
+          ],
+        },
+      }[workflowTab]
+      return workflowHelp
+    }
+
+    if (activePage === 'history') {
+      return {
+        title: '分析结果帮助',
+        description:
+          '这里保存每次账号诊断、热点分析、视频博主质量诊断的运行历史。',
+        bullets: [
+          '每条 run 都包含 workflow type、status、input snapshot、stage results 和 errors。',
+          '重新打开历史结果不会重新执行 workflow。',
+          'Input snapshot 是不可变执行历史，用于复盘和后续生成选题/结构。',
+          '失败或部分完成的 run 也会保留可用 stage result。',
+        ],
+      }
+    }
+
+    if (activePage === 'topics') {
+      return {
+        title: '选题库帮助',
+        description:
+          '选题库保存来自诊断、热点分析或手动录入的选题资产。',
+        bullets: [
+          '选题可以被设为 Current Topic，用于内容结构生成或受众模拟。',
+          'title 和 angle 可编辑；generated snapshot 作为来源记录保留。',
+          'Archive 会把选题从候选工作流中移出，但不删除历史。',
+          '从生成卡片“填入下一步”的快捷动作会尽量绑定到 Topic entity。',
+        ],
+      }
+    }
+
+    if (activePage === 'drafts') {
+      return {
+        title: '内容结构帮助',
+        description:
+          '内容结构保存从选题生成的结构化草稿，以及用户后续编辑内容。',
+        bullets: [
+          'generated snapshot 是模型生成快照，不应被用户编辑覆盖。',
+          'editable content 保存用户修改版本。',
+          '结构可以继续发送到受众模拟。',
+          '这个页面当前不作为左侧一级导航暴露，但仍是 Topic 到 Simulation 的连接资产。',
+        ],
+      }
+    }
+
+    if (activePage === 'simulations') {
+      return {
+        title: '受众模拟帮助',
+        description:
+          '这里保存围绕某个 Topic 或内容结构运行的受众模拟结果。',
+        bullets: [
+          '模拟会生成产品特定 personas，不是通用可配置 agents。',
+          '每个 persona 的反应是独立结果，失败时尽量保留部分反应。',
+          '可以重新打开历史 simulation，不会重新执行。',
+          '适合验证选题角度、受众疑虑、反对意见和内容策略。',
+        ],
+      }
+    }
+
+    if (activePage === 'skills') {
+      return {
+        title: 'Skills 帮助',
+        description:
+          'Skills 是产品内部可组合能力资产，描述输入 contract、输出 schema、side effects 和组合边界。',
+        bullets: [
+          '当前用户侧只读；我们可以在代码和 maker agent 中新增或调整。',
+          'Capability Maker 会根据需求调用对应 skill，生成 Skill asset proposal。',
+          'Skill 的输入应引用 InputAsset、AnalysisRun、Topic 等产品资产。',
+          '旧 source.* skill id 暂时保留为兼容 ID，但 contract 已迁到 InputAsset 语义。',
+        ],
+      }
+    }
+
+    if (activePage === 'agents') {
+      return {
+        title: 'Agents 帮助',
+        description:
+          'Agents 是产品角色资产：system prompt + 多个 Skills + 默认 context policy。',
+        bullets: [
+          'Conversation 入口可以和 agent 对话，用于生成或修改资产提案。',
+          'Agent 可以读取 broad workspace context pack，但不能直接访问数据库或任意文件。',
+          'Capability Maker 可用于生成 Agent asset proposal。',
+          '未来 agent 可逐步拥有确认后应用的资产修改能力。',
+        ],
+      }
+    }
+
+    if (activePage === 'workflows') {
+      return {
+        title: 'Workflows 帮助',
+        description:
+          'Workflows 是多 agent、多 task 的产品执行计划，不是通用流程编辑器。',
+        bullets: [
+          'workflow 调用在右侧发起；这里查看 workflow asset 定义和 agent plan。',
+          '当前 graph 执行仍由后端产品接口封装，前端不暴露 LangGraph 术语。',
+          'Capability Maker 可用于生成 workflow asset proposal。',
+          'Workflow 输入应绑定具体 InputAsset 实例或由运行前自动保存。',
+        ],
+      }
+    }
+
+    return {
+      title: '工作区整体帮助',
+      description:
+        '这个 workspace 用来管理创作者内容资产、分析结果、选题、内容结构、受众模拟，以及 Skills / Agents / Workflows 能力资产。',
+      bullets: [
+        '左侧是内容资产：输入素材和可复用输出统一放在一起。',
+        '右侧是能力资产与 workflow 调用入口：Skills、Agents、Workflows。',
+        '两侧组合起来完成调用：内容资产提供上下文，能力资产定义如何处理这些上下文。',
+        '所有 workflow 运行都会尽量保存可复用的数据库记录，避免刷新后丢失。',
+      ],
+    }
+  }
+
   const visibleTopics = topics.filter((topic) =>
     topicFilter === 'all' ? true : topic.sourceWorkflow === topicFilter,
   )
+  const helpContent = getHelpContent()
+  const mainContent = (
+    <>
+      {loadError && <div className="error-banner">⚠ {loadError}</div>}
+      {loading && <div className="loading-card">正在加载工作区…</div>}
+
+      {!loading && !workspace && (
+        <div className="empty-workspace">
+          <h2>默认工作区暂不可用</h2>
+          <p>系统会自动使用一个默认工作区保存输入资产、分析结果和能力资产。</p>
+        </div>
+      )}
+
+      {!loading &&
+        workspace &&
+        activePage === 'account-profile' &&
+        renderAccountProfilePage()}
+      {!loading &&
+        workspace &&
+        activePage === 'source-materials' &&
+        renderInputAssetsPage()}
+      {!loading && workspace && activePage === 'image-assets' && (
+        <MediaAssetsPage
+          workspaceId={workspace.id}
+          mediaType="image"
+          assets={mediaAssets}
+          skills={skills}
+          mode={mode}
+          onAssetsChange={setMediaAssets}
+        />
+      )}
+      {!loading && workspace && activePage === 'video-assets' && (
+        <MediaAssetsPage
+          workspaceId={workspace.id}
+          mediaType="video"
+          assets={mediaAssets}
+          skills={skills}
+          mode={mode}
+          onAssetsChange={setMediaAssets}
+        />
+      )}
+      {!loading &&
+        workspace &&
+        activePage === 'account-diagnosis' &&
+        renderWorkflowRunPage('account')}
+      {!loading &&
+        workspace &&
+        activePage === 'trend-analysis' &&
+        renderWorkflowRunPage('trend')}
+      {!loading &&
+        workspace &&
+        activePage === 'video-quality' &&
+        renderWorkflowRunPage('video')}
+
+      {!loading && workspace && activePage === 'history' && renderHistoryPage()}
+      {!loading && workspace && activePage === 'topics' && renderTopicsPage()}
+      {!loading && workspace && activePage === 'drafts' && renderDraftsPage()}
+      {!loading &&
+        workspace &&
+        activePage === 'simulations' &&
+        renderSimulationsPage()}
+      {!loading && workspace && activePage === 'skills' && renderSkillsPage()}
+      {!loading && workspace && activePage === 'agents' && renderAgentsPage()}
+      {!loading &&
+        workspace &&
+        activePage === 'workflows' &&
+        renderWorkflowAssetsPage()}
+    </>
+  )
 
   return (
-    <div className="app-shell">
-      <aside className="workspace-sidebar">
-        <div className="brand-row">
-          <div className="logo">薯</div>
-          <div>
-            <strong>创作者工作区</strong>
-            <span>Prototype migration</span>
-          </div>
-        </div>
-
-        <label htmlFor="workspace-select">工作区</label>
-        <select
-          id="workspace-select"
-          aria-label="选择工作区"
-          value={selectedWorkspaceId}
-          onChange={(event) => setSelectedWorkspaceId(event.target.value)}
-        >
-          {!workspaces.length && <option value="">尚无工作区</option>}
-          {workspaces.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name}
-            </option>
-          ))}
-        </select>
-        <button
-          className="sidebar-create"
-          type="button"
-          onClick={() => setShowCreate((value) => !value)}
-        >
-          ＋ 新建工作区
-        </button>
-
-        {showCreate && (
-          <form className="create-workspace" onSubmit={createWorkspace}>
-            <label htmlFor="new-workspace-name">名称</label>
-            <input
-              id="new-workspace-name"
-              value={createName}
-              onChange={(event) => setCreateName(event.target.value)}
-              required
-            />
-            <label htmlFor="new-workspace-positioning">账号定位</label>
-            <textarea
-              id="new-workspace-positioning"
-              rows={3}
-              value={createPositioning}
-              onChange={(event) => setCreatePositioning(event.target.value)}
-            />
-            <button className="small-primary" disabled={creating}>
-              {creating ? '创建中…' : '创建'}
-            </button>
-          </form>
-        )}
-
-        <nav aria-label="内容资产导航">
-          <div className="nav-section-title">Input Assets</div>
-          {INPUT_ASSET_DEFINITIONS.map((definition) => (
-            <button
-              key={definition.panel}
-              className={
-                activePage === 'source-materials' &&
-                inputAssetPanel === definition.panel
-                  ? 'active'
-                  : ''
-              }
-              onClick={() => openInputAsset(definition.panel)}
-            >
-              <span>{definition.icon}</span> {definition.label}
-            </button>
-          ))}
-          <div className="nav-section-title">Reusable Outputs</div>
-          <button
-            className={activePage === 'history' ? 'active' : ''}
-            onClick={() => setActivePage('history')}
-          >
-            <span>◷</span> Analysis Results
-          </button>
-          <button
-            className={activePage === 'topics' ? 'active' : ''}
-            onClick={() => setActivePage('topics')}
-          >
-            <span>◇</span> Topic Library
-          </button>
-          <button
-            className={activePage === 'simulations' ? 'active' : ''}
-            onClick={() => setActivePage('simulations')}
-          >
-            <span>👥</span> Audience Simulations
-          </button>
-        </nav>
-      </aside>
-
-      <main className="workspace-main">
-        <header className="topbar">
-          <div>
-            <h1>创作者内容诊断与选题共创助手</h1>
-            <p>左侧管理上下文与产物资产；右侧发起 workflow 调用并查看能力资产。</p>
-          </div>
-          <span className="badge">Workspace</span>
-        </header>
-
-        {loadError && <div className="error-banner">⚠ {loadError}</div>}
-        {loading && <div className="loading-card">正在加载工作区…</div>}
-
-        {!loading && !workspace && (
-          <div className="empty-workspace">
-            <h2>先创建一个创作者工作区</h2>
-            <p>工作区用于保存账号定位、历史笔记、评论和热点 CSV。</p>
-            <button className="primary" onClick={() => setShowCreate(true)}>
-              新建工作区
-            </button>
-          </div>
-        )}
-
-        {!loading &&
-          workspace &&
-          activePage === 'account-profile' &&
-          renderAccountProfilePage()}
-        {!loading &&
-          workspace &&
-          activePage === 'source-materials' &&
-          renderInputAssetsPage()}
-        {!loading &&
-          workspace &&
-          activePage === 'account-diagnosis' &&
-          renderWorkflowRunPage('account')}
-        {!loading &&
-          workspace &&
-          activePage === 'trend-analysis' &&
-          renderWorkflowRunPage('trend')}
-        {!loading &&
-          workspace &&
-          activePage === 'video-quality' &&
-          renderWorkflowRunPage('video')}
-
-        {!loading && workspace && activePage === 'history' && renderHistoryPage()}
-        {!loading && workspace && activePage === 'topics' && renderTopicsPage()}
-        {!loading && workspace && activePage === 'drafts' && renderDraftsPage()}
-        {!loading &&
-          workspace &&
-          activePage === 'simulations' &&
-          renderSimulationsPage()}
-        {!loading && workspace && activePage === 'skills' && renderSkillsPage()}
-        {!loading && workspace && activePage === 'agents' && renderAgentsPage()}
-        {!loading &&
-          workspace &&
-          activePage === 'workflows' &&
-          renderWorkflowAssetsPage()}
-      </main>
-
-      <aside className="capability-sidebar">
-        <div className="capability-header">
-          <strong>能力资产</strong>
-          <span>调用 workflow · 查看能力组合</span>
-        </div>
-        <nav aria-label="能力资产导航">
-          <div className="nav-section-title">Workflow Calls</div>
-          <button
-            className={activePage === 'account-diagnosis' ? 'active' : ''}
-            onClick={() => {
-              setWorkflowTab('account')
-              setActivePage('account-diagnosis')
-            }}
-          >
-            <span>📊</span> Account Diagnosis
-          </button>
-          <button
-            className={activePage === 'trend-analysis' ? 'active' : ''}
-            onClick={() => {
-              setWorkflowTab('trend')
-              setActivePage('trend-analysis')
-            }}
-          >
-            <span>🔥</span> Trend Analysis
-          </button>
-          <button
-            className={activePage === 'video-quality' ? 'active' : ''}
-            onClick={() => {
-              setWorkflowTab('video')
-              setActivePage('video-quality')
-            }}
-          >
-            <span>🎬</span> Video Creator Quality
-          </button>
-          <div className="nav-section-title">Capability Assets</div>
-          <button
-            className={activePage === 'skills' ? 'active' : ''}
-            onClick={() => setActivePage('skills')}
-          >
-            <span>✦</span> Skills
-          </button>
-          <button
-            className={activePage === 'agents' ? 'active' : ''}
-            onClick={() => setActivePage('agents')}
-          >
-            <span>◉</span> Agents
-          </button>
-          <button
-            className={activePage === 'workflows' ? 'active' : ''}
-            onClick={() => setActivePage('workflows')}
-          >
-            <span>⌘</span> Workflows
-          </button>
-        </nav>
-        <div className="relationship-hint">
-          <b>调用关系</b>
-          <span>左侧 Input Assets 和 Reusable Outputs 提供上下文与产物；右侧 Workflow Calls 使用这些资产并由 Skills、Agents、Workflows 定义执行方式。</span>
-        </div>
-      </aside>
-    </div>
+    <WorkspaceShell
+      workspace={workspace}
+      activePage={activePage}
+      inputAssetPanel={inputAssetPanel}
+      showHelp={showHelp}
+      helpContent={helpContent}
+      onOpenInputAsset={openInputAsset}
+      onSetActivePage={setActivePage}
+      onSetWorkflowTab={setWorkflowTab}
+      onToggleHelp={() => setShowHelp((value) => !value)}
+    >
+      {mainContent}
+    </WorkspaceShell>
   )
 
   async function saveAccountProfile() {
@@ -2543,9 +2442,10 @@ function WorkspaceApp() {
       const savedProfile = await persistTextMaterial(
         'account_profile',
         positioning,
-        selectedProfileMaterial || accountProfileMaterials[0],
+        selectedProfileMaterial || undefined,
+        accountProfileDraftName,
       )
-      setSelectedProfileMaterialId(savedProfile.id)
+      setSelectedProfileInputAssetId(savedProfile.id)
       setSaveState('workspace', { phase: 'saved' })
       setSaveState('accountProfiles', { phase: 'saved' })
     } catch (error) {
@@ -2565,9 +2465,10 @@ function WorkspaceApp() {
       const savedProfile = await persistTextMaterial(
         'account_profile',
         positioning,
+        undefined,
+        accountProfileDraftName,
       )
-      setSelectedProfileMaterialId(savedProfile.id)
-      setProfileSourceMode('saved')
+      setSelectedProfileInputAssetId(savedProfile.id)
       setSaveState('workspace', { phase: 'saved' })
       setSaveState('accountProfiles', { phase: 'saved' })
     } catch (error) {
@@ -2582,7 +2483,12 @@ function WorkspaceApp() {
   async function saveHistoricalPosts() {
     setSaveState('historical', { phase: 'saving' })
     try {
-      await persistTextMaterial('historical_posts', historicalPosts, historicalMaterial)
+      await persistTextMaterial(
+        'historical_posts',
+        historicalPosts,
+        historicalMaterial,
+        historicalPostsDraftName,
+      )
       setSaveState('historical', { phase: 'saved' })
     } catch (error) {
       setSaveState('historical', { phase: 'error', message: errorMessage(error) })
@@ -2592,7 +2498,12 @@ function WorkspaceApp() {
   async function saveHistoricalPostsAsNew() {
     setSaveState('historical', { phase: 'saving' })
     try {
-      await persistTextMaterial('historical_posts', historicalPosts)
+      await persistTextMaterial(
+        'historical_posts',
+        historicalPosts,
+        undefined,
+        historicalPostsDraftName,
+      )
       setSaveState('historical', { phase: 'saved' })
     } catch (error) {
       setSaveState('historical', { phase: 'error', message: errorMessage(error) })
@@ -2602,7 +2513,7 @@ function WorkspaceApp() {
   async function saveComments() {
     setSaveState('comments', { phase: 'saving' })
     try {
-      await persistTextMaterial('comments', comments, commentsMaterial)
+      await persistTextMaterial('comments', comments, commentsMaterial, commentsDraftName)
       setSaveState('comments', { phase: 'saved' })
     } catch (error) {
       setSaveState('comments', { phase: 'error', message: errorMessage(error) })
@@ -2612,7 +2523,7 @@ function WorkspaceApp() {
   async function saveCommentsAsNew() {
     setSaveState('comments', { phase: 'saving' })
     try {
-      await persistTextMaterial('comments', comments)
+      await persistTextMaterial('comments', comments, undefined, commentsDraftName)
       setSaveState('comments', { phase: 'saved' })
     } catch (error) {
       setSaveState('comments', { phase: 'error', message: errorMessage(error) })
@@ -2626,6 +2537,7 @@ function WorkspaceApp() {
         'video_creator_samples',
         videoCreatorSamples,
         videoCreatorSamplesMaterial,
+        videoCreatorSamplesDraftName,
       )
       setSaveState('video', { phase: 'saved' })
     } catch (error) {
@@ -2636,7 +2548,12 @@ function WorkspaceApp() {
   async function saveVideoCreatorSamplesAsNew() {
     setSaveState('video', { phase: 'saving' })
     try {
-      await persistTextMaterial('video_creator_samples', videoCreatorSamples)
+      await persistTextMaterial(
+        'video_creator_samples',
+        videoCreatorSamples,
+        undefined,
+        videoCreatorSamplesDraftName,
+      )
       setSaveState('video', { phase: 'saved' })
     } catch (error) {
       setSaveState('video', { phase: 'error', message: errorMessage(error) })
@@ -2645,579 +2562,268 @@ function WorkspaceApp() {
 
   function renderAccountProfilePage() {
     return (
-      <div className="workspace-page asset-page">
-        <section className="history-list">
-          <div className="panel-title">◎ Account Profile</div>
-          <p className="subline">
-            账号定位现在作为可复用 context asset，被账号诊断、热点分析和受众模拟共同引用。
-          </p>
-          <div className="asset-card active">
-            <b>{workspaceName || '未命名工作区'}</b>
-            <span>{positioning.trim() ? '已填写账号定位' : '账号定位为空'}</span>
-            <small>positioningVersion: {workspace?.positioningVersion ?? 0}</small>
-          </div>
-        </section>
-        <section className="history-detail">
-          <div className="detail-head">
-            <div>
-              <h2>Account Profile Asset</h2>
-              <p>编辑后会更新当前 workspace 的账号定位资产。</p>
-            </div>
-          </div>
-          <label htmlFor="workspace-name">工作区名称</label>
-          <input
-            id="workspace-name"
-            value={workspaceName}
-            onChange={(event) => {
-              setWorkspaceName(event.target.value)
-              setSaveState('workspace', idleState)
-            }}
-          />
-          <label htmlFor="positioning">账号定位</label>
-          <textarea
-            id="positioning"
-            rows={10}
-            value={positioning}
-            onChange={(event) => {
-              setPositioning(event.target.value)
-              setSaveState('workspace', idleState)
-            }}
-          />
-          <div className="save-row">
-            <button className="save-button" onClick={saveAccountProfile}>
-              保存 Account Profile
-            </button>
-            <SaveIndicator state={saveStates.workspace} />
-            <SaveIndicator state={saveStates.accountProfiles} />
-          </div>
-        </section>
-      </div>
+      <AccountProfilePage
+        workspaceName={workspaceName}
+        positioning={positioning}
+        positioningVersion={workspace?.positioningVersion ?? 0}
+        workspaceSaveState={saveStates.workspace}
+        accountProfilesSaveState={saveStates.accountProfiles}
+        onWorkspaceNameChange={(value) => {
+          setWorkspaceName(value)
+          setSaveState('workspace', idleState)
+        }}
+        onPositioningChange={(value) => {
+          setPositioning(value)
+          setSaveState('workspace', idleState)
+        }}
+        onSave={saveAccountProfile}
+      />
     )
   }
 
   function renderInputAssetsPage() {
-    const definition = INPUT_ASSET_DEFINITION_BY_PANEL[inputAssetPanel]
-    const panelMaterials: SourceMaterial[] =
-      inputAssetPanel === 'account_profiles'
-        ? accountProfileMaterials
-        : inputAssetPanel === 'historical_posts'
-          ? historicalMaterials
-          : inputAssetPanel === 'comments'
-            ? commentsMaterials
-            : inputAssetPanel === 'trend_csv'
-              ? trendMaterials
-              : videoCreatorSamplesMaterials
-    const selectedPanelAsset: SourceMaterial | null =
-      inputAssetPanel === 'account_profiles'
-        ? selectedProfileMaterial
-        : inputAssetPanel === 'historical_posts'
-          ? historicalMaterial || null
-          : inputAssetPanel === 'comments'
-            ? commentsMaterial || null
-            : inputAssetPanel === 'trend_csv'
-              ? trendMaterial || null
-              : videoCreatorSamplesMaterial || null
-
-    const selectInputAsset = (asset: SourceMaterial) => {
-      if (isTrendCsvInputAsset(asset)) {
-        chooseTrendMaterial(asset)
-        return
-      }
-      chooseTextMaterial(asset)
-    }
-
-    const renderInputAssetDetail = () => {
-      if (inputAssetPanel === 'account_profiles') {
-        return (
-          <>
-            <div className="detail-head">
-              <div>
-                <h2>
-                  {selectedProfileMaterial
-                    ? selectedProfileMaterial.name
-                    : '新建 Account Profile'}
-                </h2>
-                <p>{definition.description}</p>
-              </div>
-            </div>
-            <div className="source-editor-card">
-              <label htmlFor="workspace-name-inline">Workspace 名称</label>
-              <input
-                id="workspace-name-inline"
-                value={workspaceName}
-                onChange={(event) => {
-                  setWorkspaceName(event.target.value)
-                  setSaveState('workspace', idleState)
-                }}
-              />
-              <label htmlFor="positioning-inline">账号定位</label>
-              <textarea
-                id="positioning-inline"
-                rows={7}
-                value={positioning}
-                onChange={(event) => {
-                  setPositioning(event.target.value)
-                  setSaveState('workspace', idleState)
-                }}
-              />
-              <div className="save-row">
-                <button className="save-button" onClick={saveAccountProfile}>
-                  {selectedProfileMaterial
-                    ? '保存当前 Account Profile'
-                    : '保存为 Account Profile'}
-                </button>
-                <button className="save-button" onClick={saveAccountProfileAsNew}>
-                  另存为新 Account Profile
-                </button>
-                <SaveIndicator state={saveStates.workspace} />
-                <SaveIndicator state={saveStates.accountProfiles} />
-              </div>
-              <p className="subline">
-                当前实现会同步更新 workspace 默认定位；后续可拆成纯资产编辑。
-              </p>
-            </div>
-            <div className="source-editor-card">
-              <label htmlFor="account-profiles-file">
-                Account Profiles 批量导入（CSV / TSV）
-              </label>
-              <input
-                id="account-profiles-file"
-                type="file"
-                accept=".csv,.tsv"
-                onChange={(event) => {
-                  setAccountProfilesFile(event.target.files?.[0] || null)
-                  setSaveState('accountProfiles', idleState)
-                }}
-              />
-              <p className="subline">
-                表头支持 name/profile、profile_name/account_profile、账号/定位。
-              </p>
-              <div className="save-row">
-                <button className="save-button" onClick={uploadAccountProfilesCsv}>
-                  上传并保存 Profiles
-                </button>
-                <SaveIndicator state={saveStates.accountProfiles} />
-              </div>
-            </div>
-          </>
-        )
-      }
-
-      if (inputAssetPanel === 'comments') {
-        return (
-          <>
-            <div className="detail-head">
-              <div>
-                <h2>{commentsMaterial ? commentsMaterial.name : '新建 Comment Samples'}</h2>
-                <p>{definition.description}</p>
-              </div>
-            </div>
-            <div className="source-editor-card">
-              <label htmlFor="comments">评论区原文（一行一条）</label>
-              <textarea
-                id="comments"
-                rows={12}
-                value={comments}
-                onChange={(event) => {
-                  setComments(event.target.value)
-                  setSaveState('comments', idleState)
-                }}
-              />
-              <div className="save-row">
-                <button className="save-button" onClick={saveComments}>
-                  {commentsMaterial ? '保存当前评论样本' : '保存为评论样本'}
-                </button>
-                <button className="save-button" onClick={saveCommentsAsNew}>
-                  另存为新评论样本
-                </button>
-                <SaveIndicator state={saveStates.comments} />
-              </div>
-            </div>
-          </>
-        )
-      }
-
-      if (inputAssetPanel === 'trend_csv') {
-        return (
-          <>
-            <div className="detail-head">
-              <div>
-                <h2>{trendMaterial ? trendMaterial.name : '上传新 Trend CSV'}</h2>
-                <p>{definition.description}</p>
-              </div>
-            </div>
-            <div className="source-editor-card">
-              <label htmlFor="trend-keyword">话题关键词</label>
-              <input
-                id="trend-keyword"
-                value={trendKeyword}
-                onChange={(event) => {
-                  setTrendKeyword(event.target.value)
-                  setSaveState('trend', idleState)
-                }}
-                placeholder="例：数字游民、留学申请"
-              />
-              <label htmlFor="trend-file">热帖数据（CSV / TSV）</label>
-              <input
-                id="trend-file"
-                type="file"
-                accept=".csv,.tsv"
-                onChange={(event) => {
-                  setTrendFile(event.target.files?.[0] || null)
-                  setSaveState('trend', idleState)
-                }}
-              />
-              <div className="save-row">
-                <button className="save-button" onClick={uploadTrendCsv}>
-                  上传并保存 CSV
-                </button>
-                <SaveIndicator state={saveStates.trend} />
-              </div>
-              {trendMaterial && (
-                <div className="csv-preview">
-                  <div className="csv-summary">
-                    <strong>{trendMaterial.originalFilename}</strong>
-                    <span>{trendMaterial.rowCount} 条</span>
-                  </div>
-                  {trendMaterial.preview.length > 0 && (
-                    <div className="table-scroll">
-                      <table>
-                        <thead>
-                          <tr>
-                            {Object.keys(trendMaterial.preview[0]).map((header) => (
-                              <th key={header}>{header}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {trendMaterial.preview.map((row, index) => (
-                            <tr key={index}>
-                              {Object.keys(trendMaterial.preview[0]).map((header) => (
-                                <td key={header}>{row[header] || ''}</td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </>
-        )
-      }
-
-      if (inputAssetPanel === 'video_creator_samples') {
-        return (
-          <>
-            <div className="detail-head">
-              <div>
-                <h2>
-                  {videoCreatorSamplesMaterial
-                    ? videoCreatorSamplesMaterial.name
-                    : '新建 Video Creator Samples'}
-                </h2>
-                <p>{definition.description}</p>
-              </div>
-            </div>
-            <div className="source-editor-card">
-              <label htmlFor="video-creator-samples">
-                视频创作者样本（创作者背景、视频样本、互动数据、运营备注）
-              </label>
-              <textarea
-                id="video-creator-samples"
-                rows={12}
-                value={videoCreatorSamples}
-                onChange={(event) => {
-                  setVideoCreatorSamples(event.target.value)
-                  setSaveState('video', idleState)
-                }}
-                placeholder="例：创作者 @xxx；样本视频标题、数据、画面/脚本/更新频率观察；是否商单驱动等"
-              />
-              <div className="save-row">
-                <button className="save-button" onClick={saveVideoCreatorSamples}>
-                  {videoCreatorSamplesMaterial
-                    ? '保存当前视频创作者样本'
-                    : '保存为视频创作者样本'}
-                </button>
-                <button className="save-button" onClick={saveVideoCreatorSamplesAsNew}>
-                  另存为新视频创作者样本
-                </button>
-                <SaveIndicator state={saveStates.video} />
-              </div>
-            </div>
-          </>
-        )
-      }
-
-      return (
-        <>
-          <div className="detail-head">
-            <div>
-              <h2>
-                {historicalMaterial ? historicalMaterial.name : '新建 Historical Posts'}
-              </h2>
-              <p>{definition.description}</p>
-            </div>
-          </div>
-          <div className="source-editor-card">
-            <label htmlFor="historical-posts">
-              主页 / 历史笔记 + 数据（格式：标题 ｜ 数据 ｜ 爆/平/差）
-            </label>
-            <textarea
-              id="historical-posts"
-              rows={12}
-              value={historicalPosts}
-              onChange={(event) => {
-                setHistoricalPosts(event.target.value)
-                setSaveState('historical', idleState)
-              }}
-            />
-            <div className="save-row">
-              <button className="save-button" onClick={saveHistoricalPosts}>
-                {historicalMaterial ? '保存当前历史笔记' : '保存为历史笔记'}
-              </button>
-              <button className="save-button" onClick={saveHistoricalPostsAsNew}>
-                另存为新历史笔记
-              </button>
-              <SaveIndicator state={saveStates.historical} />
-            </div>
-          </div>
-        </>
-      )
-    }
-
     return (
-      <div className="workspace-page asset-page">
-        <section className="history-list">
-          <div className="panel-title">
-            {definition.icon} {definition.label}
-          </div>
-          <p className="subline">
-            {definition.description}
-          </p>
-          <button
-            className={`run-row ${selectedPanelAsset ? '' : 'active'}`}
-            type="button"
-            onClick={() => startNewInputAsset(inputAssetPanel)}
-          >
-            <span>{definition.newLabel}</span>
-            <b>{definition.contentKind === 'file' ? 'upload' : 'new'}</b>
-            <small>创建一个新的 {definition.singularLabel} 实例</small>
-          </button>
-          {panelMaterials.length === 0 ? (
-            <div className="empty-card">{definition.emptyLabel}</div>
-          ) : (
-            panelMaterials.map((material) => (
-              <button
-                key={material.id}
-                className={`run-row ${
-                  selectedPanelAsset?.id === material.id ? 'active' : ''
-                }`}
-                type="button"
-                onClick={() => selectInputAsset(material)}
-              >
-                <span>{material.name}</span>
-                <b>{material.type}</b>
-                <small>{inputAssetPreview(material)}</small>
-                <small>更新于 {inputAssetUpdatedLabel(material)}</small>
-              </button>
-            ))
-          )}
-          <div className="asset-type-contract">
-            <label>Asset Type Contract</label>
-            <span>type: {definition.type}</span>
-            <span>kind: {definition.contentKind}</span>
-            <span>workflow roles: {definition.workflowRoles.join(', ')}</span>
-            <span>context: {definition.contextSelectors.join(', ')}</span>
-          </div>
-        </section>
-        <section className="history-detail source-editor-stack">
-          {renderInputAssetDetail()}
-        </section>
-      </div>
+      <InputAssetsPage
+        inputAssetPanel={inputAssetPanel}
+        accountProfileMaterials={accountProfileMaterials}
+        historicalMaterials={historicalMaterials}
+        commentsMaterials={commentsMaterials}
+        trendMaterials={trendMaterials}
+        videoCreatorSamplesMaterials={videoCreatorSamplesMaterials}
+        selectedProfileMaterial={selectedProfileMaterial}
+        historicalMaterial={historicalMaterial}
+        commentsMaterial={commentsMaterial}
+        trendMaterial={trendMaterial}
+        videoCreatorSamplesMaterial={videoCreatorSamplesMaterial}
+        workspaceName={workspaceName}
+        positioning={positioning}
+        accountProfileDraftName={accountProfileDraftName}
+        historicalPostsDraftName={historicalPostsDraftName}
+        commentsDraftName={commentsDraftName}
+        trendCsvDraftName={trendCsvDraftName}
+        videoCreatorSamplesDraftName={videoCreatorSamplesDraftName}
+        historicalPosts={historicalPosts}
+        comments={comments}
+        trendKeyword={trendKeyword}
+        videoCreatorSamples={videoCreatorSamples}
+        inputAssetFormatterDraft={inputAssetFormatterDraft}
+        inputAssetFormatterStatus={inputAssetFormatterStatus}
+        workspaceSaveState={saveStates.workspace}
+        accountProfilesSaveState={saveStates.accountProfiles}
+        historicalSaveState={saveStates.historical}
+        commentsSaveState={saveStates.comments}
+        trendSaveState={saveStates.trend}
+        videoSaveState={saveStates.video}
+        onStartNewInputAsset={startNewInputAsset}
+        onChooseTextMaterial={chooseTextMaterial}
+        onChooseTrendMaterial={chooseTrendMaterial}
+        onFormatterDraftChange={(value) => {
+          setInputAssetFormatterDraft(value)
+          setInputAssetFormatterStatus('')
+        }}
+        onApplyInputAssetFormatter={applyInputAssetFormatter}
+        onAccountProfileDraftNameChange={setAccountProfileDraftName}
+        onWorkspaceNameChange={(value) => {
+          setWorkspaceName(value)
+          setSaveState('workspace', idleState)
+        }}
+        onPositioningChange={(value) => {
+          setPositioning(value)
+          setSaveState('workspace', idleState)
+        }}
+        onSaveAccountProfile={saveAccountProfile}
+        onSaveAccountProfileAsNew={saveAccountProfileAsNew}
+        onHistoricalPostsDraftNameChange={(value) => {
+          setHistoricalPostsDraftName(value)
+          setSaveState('historical', idleState)
+        }}
+        onHistoricalPostsChange={(value) => {
+          setHistoricalPosts(value)
+          setSaveState('historical', idleState)
+        }}
+        onSaveHistoricalPosts={saveHistoricalPosts}
+        onSaveHistoricalPostsAsNew={saveHistoricalPostsAsNew}
+        onCommentsDraftNameChange={(value) => {
+          setCommentsDraftName(value)
+          setSaveState('comments', idleState)
+        }}
+        onCommentsChange={(value) => {
+          setComments(value)
+          setSaveState('comments', idleState)
+        }}
+        onSaveComments={saveComments}
+        onSaveCommentsAsNew={saveCommentsAsNew}
+        onTrendCsvDraftNameChange={(value) => {
+          setTrendCsvDraftName(value)
+          setSaveState('trend', idleState)
+        }}
+        onTrendKeywordChange={(value) => {
+          setTrendKeyword(value)
+          setSaveState('trend', idleState)
+        }}
+        onTrendFileChange={(file) => {
+          setTrendFile(file)
+          setSaveState('trend', idleState)
+        }}
+        onUploadTrendCsv={uploadTrendCsv}
+        onVideoCreatorSamplesDraftNameChange={(value) => {
+          setVideoCreatorSamplesDraftName(value)
+          setSaveState('video', idleState)
+        }}
+        onVideoCreatorSamplesChange={(value) => {
+          setVideoCreatorSamples(value)
+          setSaveState('video', idleState)
+        }}
+        onSaveVideoCreatorSamples={saveVideoCreatorSamples}
+        onSaveVideoCreatorSamplesAsNew={saveVideoCreatorSamplesAsNew}
+        onSetInputAssetBatchFile={setInputAssetBatchFile}
+        onUploadTextInputAssetsCsv={uploadTextInputAssetsCsv}
+      />
     )
   }
 
   function renderWorkflowRunPage(targetTab: WorkflowTab) {
     const isAccount = targetTab === 'account'
     const isVideo = targetTab === 'video'
-    const activeProfileContent =
-      profileSourceMode === 'saved'
-        ? selectedProfileMaterial?.content || ''
-        : profileSourceMode === 'manual'
-          ? manualWorkflowProfile
-          : positioning
-    const activeProfileLabel =
-      profileSourceMode === 'saved'
-        ? selectedProfileMaterial?.name || '未选择已保存 Profile'
-        : profileSourceMode === 'manual'
-          ? '手动输入 Profile'
-          : 'Workspace Account Profile'
-    const accountProfileRequirement = {
-      name: 'Account Profile',
-      status: activeProfileContent.trim() ? 'ready' : 'missing',
-      detail: activeProfileContent.trim()
-        ? `${activeProfileLabel}: ${activeProfileContent}`
-        : '未填写账号定位',
-    }
-    const requiredAssets =
-      targetTab === 'account'
-        ? [
-            accountProfileRequirement,
-            {
-              name: 'Historical Posts',
-              status: historicalPosts.trim() ? 'ready' : 'missing',
-              detail: `${historicalPosts.split('\n').filter(Boolean).length} 行`,
-            },
-            {
-              name: 'Comment Samples',
-              status: comments.trim() ? 'ready' : 'missing',
-              detail: `${comments.split('\n').filter(Boolean).length} 行`,
-            },
-          ]
-        : targetTab === 'video'
-          ? [
-              accountProfileRequirement,
-              {
-                name: 'Video Creator Samples',
-                status: videoCreatorSamples.trim() ? 'ready' : 'missing',
-                detail: `${videoCreatorSamples.split('\n').filter(Boolean).length} 行`,
-              },
-            ]
-          : [
-              accountProfileRequirement,
-              {
-                name: 'Trend CSV',
-                status: trendMaterial || trendFile ? 'ready' : 'missing',
-                detail: trendMaterial
-                  ? `${trendMaterial.originalFilename} · ${trendMaterial.rowCount} 行`
-                  : trendFile
-                    ? trendFile.name
-                    : '未上传 CSV',
-              },
-            ]
     const panelTitle = isAccount
-      ? '📊 Account Diagnosis'
+      ? '📊 账号诊断'
       : isVideo
-        ? '🎬 Video Creator Quality'
-        : '🔥 Trend Analysis'
+        ? '🎬 视频博主质量诊断'
+        : '🔥 热点分析'
     const description = isAccount
-      ? '使用 Account Profile、Historical Posts 和 Comment Samples 生成账号诊断。'
+      ? '使用账号概况、历史笔记和评论样本生成账号诊断。'
       : isVideo
-        ? '使用 Account Profile 和 Video Creator Samples 判断 AIGC 视频创作者质量与激励计划适配度。'
-        : '使用 Account Profile 和 Trend CSV 生成热点分析。'
-    const demoLabel = isAccount ? '账号诊断' : isVideo ? '视频创作者诊断' : '热点分析'
+        ? '使用账号概况和视频创作者样本判断 AIGC 视频创作者质量与激励计划适配度。'
+        : '使用账号概况和趋势 CSV 生成热点分析。'
     const runLabel = isAccount
       ? '⚡ 生成账号诊断'
       : isVideo
         ? '⚡ 生成视频创作者诊断'
         : '⚡ 生成热点分析'
+    const renderInputPreview = (
+      name: string,
+      status: 'ready' | 'missing',
+      detail: string,
+    ) => (
+      <div className="asset-requirement workflow-input-preview">
+        <div>
+          <b>{name}</b>
+          <span>{detail}</span>
+        </div>
+        <em className={status}>{status}</em>
+      </div>
+    )
+    const mediaWorkflowPreview = (asset: MediaAsset) => {
+      const hasUnderstanding = Boolean(
+        asset.derived.qwenUnderstanding ||
+          asset.derived.imageUnderstanding ||
+          asset.derived.videoUnderstanding ||
+          asset.derived.visualSummary ||
+          asset.derived.sceneSummary,
+      )
+      return `${asset.type === 'image' ? '图片' : '视频'} · ${asset.name} · ${
+        hasUnderstanding ? '已有理解结果' : '未保存理解结果'
+      }`
+    }
     return (
       <div className="prototype-grid">
         <section className="input-panel workflow-call-panel">
           <div className="panel-title">{panelTitle}</div>
           <p className="subline">{description}</p>
           <div className="source-editor-card compact">
-            <label>Account Profile 来源</label>
-            <div className="mode-switch">
-              <button
-                className={profileSourceMode === 'workspace' ? 'active' : ''}
-                type="button"
-                onClick={() => setProfileSourceMode('workspace')}
-              >
-                Workspace
-              </button>
-              <button
-                className={profileSourceMode === 'saved' ? 'active' : ''}
-                type="button"
-                onClick={() => setProfileSourceMode('saved')}
-              >
-                已保存 Profile
-              </button>
-              <button
-                className={profileSourceMode === 'manual' ? 'active' : ''}
-                type="button"
-                onClick={() => setProfileSourceMode('manual')}
-              >
-                手动输入
-              </button>
-            </div>
-            {profileSourceMode === 'saved' && (
-              <select
-                value={selectedProfileMaterial?.id || ''}
-                onChange={(event) => setSelectedProfileMaterialId(event.target.value)}
-              >
-                {accountProfileMaterials.length === 0 ? (
-                  <option value="">还没有已保存 Profile</option>
-                ) : (
-                  accountProfileMaterials.map((material) => (
-                    <option value={material.id} key={material.id}>
-                      {material.name}
-                    </option>
-                  ))
-                )}
-              </select>
-            )}
-            {profileSourceMode === 'manual' && (
-              <textarea
-                rows={4}
-                value={manualWorkflowProfile}
-                onChange={(event) => setManualWorkflowProfile(event.target.value)}
-                placeholder="本次运行临时使用的账号/创作者定位，不覆盖 workspace profile。"
-              />
+            <label htmlFor="workflow-account-profile-material">
+              账号概况实例
+            </label>
+            <select
+              id="workflow-account-profile-material"
+              value={selectedProfileMaterial?.id || ''}
+              onChange={(event) => setSelectedProfileInputAssetId(event.target.value)}
+            >
+              {accountProfileMaterials.length === 0 ? (
+                <option value="">还没有保存的账号概况</option>
+              ) : (
+                accountProfileMaterials.map((material) => (
+                  <option value={material.id} key={material.id}>
+                    {material.name}
+                  </option>
+                ))
+              )}
+            </select>
+            {renderInputPreview(
+              '账号概况',
+              selectedProfileMaterial ? 'ready' : 'missing',
+              selectedProfileMaterial
+                ? inputAssetPreview(selectedProfileMaterial)
+                : '未选择账号概况实例',
             )}
           </div>
           {isAccount && (
-            <div className="source-editor-card compact">
-              <label htmlFor="workflow-historical-material">Historical Posts 实例</label>
-              <select
-                id="workflow-historical-material"
-                value={historicalMaterial?.id || ''}
-                onChange={(event) => {
-                  const material = historicalMaterials.find(
-                    (item) => item.id === event.target.value,
-                  )
-                  if (material) chooseTextMaterial(material)
-                }}
-              >
-                {historicalMaterials.length === 0 ? (
-                  <option value="">还没有保存的 Historical Posts</option>
-                ) : (
-                  historicalMaterials.map((material) => (
-                    <option value={material.id} key={material.id}>
-                      {material.name}
-                    </option>
-                  ))
+            <>
+              <div className="source-editor-card compact">
+                <label htmlFor="workflow-historical-material">历史笔记实例</label>
+                <select
+                  id="workflow-historical-material"
+                  value={historicalMaterial?.id || ''}
+                  onChange={(event) => {
+                    const material = historicalMaterials.find(
+                      (item) => item.id === event.target.value,
+                    )
+                    if (material) chooseTextMaterial(material)
+                  }}
+                >
+                  {historicalMaterials.length === 0 ? (
+                    <option value="">还没有保存的历史笔记</option>
+                  ) : (
+                    historicalMaterials.map((material) => (
+                      <option value={material.id} key={material.id}>
+                        {material.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+                {renderInputPreview(
+                  '历史笔记',
+                  historicalMaterial ? 'ready' : 'missing',
+                  historicalMaterial
+                    ? inputAssetPreview(historicalMaterial)
+                    : '未选择历史笔记实例',
                 )}
-              </select>
-              <label htmlFor="workflow-comments-material">Comment Samples 实例</label>
-              <select
-                id="workflow-comments-material"
-                value={commentsMaterial?.id || ''}
-                onChange={(event) => {
-                  const material = commentsMaterials.find(
-                    (item) => item.id === event.target.value,
-                  )
-                  if (material) chooseTextMaterial(material)
-                }}
-              >
-                {commentsMaterials.length === 0 ? (
-                  <option value="">还没有保存的 Comment Samples</option>
-                ) : (
-                  commentsMaterials.map((material) => (
-                    <option value={material.id} key={material.id}>
-                      {material.name}
-                    </option>
-                  ))
+              </div>
+              <div className="source-editor-card compact">
+                <label htmlFor="workflow-comments-material">评论样本实例</label>
+                <select
+                  id="workflow-comments-material"
+                  value={commentsMaterial?.id || ''}
+                  onChange={(event) => {
+                    const material = commentsMaterials.find(
+                      (item) => item.id === event.target.value,
+                    )
+                    if (material) chooseTextMaterial(material)
+                  }}
+                >
+                  {commentsMaterials.length === 0 ? (
+                    <option value="">还没有保存的评论样本</option>
+                  ) : (
+                    commentsMaterials.map((material) => (
+                      <option value={material.id} key={material.id}>
+                        {material.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+                {renderInputPreview(
+                  '评论样本',
+                  commentsMaterial ? 'ready' : 'missing',
+                  commentsMaterial
+                    ? inputAssetPreview(commentsMaterial)
+                    : '未选择评论样本实例',
                 )}
-              </select>
-            </div>
+              </div>
+            </>
           )}
           {targetTab === 'trend' && (
             <div className="source-editor-card compact">
-              <label htmlFor="workflow-trend-material">Trend CSV Data 实例</label>
+              <label htmlFor="workflow-trend-material">趋势 CSV 数据实例</label>
               <select
                 id="workflow-trend-material"
                 value={trendMaterial?.id || ''}
@@ -3229,7 +2835,7 @@ function WorkspaceApp() {
                 }}
               >
                 {trendMaterials.length === 0 ? (
-                  <option value="">还没有上传的 Trend CSV</option>
+                  <option value="">还没有上传的趋势 CSV</option>
                 ) : (
                   trendMaterials.map((material) => (
                     <option value={material.id} key={material.id}>
@@ -3238,60 +2844,80 @@ function WorkspaceApp() {
                   ))
                 )}
               </select>
+              {renderInputPreview(
+                '趋势 CSV',
+                trendMaterial ? 'ready' : 'missing',
+                trendMaterial ? inputAssetPreview(trendMaterial) : '未选择趋势 CSV 实例',
+              )}
             </div>
           )}
           {isVideo && (
-            <div className="source-editor-card compact">
-              <label htmlFor="workflow-video-material">Video Creator Samples 实例</label>
-              <select
-                id="workflow-video-material"
-                value={videoCreatorSamplesMaterial?.id || ''}
-                onChange={(event) => {
-                  const material = videoCreatorSamplesMaterials.find(
-                    (item) => item.id === event.target.value,
-                  )
-                  if (material) chooseTextMaterial(material)
-                }}
-              >
-                {videoCreatorSamplesMaterials.length === 0 ? (
-                  <option value="">还没有保存的 Video Creator Samples</option>
-                ) : (
-                  videoCreatorSamplesMaterials.map((material) => (
-                    <option value={material.id} key={material.id}>
-                      {material.name}
-                    </option>
-                  ))
+            <>
+              <div className="source-editor-card compact">
+                <label htmlFor="workflow-video-material">视频创作者样本实例</label>
+                <select
+                  id="workflow-video-material"
+                  value={videoCreatorSamplesMaterial?.id || ''}
+                  onChange={(event) => {
+                    const material = videoCreatorSamplesMaterials.find(
+                      (item) => item.id === event.target.value,
+                    )
+                    if (material) chooseTextMaterial(material)
+                  }}
+                >
+                  {videoCreatorSamplesMaterials.length === 0 ? (
+                    <option value="">还没有保存的视频创作者样本</option>
+                  ) : (
+                    videoCreatorSamplesMaterials.map((material) => (
+                      <option value={material.id} key={material.id}>
+                        {material.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+                {renderInputPreview(
+                  '视频创作者样本',
+                  videoCreatorSamplesMaterial ? 'ready' : 'missing',
+                  videoCreatorSamplesMaterial
+                    ? inputAssetPreview(videoCreatorSamplesMaterial)
+                    : '未选择视频创作者样本实例',
                 )}
-              </select>
-            </div>
-          )}
-          <div className="asset-requirements">
-            {requiredAssets.map((asset) => (
-              <div className="asset-requirement" key={asset.name}>
-                <div>
-                  <b>{asset.name}</b>
-                  <span>{asset.detail}</span>
-                </div>
-                <em className={asset.status}>{asset.status}</em>
               </div>
-            ))}
-          </div>
-          <div className="workflow-shortcuts">
-            <button onClick={() => openInputAsset('account_profiles')}>
-              管理 Account Profiles
-            </button>
-            <button onClick={() => openInputAsset('historical_posts')}>
-              管理输入资产
-            </button>
-          </div>
-          {mode === 'demo' && (
-            <button
-              className="btn-fill"
-              type="button"
-              onClick={() => applyDemoSample(true, targetTab)}
-            >
-              ↺ 载入{demoLabel}演示样例
-            </button>
+              <div className="source-editor-card compact">
+                <label>关联图片/视频素材</label>
+                {mediaAssets.length === 0 ? (
+                  <div className="empty-card">还没有图片或视频素材。</div>
+                ) : (
+                  <div className="asset-mini-list">
+                    {mediaAssets.map((asset) => (
+                      <label className="media-select-row" key={asset.id}>
+                        <input
+                          type="checkbox"
+                          checked={selectedVideoWorkflowMediaAssetIds.includes(
+                            asset.id,
+                          )}
+                          onChange={(event) => {
+                            setSelectedVideoWorkflowMediaAssetIds((current) =>
+                              event.target.checked
+                                ? [...current, asset.id]
+                                : current.filter((id) => id !== asset.id),
+                            )
+                          }}
+                        />
+                        <span>{mediaWorkflowPreview(asset)}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {renderInputPreview(
+                  '媒体素材',
+                  videoWorkflowMediaAssets.length ? 'ready' : 'missing',
+                  videoWorkflowMediaAssets.length
+                    ? videoWorkflowMediaAssets.map(mediaWorkflowPreview).join('\n')
+                    : '可选。建议先在图片/视频素材页保存 Qwen 理解结果。',
+                )}
+              </div>
+            </>
           )}
           <div className="simulation-divider">
             <label htmlFor="simulation-topic">👥 下期选题（受众模拟的测试内容）</label>
@@ -3343,7 +2969,7 @@ function WorkspaceApp() {
               disabled={running || accountProfileMaterials.length === 0}
               onClick={() => runBatchWorkflow(targetTab)}
             >
-              批量运行当前 Workflow（{accountProfileMaterials.length} Profiles）
+              批量运行当前 Workflow（{accountProfileMaterials.length} 个账号概况）
             </button>
             <button type="button" onClick={() => downloadAnalysisRunsCsv(targetTab)}>
               下载结果 CSV
@@ -3366,52 +2992,14 @@ function WorkspaceApp() {
     views: StageView[],
     outputKind: WorkflowOutputKind,
   ) {
-    const isSimulation = outputKind === 'simulation'
     return (
-      <section className="output-panel">
-        {runError && <div className="error-banner">⚠ {runError}</div>}
-        {!views.length ? (
-          <div className="output-empty">
-            <span>✓</span>
-            <h2>
-              {isSimulation
-                ? '受众模拟待运行'
-                : targetTab === 'account'
-                  ? '账号诊断待运行'
-                  : targetTab === 'video'
-                    ? '视频创作者诊断待运行'
-                    : '热点分析待运行'}
-            </h2>
-            <p>运行后结果会渐进渲染，并保存到 Analysis Results。</p>
-          </div>
-        ) : (
-          views.map((stage) => (
-            <div className="stage" key={stage.key}>
-              <div className="stage-h">
-                <div className="stage-n">{stage.n}</div>
-                <h3>{stage.title}</h3>
-                <div className={`stage-status ${stage.status}`}>
-                  {stage.status === 'running'
-                    ? '分析中…'
-                    : stage.status === 'completed'
-                      ? '已完成'
-                      : stage.status === 'failed'
-                        ? '失败'
-                        : '等待中'}
-                </div>
-              </div>
-              {stage.status === 'running' && (
-                <div className="stage-loading">
-                  <span className="spinner" />
-                  分析中…
-                </div>
-              )}
-              {stage.error && <div className="err">{stage.error}</div>}
-              {renderStageResult(stage)}
-            </div>
-          ))
-        )}
-      </section>
+      <WorkflowOutputPanel
+        targetTab={targetTab}
+        views={views}
+        outputKind={outputKind}
+        runError={runError}
+        renderStageResult={renderStageResult}
+      />
     )
   }
 
@@ -3419,7 +3007,7 @@ function WorkspaceApp() {
     return (
       <div className="workspace-page">
         <section className="history-list">
-          <div className="panel-title">◷ Analysis Results</div>
+          <div className="panel-title">◷ 分析结果</div>
           {analysisRuns.length === 0 ? (
             <div className="empty-card">暂无分析运行。</div>
           ) : (
@@ -3479,7 +3067,7 @@ function WorkspaceApp() {
     return (
       <div className="workspace-page topics-page">
         <section className="history-list">
-          <div className="panel-title">◇ Topic Library</div>
+          <div className="panel-title">◇ 选题库</div>
           <form className="manual-topic" onSubmit={saveManualTopic}>
             <input
               aria-label="手动选题标题"
@@ -3591,7 +3179,7 @@ function WorkspaceApp() {
     return (
       <div className="workspace-page">
         <section className="history-list">
-          <div className="panel-title">▱ Generated Structures</div>
+          <div className="panel-title">▱ 内容结构</div>
           {drafts.length === 0 ? (
             <div className="empty-card">暂无内容结构或草稿。请先从选题卡生成内容结构。</div>
           ) : (
@@ -3669,7 +3257,7 @@ function WorkspaceApp() {
             不提供通用 agent builder。
           </p>
           <div className="asset-maker-call">
-            <span>不要手填 contract：描述你需要的能力，让 Skill Maker 生成定义提案。</span>
+            <span>不要手填 contract：描述你需要的能力，让 Capability Maker 生成 Skill 提案。</span>
             <button
               className="small-primary"
               disabled={agentConversationCreating}
@@ -3677,10 +3265,13 @@ function WorkspaceApp() {
                 startMakerConversation(
                   MAKER_AGENT_IDS.skill,
                   '我想设计一个新的 Skill，用来：\n\n它应该读取哪些 workspace 资产：\n\n它应该输出什么结构：',
+                  selectedSkill
+                    ? { assetType: 'skill', assetId: selectedSkill.id }
+                    : undefined,
                 )
               }
             >
-              让 Skill Maker 设计 Skill
+              让 Capability Maker 设计 Skill
             </button>
           </div>
           {Object.entries(grouped).map(([category, items]) => (
@@ -3693,7 +3284,7 @@ function WorkspaceApp() {
                   onClick={() => openSkill(skill.id)}
                 >
                   <span>{skill.displayName}</span>
-                  <b>{skill.status}</b>
+                  <b className={capabilityStatusClass(skill.status)}>{skill.status}</b>
                   <small>{skill.skillId}</small>
                 </button>
               ))}
@@ -3711,7 +3302,7 @@ function WorkspaceApp() {
                     {selectedSkill.version}
                   </p>
                 </div>
-                <span className={`tag ${selectedSkill.status === 'enabled' ? 'high' : 'mid'}`}>
+                <span className={capabilityStatusClass(selectedSkill.status)}>
                   {selectedSkill.status}
                 </span>
               </div>
@@ -3766,7 +3357,7 @@ function WorkspaceApp() {
             默认上下文边界。用户侧只读展示，不提供通用 agent builder。
           </p>
           <div className="asset-maker-call">
-            <span>描述你需要的角色，Agent Maker 会组合 system prompt、skills 和上下文边界。</span>
+            <span>描述你需要的角色，Capability Maker 会组合 system prompt、skills 和上下文边界。</span>
             <button
               className="small-primary"
               disabled={agentConversationCreating}
@@ -3774,10 +3365,13 @@ function WorkspaceApp() {
                 startMakerConversation(
                   MAKER_AGENT_IDS.agent,
                   '我想设计一个新的 Agent，用来：\n\n它应该具备哪些能力 / skills：\n\n它应该读取哪些资产，不应该读取哪些资产：',
+                  selectedAgent && selectedAgent.agentId !== MAKER_AGENT_IDS.agent
+                    ? { assetType: 'agent', assetId: selectedAgent.id }
+                    : undefined,
                 )
               }
             >
-              让 Agent Maker 设计 Agent
+              让 Capability Maker 设计 Agent
             </button>
           </div>
           {runError && <div className="error-banner">⚠ {runError}</div>}
@@ -3788,7 +3382,7 @@ function WorkspaceApp() {
               onClick={() => openAgent(agent.id)}
             >
               <span>{agent.displayName}</span>
-              <b>{agent.status}</b>
+              <b className={capabilityStatusClass(agent.status)}>{agent.status}</b>
               <small>{agent.agentId}</small>
             </button>
           ))}
@@ -3834,7 +3428,7 @@ function WorkspaceApp() {
                   </p>
                 </div>
                 <span
-                  className={`tag ${selectedAgent.status === 'enabled' ? 'high' : 'mid'}`}
+                  className={capabilityStatusClass(selectedAgent.status)}
                 >
                   {selectedAgent.status}
                 </span>
@@ -3861,6 +3455,22 @@ function WorkspaceApp() {
                     <p className="microcopy">
                       当前对话模式：{mode === 'demo' ? '演示模式' : '实时生成'}
                     </p>
+                    <div className="mode-switch">
+                      <button
+                        type="button"
+                        className={mode === 'demo' ? 'active' : ''}
+                        onClick={() => setMode('demo')}
+                      >
+                        演示模式
+                      </button>
+                      <button
+                        type="button"
+                        className={mode === 'live' ? 'active' : ''}
+                        onClick={() => setMode('live')}
+                      >
+                        实时生成
+                      </button>
+                    </div>
                     {selectedAgentConversation.messages.length === 0 ? (
                       <div className="empty-card compact-empty">
                         发送第一条消息，Agent 会读取当前 workspace broad context。
@@ -3974,7 +3584,7 @@ function WorkspaceApp() {
             不提供通用流程编辑器。
           </p>
           <div className="asset-maker-call">
-            <span>描述你想新增的创作者链路，Workflow Maker 会生成多 Agent task plan 提案。</span>
+            <span>描述你想新增的创作者链路，Capability Maker 会生成多 Agent task plan 提案。</span>
             <button
               className="small-primary"
               disabled={agentConversationCreating}
@@ -3982,10 +3592,13 @@ function WorkspaceApp() {
                 startMakerConversation(
                   MAKER_AGENT_IDS.workflow,
                   '我想设计一个新的 Workflow，用来：\n\n输入资产包括：\n\n输出资产应该是：\n\n需要哪些 agent / skill 协作：',
+                  selectedWorkflowAsset
+                    ? { assetType: 'workflow', assetId: selectedWorkflowAsset.id }
+                    : undefined,
                 )
               }
             >
-              让 Workflow Maker 设计 Workflow
+              让 Capability Maker 设计 Workflow
             </button>
           </div>
           {workflowAssets.map((workflowAsset) => (
@@ -3997,7 +3610,9 @@ function WorkspaceApp() {
               onClick={() => openWorkflowAsset(workflowAsset.id)}
             >
               <span>{workflowAsset.displayName}</span>
-              <b>{workflowAsset.status}</b>
+              <b className={capabilityStatusClass(workflowAsset.status)}>
+                {workflowAsset.status}
+              </b>
               <small>{workflowAsset.workflowId}</small>
             </button>
           ))}
@@ -4015,9 +3630,7 @@ function WorkspaceApp() {
                   </p>
                 </div>
                 <span
-                  className={`tag ${
-                    selectedWorkflowAsset.status === 'enabled' ? 'high' : 'mid'
-                  }`}
+                  className={capabilityStatusClass(selectedWorkflowAsset.status)}
                 >
                   {selectedWorkflowAsset.status}
                 </span>
@@ -4055,7 +3668,7 @@ function WorkspaceApp() {
     return (
       <div className="workspace-page">
         <section className="history-list">
-          <div className="panel-title">👥 Audience Simulations</div>
+          <div className="panel-title">👥 受众模拟</div>
           {simulationRuns.length === 0 ? (
             <div className="empty-card">暂无受众模拟。</div>
           ) : (

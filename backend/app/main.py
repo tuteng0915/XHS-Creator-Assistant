@@ -15,6 +15,7 @@ from app.repositories import (
     AssetProposalRepository,
     DraftRepository,
     GraphCheckpointRepository,
+    MediaAssetRepository,
     SimulationRunRepository,
     SkillRepository,
     SourceMaterialRepository,
@@ -32,12 +33,14 @@ from app.services import (
     DraftService,
     FakeAgentConversationModelProvider,
     FakeStructureModelProvider,
+    InputAssetService,
+    MediaAssetService,
     ModelCallService,
+    QwenMediaService,
     RealAgentConversationModelProvider,
     RealStructureModelProvider,
     SimulationRunService,
     SkillService,
-    SourceMaterialService,
     TopicService,
     WorkflowAssetService,
     WorkflowWorkerService,
@@ -66,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     workspace_repository = WorkspaceRepository()
     source_repository = SourceMaterialRepository()
+    media_asset_repository = MediaAssetRepository()
     analysis_repository = AnalysisRunRepository()
     draft_repository = DraftRepository()
     topic_repository = TopicRepository()
@@ -78,6 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     checkpoint_repository = GraphCheckpointRepository()
     context_access_service = ContextAccessService(
         source_repository=source_repository,
+        media_asset_repository=media_asset_repository,
         analysis_repository=analysis_repository,
         topic_repository=topic_repository,
         draft_repository=draft_repository,
@@ -87,17 +92,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         workflow_repository=workflow_asset_repository,
     )
     workspace_service = WorkspaceService(database, workspace_repository)
-    source_service = SourceMaterialService(
+    input_asset_service = InputAssetService(
         database,
         source_repository,
         workspace_repository,
         active_settings,
     )
+    media_asset_service = MediaAssetService(
+        database,
+        media_asset_repository,
+        workspace_repository,
+        active_settings,
+    )
+    qwen_media_service = QwenMediaService(active_settings, media_asset_service)
     analysis_service = AnalysisRunService(
         database,
         analysis_repository,
         workspace_repository,
         source_repository,
+        media_asset_repository,
+        topic_repository,
         active_settings,
         context_access_service,
     )
@@ -134,6 +148,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         database,
         skill_repository,
         workspace_repository,
+        qwen_media_service,
     )
     agent_service = AgentService(
         database,
@@ -212,22 +227,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI):
+        agent_conversation_service.resume_unfinished()
         await workflow_worker.resume_unfinished()
         try:
             yield
         finally:
+            await agent_conversation_service.shutdown()
             await workflow_worker.shutdown()
 
     application = FastAPI(
         title="Creator Workspace API",
         version="0.1.0",
-        description="Workspace and source-material persistence for the creator prototype.",
+        description="Workspace and input-asset persistence for the creator prototype.",
         lifespan=lifespan,
     )
     application.state.settings = active_settings
     application.state.database = database
     application.state.workspace_service = workspace_service
-    application.state.source_service = source_service
+    application.state.input_asset_service = input_asset_service
+    application.state.media_asset_service = media_asset_service
+    application.state.qwen_media_service = qwen_media_service
+    application.state.source_service = input_asset_service
     application.state.analysis_service = analysis_service
     application.state.topic_service = topic_service
     application.state.draft_service = draft_service
@@ -269,7 +289,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(
         create_api_router(
             workspace_service,
-            source_service,
+            input_asset_service,
+            media_asset_service,
             analysis_service,
             topic_service,
             draft_service,

@@ -8,6 +8,7 @@ from uuid import uuid4
 from app.repositories.agents import AgentRepository
 from app.repositories.analysis_runs import AnalysisRunRepository
 from app.repositories.drafts import DraftRepository
+from app.repositories.media_assets import MediaAssetRepository
 from app.repositories.simulation_runs import SimulationRunRepository
 from app.repositories.skills import SkillRepository
 from app.repositories.source_materials import SourceMaterialRepository
@@ -29,6 +30,7 @@ class ContextAccessService:
         self,
         *,
         source_repository: SourceMaterialRepository,
+        media_asset_repository: MediaAssetRepository,
         analysis_repository: AnalysisRunRepository,
         topic_repository: TopicRepository,
         draft_repository: DraftRepository,
@@ -38,6 +40,7 @@ class ContextAccessService:
         workflow_repository: WorkflowAssetRepository,
     ) -> None:
         self.source_repository = source_repository
+        self.media_asset_repository = media_asset_repository
         self.analysis_repository = analysis_repository
         self.topic_repository = topic_repository
         self.draft_repository = draft_repository
@@ -88,6 +91,22 @@ class ContextAccessService:
                 data=[
                     self._summarize_material(row, max_summary_chars, omitted)
                     for row in self.source_repository.list(connection, workspace_id)
+                ],
+            )
+        )
+        items.append(
+            self._item(
+                key="media_assets_overview",
+                asset_type="workspace",
+                asset_id=workspace_id,
+                workspace_id=workspace_id,
+                selector="media_assets_overview",
+                role="global_context",
+                data=[
+                    self._summarize_media_asset(row)
+                    for row in self.media_asset_repository.list(
+                        connection, workspace_id
+                    )
                 ],
             )
         )
@@ -226,6 +245,76 @@ class ContextAccessService:
             "text": text,
         }
 
+    def capability_asset_detail_item(
+        self,
+        connection,
+        *,
+        workspace_id: str,
+        context_target: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        asset_type = context_target.get("assetType") or context_target.get("asset_type")
+        asset_id = context_target.get("assetId") or context_target.get("asset_id")
+        if not isinstance(asset_type, str) or not isinstance(asset_id, str):
+            return None
+        if asset_type == "skill":
+            row = self.skill_repository.get(connection, asset_id)
+            if row["workspace_id"] != workspace_id:
+                return None
+            data = {
+                **self._summarize_skill(row),
+                "triggerIntents": json.loads(row["trigger_intents_json"]),
+                "contextPolicy": json.loads(row["context_policy_json"]),
+                "outputSchema": json.loads(row["output_schema_json"]),
+                "sideEffects": json.loads(row["side_effects_json"]),
+                "implementationRefs": json.loads(row["implementation_refs_json"]),
+                "userNotes": row["user_notes"],
+            }
+            return self.deep_item(
+                key="selected_capability_asset",
+                asset_type="skill",
+                asset_id=asset_id,
+                selector="selected_skill_detail",
+                role="selected_capability_asset",
+                workspace_id=workspace_id,
+                data=data,
+            )
+        if asset_type == "agent":
+            row = self.agent_repository.get(connection, asset_id)
+            if row["workspace_id"] != workspace_id:
+                return None
+            data = {
+                **self._summarize_agent(row),
+                "systemPrompt": row["system_prompt"],
+                "userNotes": row["user_notes"],
+            }
+            return self.deep_item(
+                key="selected_capability_asset",
+                asset_type="agent",
+                asset_id=asset_id,
+                selector="selected_agent_detail",
+                role="selected_capability_asset",
+                workspace_id=workspace_id,
+                data=data,
+            )
+        if asset_type == "workflow":
+            row = self.workflow_repository.get(connection, asset_id)
+            if row["workspace_id"] != workspace_id:
+                return None
+            data = {
+                **self._summarize_workflow(row),
+                "userNotes": row["user_notes"],
+            }
+            return self.deep_item(
+                key="selected_capability_asset",
+                asset_type="workflow",
+                asset_id=asset_id,
+                selector="selected_workflow_detail",
+                role="selected_capability_asset",
+                workspace_id=workspace_id,
+                data=data,
+            )
+        return None
+
     def _item(
         self,
         *,
@@ -296,6 +385,59 @@ class ContextAccessService:
             "summaryText": text[:max_summary_chars],
             "charCount": len(text),
         }
+
+    def _summarize_media_asset(self, row: dict) -> dict[str, Any]:
+        derived = json.loads(row["derived_json"])
+        metadata = json.loads(row["metadata_json"])
+        compact_derived: dict[str, Any]
+        if row["type"] == "image":
+            compact_derived = {
+                "extractedText": derived.get("extractedText", ""),
+                "visualSummary": derived.get("visualSummary", ""),
+                "tags": derived.get("tags", []),
+            }
+            self._copy_if_present(
+                compact_derived,
+                derived,
+                ["imageUnderstanding", "qwenUnderstanding"],
+            )
+        else:
+            compact_derived = {
+                "transcript": derived.get("transcript", ""),
+                "sceneSummary": derived.get("sceneSummary", ""),
+                "visualSummary": derived.get("visualSummary", ""),
+                "audioSummary": derived.get("audioSummary", ""),
+                "tags": derived.get("tags", []),
+                "metrics": derived.get("metrics", {}),
+            }
+            self._copy_if_present(
+                compact_derived,
+                derived,
+                ["videoUnderstanding", "qwenUnderstanding", "videoPreview"],
+            )
+        return {
+            "mediaAssetId": row["id"],
+            "type": row["type"],
+            "name": row["name"],
+            "purpose": row["purpose"],
+            "sourceType": row["source_type"],
+            "originalFilename": row["original_filename"],
+            "mediaType": row["media_type"],
+            "byteSize": row["byte_size"],
+            "externalUrl": row.get("external_url", ""),
+            "metadata": metadata,
+            "derived": compact_derived,
+            "updatedAt": row["updated_at"],
+        }
+
+    @staticmethod
+    def _copy_if_present(
+        target: dict[str, Any], source: dict[str, Any], keys: list[str]
+    ) -> None:
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, (dict, list)):
+                target[key] = value
 
     def _summarize_analysis_run(self, row: dict) -> dict[str, Any]:
         stage_results = json.loads(row["stage_results_json"])

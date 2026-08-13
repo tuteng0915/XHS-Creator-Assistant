@@ -93,6 +93,14 @@ def test_fake_trend_graph_routes_and_persists_successful_stages(app: FastAPI) ->
     assert completed["stageResults"]["topics"]["topics"][0]["whyTrending"]
     assert "structure" not in completed["stageResults"]
 
+    topics = send(
+        app, "GET", f"/api/workspaces/{run['workspaceId']}/topics"
+    ).json()
+    assert len(topics) == 2
+    assert topics[0]["sourceAnalysisRunId"] == run["id"]
+    assert topics[0]["sourceWorkflow"] == "trend_analysis"
+    assert topics[0]["generatedSnapshot"]["whyTrending"]
+
 
 def test_parallel_trend_failure_allows_partial_result(app: FastAPI) -> None:
     run = create_trend_run(app)

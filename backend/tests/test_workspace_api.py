@@ -66,6 +66,39 @@ def test_workspace_crud_and_optimistic_update(app: FastAPI) -> None:
     assert stale.status_code == 409
 
 
+def test_workspace_list_prefers_workspace_with_creator_assets(app: FastAPI) -> None:
+    workspace_with_assets = create_workspace(app)
+    newer_empty_workspace = send(
+        app,
+        "POST",
+        "/api/workspaces",
+        json={
+            "name": "空白工作区",
+            "accountPositioning": "暂时没有输入资产。",
+        },
+    ).json()
+    assert newer_empty_workspace["id"] != workspace_with_assets["id"]
+
+    created = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace_with_assets['id']}/input-assets",
+        json={
+            "type": "historical_posts",
+            "name": "留学帖子数据合集",
+            "content": "留学中介到底值不值｜赞1.1k｜爆",
+        },
+    )
+    assert created.status_code == 201
+
+    listed = send(app, "GET", "/api/workspaces")
+
+    assert listed.status_code == 200
+    workspaces = listed.json()
+    assert workspaces[0]["id"] == workspace_with_assets["id"]
+    assert workspaces[1]["id"] == newer_empty_workspace["id"]
+
+
 def test_text_source_material_lifecycle_preserves_utf8(app: FastAPI) -> None:
     workspace = create_workspace(app)
     content = "二本逆袭G5？别再被这种标题骗了｜赞1.4k 藏980｜爆\n留学中介值不值？"
@@ -117,6 +150,50 @@ def test_text_source_material_lifecycle_preserves_utf8(app: FastAPI) -> None:
         },
     )
     assert stale.status_code == 409
+
+
+def test_input_asset_alias_lifecycle_preserves_utf8(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    content = "评论样本：这个选题解决了我的真实焦虑。"
+
+    created = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets",
+        json={
+            "type": "comments",
+            "name": "评论样本资产",
+            "content": content,
+        },
+    )
+    assert created.status_code == 201
+    asset = created.json()
+    assert asset["type"] == "comments"
+    assert asset["content"] == content
+
+    listed = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/input-assets?type=comments",
+    )
+    assert listed.status_code == 200
+    assert listed.json()[0]["id"] == asset["id"]
+
+    retrieved = send(app, "GET", f"/api/input-assets/{asset['id']}")
+    assert retrieved.status_code == 200
+    assert retrieved.json() == asset
+
+    updated = send(
+        app,
+        "PATCH",
+        f"/api/input-assets/{asset['id']}",
+        json={
+            "content": "评论样本：希望有更具体的步骤。",
+            "expectedUpdatedAt": asset["updatedAt"],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["content"] == "评论样本：希望有更具体的步骤。"
 
 
 def test_video_creator_samples_material_lifecycle_preserves_utf8(
@@ -229,6 +306,57 @@ def test_account_profiles_csv_import_preserves_utf8(app: FastAPI) -> None:
     )
 
 
+def test_text_input_assets_csv_import_supports_peer_asset_types(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    comments_csv = (
+        "name,content\n"
+        "留学评论区合集,太焦虑了，不知道怎么选校\\n求时间线\n"
+        "预算评论,预算有限，中介和DIY的钱到底该花在哪一步\n"
+    ).encode()
+
+    imported = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/text-csv",
+        data={"type": "comments"},
+        files={"file": ("comments.csv", comments_csv, "text/csv")},
+    )
+
+    assert imported.status_code == 201
+    materials = imported.json()["materials"]
+    assert [item["type"] for item in materials] == ["comments", "comments"]
+    assert materials[0]["name"] == "留学评论区合集"
+    assert materials[0]["content"] == "太焦虑了，不知道怎么选校\\n求时间线"
+
+    listed = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/input-assets?type=comments",
+    )
+    assert listed.status_code == 200
+    assert sorted(item["name"] for item in listed.json()) == [
+        "留学评论区合集",
+        "预算评论",
+    ]
+
+
+def test_text_input_assets_csv_import_rejects_non_text_asset_types(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/text-csv",
+        data={"type": "trend_csv"},
+        files={"file": ("trend.csv", b"name,content\nx,y\n", "text/csv")},
+    )
+
+    assert response.status_code == 422
+    assert "Only text input asset types" in response.text
+
+
 def test_analysis_run_can_use_saved_or_manual_account_profile(
     app: FastAPI,
 ) -> None:
@@ -271,7 +399,8 @@ def test_analysis_run_can_use_saved_or_manual_account_profile(
     assert saved_profile_run.status_code == 201
     snapshot = saved_profile_run.json()["inputSnapshot"]
     assert snapshot["accountPositioning"] == "账号定位：商单驱动，内容围绕品牌brief。"
-    assert snapshot["accountProfile"]["source"] == "source_material"
+    assert snapshot["accountProfile"]["source"] == "input_asset"
+    assert snapshot["accountProfile"]["inputAssetId"] == profile["id"]
     assert snapshot["accountProfile"]["materialId"] == profile["id"]
 
     manual_profile_run = send(

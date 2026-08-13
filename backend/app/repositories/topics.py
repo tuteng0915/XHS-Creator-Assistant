@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sqlite3
 from uuid import uuid4
 
@@ -67,6 +69,19 @@ class TopicRepository:
             ORDER BY updated_at DESC, id
             """,
             args,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_by_source_analysis_run(
+        self, connection: sqlite3.Connection, source_analysis_run_id: str
+    ) -> list[dict]:
+        rows = connection.execute(
+            """
+            SELECT * FROM topics
+            WHERE source_analysis_run_id = ?
+            ORDER BY created_at ASC, id
+            """,
+            (source_analysis_run_id,),
         ).fetchall()
         return [dict(row) for row in rows]
 

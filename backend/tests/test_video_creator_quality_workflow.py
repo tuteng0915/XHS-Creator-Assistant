@@ -50,6 +50,57 @@ def create_video_creator_run(app: FastAPI, mode: str = "demo") -> dict:
     return response.json()
 
 
+def create_video_creator_run_with_media(app: FastAPI) -> dict:
+    workspace = create_workspace(app)
+    samples = create_text_material(
+        app,
+        workspace["id"],
+        "video_creator_samples",
+        "创作者：@AI短剧研究所\n运营备注：剧情内容催更多。",
+    )
+    uploaded = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/media-assets/upload",
+        data={"type": "image", "name": "主页截图", "purpose": "账号主页视觉参考"},
+        files={"file": ("home.png", b"\x89PNG\r\n\x1a\nfake-image", "image/png")},
+    )
+    assert uploaded.status_code == 201
+    image = uploaded.json()
+    updated = send(
+        app,
+        "PATCH",
+        f"/api/media-assets/{image['id']}",
+        json={
+            "derived": {
+                "visualSummary": "主页强调连续 AI 短剧角色设定。",
+                "imageUnderstanding": {
+                    "visualSummary": "主页强调连续 AI 短剧角色设定。",
+                    "creatorSignals": ["系列化", "角色驱动"],
+                    "risks": [],
+                    "uncertainties": [],
+                },
+                "qwenUnderstanding": {"text": "主页强调连续 AI 短剧角色设定。"},
+            },
+            "expectedUpdatedAt": image["updatedAt"],
+        },
+    )
+    assert updated.status_code == 200
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+        json={
+            "workflowType": "video_creator_quality",
+            "videoCreatorSamplesMaterialId": samples["id"],
+            "mediaAssetIds": [image["id"]],
+            "mode": "demo",
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
 def collect(app: FastAPI, run_id: str, stop_after_node: str | None = None) -> list[dict]:
     return asyncio.run(
         app.state.video_workflow_service.collect_events(
@@ -77,6 +128,32 @@ def test_video_creator_graph_state_keeps_full_samples_outside_state(
     dumped = json.dumps(state, ensure_ascii=False)
     assert "机器人女友" not in dumped
     assert "商单内容互动明显低" not in dumped
+
+
+def test_video_creator_snapshot_uses_compact_media_asset_context(
+    app: FastAPI,
+) -> None:
+    run = create_video_creator_run_with_media(app)
+
+    media_assets = run["inputSnapshot"]["mediaAssets"]
+    assert len(media_assets) == 1
+    assert media_assets[0]["name"] == "主页截图"
+    assert media_assets[0]["derived"]["visualSummary"] == (
+        "主页强调连续 AI 短剧角色设定。"
+    )
+    assert media_assets[0]["derived"]["imageUnderstanding"]["creatorSignals"] == [
+        "系列化",
+        "角色驱动",
+    ]
+    assert media_assets[0]["derived"]["qwenUnderstanding"]["text"] == (
+        "主页强调连续 AI 短剧角色设定。"
+    )
+    assert "storedKey" not in json.dumps(media_assets, ensure_ascii=False)
+
+    state = app.state.video_workflow_service.initial_state_for_run(run["id"])
+    assert state["media_asset_ids"] == [media_assets[0]["mediaAssetId"]]
+    dumped_state = json.dumps(state, ensure_ascii=False)
+    assert "主页强调连续 AI 短剧角色设定" not in dumped_state
 
 
 def test_fake_video_creator_graph_routes_and_persists_successful_stages(

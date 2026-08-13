@@ -14,16 +14,26 @@ class AgentConversationRepository:
         workspace_id: str,
         agent_asset_id: str,
         title: str,
+        context_target_json: str,
         now: str,
     ) -> dict:
         conversation_id = str(uuid4())
         connection.execute(
             """
             INSERT INTO agent_conversations(
-                id, workspace_id, agent_asset_id, title, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                id, workspace_id, agent_asset_id, title, context_target_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (conversation_id, workspace_id, agent_asset_id, title, now, now),
+            (
+                conversation_id,
+                workspace_id,
+                agent_asset_id,
+                title,
+                context_target_json,
+                now,
+                now,
+            ),
         )
         return self.get(connection, conversation_id)
 
@@ -90,6 +100,41 @@ class AgentConversationRepository:
             ),
         )
         self.touch(connection, conversation_id=conversation_id, now=now)
+        return self.get_message(connection, message_id)
+
+    def update_message(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        message_id: str,
+        content: str,
+        context_pack_json: str,
+        asset_refs_json: str,
+        proposed_actions_json: str,
+        model_metadata_json: str,
+        now: str,
+    ) -> dict:
+        current = self.get_message(connection, message_id)
+        connection.execute(
+            """
+            UPDATE agent_messages
+            SET content = ?,
+                context_pack_json = ?,
+                asset_refs_json = ?,
+                proposed_actions_json = ?,
+                model_metadata_json = ?
+            WHERE id = ?
+            """,
+            (
+                content,
+                context_pack_json,
+                asset_refs_json,
+                proposed_actions_json,
+                model_metadata_json,
+                message_id,
+            ),
+        )
+        self.touch(connection, conversation_id=current["conversation_id"], now=now)
         return self.get_message(connection, message_id)
 
     def list_messages(

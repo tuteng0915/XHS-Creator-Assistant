@@ -186,7 +186,7 @@ class ModelCallService:
         system, user = self._build_prompt(operation, context)
         async with httpx.AsyncClient(timeout=90) as client:
             response = await client.post(
-                "https://api.anthropic.com/v1/messages",
+                self._anthropic_messages_url(),
                 headers={
                     "content-type": "application/json",
                     "x-api-key": self.settings.anthropic_api_key,
@@ -210,7 +210,7 @@ class ModelCallService:
             if block.get("type") == "text"
         )
         return ModelCallResponse(
-            output=self._parse_json(text),
+            output=self._parse_model_output(operation, text),
             model_metadata={
                 "provider": "anthropic",
                 "model": body.get("model", self.settings.anthropic_model),
@@ -239,6 +239,7 @@ class ModelCallService:
                     "model": self.settings.qwen_model,
                     "max_tokens": MAX_TOKENS[operation],
                     "temperature": 0.3,
+                    "response_format": {"type": "json_object"},
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
@@ -251,7 +252,7 @@ class ModelCallService:
         body = response.json()
         text = self._extract_openai_compatible_text(body)
         return ModelCallResponse(
-            output=self._parse_json(text),
+            output=self._parse_model_output(operation, text),
             model_metadata={
                 "provider": "qwen",
                 "model": body.get("model", self.settings.qwen_model),
@@ -259,6 +260,14 @@ class ModelCallService:
                 "operation": operation.value,
             },
         )
+
+    def _anthropic_messages_url(self) -> str:
+        if self.settings.anthropic_messages_url.strip():
+            return self.settings.anthropic_messages_url.strip()
+        base_url = self.settings.anthropic_base_url.rstrip("/")
+        if base_url.endswith("/apps/anthropic"):
+            return f"{base_url}/v1/messages"
+        return f"{base_url}/messages"
 
     def _build_prompt(
         self, operation: ModelOperation, context: dict[str, Any]
@@ -357,7 +366,9 @@ class ModelCallService:
             return (
                 PROMPT_VIDEO_CREATOR_PROFILE,
                 f"激励计划/运营目标：\n{positioning}\n\n视频创作者样本：\n"
-                f"{context.get('videoCreatorSamples', '')}",
+                f"{context.get('videoCreatorSamples', '')}\n\n"
+                "已确认的图片/视频媒体理解结果（compact snapshot）：\n"
+                f"{json.dumps(context.get('mediaAssets', []), ensure_ascii=False)}",
             )
         if operation == ModelOperation.VIDEO_QUALITY_ANALYSIS:
             return (
@@ -366,7 +377,9 @@ class ModelCallService:
                 f"{positioning}\n\n创作者画像：\n"
                 f"{json.dumps(context.get('creatorProfile'), ensure_ascii=False)}\n\n"
                 "视频创作者样本：\n"
-                f"{context.get('videoCreatorSamples', '')}",
+                f"{context.get('videoCreatorSamples', '')}\n\n"
+                "已确认的图片/视频媒体理解结果（compact snapshot）：\n"
+                f"{json.dumps(context.get('mediaAssets', []), ensure_ascii=False)}",
             )
         if operation == ModelOperation.INCENTIVE_FIT_ANALYSIS:
             return (
@@ -379,18 +392,79 @@ class ModelCallService:
             )
         raise ValidationError("Unsupported model operation")
 
+    @classmethod
+    def _parse_model_output(cls, operation: ModelOperation, text: str) -> dict[str, Any]:
+        try:
+            return cls._parse_json(text)
+        except ValidationError:
+            if operation != ModelOperation.AGENT_CHAT:
+                raise
+            reply = text.strip()
+            if not reply:
+                raise
+            return {"reply": reply, "proposedActions": []}
+
     @staticmethod
     def _parse_json(text: str) -> dict[str, Any]:
+        last_error: json.JSONDecodeError | None = None
+        for candidate in ModelCallService._json_candidates(text):
+            try:
+                value = json.loads(candidate)
+            except json.JSONDecodeError as error:
+                last_error = error
+                continue
+            if not isinstance(value, dict):
+                raise ValidationError("Model response JSON must be an object")
+            return value
+        raise ValidationError("Model response was not valid JSON") from last_error
+
+    @staticmethod
+    def _json_candidates(text: str) -> list[str]:
         stripped = text.strip()
-        stripped = re.sub(r"^```(?:json)?", "", stripped).strip()
-        stripped = re.sub(r"```$", "", stripped).strip()
-        try:
-            value = json.loads(stripped)
-        except json.JSONDecodeError as error:
-            raise ValidationError("Model response was not valid JSON") from error
-        if not isinstance(value, dict):
-            raise ValidationError("Model response JSON must be an object")
-        return value
+        candidates = [stripped]
+        fenced = re.search(
+            r"```(?:json|JSON)?\s*(?P<body>.*?)\s*```",
+            stripped,
+            flags=re.DOTALL,
+        )
+        if fenced:
+            candidates.append(fenced.group("body").strip())
+        extracted = ModelCallService._extract_first_json_object(stripped)
+        if extracted:
+            candidates.append(extracted)
+        deduped: list[str] = []
+        for candidate in candidates:
+            if candidate and candidate not in deduped:
+                deduped.append(candidate)
+        return deduped
+
+    @staticmethod
+    def _extract_first_json_object(text: str) -> str | None:
+        start = text.find("{")
+        if start < 0:
+            return None
+        depth = 0
+        in_string = False
+        escaped = False
+        for index, char in enumerate(text[start:], start=start):
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+                continue
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : index + 1]
+        return None
 
     @staticmethod
     def _extract_openai_compatible_text(body: dict[str, Any]) -> str:

@@ -57,6 +57,7 @@ class VideoCreatorQualityState(TypedDict, total=False):
     workspace_id: str
     positioning_snapshot: str
     video_creator_samples_material_id: str
+    media_asset_ids: list[str]
     creator_profile: dict[str, Any]
     video_quality: dict[str, Any]
     incentive_fit: dict[str, Any]
@@ -119,7 +120,11 @@ class IncentiveFitStageResult(BaseModel):
 
 class VideoCreatorQualityModelProvider(Protocol):
     async def creator_profile(
-        self, *, positioning: str, video_creator_samples: str
+        self,
+        *,
+        positioning: str,
+        video_creator_samples: str,
+        media_assets: list[dict[str, Any]],
     ) -> dict[str, Any]: ...
 
     async def video_quality(
@@ -127,6 +132,7 @@ class VideoCreatorQualityModelProvider(Protocol):
         *,
         positioning: str,
         video_creator_samples: str,
+        media_assets: list[dict[str, Any]],
         creator_profile: dict[str, Any] | None,
     ) -> dict[str, Any]: ...
 
@@ -185,7 +191,11 @@ class FakeVideoCreatorQualityModelProvider:
         self.calls: list[str] = []
 
     async def creator_profile(
-        self, *, positioning: str, video_creator_samples: str
+        self,
+        *,
+        positioning: str,
+        video_creator_samples: str,
+        media_assets: list[dict[str, Any]],
     ) -> dict[str, Any]:
         self.calls.append("creator_profile")
         if "creator_profile" in self.failures:
@@ -197,6 +207,7 @@ class FakeVideoCreatorQualityModelProvider:
         *,
         positioning: str,
         video_creator_samples: str,
+        media_assets: list[dict[str, Any]],
         creator_profile: dict[str, Any] | None,
     ) -> dict[str, Any]:
         self.calls.append("video_quality")
@@ -222,13 +233,18 @@ class RealVideoCreatorQualityModelProvider:
         self.model_call_service = model_call_service
 
     async def creator_profile(
-        self, *, positioning: str, video_creator_samples: str
+        self,
+        *,
+        positioning: str,
+        video_creator_samples: str,
+        media_assets: list[dict[str, Any]],
     ) -> dict[str, Any]:
         response = await self.model_call_service.call_operation(
             ModelOperation.VIDEO_CREATOR_PROFILE,
             {
                 "positioning": positioning,
                 "videoCreatorSamples": video_creator_samples,
+                "mediaAssets": media_assets,
             },
         )
         return response.output
@@ -238,6 +254,7 @@ class RealVideoCreatorQualityModelProvider:
         *,
         positioning: str,
         video_creator_samples: str,
+        media_assets: list[dict[str, Any]],
         creator_profile: dict[str, Any] | None,
     ) -> dict[str, Any]:
         response = await self.model_call_service.call_operation(
@@ -245,6 +262,7 @@ class RealVideoCreatorQualityModelProvider:
             {
                 "positioning": positioning,
                 "videoCreatorSamples": video_creator_samples,
+                "mediaAssets": media_assets,
                 "creatorProfile": creator_profile,
             },
         )
@@ -300,6 +318,11 @@ class VideoCreatorQualityWorkflowService:
             workspace_id=run.workspace_id,
             positioning_snapshot=str(snapshot["accountPositioning"]),
             video_creator_samples_material_id=str(samples["materialId"]),
+            media_asset_ids=[
+                str(asset.get("mediaAssetId"))
+                for asset in snapshot.get("mediaAssets", [])
+                if isinstance(asset, dict) and asset.get("mediaAssetId")
+            ],
             creator_profile=run.stage_results.get("creator_profile", {}).get(
                 "creatorProfile"
             ),
@@ -442,6 +465,7 @@ class _VideoCreatorQualityGraphExecution:
                 video_creator_samples=str(
                     self.snapshot()["videoCreatorSamples"]["content"]
                 ),
+                media_assets=self.snapshot().get("mediaAssets", []),
             )
             result = CreatorProfileStageResult.model_validate(output).model_dump(
                 mode="json"
@@ -476,6 +500,7 @@ class _VideoCreatorQualityGraphExecution:
                 video_creator_samples=str(
                     self.snapshot()["videoCreatorSamples"]["content"]
                 ),
+                media_assets=self.snapshot().get("mediaAssets", []),
                 creator_profile=updated.get("creator_profile"),
             )
             result = VideoQualityStageResult.model_validate(output).model_dump(
@@ -593,6 +618,7 @@ class _VideoCreatorQualityGraphExecution:
             "video_creator_samples_material_id": state.get(
                 "video_creator_samples_material_id"
             ),
+            "media_asset_ids": state.get("media_asset_ids", []),
             "creator_profile": state.get("creator_profile"),
             "video_quality": state.get("video_quality"),
             "incentive_fit": state.get("incentive_fit"),

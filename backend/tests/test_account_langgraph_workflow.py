@@ -104,6 +104,31 @@ def test_fake_account_graph_routes_and_persists_successful_stages(
     assert completed["stageResults"]["topics"]["topics"][0]["title"]
     assert "structure" not in completed["stageResults"]
 
+    topics = send(
+        app, "GET", f"/api/workspaces/{run['workspaceId']}/topics"
+    ).json()
+    assert len(topics) == 2
+    assert topics[0]["sourceAnalysisRunId"] == run["id"]
+    assert topics[0]["sourceWorkflow"] == "account_diagnosis"
+    assert topics[0]["status"] == "candidate"
+    assert topics[0]["title"]
+
+    duplicate = send(
+        app,
+        "POST",
+        f"/api/workspaces/{run['workspaceId']}/topics",
+        json={
+            "title": topics[0]["title"],
+            "angle": "重复保存不应新增",
+            "sourceAnalysisRunId": run["id"],
+        },
+    )
+    assert duplicate.status_code == 201
+    topics_after_duplicate_save = send(
+        app, "GET", f"/api/workspaces/{run['workspaceId']}/topics"
+    ).json()
+    assert len(topics_after_duplicate_save) == 2
+
 
 def test_parallel_stage_failure_allows_partial_account_result(app: FastAPI) -> None:
     run = create_account_run(app)

@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
@@ -12,7 +19,8 @@ import type {
   SimulationRunSummary,
   Skill,
   SkillSummary,
-  SourceMaterial,
+  InputAsset,
+  MediaAsset,
   Topic,
   WorkflowAsset,
   WorkflowAssetSummary,
@@ -39,13 +47,13 @@ const workspaceTwo: Workspace = {
   updatedAt: '2026-07-11T11:00:00Z',
 }
 
-const materials: Record<string, SourceMaterial[]> = {
+const materials: Record<string, InputAsset[]> = {
   'workspace-1': [
     {
       id: 'history-1',
       workspaceId: 'workspace-1',
       type: 'historical_posts',
-      name: '历史笔记',
+      name: '留学帖子数据合集',
       content: '留学中介到底值不值｜赞1.1k｜爆',
       createdAt: '2026-07-11T10:00:00Z',
       updatedAt: '2026-07-11T10:00:00Z',
@@ -54,7 +62,7 @@ const materials: Record<string, SourceMaterial[]> = {
       id: 'comments-1',
       workspaceId: 'workspace-1',
       type: 'comments',
-      name: '评论样本',
+      name: '留学评论区合集',
       content: '双非背景冲英国前30有戏吗？',
       createdAt: '2026-07-11T10:00:00Z',
       updatedAt: '2026-07-11T10:00:00Z',
@@ -120,6 +128,36 @@ const analysisRuns: Record<string, AnalysisRunSummary[]> = {
     },
   ],
   'workspace-2': [],
+}
+
+const mediaAssets: Record<string, MediaAsset[]> = {
+  'workspace-1': [],
+  'workspace-2': [
+    {
+      id: 'media-image-2',
+      workspaceId: 'workspace-2',
+      type: 'image',
+      name: 'AI短剧主页截图',
+      purpose: '视频质量诊断参考',
+      sourceType: 'upload',
+      originalFilename: 'home.png',
+      mediaType: 'image/png',
+      byteSize: 128,
+      sha256: 'abc',
+      metadata: { width: null, height: null },
+      derived: {
+        visualSummary: '主页强调连续 AI 短剧角色设定。',
+        imageUnderstanding: {
+          visualSummary: '主页强调连续 AI 短剧角色设定。',
+          creatorSignals: ['系列化'],
+        },
+      },
+      userNotes: '',
+      fileUrl: '/api/media-assets/media-image-2/file',
+      createdAt: '2026-07-11T11:00:00Z',
+      updatedAt: '2026-07-11T11:00:00Z',
+    },
+  ],
 }
 
 const simulationRuns: Record<string, SimulationRunSummary[]> = {
@@ -190,8 +228,18 @@ const skillSummary: SkillSummary = {
   updatedAt: '2026-07-11T12:00:00Z',
 }
 
+const commentsFormatterSkill: SkillSummary = {
+  ...skillSummary,
+  id: 'skill-format-comments',
+  skillId: 'input_asset.format_comments',
+  displayName: 'Format Comment Samples',
+  category: 'input_asset',
+  purpose: 'Format pasted comments into an editable draft.',
+  artifactEffect: 'Draft InputAsset.comments',
+}
+
 const skills: Record<string, SkillSummary[]> = {
-  'workspace-1': [skillSummary],
+  'workspace-1': [skillSummary, commentsFormatterSkill],
   'workspace-2': [
     {
       ...skillSummary,
@@ -260,7 +308,7 @@ const agentConversations: Record<string, AgentConversationSummary[]> = {
 const agentDetail: Agent = {
   ...agentSummary,
   systemPrompt:
-    'You are a creator account strategist. Use only selected source materials.',
+    'You are a creator account strategist. Use only selected input assets.',
   defaultContextPolicy: {
     may_read: ['positioning snapshot', 'selected historical posts'],
     must_not_read: ['full workspace'],
@@ -323,12 +371,34 @@ function jsonResponse(body: unknown, status = 200) {
   )
 }
 
-function installWorkspaceApiMock() {
+function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-2' = 'workspace-1') {
   return vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
     const url = String(input)
     const method = init?.method || 'GET'
     if (url === '/api/workspaces' && method === 'GET') {
-      return jsonResponse([workspaceOne, workspaceTwo])
+      return jsonResponse(
+        defaultWorkspaceId === 'workspace-1'
+          ? [workspaceOne, workspaceTwo]
+          : [workspaceTwo, workspaceOne],
+      )
+    }
+    if (url === '/api/workspaces' && method === 'POST') {
+      const body = JSON.parse(String(init?.body)) as {
+        name: string
+        accountPositioning: string
+      }
+      return jsonResponse(
+        {
+          id: 'workspace-default',
+          name: body.name,
+          accountPositioning: body.accountPositioning,
+          positioningVersion: 1,
+          currentTopicId: null,
+          createdAt: '2026-07-11T09:00:00Z',
+          updatedAt: '2026-07-11T09:00:00Z',
+        },
+        201,
+      )
     }
     const workspaceMatch = url.match(/^\/api\/workspaces\/(workspace-[12])$/)
     if (workspaceMatch && method === 'GET') {
@@ -337,10 +407,80 @@ function installWorkspaceApiMock() {
       )
     }
     const materialsMatch = url.match(
-      /^\/api\/workspaces\/(workspace-[12])\/source-materials$/,
+      /^\/api\/workspaces\/(workspace-[12])\/input-assets$/,
     )
     if (materialsMatch && method === 'GET') {
       return jsonResponse(materials[materialsMatch[1]])
+    }
+    const mediaAssetsMatch = url.match(
+      /^\/api\/workspaces\/(workspace-[12])\/media-assets$/,
+    )
+    if (mediaAssetsMatch && method === 'GET') {
+      return jsonResponse(mediaAssets[mediaAssetsMatch[1]])
+    }
+    if (materialsMatch && method === 'POST') {
+      const body = JSON.parse(String(init?.body)) as {
+        type: InputAsset['type']
+        name: string
+        content: string
+      }
+      return jsonResponse(
+        {
+          id: `new-${body.type}`,
+          workspaceId: materialsMatch[1],
+          type: body.type,
+          name: body.name,
+          content: body.content,
+          createdAt: '2026-07-11T15:00:00Z',
+          updatedAt: '2026-07-11T15:00:00Z',
+        },
+        201,
+      )
+    }
+    const textCsvImportMatch = url.match(
+      /^\/api\/workspaces\/(workspace-[12])\/input-assets\/text-csv$/,
+    )
+    if (textCsvImportMatch && method === 'POST') {
+      const form = init?.body as FormData
+      const type = form.get('type') as InputAsset['type']
+      return jsonResponse(
+        {
+          materials: [
+            {
+              id: `imported-${type}`,
+              workspaceId: textCsvImportMatch[1],
+              type,
+              name: '批量导入资产',
+              content: '批量导入内容',
+              createdAt: '2026-07-11T15:00:00Z',
+              updatedAt: '2026-07-11T15:00:00Z',
+            },
+          ],
+        },
+        201,
+      )
+    }
+    const inputAssetMatch = url.match(/^\/api\/input-assets\/(.+)$/)
+    if (inputAssetMatch && method === 'PATCH') {
+      const body = JSON.parse(String(init?.body)) as {
+        content?: string
+        keyword?: string
+      }
+      const asset = Object.values(materials)
+        .flat()
+        .find((item) => item.id === inputAssetMatch[1])
+      if (!asset) throw new Error(`Unknown input asset ${inputAssetMatch[1]}`)
+      const updated = {
+        ...asset,
+        ...('content' in asset && body.content !== undefined
+          ? { content: body.content }
+          : {}),
+        ...('keyword' in asset && body.keyword !== undefined
+          ? { keyword: body.keyword }
+          : {}),
+        updatedAt: '2026-07-11T15:00:00Z',
+      }
+      return jsonResponse(updated)
     }
     const runsMatch = url.match(
       /^\/api\/workspaces\/(workspace-[12])\/analysis-runs$/,
@@ -361,6 +501,23 @@ function installWorkspaceApiMock() {
     if (url === '/api/skills/skill-profile' && method === 'GET') {
       return jsonResponse(skillDetail)
     }
+    if (url === '/api/skills/skill-format-comments/invoke' && method === 'POST') {
+      return jsonResponse({
+        skillAssetId: 'skill-format-comments',
+        skillId: 'input_asset.format_comments',
+        status: 'completed',
+        output: {
+          assetType: 'comments',
+          name: '整理后的评论样本合集',
+          content: '太焦虑了，不知道怎么选校\n求时间线',
+          notes: '已整理为一行一条评论样本。',
+        },
+        modelMetadata: {
+          provider: 'code',
+          operation: 'skill.invoke',
+        },
+      })
+    }
     const agentsMatch = url.match(/^\/api\/workspaces\/(workspace-[12])\/agents$/)
     if (agentsMatch && method === 'GET') {
       return jsonResponse(agents[agentsMatch[1]])
@@ -375,6 +532,7 @@ function installWorkspaceApiMock() {
       const body = JSON.parse(String(init?.body)) as {
         agentAssetId: string
         title?: string
+        contextTarget?: Record<string, unknown>
       }
       const conversation: AgentConversation = {
         id: 'conversation-1',
@@ -382,6 +540,7 @@ function installWorkspaceApiMock() {
         agentAssetId: body.agentAssetId,
         title: body.title || '与 Agent 对话',
         status: 'active',
+        contextTarget: body.contextTarget || {},
         createdAt: '2026-07-11T14:00:00Z',
         updatedAt: '2026-07-11T14:00:00Z',
         messages: [],
@@ -613,55 +772,245 @@ describe('frontend health page', () => {
 })
 
 describe('workspace UI', () => {
-  it('loads account profile and source material assets separately', async () => {
+  it('auto-creates and hides the default workspace controls', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input, init) => {
+        const url = String(input)
+        const method = init?.method || 'GET'
+        if (url === '/api/workspaces' && method === 'GET') {
+          return jsonResponse([])
+        }
+        if (url === '/api/workspaces' && method === 'POST') {
+          const body = JSON.parse(String(init?.body)) as {
+            name: string
+            accountPositioning: string
+          }
+          expect(body.name).toBe('默认创作者工作区')
+          return jsonResponse(
+            {
+              id: 'workspace-default',
+              name: body.name,
+              accountPositioning: body.accountPositioning,
+              positioningVersion: 1,
+              currentTopicId: null,
+              createdAt: '2026-07-11T09:00:00Z',
+              updatedAt: '2026-07-11T09:00:00Z',
+            },
+            201,
+          )
+        }
+        if (url === '/api/workspaces/workspace-default' && method === 'GET') {
+          return jsonResponse({
+            id: 'workspace-default',
+            name: '默认创作者工作区',
+            accountPositioning: '',
+            positioningVersion: 1,
+            currentTopicId: null,
+            createdAt: '2026-07-11T09:00:00Z',
+            updatedAt: '2026-07-11T09:00:00Z',
+          })
+        }
+        if (url.startsWith('/api/workspaces/workspace-default/') && method === 'GET') {
+          return jsonResponse([])
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`)
+      })
+
+    render(<App />)
+
+    expect(await screen.findByText('账号诊断待运行')).toBeInTheDocument()
+    expect(screen.queryByLabelText('选择工作区')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /新建工作区/ })).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url, init]) => String(url) === '/api/workspaces' && init?.method === 'POST',
+        ),
+      ).toHaveLength(1)
+    })
+  })
+
+  it('loads account profile and input asset instances separately', async () => {
     installWorkspaceApiMock()
     render(<App />)
 
     await screen.findByText('账号诊断待运行')
-    fireEvent.click((await screen.findAllByRole('button', { name: /Account Profiles/ }))[0])
+    expect(screen.queryByLabelText('选择工作区')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /新建工作区/ })).not.toBeInTheDocument()
+    fireEvent.click((await screen.findAllByRole('button', { name: /账号概况/ }))[0])
     expect(
       await screen.findByDisplayValue('帮助文科生做留学决策。'),
     ).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: /Historical Posts/ })[0])
+    expect(screen.queryByRole('button', { name: /载入/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: /历史笔记/ })[0])
+    expect(await screen.findByLabelText('历史笔记名称')).toHaveValue(
+      '留学帖子数据合集',
+    )
     expect(
       await screen.findByDisplayValue('留学中介到底值不值｜赞1.1k｜爆'),
     ).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: /Comment Samples/ })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: /评论样本/ })[0])
+    expect(await screen.findByLabelText('评论样本名称')).toHaveValue(
+      '留学评论区合集',
+    )
     expect(
       screen.getByDisplayValue('双非背景冲英国前30有戏吗？'),
     ).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('选择工作区'), {
-      target: { value: 'workspace-2' },
+    fireEvent.click(screen.getByRole('button', { name: /热点分析/ }))
+    expect(await screen.findByText('趋势 CSV')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '管理账号概况' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '管理输入资产' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /视频博主质量诊断/ }))
+    await screen.findByText('视频创作者诊断待运行')
+    expect(screen.getAllByText('视频创作者样本').length).toBeGreaterThan(0)
+  })
+
+  it('prefers a workspace with input assets when the newest workspace is empty', async () => {
+    const originalWorkspaceTwoMaterials = materials['workspace-2']
+    materials['workspace-2'] = []
+    try {
+      const fetchMock = installWorkspaceApiMock('workspace-2')
+      render(<App />)
+
+      await screen.findByText('账号诊断待运行')
+      fireEvent.click((await screen.findAllByRole('button', { name: /历史笔记/ }))[0])
+
+      expect(
+        await screen.findByDisplayValue('留学中介到底值不值｜赞1.1k｜爆'),
+      ).toBeInTheDocument()
+      await waitFor(() => {
+        expect(
+          fetchMock.mock.calls.some(
+            ([url]) => String(url) === '/api/workspaces/workspace-2/input-assets',
+          ),
+        ).toBe(true)
+        expect(
+          fetchMock.mock.calls.some(
+            ([url]) => String(url) === '/api/workspaces/workspace-1/input-assets',
+          ),
+        ).toBe(true)
+      })
+    } finally {
+      materials['workspace-2'] = originalWorkspaceTwoMaterials
+    }
+  })
+
+  it('uses explicit save buttons for current and new input asset instances', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click((await screen.findAllByRole('button', { name: /历史笔记/ }))[0])
+    const historicalEditor = await screen.findByLabelText(
+      '主页 / 历史笔记 + 数据（格式：标题 ｜ 数据 ｜ 爆/平/差）',
+    )
+    fireEvent.change(historicalEditor, {
+      target: { value: '更新后的历史笔记｜赞2k｜爆' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存当前历史笔记' }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/input-assets/history-1' &&
+            init?.method === 'PATCH',
+        ),
+      ).toBe(true)
+    })
+    await waitFor(() => {
+      expect(screen.getAllByText('已保存').length).toBeGreaterThan(0)
     })
 
-    fireEvent.click((await screen.findAllByRole('button', { name: /Account Profiles/ }))[0])
-    expect(
-      await screen.findByDisplayValue('记录真实的数字游民转型路径。'),
-    ).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: /Historical Posts/ })[0])
-    expect(
-      await screen.findByDisplayValue('普通小孩不要轻易尝试数字游民｜赞953｜爆'),
-    ).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: /Comment Samples/ })[0])
-    expect(
-      screen.getByDisplayValue('文科生能做数字游民吗？'),
-    ).toBeInTheDocument()
+    fireEvent.change(historicalEditor, {
+      target: { value: '另存的新历史笔记｜赞3k｜爆' },
+    })
+    fireEvent.change(screen.getByLabelText('历史笔记名称'), {
+      target: { value: '另存历史笔记合集' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '另存为新历史笔记' }))
 
-    fireEvent.click(screen.getByRole('button', { name: /Trend CSV Data/ }))
-    expect(screen.getByDisplayValue('数字游民')).toBeInTheDocument()
-    expect(screen.getAllByText('数字游民趋势.csv').length).toBeGreaterThan(0)
-    expect(screen.getByText('普通人如何开始数字游民')).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: /Video Creator Samples/ })[0])
-    expect(screen.getByDisplayValue(/@AI短剧研究所/)).toBeInTheDocument()
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/workspaces/workspace-1/input-assets' &&
+            init?.method === 'POST',
+        ),
+      ).toBe(true)
+    })
+    const createCall = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url) === '/api/workspaces/workspace-1/input-assets' &&
+        init?.method === 'POST',
+    )
+    expect(JSON.parse(String(createCall?.[1]?.body)).name).toBe('另存历史笔记合集')
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: /Trend Analysis/ }))
-    expect(await screen.findByText('Trend CSV')).toBeInTheDocument()
-    expect(screen.getAllByText(/数字游民趋势.csv/).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: /Video Creator Quality/ }))
-    await screen.findByText('视频创作者诊断待运行')
-    expect(screen.getAllByText('Video Creator Samples').length).toBeGreaterThan(0)
-    expect(screen.getByText(/2 行/)).toBeInTheDocument()
+  it('uses the input asset formatter agent to fill an editor without saving', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /评论样本/ }))
+    fireEvent.change(
+      await screen.findByPlaceholderText(/粘贴账号定位、历史帖子、评论/),
+      {
+        target: { value: '1. “太焦虑了，不知道怎么选校”\n2. 求时间线' },
+      },
+    )
+    fireEvent.click(screen.getByRole('button', { name: '让 Agent 整理并填入' }))
+
+    expect(await screen.findByLabelText('评论样本名称')).toHaveValue(
+      '整理后的评论样本合集',
+    )
+    expect(await screen.findByLabelText('评论区原文（一行一条）')).toHaveValue(
+      '太焦虑了，不知道怎么选校\n求时间线',
+    )
+    expect(screen.getByText(/已整理为一行一条/)).toBeInTheDocument()
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url) === '/api/skills/skill-format-comments/invoke' &&
+          init?.method === 'POST',
+      ),
+    ).toBe(true)
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          init?.method === 'POST' &&
+          String(url) === '/api/workspaces/workspace-1/input-assets',
+      ),
+    ).toHaveLength(0)
+  })
+
+  it('supports batch CSV import for non-profile text input assets', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /评论样本/ }))
+    const file = new File(['name,content\n评论合集,我很焦虑\n'], 'comments.csv', {
+      type: 'text/csv',
+    })
+    fireEvent.change(await screen.findByLabelText('评论样本批量导入（CSV / TSV）'), {
+      target: { files: [file] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '上传并保存评论样本' }))
+
+    await waitFor(() => {
+      const importCall = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/workspaces/workspace-1/input-assets/text-csv' &&
+          init?.method === 'POST',
+      )
+      expect(importCall).toBeTruthy()
+      const body = importCall?.[1]?.body as FormData
+      expect(body.get('type')).toBe('comments')
+    })
+    await waitFor(() => {
+      expect(screen.getAllByText('已保存').length).toBeGreaterThan(0)
+    })
+    expect(screen.getByDisplayValue('批量导入内容')).toBeInTheDocument()
   })
 
   it('shows workspace skills as product assets', async () => {
@@ -769,10 +1118,23 @@ describe('workspace UI', () => {
           return jsonResponse(workspaceOne)
         }
         if (
-          url === '/api/workspaces/workspace-1/source-materials' &&
+          url === '/api/workspaces/workspace-1/input-assets' &&
           method === 'GET'
         ) {
           return jsonResponse([])
+        }
+        if (
+          url === '/api/workspaces/workspace-1/media-assets' &&
+          method === 'GET'
+        ) {
+          return jsonResponse([
+            {
+              ...mediaAssets['workspace-2'][0],
+              id: 'media-workflow-1',
+              workspaceId: 'workspace-1',
+              name: 'AI短剧主页截图',
+            },
+          ])
         }
         if (
           url === '/api/workspaces/workspace-1/analysis-runs' &&
@@ -808,17 +1170,22 @@ describe('workspace UI', () => {
           return jsonResponse([])
         }
         if (
-          url === '/api/workspaces/workspace-1/source-materials' &&
+          url === '/api/workspaces/workspace-1/input-assets' &&
           method === 'POST'
         ) {
           const body = JSON.parse(String(init?.body)) as {
-            type: 'historical_posts' | 'comments'
+            type: 'account_profile' | 'historical_posts' | 'comments'
             name: string
             content: string
           }
+          const idByType = {
+            account_profile: 'new-profile',
+            comments: 'new-comments',
+            historical_posts: 'new-history',
+          }
           return jsonResponse(
             {
-              id: body.type === 'comments' ? 'new-comments' : 'new-history',
+              id: idByType[body.type],
               workspaceId: 'workspace-1',
               type: body.type,
               name: body.name,
@@ -834,11 +1201,13 @@ describe('workspace UI', () => {
           method === 'POST'
         ) {
           const body = JSON.parse(String(init?.body)) as {
-            historicalPostsMaterialId?: string
-            commentsMaterialId?: string
+            accountProfileInputAssetId?: string
+            historicalPostsInputAssetId?: string
+            commentsInputAssetId?: string
           }
-          expect(body.historicalPostsMaterialId).toBe('new-history')
-          expect(body.commentsMaterialId).toBe('new-comments')
+          expect(body.accountProfileInputAssetId).toBe('new-profile')
+          expect(body.historicalPostsInputAssetId).toBe('new-history')
+          expect(body.commentsInputAssetId).toBe('new-comments')
           return jsonResponse(
             {
               id: 'run-auto',
@@ -877,14 +1246,14 @@ describe('workspace UI', () => {
       })
 
     render(<App />)
-    fireEvent.click((await screen.findAllByRole('button', { name: /Historical Posts/ }))[0])
+    fireEvent.click((await screen.findAllByRole('button', { name: /历史笔记/ }))[0])
     const historicalEditor = await screen.findByLabelText(
       '主页 / 历史笔记 + 数据（格式：标题 ｜ 数据 ｜ 爆/平/差）',
     )
     fireEvent.change(historicalEditor, {
       target: { value: '留学中介到底值不值｜赞1.1k｜爆' },
     })
-    fireEvent.click(screen.getAllByRole('button', { name: /Comment Samples/ })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: /评论样本/ })[0])
     const commentsEditor = await screen.findByLabelText('评论区原文（一行一条）')
     fireEvent.change(commentsEditor, { target: { value: '这是一条新评论' } })
 
@@ -892,16 +1261,16 @@ describe('workspace UI', () => {
       fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST'),
     ).toHaveLength(0)
     expect(
-      screen.queryByRole('button', { name: /保存.*评论样本/ }),
+      screen.queryByRole('button', { name: '保存为评论样本' }),
     ).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /Account Diagnosis/ }))
+    fireEvent.click(screen.getByRole('button', { name: /账号诊断/ }))
     fireEvent.click(screen.getByRole('button', { name: '⚡ 生成账号诊断' }))
 
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST'),
-      ).toHaveLength(3)
+      ).toHaveLength(4)
     })
   })
 
@@ -951,10 +1320,41 @@ describe('workspace UI', () => {
           return jsonResponse(workspaceOne)
         }
         if (
-          url === '/api/workspaces/workspace-1/source-materials' &&
+          url === '/api/workspaces/workspace-1/input-assets' &&
           method === 'GET'
         ) {
           return jsonResponse([])
+        }
+        if (
+          url === '/api/workspaces/workspace-1/media-assets' &&
+          method === 'GET'
+        ) {
+          return jsonResponse([
+            {
+              id: 'media-workflow-1',
+              workspaceId: 'workspace-1',
+              type: 'image',
+              name: 'AI短剧主页截图',
+              purpose: '视频质量诊断参考',
+              sourceType: 'upload',
+              originalFilename: 'home.png',
+              mediaType: 'image/png',
+              byteSize: 128,
+              sha256: 'abc',
+              metadata: {},
+              derived: {
+                visualSummary: '主页突出连续 AI 短剧角色和系列化更新。',
+                imageUnderstanding: {
+                  visualSummary: '主页突出连续 AI 短剧角色和系列化更新。',
+                  creatorSignals: ['系列化', '剧情驱动'],
+                },
+              },
+              userNotes: '',
+              fileUrl: '/api/media-assets/media-workflow-1/file',
+              createdAt: '2026-07-11T12:00:00Z',
+              updatedAt: '2026-07-11T12:00:00Z',
+            },
+          ])
         }
         if (
           url === '/api/workspaces/workspace-1/analysis-runs' &&
@@ -990,19 +1390,22 @@ describe('workspace UI', () => {
           return jsonResponse([])
         }
         if (
-          url === '/api/workspaces/workspace-1/source-materials' &&
+          url === '/api/workspaces/workspace-1/input-assets' &&
           method === 'POST'
         ) {
           const body = JSON.parse(String(init?.body)) as {
-            type: 'video_creator_samples'
+            type: 'account_profile' | 'video_creator_samples'
             name: string
             content: string
           }
-          expect(body.type).toBe('video_creator_samples')
-          expect(body.content).toContain('@AI短剧研究所')
+          if (body.type === 'account_profile') {
+            expect(body.name).toBe('AIGC视频创作者激励计划')
+          } else {
+            expect(body.content).toContain('@AI短剧研究所')
+          }
           return jsonResponse(
             {
-              id: 'new-video-samples',
+              id: body.type === 'account_profile' ? 'new-video-profile' : 'new-video-samples',
               workspaceId: 'workspace-1',
               type: body.type,
               name: body.name,
@@ -1019,10 +1422,14 @@ describe('workspace UI', () => {
         ) {
           const body = JSON.parse(String(init?.body)) as {
             workflowType?: string
-            videoCreatorSamplesMaterialId?: string
+            accountProfileInputAssetId?: string
+            videoCreatorSamplesInputAssetId?: string
+            mediaAssetIds?: string[]
           }
           expect(body.workflowType).toBe('video_creator_quality')
-          expect(body.videoCreatorSamplesMaterialId).toBe('new-video-samples')
+          expect(body.accountProfileInputAssetId).toBe('new-video-profile')
+          expect(body.videoCreatorSamplesInputAssetId).toBe('new-video-samples')
+          expect(body.mediaAssetIds).toEqual(['media-workflow-1'])
           return jsonResponse(
             {
               id: 'run-video',
@@ -1061,10 +1468,7 @@ describe('workspace UI', () => {
       })
 
     render(<App />)
-    fireEvent.click(await screen.findByRole('button', { name: /Video Creator Samples/ }))
-    fireEvent.click(
-      await screen.findByRole('button', { name: /Video Creator Samples/ }),
-    )
+    fireEvent.click(await screen.findByRole('button', { name: /视频创作者样本/ }))
     fireEvent.change(
       await screen.findByLabelText(
         '视频创作者样本（创作者背景、视频样本、互动数据、运营备注）',
@@ -1080,13 +1484,14 @@ describe('workspace UI', () => {
       fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST'),
     ).toHaveLength(0)
 
-    fireEvent.click(screen.getByRole('button', { name: /Video Creator Quality/ }))
+    fireEvent.click(screen.getByRole('button', { name: /视频博主质量诊断/ }))
+    fireEvent.click(await screen.findByLabelText(/AI短剧主页截图/))
     fireEvent.click(screen.getByRole('button', { name: '⚡ 生成视频创作者诊断' }))
 
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST'),
-      ).toHaveLength(2)
+      ).toHaveLength(3)
     })
   })
 
@@ -1094,28 +1499,32 @@ describe('workspace UI', () => {
     installWorkspaceApiMock()
     render(<App />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /Analysis Results/ }))
-    fireEvent.click(await screen.findByRole('button', { name: /账号诊断/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /分析结果/ }))
+    const historyList = await screen.findByText('◷ 分析结果')
+    fireEvent.click(
+      within(historyList.closest('section') as HTMLElement).getByRole('button', {
+        name: /账号诊断/,
+      }),
+    )
 
     expect(await screen.findByText('原始输入快照')).toBeInTheDocument()
     expect(screen.getByText('中介费到底该花在哪三步')).toBeInTheDocument()
   })
 
   it('opens and edits a topic from the library', async () => {
-    installWorkspaceApiMock()
+    installWorkspaceApiMock('workspace-2')
     render(<App />)
 
-    fireEvent.change(await screen.findByLabelText('选择工作区'), {
-      target: { value: 'workspace-2' },
-    })
-    fireEvent.click(await screen.findByRole('button', { name: /Topic Library/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /选题库/ }))
 
     fireEvent.click(await screen.findByRole('button', { name: /文科生如何开始数字游民/ }))
     const title = await screen.findByLabelText('标题')
     fireEvent.change(title, { target: { value: '非技术人如何开始数字游民' } })
     fireEvent.click(screen.getByRole('button', { name: '保存选题编辑' }))
 
-    expect(await screen.findByText('已保存')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getAllByText('已保存').length).toBeGreaterThan(0)
+    })
     expect(screen.getByDisplayValue('非技术人如何开始数字游民')).toBeInTheDocument()
   })
 
@@ -1123,11 +1532,12 @@ describe('workspace UI', () => {
     installWorkspaceApiMock()
     render(<App />)
 
-    expect(await screen.findByText('Input Assets')).toBeInTheDocument()
-    expect(screen.getByText('Reusable Outputs')).toBeInTheDocument()
-    expect(screen.getByText('Capability Assets')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Account Profiles/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Analysis Results/ })).toBeInTheDocument()
+    expect(screen.queryByText('Input Assets')).not.toBeInTheDocument()
+    expect(screen.queryByText('Reusable Outputs')).not.toBeInTheDocument()
+    expect(screen.queryByText('Capability Assets')).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /账号概况/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /分析结果/ })).toBeInTheDocument()
+    expect(screen.getAllByText('能力资产').length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: /Skills/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Agents/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Workflows/ })).toBeInTheDocument()
@@ -1137,17 +1547,38 @@ describe('workspace UI', () => {
     expect(screen.queryByText('Content Drafts')).not.toBeInTheDocument()
   })
 
-  it('opens a saved audience simulation from history', async () => {
+  it('shows overall and page-specific help from the topbar help entry', async () => {
     installWorkspaceApiMock()
     render(<App />)
 
-    fireEvent.change(await screen.findByLabelText('选择工作区'), {
-      target: { value: 'workspace-2' },
-    })
+    const helpButton = await screen.findByRole('button', { name: '帮助' })
+    expect(helpButton).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(helpButton)
+
+    expect(helpButton).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('整体说明')).toBeInTheDocument()
+    expect(screen.getByText('账号诊断帮助')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /热点分析/ }))
+
+    expect(screen.getByText('热点分析帮助')).toBeInTheDocument()
+    expect(screen.getByText(/热点分析会读取账号概况/)).toBeInTheDocument()
+  })
+
+  it('opens a saved audience simulation from history', async () => {
+    installWorkspaceApiMock('workspace-2')
+    render(<App />)
+
     fireEvent.click(
-      await screen.findByRole('button', { name: /Audience Simulations/ }),
+      await screen.findByRole('button', { name: /受众模拟/ }),
     )
-    fireEvent.click(await screen.findByRole('button', { name: /受众模拟/ }))
+    const simulationList = await screen.findByText('👥 受众模拟')
+    fireEvent.click(
+      within(simulationList.closest('section') as HTMLElement).getByRole('button', {
+        name: /受众模拟/,
+      }),
+    )
 
     expect(await screen.findByText('模拟结果')).toBeInTheDocument()
     expect(screen.getByText('谨慎执行派')).toBeInTheDocument()

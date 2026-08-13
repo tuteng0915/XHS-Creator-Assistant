@@ -107,6 +107,8 @@ BUILTIN_AGENTS = [
             "analysis.video_creator_profile",
             "analysis.video_quality",
             "analysis.incentive_fit",
+            "media.understand_video",
+            "media.understand_image",
         ],
         default_context_policy={
             "may_read": [
@@ -115,6 +117,38 @@ BUILTIN_AGENTS = [
                 "related analysis history",
             ],
             "must_not_read": ["unrelated input assets", "raw uploaded video files"],
+        },
+    ),
+    BuiltinAgentDefinition(
+        agent_id="media_generation_operator",
+        display_name="Media Generation Operator",
+        purpose=(
+            "Generates and inspects creator-facing image/video media assets through "
+            "Qwen media APIs."
+        ),
+        system_prompt=(
+            "You are a media asset operator for this creator workspace. Use Qwen "
+            "image/video understanding to inspect referenced media, and use Qwen "
+            "image/video generation only when the user asks to create media assets. "
+            "Generated media must be saved as MediaAsset records; do not treat "
+            "temporary model URLs as durable product state unless they have been "
+            "recorded in the workspace."
+        ),
+        skill_ids=[
+            "media.understand_image",
+            "media.understand_video",
+            "media.generate_image",
+            "media.generate_video",
+        ],
+        default_context_policy={
+            "may_read": [
+                "workspace profile",
+                "media asset overview",
+                "selected topics",
+                "recent analysis summaries",
+            ],
+            "must_not_read": ["secrets", "arbitrary filesystem paths"],
+            "write_policy": "media_asset_only",
         },
     ),
     BuiltinAgentDefinition(
@@ -159,83 +193,26 @@ BUILTIN_AGENTS = [
         },
     ),
     BuiltinAgentDefinition(
-        agent_id="skill_maker",
-        display_name="Skill Maker",
+        agent_id="capability_maker",
+        display_name="Capability Maker",
         purpose=(
-            "Converts creator-product requirements into proposed Skill asset "
-            "definitions instead of asking users to fill definition forms."
+            "Converts creator-product requirements into proposed Skill, Agent, "
+            "or Workflow asset definitions."
         ),
         system_prompt=(
-            "You design product-specific Skill assets for this creator workspace. "
-            "Start from the user's concrete need, inspect the existing workspace "
-            "assets and capability catalog, then propose a bounded skill definition. "
-            "Do not design a generic plugin, marketplace, filesystem tool, or "
-            "workflow editor. Output a practical proposal with skillId, inputs, "
-            "output schema, context policy, side effects, failure mode, and how it "
-            "composes with existing skills. Do not claim that the asset has been "
-            "written; propose changes for confirmation."
-        ),
-        skill_ids=["meta.design_skill_asset"],
-        default_context_policy={
-            "may_read": [
-                "workspace profile",
-                "input asset overview",
-                "existing skills",
-                "existing agents",
-                "existing workflows",
-                "recent run summaries",
-            ],
-            "must_not_read": ["secrets", "arbitrary filesystem paths"],
-            "write_policy": "proposal_only",
-        },
-    ),
-    BuiltinAgentDefinition(
-        agent_id="agent_maker",
-        display_name="Agent Maker",
-        purpose=(
-            "Converts user needs into proposed Agent assets with system prompts "
-            "and skill composition."
-        ),
-        system_prompt=(
-            "You design product-specific Agent assets for this creator workspace. "
-            "Given a user need, propose the agent's purpose, system prompt, skillIds, "
-            "and default context policy. Prefer composing existing skills; if a "
-            "missing skill is needed, explicitly mark it as a proposed dependency. "
-            "Do not expose this as a generic agent builder. Do not claim writes have "
-            "happened; propose changes for confirmation."
-        ),
-        skill_ids=["meta.design_agent_asset", "meta.design_skill_asset"],
-        default_context_policy={
-            "may_read": [
-                "workspace profile",
-                "existing skills",
-                "existing agents",
-                "existing workflows",
-                "recent run summaries",
-            ],
-            "must_not_read": ["secrets", "unrelated filesystem"],
-            "write_policy": "proposal_only",
-        },
-    ),
-    BuiltinAgentDefinition(
-        agent_id="workflow_maker",
-        display_name="Workflow Maker",
-        purpose=(
-            "Converts larger creator-product needs into proposed multi-agent "
-            "workflow assets."
-        ),
-        system_prompt=(
-            "You design product-specific Workflow assets for this creator workspace. "
-            "Given a user need, propose a bounded workflow with entry agents, task "
-            "dependencies, parallel sections where useful, expected artifacts, and "
-            "failure/retry boundaries. Compose existing or proposed agents and skills. "
-            "Do not design a generic workflow editor or platform abstraction. Do not "
-            "claim writes have happened; propose changes for confirmation."
+            "You design product-specific capability assets for this creator "
+            "workspace. Depending on the user's intent, use the Skill, Agent, or "
+            "Workflow design skill. Start from the concrete creator-product need, "
+            "inspect the existing workspace assets and capability catalog, then "
+            "propose bounded changes for confirmation. Prefer composing existing "
+            "skills and agents before inventing new ones. Do not design a generic "
+            "plugin marketplace, filesystem, workflow editor, or platform agent "
+            "builder. Do not claim writes have happened; output proposals only."
         ),
         skill_ids=[
-            "meta.design_workflow_asset",
-            "meta.design_agent_asset",
             "meta.design_skill_asset",
+            "meta.design_agent_asset",
+            "meta.design_workflow_asset",
         ],
         default_context_policy={
             "may_read": [
@@ -248,6 +225,33 @@ BUILTIN_AGENTS = [
             ],
             "must_not_read": ["secrets", "arbitrary filesystem paths"],
             "write_policy": "proposal_only",
+        },
+    ),
+    BuiltinAgentDefinition(
+        agent_id="input_asset_formatter",
+        display_name="Input Asset Formatter",
+        purpose=(
+            "Turns pasted raw creator materials into editable input asset drafts "
+            "without silently saving or overwriting user data."
+        ),
+        system_prompt=(
+            "You format raw pasted creator materials into the selected input asset "
+            "type. Preserve user facts exactly, remove only obvious numbering or "
+            "format noise, and never invent missing source content. Return a draft "
+            "that the user can inspect and explicitly save. For CSV assets, extract "
+            "metadata such as keyword but do not pretend a CSV file was uploaded."
+        ),
+        skill_ids=[
+            "input_asset.format_profile",
+            "input_asset.format_historical_posts",
+            "input_asset.format_comments",
+            "input_asset.format_trend_csv_brief",
+            "input_asset.format_video_creator_samples",
+        ],
+        default_context_policy={
+            "may_read": ["target input asset type", "raw pasted text"],
+            "must_not_read": ["unrelated workspace artifacts", "secrets"],
+            "write_policy": "draft_only",
         },
     ),
 ]

@@ -49,6 +49,13 @@ class TopicService:
                 and payload.source_analysis_run_id is not None
             ):
                 raise ValidationError("Manual topics cannot reference an analysis run")
+            if payload.source_analysis_run_id is not None:
+                existing_topics = self.repository.list_by_source_analysis_run(
+                    connection, payload.source_analysis_run_id
+                )
+                for existing_topic in existing_topics:
+                    if existing_topic["title"] == title:
+                        return self._to_response(existing_topic)
             generated_snapshot = payload.generated_snapshot
             if generated_snapshot is None and source_workflow != TopicSourceWorkflow.MANUAL:
                 generated_snapshot = {

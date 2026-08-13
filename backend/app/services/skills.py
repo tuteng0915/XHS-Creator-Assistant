@@ -3,14 +3,23 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.db.database import SQLiteDatabase
 from app.errors import ValidationError
-from app.models import SkillResponse, SkillSummary, SkillUpdate
+from app.models import (
+    SkillInvokeRequest,
+    SkillInvokeResponse,
+    SkillResponse,
+    SkillSummary,
+    SkillUpdate,
+)
 from app.repositories.skills import SkillRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.common import as_iso, utc_now
+
+if TYPE_CHECKING:
+    from app.services.qwen_media import QwenMediaService
 
 
 @dataclass(frozen=True)
@@ -94,6 +103,229 @@ BUILTIN_SKILLS = [
         failure_mode="atomic",
         composable_with=["trend.rank_posts"],
         implementation_refs=["SourceMaterialService.create_csv"],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="input_asset.format_profile",
+        display_name="Format Account Profile",
+        category="input_asset",
+        purpose=(
+            "Turn pasted raw creator/account notes into an editable Profile draft "
+            "without saving it automatically."
+        ),
+        required_inputs=["raw_text", "target_asset_type"],
+        output_schema={
+            "type": "FormattedInputAssetDraft",
+            "asset_type": "account_profile",
+            "fields": ["name", "content", "notes"],
+        },
+        artifact_effect="Draft InputAsset.account_profile",
+        side_effects=["returns draft only", "requires explicit save before persistence"],
+        failure_mode="draft_only",
+        composable_with=["source.save_historical_posts", "analysis.profile_from_history"],
+        implementation_refs=["InputAssetFormatterAgent", "AgentConversationService"],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="input_asset.format_historical_posts",
+        display_name="Format Historical Posts",
+        category="input_asset",
+        purpose=(
+            "Turn pasted post lists, titles, or metrics into an editable "
+            "Historical Posts draft."
+        ),
+        required_inputs=["raw_text", "target_asset_type"],
+        output_schema={
+            "type": "FormattedInputAssetDraft",
+            "asset_type": "historical_posts",
+            "fields": ["name", "content", "notes"],
+        },
+        artifact_effect="Draft InputAsset.historical_posts",
+        side_effects=["returns draft only", "requires explicit save before persistence"],
+        failure_mode="draft_only",
+        composable_with=["source.save_historical_posts", "analysis.profile_from_history"],
+        implementation_refs=["InputAssetFormatterAgent", "AgentConversationService"],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="input_asset.format_comments",
+        display_name="Format Comment Samples",
+        category="input_asset",
+        purpose=(
+            "Turn pasted comment blocks into one-comment-per-line editable "
+            "Comment Samples drafts."
+        ),
+        required_inputs=["raw_text", "target_asset_type"],
+        output_schema={
+            "type": "FormattedInputAssetDraft",
+            "asset_type": "comments",
+            "fields": ["name", "content", "notes"],
+        },
+        artifact_effect="Draft InputAsset.comments",
+        side_effects=["returns draft only", "requires explicit save before persistence"],
+        failure_mode="draft_only",
+        composable_with=["source.save_comments", "analysis.pain_points_from_comments"],
+        implementation_refs=["InputAssetFormatterAgent", "AgentConversationService"],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="input_asset.format_trend_csv_brief",
+        display_name="Format Trend CSV Brief",
+        category="input_asset",
+        purpose=(
+            "Extract a trend keyword and import notes from pasted trend "
+            "descriptions while keeping CSV upload explicit."
+        ),
+        required_inputs=["raw_text", "target_asset_type"],
+        output_schema={
+            "type": "FormattedInputAssetDraft",
+            "asset_type": "trend_csv",
+            "fields": ["keyword", "notes"],
+        },
+        artifact_effect="Draft InputAsset.trend_csv metadata",
+        side_effects=["returns draft only", "does not create uploaded file"],
+        failure_mode="draft_only",
+        composable_with=["source.upload_trend_csv", "trend.rank_posts"],
+        implementation_refs=["InputAssetFormatterAgent", "AgentConversationService"],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="input_asset.format_video_creator_samples",
+        display_name="Format Video Creator Samples",
+        category="input_asset",
+        purpose=(
+            "Turn pasted video creator observations into editable Video Creator "
+            "Samples drafts."
+        ),
+        required_inputs=["raw_text", "target_asset_type"],
+        output_schema={
+            "type": "FormattedInputAssetDraft",
+            "asset_type": "video_creator_samples",
+            "fields": ["name", "content", "notes"],
+        },
+        artifact_effect="Draft InputAsset.video_creator_samples",
+        side_effects=["returns draft only", "requires explicit save before persistence"],
+        failure_mode="draft_only",
+        composable_with=["analysis.video_creator_profile"],
+        implementation_refs=["InputAssetFormatterAgent", "AgentConversationService"],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="media.understand_image",
+        display_name="Understand Image Asset",
+        category="media",
+        purpose=(
+            "Use Qwen vision models to describe, OCR, or inspect an image from a "
+            "public image URL or saved image media asset."
+        ),
+        required_inputs=["prompt"],
+        optional_inputs=["imageUrl", "mediaAssetId"],
+        output_schema={
+            "type": "ImageUnderstandingResult",
+            "root": "imageUnderstanding",
+            "fields": [
+                "visualSummary",
+                "extractedText",
+                "styleTags",
+                "creatorSignals",
+                "risks",
+                "uncertainties",
+            ],
+        },
+        artifact_effect="MediaAsset.derived draft or standalone interpretation",
+        side_effects=["calls Qwen vision API in live mode"],
+        failure_mode="atomic",
+        composable_with=[
+            "analysis.video_quality",
+            "draft.generate_structure",
+            "media.generate_image",
+        ],
+        implementation_refs=[
+            "QwenMediaService.understand_image",
+            "qwen-vl-plus/qwen-vl-max compatible chat.completions",
+        ],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="media.understand_video",
+        display_name="Understand Video Asset",
+        category="media",
+        purpose=(
+            "Use Qwen vision models to inspect a video represented by public video "
+            "or frame URLs. Local uploaded videos are understood through extracted "
+            "preview frames, not direct video upload."
+        ),
+        required_inputs=["prompt"],
+        optional_inputs=["videoUrl", "videoFrameUrls", "mediaAssetId"],
+        output_schema={
+            "type": "VideoUnderstandingResult",
+            "root": "videoUnderstanding",
+            "fields": [
+                "sceneSummary",
+                "transcript",
+                "visualSummary",
+                "audioSummary",
+                "qualitySignals",
+                "creatorSignals",
+                "incentiveFitSignals",
+                "risks",
+                "uncertainties",
+            ],
+        },
+        artifact_effect="MediaAsset.derived draft or standalone interpretation",
+        side_effects=["calls Qwen vision API in live mode"],
+        failure_mode="atomic",
+        composable_with=[
+            "analysis.video_creator_profile",
+            "analysis.video_quality",
+            "analysis.incentive_fit",
+        ],
+        implementation_refs=[
+            "QwenMediaService.understand_video",
+            "qwen-vl-plus/qwen-vl-max compatible chat.completions",
+        ],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="media.generate_image",
+        display_name="Generate Image Asset",
+        category="media",
+        purpose=(
+            "Generate an image through Qwen/DashScope image generation and persist "
+            "the returned media URL as a workspace media asset."
+        ),
+        required_inputs=["prompt"],
+        optional_inputs=["name", "purpose", "size", "n"],
+        output_schema={"type": "MediaAsset", "asset_type": "image"},
+        artifact_effect="MediaAsset.image",
+        side_effects=["calls DashScope async task API", "creates media asset record"],
+        failure_mode="atomic",
+        composable_with=["media.understand_image", "draft.generate_structure"],
+        implementation_refs=[
+            "QwenMediaService.generate_image",
+            "DashScope image-synthesis async task",
+        ],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="media.generate_video",
+        display_name="Generate Video Asset",
+        category="media",
+        purpose=(
+            "Generate a short video through Qwen/DashScope video generation and "
+            "persist the returned media URL as a workspace media asset."
+        ),
+        required_inputs=["prompt"],
+        optional_inputs=[
+            "name",
+            "purpose",
+            "size",
+            "resolution",
+            "ratio",
+            "duration",
+            "promptExtend",
+            "watermark",
+        ],
+        output_schema={"type": "MediaAsset", "asset_type": "video"},
+        artifact_effect="MediaAsset.video",
+        side_effects=["calls DashScope async task API", "creates media asset record"],
+        failure_mode="atomic",
+        composable_with=["media.understand_video", "analysis.video_quality"],
+        implementation_refs=[
+            "QwenMediaService.generate_video",
+            "DashScope video-synthesis async task",
+        ],
     ),
     BuiltinSkillDefinition(
         skill_id="trend.rank_posts",
@@ -608,10 +840,12 @@ class SkillService:
         database: SQLiteDatabase,
         repository: SkillRepository,
         workspace_repository: WorkspaceRepository,
+        qwen_media_service: QwenMediaService | None = None,
     ) -> None:
         self.database = database
         self.repository = repository
         self.workspace_repository = workspace_repository
+        self.qwen_media_service = qwen_media_service
 
     def list(self, workspace_id: str) -> list[SkillSummary]:
         self._sync_builtin_skills(workspace_id)
@@ -637,6 +871,178 @@ class SkillService:
                 now=utc_now(),
             )
         return self._to_response(row)
+
+    def invoke(
+        self, skill_asset_id: str, payload: SkillInvokeRequest
+    ) -> SkillInvokeResponse:
+        with self.database.read() as connection:
+            row = self.repository.get(connection, skill_asset_id)
+        if row["status"] != "enabled":
+            raise ValidationError("Skill is disabled")
+        skill_id = row["skill_id"]
+        if skill_id.startswith("media."):
+            if self.qwen_media_service is None:
+                raise ValidationError("Qwen media service is not configured")
+            output = self.qwen_media_service.invoke(
+                workspace_id=row["workspace_id"],
+                skill_id=skill_id,
+                input_payload=payload.input,
+                mode=payload.mode,
+            )
+            return SkillInvokeResponse(
+                skill_asset_id=row["id"],
+                skill_id=skill_id,
+                status="completed",
+                output=output,
+                model_metadata={
+                    "provider": "qwen" if payload.mode == "live" else "demo",
+                    "mode": payload.mode,
+                    "operation": "skill.invoke",
+                    "implementation": "qwen_media_service",
+                },
+            )
+        if not skill_id.startswith("input_asset.format_"):
+            raise ValidationError(
+                "This version only supports direct invocation for input asset "
+                "formatter and media skills"
+            )
+        output = self._invoke_input_asset_formatter(skill_id, payload.input)
+        return SkillInvokeResponse(
+            skill_asset_id=row["id"],
+            skill_id=skill_id,
+            status="completed",
+            output=output,
+            model_metadata={
+                "provider": "code",
+                "mode": payload.mode,
+                "operation": "skill.invoke",
+                "implementation": "deterministic_input_asset_formatter",
+            },
+        )
+
+    def _invoke_input_asset_formatter(
+        self, skill_id: str, input_payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        raw_text = str(input_payload.get("rawText") or input_payload.get("raw_text") or "")
+        if not raw_text.strip():
+            raise ValidationError("rawText is required")
+        lines = self._normalize_pasted_lines(raw_text)
+        if not lines:
+            raise ValidationError("rawText did not contain usable content")
+        target_type = self._formatter_target_type(skill_id)
+        if target_type == "account_profile":
+            return {
+                "assetType": target_type,
+                "name": self._generated_input_asset_name(target_type, lines),
+                "content": "\n".join(lines),
+                "notes": "已按账号概况整理为可编辑草稿；保存前请确认事实准确。",
+            }
+        if target_type == "historical_posts":
+            metric_tokens = ["赞", "藏", "评", "爆", "平", "差", "收藏", "评论"]
+            content = "\n".join(
+                line
+                if any(token in line for token in metric_tokens)
+                else f"{line} ｜ 数据待补充"
+                for line in lines
+            )
+            return {
+                "assetType": target_type,
+                "name": self._generated_input_asset_name(target_type, lines),
+                "content": content,
+                "notes": "已整理为一行一条历史笔记；缺少互动数据的行已标注“数据待补充”。",
+            }
+        if target_type == "comments":
+            return {
+                "assetType": target_type,
+                "name": self._generated_input_asset_name(target_type, lines),
+                "content": "\n".join(lines),
+                "notes": "已整理为一行一条评论样本。",
+            }
+        if target_type == "trend_csv":
+            trend_tokens = ["关键词", "话题", "主题"]
+            keyword_line = next(
+                (line for line in lines if any(token in line for token in trend_tokens)),
+                lines[0],
+            )
+            keyword = (
+                keyword_line.split(":", 1)[-1]
+                .split("：", 1)[-1]
+                .replace("，", "")
+                .replace(",", "")
+                .replace("。", "")
+                .strip()
+                or keyword_line
+            )
+            return {
+                "assetType": target_type,
+                "name": self._generated_input_asset_name(target_type, lines, keyword[:80]),
+                "keyword": keyword[:80],
+                "notes": "已提取趋势关键词；趋势 CSV 仍需要上传 CSV / TSV 文件后才能保存。",
+            }
+        return {
+            "assetType": target_type,
+            "name": self._generated_input_asset_name(target_type, lines),
+            "content": "\n".join(lines),
+            "notes": "已整理为视频创作者样本草稿；保存前请确认观察来自真实样本记录。",
+        }
+
+    @staticmethod
+    def _formatter_target_type(skill_id: str) -> str:
+        mapping = {
+            "input_asset.format_profile": "account_profile",
+            "input_asset.format_historical_posts": "historical_posts",
+            "input_asset.format_comments": "comments",
+            "input_asset.format_trend_csv_brief": "trend_csv",
+            "input_asset.format_video_creator_samples": "video_creator_samples",
+        }
+        target_type = mapping.get(skill_id)
+        if target_type is None:
+            raise ValidationError(f"Unsupported formatter skill: {skill_id}")
+        return target_type
+
+    @staticmethod
+    def _normalize_pasted_lines(value: str) -> list[str]:
+        stripped_quotes = "\"“”'‘’"
+        normalized: list[str] = []
+        for raw_line in value.splitlines():
+            line = raw_line.strip()
+            while line and (line[0] in "-*•0123456789.、 "):
+                line = line[1:].strip()
+            line = line.strip(stripped_quotes).strip()
+            if line:
+                normalized.append(line)
+        return normalized
+
+    @staticmethod
+    def _generated_input_asset_name(
+        target_type: str, lines: list[str], keyword: str | None = None
+    ) -> str:
+        first = lines[0] if lines else ""
+        if target_type == "account_profile":
+            account = ""
+            for marker in ["账号:", "账号：", "@"]:
+                if marker in first:
+                    account = first.split(marker, 1)[-1].split("｜", 1)[0].strip()
+                    break
+            return f"{account.replace('@', '')} 账号概况" if account else "整理后的账号概况"
+        if target_type == "historical_posts":
+            return "整理后的历史笔记合集"
+        if target_type == "comments":
+            return "整理后的评论样本合集"
+        if target_type == "trend_csv":
+            return f"{keyword or '整理后的趋势'} 趋势数据"
+        if target_type == "video_creator_samples":
+            creator = ""
+            for marker in ["创作者:", "创作者：", "@"]:
+                if marker in first:
+                    creator = first.split(marker, 1)[-1].split("｜", 1)[0].strip()
+                    break
+            return (
+                f"{creator.replace('@', '')} 视频创作者样本"
+                if creator
+                else "整理后的视频创作者样本"
+            )
+        return "整理后的输入素材"
 
     def _sync_builtin_skills(self, workspace_id: str) -> None:
         now = utc_now()

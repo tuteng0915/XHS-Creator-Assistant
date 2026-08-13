@@ -4,6 +4,7 @@ from app.repositories.analysis_runs import AnalysisRunRepository
 from app.repositories.asset_proposals import AssetProposalRepository
 from app.repositories.drafts import DraftRepository
 from app.repositories.graph_checkpoints import GraphCheckpointRepository
+from app.repositories.media_assets import MediaAssetRepository
 from app.repositories.simulation_runs import SimulationRunRepository
 from app.repositories.skills import SkillRepository
 from app.repositories.source_materials import SourceMaterialRepository
@@ -18,6 +19,7 @@ __all__ = [
     "AssetProposalRepository",
     "DraftRepository",
     "GraphCheckpointRepository",
+    "MediaAssetRepository",
     "SimulationRunRepository",
     "SkillRepository",
     "SourceMaterialRepository",

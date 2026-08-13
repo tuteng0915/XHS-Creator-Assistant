@@ -104,6 +104,69 @@ SourceMaterialResponse = Annotated[
     Field(discriminator="type"),
 ]
 
+# Product-facing input asset aliases.
+#
+# The storage/API compatibility layer still has SourceMaterial names. New
+# product code should prefer InputAsset names while old API paths remain active.
+InputAssetType = SourceMaterialType
+TextInputAssetCreate = TextSourceMaterialCreate
+InputAssetUpdate = SourceMaterialUpdate
+InputAssetBase = SourceMaterialBase
+TextInputAssetResponse = TextSourceMaterialResponse
+TrendCsvInputAssetResponse = TrendCsvSourceMaterialResponse
+InputAssetResponse = SourceMaterialResponse
+
+
+class MediaAssetType(StrEnum):
+    IMAGE = "image"
+    VIDEO = "video"
+
+
+class MediaAssetSourceType(StrEnum):
+    UPLOAD = "upload"
+    URL = "url"
+    GENERATED = "generated"
+    EXTRACTED_FRAME = "extracted_frame"
+
+
+class MediaAssetUpdate(APIModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    purpose: str | None = Field(default=None, max_length=2_000)
+    metadata: dict[str, Any] | None = None
+    derived: dict[str, Any] | None = None
+    user_notes: str | None = Field(default=None, max_length=100_000)
+    expected_updated_at: datetime
+
+
+class VideoPreviewDeriveRequest(APIModel):
+    frame_count: int | None = Field(default=None, ge=1, le=12)
+    force: bool = False
+
+
+class MediaAssetResponse(APIModel):
+    id: str
+    workspace_id: str
+    type: MediaAssetType
+    name: str
+    purpose: str
+    source_type: MediaAssetSourceType
+    original_filename: str
+    media_type: str
+    byte_size: int
+    sha256: str
+    metadata: dict[str, Any]
+    derived: dict[str, Any]
+    user_notes: str
+    file_url: str
+    external_url: str = ""
+    created_at: datetime
+    updated_at: datetime
+
+
+class VideoPreviewDeriveResponse(APIModel):
+    video_asset: MediaAssetResponse
+    frames: list[MediaAssetResponse]
+
 
 class SkillStatus(StrEnum):
     ENABLED = "enabled"
@@ -148,6 +211,19 @@ class SkillUpdate(APIModel):
     expected_updated_at: datetime
 
 
+class SkillInvokeRequest(APIModel):
+    input: dict[str, Any] = Field(default_factory=dict)
+    mode: Literal["demo", "live"] = "demo"
+
+
+class SkillInvokeResponse(APIModel):
+    skill_asset_id: str
+    skill_id: str
+    status: Literal["completed"]
+    output: dict[str, Any]
+    model_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class AgentStatus(StrEnum):
     ENABLED = "enabled"
     DISABLED = "disabled"
@@ -188,9 +264,15 @@ class AgentConversationStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class ConversationContextTarget(APIModel):
+    asset_type: Literal["skill", "agent", "workflow"]
+    asset_id: str = Field(min_length=1, max_length=80)
+
+
 class AgentConversationCreate(APIModel):
     agent_asset_id: str
     title: str | None = Field(default=None, max_length=160)
+    context_target: ConversationContextTarget | None = None
 
 
 class AgentMessageCreate(APIModel):
@@ -216,6 +298,7 @@ class AgentConversationSummary(APIModel):
     agent_asset_id: str
     title: str
     status: AgentConversationStatus
+    context_target: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 
@@ -299,26 +382,44 @@ class AnalysisRunStatus(StrEnum):
 
 class AnalysisRunCreate(APIModel):
     workflow_type: WorkflowType
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=120)
+    account_profile_input_asset_id: str | None = None
     account_profile_material_id: str | None = None
     manual_account_profile: str | None = Field(default=None, max_length=100_000)
+    historical_posts_input_asset_id: str | None = None
     historical_posts_material_id: str | None = None
+    comments_input_asset_id: str | None = None
     comments_material_id: str | None = None
+    trend_csv_input_asset_id: str | None = None
     trend_csv_material_id: str | None = None
+    video_creator_samples_input_asset_id: str | None = None
     video_creator_samples_material_id: str | None = None
+    media_asset_ids: list[str] = Field(default_factory=list)
     mode: Literal["demo", "live"] = "demo"
 
 
 class AnalysisRunBatchCreate(APIModel):
     workflow_type: WorkflowType
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=120)
+    account_profile_input_asset_ids: list[str] = Field(default_factory=list)
     account_profile_material_ids: list[str] = Field(default_factory=list)
+    historical_posts_input_asset_id: str | None = None
     historical_posts_material_id: str | None = None
+    comments_input_asset_id: str | None = None
     comments_material_id: str | None = None
+    trend_csv_input_asset_id: str | None = None
     trend_csv_material_id: str | None = None
+    video_creator_samples_input_asset_id: str | None = None
     video_creator_samples_material_id: str | None = None
+    media_asset_ids: list[str] = Field(default_factory=list)
     mode: Literal["demo", "live"] = "demo"
 
 
 class AccountProfileCsvImportResponse(APIModel):
+    materials: list[TextSourceMaterialResponse]
+
+
+class TextInputAssetCsvImportResponse(APIModel):
     materials: list[TextSourceMaterialResponse]
 
 

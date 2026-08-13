@@ -1,7 +1,16 @@
+import asyncio
+from dataclasses import replace
+from typing import Any
+
+import httpx
 from fastapi import FastAPI
 from test_workspace_api import create_workspace, send
 
-from app.services.agent_conversations import AgentConversationReply
+from app.services.agent_conversations import (
+    AgentConversationReply,
+    RealAgentConversationModelProvider,
+)
+from app.services.model_calls import ModelCallService
 
 
 def test_agent_conversation_uses_broad_workspace_context(app: FastAPI) -> None:
@@ -89,6 +98,56 @@ def test_agent_conversation_uses_broad_workspace_context(app: FastAPI) -> None:
     assert len(loaded.json()["messages"]) == 2
 
 
+def test_maker_conversation_includes_selected_capability_asset_context(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    maker = next(item for item in agents if item["agentId"] == "capability_maker")
+    skills = send(app, "GET", f"/api/workspaces/{workspace['id']}/skills").json()
+    selected_skill = next(
+        item for item in skills if item["skillId"] == "analysis.profile_from_history"
+    )
+
+    created = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={
+            "agentAssetId": maker["id"],
+            "title": "改造 Skill",
+            "contextTarget": {
+                "assetType": "skill",
+                "assetId": selected_skill["id"],
+            },
+        },
+    )
+    assert created.status_code == 201
+    conversation = created.json()
+    assert conversation["contextTarget"] == {
+        "assetType": "skill",
+        "assetId": selected_skill["id"],
+    }
+
+    replied = send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "基于当前 Skill 帮我改进一下"},
+    )
+
+    assert replied.status_code == 200
+    assistant_message = replied.json()["messages"][1]
+    selected_item = next(
+        item
+        for item in assistant_message["contextPack"]["items"]
+        if item["key"] == "selected_capability_asset"
+    )
+    assert selected_item["assetRef"]["assetType"] == "skill"
+    assert selected_item["assetRef"]["assetId"] == selected_skill["id"]
+    assert selected_item["data"]["skillId"] == "analysis.profile_from_history"
+
+
 def test_live_agent_conversation_uses_injected_model_provider(app: FastAPI) -> None:
     class StubProvider:
         def __init__(self) -> None:
@@ -140,6 +199,138 @@ def test_live_agent_conversation_uses_injected_model_provider(app: FastAPI) -> N
     assert assistant_message["proposedActions"][0]["type"] == "topic.create_or_update"
     assert provider.seen_context_pack["mode"] == "workspace_pack"
     assert provider.seen_messages[0]["role"] == "user"
+
+
+def test_live_agent_conversation_post_returns_queued_message_without_waiting(
+    app: FastAPI,
+) -> None:
+    class SlowProvider:
+        async def reply(self, *, agent, user_content, context_pack, messages):
+            await asyncio.sleep(0.1)
+            return AgentConversationReply(
+                reply="slow reply",
+                proposed_actions=[],
+                model_metadata={"provider": "slow", "operation": "agent_chat"},
+            )
+
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    agent = next(item for item in agents if item["agentId"] == "creator_material_curator")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": agent["id"]},
+    ).json()
+    app.state.agent_conversation_service.live_provider = SlowProvider()
+
+    replied = send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "慢请求", "mode": "live"},
+    )
+
+    assert replied.status_code == 200
+    messages = replied.json()["messages"]
+    assert messages[0]["role"] == "user"
+    assert messages[1]["role"] == "assistant"
+    assert messages[1]["content"] == "Agent 正在生成回复…"
+    assert messages[1]["modelMetadata"]["status"] in {"queued", "running"}
+
+
+def test_live_agent_conversation_can_call_qwen_compatible_api_with_mocked_http(
+    app: FastAPI,
+    monkeypatch,
+) -> None:
+    class FakeQwenClient:
+        requests: list[dict[str, Any]] = []
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeQwenClient":
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def post(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str],
+            json: dict[str, Any],
+        ) -> httpx.Response:
+            self.requests.append({"url": url, "headers": headers, "json": json})
+            return httpx.Response(
+                200,
+                json={
+                    "model": "qwen-plus",
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"reply":"qwen 已根据 workspace context 返回。",'
+                                    '"proposedActions":[]}'
+                                )
+                            }
+                        }
+                    ],
+                    "usage": {"total_tokens": 42},
+                },
+            )
+
+    FakeQwenClient.requests = []
+    monkeypatch.setattr(httpx, "AsyncClient", FakeQwenClient)
+    app.state.agent_conversation_service.live_provider = (
+        RealAgentConversationModelProvider(
+            ModelCallService(
+                replace(
+                    app.state.settings,
+                    model_provider="qwen",
+                    qwen_api_key="placeholder-key",
+                    qwen_model="qwen-plus",
+                    qwen_base_url=(
+                        "https://workspace-id.cn-beijing.maas.aliyuncs.com"
+                        "/compatible-mode/v1"
+                    ),
+                )
+            )
+        )
+    )
+
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    agent = next(item for item in agents if item["agentId"] == "capability_maker")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": agent["id"]},
+    ).json()
+
+    replied = send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "帮我设计一个 skill", "mode": "live"},
+    )
+
+    assert replied.status_code == 200
+    assistant_message = replied.json()["messages"][1]
+    assert assistant_message["content"] == "qwen 已根据 workspace context 返回。"
+    assert assistant_message["modelMetadata"]["provider"] == "qwen"
+    assert assistant_message["modelMetadata"]["model"] == "qwen-plus"
+    request = FakeQwenClient.requests[0]
+    assert request["url"] == (
+        "https://workspace-id.cn-beijing.maas.aliyuncs.com"
+        "/compatible-mode/v1/chat/completions"
+    )
+    assert request["json"]["model"] == "qwen-plus"
+    assert request["json"]["messages"][0]["role"] == "system"
+    assert request["json"]["messages"][1]["role"] == "user"
+    assert "capability_maker" in request["json"]["messages"][1]["content"]
 
 
 def test_asset_proposal_apply_creates_topic(app: FastAPI) -> None:
@@ -246,7 +437,7 @@ def test_asset_proposal_apply_creates_generated_skill(app: FastAPI) -> None:
 
     workspace = create_workspace(app)
     agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
-    agent = next(item for item in agents if item["agentId"] == "skill_maker")
+    agent = next(item for item in agents if item["agentId"] == "capability_maker")
     conversation = send(
         app,
         "POST",
