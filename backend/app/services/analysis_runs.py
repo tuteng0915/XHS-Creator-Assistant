@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+from collections import Counter
 from collections.abc import Iterable
 
 from app.config import Settings
@@ -106,10 +107,25 @@ class AnalysisRunService:
             payload.account_profile_input_asset_ids
             or payload.account_profile_material_ids
         )
-        if not profile_asset_ids:
-            raise ValidationError("At least one account profile input asset is required")
+        xhs_profile_asset_ids = (
+            payload.xhs_creator_profile_input_asset_ids
+            or payload.xhs_creator_profile_material_ids
+        )
+        if profile_asset_ids and xhs_profile_asset_ids:
+            raise ValidationError(
+                "Batch run accepts either account profiles or XHS creator profiles, not both"
+            )
+        if xhs_profile_asset_ids and payload.workflow_type != WorkflowType.ACCOUNT_DIAGNOSIS:
+            raise ValidationError(
+                "XHS creator profile batch input is only supported for account diagnosis"
+            )
+        batch_asset_ids = profile_asset_ids or xhs_profile_asset_ids
+        if not batch_asset_ids:
+            raise ValidationError(
+                "At least one account profile or XHS creator profile input asset is required"
+            )
         runs: list[AnalysisRunResponse] = []
-        for index, profile_asset_id in enumerate(profile_asset_ids):
+        for index, input_asset_id in enumerate(batch_asset_ids):
             runs.append(
                 self.create(
                     workspace_id,
@@ -120,7 +136,9 @@ class AnalysisRunService:
                             if payload.idempotency_key
                             else None
                         ),
-                        account_profile_input_asset_id=profile_asset_id,
+                        account_profile_input_asset_id=(
+                            input_asset_id if profile_asset_ids else None
+                        ),
                         historical_posts_input_asset_id=(
                             payload.historical_posts_input_asset_id
                             or payload.historical_posts_material_id
@@ -136,6 +154,9 @@ class AnalysisRunService:
                         video_creator_samples_input_asset_id=(
                             payload.video_creator_samples_input_asset_id
                             or payload.video_creator_samples_material_id
+                        ),
+                        xhs_creator_profile_input_asset_id=(
+                            input_asset_id if xhs_profile_asset_ids else None
                         ),
                         media_asset_ids=payload.media_asset_ids,
                         mode=payload.mode,
@@ -329,6 +350,16 @@ class AnalysisRunService:
         workspace: dict,
         payload: AnalysisRunCreate,
     ) -> dict:
+        if payload.workflow_type == WorkflowType.ACCOUNT_DIAGNOSIS:
+            xhs_asset_id = (
+                payload.xhs_creator_profile_input_asset_id
+                or payload.xhs_creator_profile_material_id
+            )
+            if xhs_asset_id:
+                return self._build_xhs_account_diagnosis_snapshot(
+                    connection, workspace, payload, xhs_asset_id
+                )
+
         profile = self._resolve_account_profile(connection, workspace, payload)
         base = {
             "mode": payload.mode,
@@ -574,6 +605,230 @@ class AnalysisRunService:
             )
         )
         return workflow_snapshot
+
+    def _build_xhs_account_diagnosis_snapshot(
+        self,
+        connection,
+        workspace: dict,
+        payload: AnalysisRunCreate,
+        xhs_asset_id: str,
+    ) -> dict:
+        xhs_asset = self._require_material(
+            connection,
+            xhs_asset_id,
+            workspace["id"],
+            SourceMaterialType.XHS_CREATOR_PROFILE.value,
+            "XHS creator profile input asset is required",
+        )
+        xhs_profile = self._parse_xhs_creator_profile(xhs_asset["text_content"] or "")
+        account_positioning = self._derive_xhs_account_positioning(xhs_profile)
+        historical_text = self._derive_xhs_historical_posts_text(xhs_profile)
+        comments_text = self._derive_xhs_comments_text(xhs_profile)
+        workflow_snapshot = {
+            "mode": payload.mode,
+            "workspaceId": workspace["id"],
+            "workspaceName": workspace["name"],
+            "accountPositioning": account_positioning,
+            "accountProfile": {
+                "source": "xhs_creator_profile",
+                "inputAssetId": xhs_asset["id"],
+                "materialId": xhs_asset["id"],
+                "name": xhs_asset["name"],
+                "content": account_positioning,
+                "updatedAt": xhs_asset["updated_at"],
+            },
+            "positioningVersion": workspace["positioning_version"],
+            "xhsCreatorProfile": {
+                "inputAssetId": xhs_asset["id"],
+                "materialId": xhs_asset["id"],
+                "name": xhs_asset["name"],
+                "updatedAt": xhs_asset["updated_at"],
+                "schemaVersion": xhs_profile.get("schemaVersion"),
+                "source": xhs_profile.get("source", {}),
+                "creator": xhs_profile.get("creator", {}),
+                "noteCount": len(xhs_profile.get("notes", [])),
+                "commentCount": sum(
+                    len(note.get("comments", []))
+                    for note in xhs_profile.get("notes", [])
+                    if isinstance(note, dict)
+                ),
+                "notes": xhs_profile.get("notes", []),
+            },
+            "historicalPosts": {
+                "inputAssetId": xhs_asset["id"],
+                "materialId": xhs_asset["id"],
+                "name": f"{xhs_asset['name']} · 派生历史笔记",
+                "content": historical_text,
+                "updatedAt": xhs_asset["updated_at"],
+                "derivedFrom": "xhs_creator_profile",
+            },
+            "comments": {
+                "inputAssetId": xhs_asset["id"],
+                "materialId": xhs_asset["id"],
+                "name": f"{xhs_asset['name']} · 派生评论样本",
+                "content": comments_text,
+                "updatedAt": xhs_asset["updated_at"],
+                "derivedFrom": "xhs_creator_profile",
+            },
+        }
+        workflow_snapshot["contextPack"] = (
+            self.context_access_service.build_workspace_pack(
+                connection,
+                workspace=workspace,
+                requester={
+                    "workflowId": payload.workflow_type.value,
+                    "agentId": "account_diagnosis_workflow",
+                    "skillId": "analysis.account_diagnosis",
+                },
+                purpose="create_account_diagnosis_analysis_run_from_xhs_creator_profile",
+                selectors=[
+                    "account_positioning",
+                    "xhs_creator_profile",
+                    "input_assets_overview",
+                    "media_assets_overview",
+                    "analysis_history_overview",
+                    "topic_library_overview",
+                    "draft_history_overview",
+                    "simulation_history_overview",
+                ],
+                deep_items=[
+                    self.context_access_service.deep_item(
+                        key="selected_xhs_creator_profile",
+                        asset_type="input_asset",
+                        asset_id=xhs_asset["id"],
+                        selector="xhs_creator_profile_json",
+                        role="xhs_creator_profile",
+                        data={
+                            "workspaceId": workspace["id"],
+                            "materialId": xhs_asset["id"],
+                            "name": xhs_asset["name"],
+                            "updatedAt": xhs_asset["updated_at"],
+                            "noteCount": workflow_snapshot["xhsCreatorProfile"][
+                                "noteCount"
+                            ],
+                            "commentCount": workflow_snapshot["xhsCreatorProfile"][
+                                "commentCount"
+                            ],
+                        },
+                        text=json.dumps(xhs_profile, ensure_ascii=False),
+                    )
+                ],
+            )
+        )
+        return workflow_snapshot
+
+    def _parse_xhs_creator_profile(self, content: str) -> dict:
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError as error:
+            raise ValidationError("XHS creator profile asset must contain valid JSON") from error
+        if not isinstance(payload, dict):
+            raise ValidationError("XHS creator profile asset must be a JSON object")
+        if payload.get("schemaVersion") != "xhs-creator-profile/v1":
+            raise ValidationError("Unsupported XHS creator profile schema")
+        notes = payload.get("notes")
+        if not isinstance(notes, list) or not notes:
+            raise ValidationError("XHS creator profile must contain notes")
+        return payload
+
+    def _derive_xhs_account_positioning(self, profile: dict) -> str:
+        creator = profile.get("creator") if isinstance(profile.get("creator"), dict) else {}
+        source = profile.get("source") if isinstance(profile.get("source"), dict) else {}
+        notes = [note for note in profile.get("notes", []) if isinstance(note, dict)]
+        tags: Counter[str] = Counter()
+        top_notes = sorted(
+            notes,
+            key=lambda note: self._metric(note, "liked"),
+            reverse=True,
+        )[:5]
+        for note in notes:
+            for tag in note.get("tags", []) if isinstance(note.get("tags"), list) else []:
+                if tag:
+                    tags[str(tag)] += 1
+        display_name = creator.get("displayName") or source.get("fixtureCode") or "未知"
+        platform = source.get("platform", "xiaohongshu")
+        crawler = source.get("crawler", "MediaCrawler")
+        comment_count = sum(len(note.get("comments", [])) for note in notes)
+        lines = [
+            f"小红书创作者主页：{display_name}",
+            f"数据来源：{platform} / {crawler}",
+            f"笔记数：{len(notes)}；一级评论数：{comment_count}",
+        ]
+        if tags:
+            lines.append("高频标签：" + "、".join(tag for tag, _ in tags.most_common(12)))
+        if top_notes:
+            lines.append("高互动内容：" + "；".join(note.get("title", "") for note in top_notes))
+        lines.append("这是从小红书抓取结果生成的结构化输入摘要，不是人工填写的账号定位。")
+        return "\n".join(lines)
+
+    def _derive_xhs_historical_posts_text(self, profile: dict) -> str:
+        lines = ["# 小红书历史笔记（由 xhs_creator_profile 派生）", ""]
+        for index, note in enumerate(profile.get("notes", []), start=1):
+            if not isinstance(note, dict):
+                continue
+            metrics = note.get("metrics") if isinstance(note.get("metrics"), dict) else {}
+            tags = note.get("tags") if isinstance(note.get("tags"), list) else []
+            lines.extend(
+                [
+                    f"## {index}. {note.get('title') or '未命名笔记'}",
+                    "",
+                    f"- note_id：{note.get('noteId') or '未知'}",
+                    f"- 类型：{note.get('type') or 'normal'}",
+                    f"- 链接：{note.get('noteUrl') or '未知'}",
+                    (
+                        f"- 赞：{metrics.get('liked', '未知')}；"
+                        f"收藏：{metrics.get('collected', '未知')}；"
+                        f"评论：{metrics.get('comments', '未知')}；"
+                        f"分享：{metrics.get('shares', '未知')}"
+                    ),
+                ]
+            )
+            if tags:
+                lines.append("- 标签：" + "、".join(str(tag) for tag in tags))
+            if note.get("coverMediaAssetId"):
+                lines.append(f"- 封面 MediaAsset：{note['coverMediaAssetId']}")
+            lines.extend(["", str(note.get("desc") or "（未抓取到正文。）"), ""])
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _derive_xhs_comments_text(self, profile: dict) -> str:
+        lines = ["# 小红书一级评论样本（由 xhs_creator_profile 派生）", ""]
+        for note in profile.get("notes", []):
+            if not isinstance(note, dict):
+                continue
+            comments = note.get("comments") if isinstance(note.get("comments"), list) else []
+            lines.extend(
+                [
+                    f"## {note.get('title') or '未命名笔记'}",
+                    "",
+                    f"- note_id：{note.get('noteId') or '未知'}",
+                    f"- 抓取评论数：{len(comments)}",
+                    "",
+                ]
+            )
+            if not comments:
+                lines.extend(["（本次未抓取到一级评论。）", ""])
+                continue
+            for index, comment in enumerate(comments, start=1):
+                if not isinstance(comment, dict):
+                    continue
+                lines.extend(
+                    [
+                        f"{index}. {comment.get('content') or '（图片评论或空文本评论）'}",
+                        (
+                            f"   - comment_id：{comment.get('commentId') or '未知'}；"
+                            f"赞：{comment.get('likeCount', '未知')}；"
+                            f"二级评论数：{comment.get('subCommentCount', '未知')}"
+                        ),
+                    ]
+                )
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
+    @staticmethod
+    def _metric(note: dict, key: str) -> int:
+        metrics = note.get("metrics") if isinstance(note.get("metrics"), dict) else {}
+        value = metrics.get(key)
+        return value if isinstance(value, int) else 0
 
     def _resolve_media_asset_snapshots(
         self,

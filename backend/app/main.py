@@ -45,6 +45,7 @@ from app.services import (
     WorkflowAssetService,
     WorkflowWorkerService,
     WorkspaceService,
+    XhsOfflineImportService,
 )
 from app.workflows import (
     AccountDiagnosisWorkflowService,
@@ -105,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         active_settings,
     )
     qwen_media_service = QwenMediaService(active_settings, media_asset_service)
+    xhs_import_service = XhsOfflineImportService(input_asset_service)
     analysis_service = AnalysisRunService(
         database,
         analysis_repository,
@@ -302,6 +304,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             asset_proposal_service,
             workflow_asset_service,
             workflow_worker,
+            xhs_import_service,
         )
     )
     return application

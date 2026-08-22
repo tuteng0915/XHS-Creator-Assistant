@@ -205,6 +205,26 @@ BUILTIN_SKILLS = [
         implementation_refs=["InputAssetFormatterAgent", "AgentConversationService"],
     ),
     BuiltinSkillDefinition(
+        skill_id="input_asset.format_xhs_creator_profile",
+        display_name="Format XHS Creator Profile",
+        category="input_asset",
+        purpose=(
+            "Turn pasted Xiaohongshu crawler/export text into an editable "
+            "XHS Creator Profile draft without saving it automatically."
+        ),
+        required_inputs=["raw_text", "target_asset_type"],
+        output_schema={
+            "type": "FormattedInputAssetDraft",
+            "asset_type": "xhs_creator_profile",
+            "fields": ["name", "content", "notes"],
+        },
+        artifact_effect="Draft InputAsset.xhs_creator_profile",
+        side_effects=["returns draft only", "requires explicit save before persistence"],
+        failure_mode="draft_only",
+        composable_with=["analysis.profile_from_xhs_creator_profile"],
+        implementation_refs=["InputAssetFormatterAgent", "AgentConversationService"],
+    ),
+    BuiltinSkillDefinition(
         skill_id="media.understand_image",
         display_name="Understand Image Asset",
         category="media",
@@ -979,6 +999,16 @@ class SkillService:
                 "keyword": keyword[:80],
                 "notes": "已提取趋势关键词；趋势 CSV 仍需要上传 CSV / TSV 文件后才能保存。",
             }
+        if target_type == "xhs_creator_profile":
+            return {
+                "assetType": target_type,
+                "name": self._generated_input_asset_name(target_type, lines),
+                "content": "\n".join(lines),
+                "notes": (
+                    "已整理为小红书创作者主页草稿；建议优先使用 "
+                    "xhs local importer 生成的 xhs-creator-profile/v1 JSON。"
+                ),
+            }
         return {
             "assetType": target_type,
             "name": self._generated_input_asset_name(target_type, lines),
@@ -994,6 +1024,7 @@ class SkillService:
             "input_asset.format_comments": "comments",
             "input_asset.format_trend_csv_brief": "trend_csv",
             "input_asset.format_video_creator_samples": "video_creator_samples",
+            "input_asset.format_xhs_creator_profile": "xhs_creator_profile",
         }
         target_type = mapping.get(skill_id)
         if target_type is None:
@@ -1042,6 +1073,8 @@ class SkillService:
                 if creator
                 else "整理后的视频创作者样本"
             )
+        if target_type == "xhs_creator_profile":
+            return "整理后的小红书创作者主页"
         return "整理后的输入素材"
 
     def _sync_builtin_skills(self, workspace_id: str) -> None:

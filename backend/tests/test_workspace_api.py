@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -23,6 +24,60 @@ def create_workspace(app: FastAPI) -> dict:
         json={
             "name": "留学内容工作区",
             "accountPositioning": "服务正在准备出国读研的文科生。",
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def create_xhs_creator_profile_asset(
+    app: FastAPI, workspace_id: str, *, name: str, note_id: str
+) -> dict:
+    xhs_payload = {
+        "schemaVersion": "xhs-creator-profile/v1",
+        "source": {
+            "platform": "xiaohongshu",
+            "fixtureCode": name,
+            "crawler": "MediaCrawler",
+        },
+        "creator": {
+            "displayName": name,
+            "profileText": f"小红书创作者主页：{name}",
+        },
+        "notes": [
+            {
+                "noteId": note_id,
+                "type": "normal",
+                "title": "中传大三|专业第一，我为什么放弃保研",
+                "desc": "申请季前梳理自己的履历发现写不下了。",
+                "noteUrl": f"https://www.xiaohongshu.com/explore/{note_id}",
+                "tags": ["留学", "申请"],
+                "metrics": {
+                    "liked": 1454,
+                    "collected": 349,
+                    "comments": 66,
+                    "shares": 253,
+                },
+                "coverMediaAssetId": f"media-{note_id}",
+                "comments": [
+                    {
+                        "commentId": f"comment-{note_id}",
+                        "content": "真诚有勇气。",
+                        "likeCount": 24,
+                        "subCommentCount": 2,
+                    }
+                ],
+            }
+        ],
+    }
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace_id}/input-assets",
+        json={
+            "type": "xhs_creator_profile",
+            "name": f"XHS {name} 创作者主页",
+            "content": json.dumps(xhs_payload, ensure_ascii=False),
         },
     )
     assert response.status_code == 201
@@ -357,6 +412,212 @@ def test_text_input_assets_csv_import_rejects_non_text_asset_types(
     assert "Only text input asset types" in response.text
 
 
+def test_xhs_offline_json_import_creates_historical_posts_asset(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    payload = {
+        "schemaVersion": "xhs-profile-import/v1",
+        "platform": "xiaohongshu",
+        "sourceUrl": "https://www.xiaohongshu.com/user/profile/u1",
+        "importedAt": "2026-08-22T00:00:00Z",
+        "importMethod": "browser_assisted_visible_page",
+        "creator": {"profileText": "账号：QSheep 留学账号"},
+        "notes": [
+            {
+                "title": "不要盲目冲前 30",
+                "url": "https://www.xiaohongshu.com/explore/n1",
+                "detailText": "这篇讲选校策略，以及如何判断项目是否适合自己。",
+                "coverUrl": "https://img.example/cover.jpg",
+                "engagementText": "赞 88 / 评论 12",
+            }
+        ],
+        "warnings": ["只导入了可见页面。"],
+    }
+
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import",
+        data={"type": "historical_posts", "name": "XHS 留学主页导入"},
+        files={
+            "file": (
+                "xhs.json",
+                json.dumps(payload, ensure_ascii=False).encode(),
+                "application/json",
+            )
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["parsedNoteCount"] == 1
+    assert body["sourceUrl"] == "https://www.xiaohongshu.com/user/profile/u1"
+    assert body["inputAsset"]["type"] == "historical_posts"
+    assert body["inputAsset"]["name"] == "XHS 留学主页导入"
+    assert "账号：QSheep 留学账号" in body["inputAsset"]["content"]
+    assert "不要盲目冲前 30" in body["inputAsset"]["content"]
+    assert "这篇讲选校策略" in body["inputAsset"]["content"]
+
+
+def test_xhs_offline_json_import_creates_workflow_ready_creator_profile_asset(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    payload = {
+        "schemaVersion": "xhs-profile-import/v1",
+        "platform": "xiaohongshu",
+        "sourceUrl": "https://www.xiaohongshu.com/user/profile/u1",
+        "importedAt": "2026-08-22T00:00:00Z",
+        "importMethod": "browser_assisted_visible_page",
+        "creator": {"profileText": "账号：QSheep 留学账号"},
+        "notes": [
+            {
+                "title": "不要盲目冲前 30",
+                "url": "https://www.xiaohongshu.com/explore/n1",
+                "detailText": "这篇讲选校策略，以及如何判断项目是否适合自己。",
+                "coverUrl": "https://img.example/cover.jpg",
+                "engagementText": "赞 88 / 评论 12",
+            }
+        ],
+        "warnings": ["只导入了可见页面。"],
+    }
+
+    imported = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import",
+        data={"type": "xhs_creator_profile", "name": "XHS 留学主页结构化导入"},
+        files={
+            "file": (
+                "xhs.json",
+                json.dumps(payload, ensure_ascii=False).encode(),
+                "application/json",
+            )
+        },
+    )
+
+    assert imported.status_code == 201
+    body = imported.json()
+    assert body["inputAsset"]["type"] == "xhs_creator_profile"
+    stored = json.loads(body["inputAsset"]["content"])
+    assert stored["schemaVersion"] == "xhs-creator-profile/v1"
+    assert stored["notes"][0]["desc"] == "这篇讲选校策略，以及如何判断项目是否适合自己。"
+    assert stored["notes"][0]["metrics"]["engagementText"] == "赞 88 / 评论 12"
+
+    created = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+        json={
+            "workflowType": "account_diagnosis",
+            "xhsCreatorProfileInputAssetId": body["inputAsset"]["id"],
+            "mode": "demo",
+        },
+    )
+    assert created.status_code == 201
+    snapshot = created.json()["inputSnapshot"]
+    assert snapshot["xhsCreatorProfile"]["schemaVersion"] == "xhs-creator-profile/v1"
+    assert "不要盲目冲前 30" in snapshot["historicalPosts"]["content"]
+
+
+def test_xhs_offline_json_import_accepts_creator_profile_schema(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    payload = {
+        "schemaVersion": "xhs-creator-profile/v1",
+        "source": {
+            "platform": "xiaohongshu",
+            "sourceUrl": "https://www.xiaohongshu.com/user/profile/u2",
+            "crawler": "MediaCrawler",
+            "importedAt": "2026-08-22T00:00:00Z",
+        },
+        "creator": {
+            "displayName": "QSheep",
+            "profileText": "小红书创作者主页：QSheep",
+        },
+        "notes": [
+            {
+                "noteId": "n2",
+                "type": "normal",
+                "title": "申请季复盘",
+                "desc": "复盘申请过程中的真实判断。",
+                "noteUrl": "https://www.xiaohongshu.com/explore/n2",
+                "tags": ["留学"],
+                "metrics": {"liked": 88, "collected": 12},
+                "coverMediaAssetId": "media-n2",
+                "comments": [{"commentId": "c2", "content": "很有帮助"}],
+            }
+        ],
+    }
+
+    imported = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import",
+        data={"type": "xhs_creator_profile"},
+        files={
+            "file": (
+                "creator-profile.json",
+                json.dumps(payload, ensure_ascii=False).encode(),
+                "application/json",
+            )
+        },
+    )
+
+    assert imported.status_code == 201
+    body = imported.json()
+    assert body["parsedNoteCount"] == 1
+    assert body["sourceUrl"] == "https://www.xiaohongshu.com/user/profile/u2"
+    stored = json.loads(body["inputAsset"]["content"])
+    assert stored["schemaVersion"] == "xhs-creator-profile/v1"
+    assert stored["notes"][0]["comments"][0]["content"] == "很有帮助"
+
+
+def test_xhs_offline_markdown_import_can_create_video_creator_samples(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    markdown = (
+        "# 小红书主页导入\n\n"
+        "- 来源：https://www.xiaohongshu.com/user/profile/video1\n\n"
+        "### 1. AI短剧第一集\n\n"
+        "脚本驱动明显，评论区催更。\n"
+    ).encode()
+
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import",
+        data={"type": "video_creator_samples"},
+        files={"file": ("video.md", markdown, "text/markdown")},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["parsedNoteCount"] == 1
+    assert body["sourceUrl"] == "https://www.xiaohongshu.com/user/profile/video1"
+    assert body["inputAsset"]["type"] == "video_creator_samples"
+    assert body["inputAsset"]["name"] == "小红书主页导入 - video"
+    assert "脚本驱动明显" in body["inputAsset"]["content"]
+
+
+def test_xhs_offline_import_rejects_unsupported_asset_type(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import",
+        data={"type": "comments"},
+        files={"file": ("xhs.md", b"# ok", "text/markdown")},
+    )
+
+    assert response.status_code == 422
+    assert "historical_posts or video_creator_samples" in response.text
+
+
 def test_analysis_run_can_use_saved_or_manual_account_profile(
     app: FastAPI,
 ) -> None:
@@ -419,6 +680,81 @@ def test_analysis_run_can_use_saved_or_manual_account_profile(
     manual_snapshot = manual_profile_run.json()["inputSnapshot"]
     assert manual_snapshot["accountProfile"]["source"] == "manual"
     assert manual_snapshot["accountPositioning"] == "账号定位：手动临时输入，不覆盖 workspace。"
+
+
+def test_account_diagnosis_can_use_xhs_creator_profile_input_asset(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    xhs_asset = create_xhs_creator_profile_asset(
+        app, workspace["id"], name="QSheep", note_id="n1"
+    )
+
+    created = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+        json={
+            "workflowType": "account_diagnosis",
+            "xhsCreatorProfileInputAssetId": xhs_asset["id"],
+            "mode": "demo",
+        },
+    )
+
+    assert created.status_code == 201
+    snapshot = created.json()["inputSnapshot"]
+    assert snapshot["accountProfile"]["source"] == "xhs_creator_profile"
+    assert snapshot["xhsCreatorProfile"]["inputAssetId"] == xhs_asset["id"]
+    assert snapshot["xhsCreatorProfile"]["noteCount"] == 1
+    assert snapshot["xhsCreatorProfile"]["commentCount"] == 1
+    assert "高频标签：留学、申请" in snapshot["accountPositioning"]
+    assert "专业第一" in snapshot["historicalPosts"]["content"]
+    assert "真诚有勇气" in snapshot["comments"]["content"]
+    assert snapshot["contextPack"]["items"][-1]["key"] == "selected_xhs_creator_profile"
+
+
+def test_batch_account_diagnosis_can_use_xhs_creator_profile_assets(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    xhs_a = create_xhs_creator_profile_asset(
+        app, workspace["id"], name="QSheep", note_id="n1"
+    )
+    xhs_b = create_xhs_creator_profile_asset(
+        app, workspace["id"], name="_tt", note_id="n2"
+    )
+
+    created = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs/batch",
+        json={
+            "workflowType": "account_diagnosis",
+            "xhsCreatorProfileInputAssetIds": [xhs_a["id"], xhs_b["id"]],
+            "mode": "demo",
+        },
+    )
+
+    assert created.status_code == 201
+    runs = created.json()
+    assert len(runs) == 2
+    assert runs[0]["inputSnapshot"]["xhsCreatorProfile"]["inputAssetId"] == xhs_a["id"]
+    assert runs[1]["inputSnapshot"]["xhsCreatorProfile"]["inputAssetId"] == xhs_b["id"]
+    assert runs[0]["inputSnapshot"]["accountProfile"]["name"] == "XHS QSheep 创作者主页"
+    assert runs[1]["inputSnapshot"]["accountProfile"]["name"] == "XHS _tt 创作者主页"
+
+    rejected = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs/batch",
+        json={
+            "workflowType": "trend_analysis",
+            "xhsCreatorProfileInputAssetIds": [xhs_a["id"]],
+            "mode": "demo",
+        },
+    )
+    assert rejected.status_code == 422
+    assert "only supported for account diagnosis" in rejected.json()["detail"]
 
 
 def test_batch_analysis_runs_and_export_csv(app: FastAPI) -> None:

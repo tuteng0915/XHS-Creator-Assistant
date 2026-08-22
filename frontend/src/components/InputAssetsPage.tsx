@@ -9,6 +9,10 @@ import type { InputAsset, TextInputAsset, TrendCsvInputAsset } from '../types'
 import { SaveIndicator, type SaveState } from './StageResultViews'
 
 type TextInputAssetPanel = Exclude<InputAssetPanel, 'trend_csv'>
+type XhsImportPanel = Extract<
+  TextInputAssetPanel,
+  'historical_posts' | 'video_creator_samples' | 'xhs_creator_profiles'
+>
 
 type InputAssetsPageProps = {
   inputAssetPanel: InputAssetPanel
@@ -17,11 +21,13 @@ type InputAssetsPageProps = {
   commentsMaterials: TextInputAsset[]
   trendMaterials: TrendCsvInputAsset[]
   videoCreatorSamplesMaterials: TextInputAsset[]
+  xhsCreatorProfileMaterials: TextInputAsset[]
   selectedProfileMaterial: TextInputAsset | null
   historicalMaterial?: TextInputAsset
   commentsMaterial?: TextInputAsset
   trendMaterial?: TrendCsvInputAsset
   videoCreatorSamplesMaterial?: TextInputAsset
+  xhsCreatorProfileMaterial?: TextInputAsset
   workspaceName: string
   positioning: string
   accountProfileDraftName: string
@@ -29,10 +35,12 @@ type InputAssetsPageProps = {
   commentsDraftName: string
   trendCsvDraftName: string
   videoCreatorSamplesDraftName: string
+  xhsCreatorProfileDraftName: string
   historicalPosts: string
   comments: string
   trendKeyword: string
   videoCreatorSamples: string
+  xhsCreatorProfileContent: string
   inputAssetFormatterDraft: string
   inputAssetFormatterStatus: string
   workspaceSaveState: SaveState
@@ -41,6 +49,7 @@ type InputAssetsPageProps = {
   commentsSaveState: SaveState
   trendSaveState: SaveState
   videoSaveState: SaveState
+  xhsSaveState: SaveState
   onStartNewInputAsset: (panel: InputAssetPanel) => void
   onChooseTextMaterial: (material: TextInputAsset) => void
   onChooseTrendMaterial: (material: TrendCsvInputAsset) => void
@@ -67,8 +76,15 @@ type InputAssetsPageProps = {
   onVideoCreatorSamplesChange: (value: string) => void
   onSaveVideoCreatorSamples: () => void
   onSaveVideoCreatorSamplesAsNew: () => void
+  onXhsCreatorProfileDraftNameChange: (value: string) => void
+  onXhsCreatorProfileContentChange: (value: string) => void
+  onSaveXhsCreatorProfile: () => void
+  onSaveXhsCreatorProfileAsNew: () => void
   onSetInputAssetBatchFile: (panel: TextInputAssetPanel, file: File | null) => void
   onUploadTextInputAssetsCsv: (panel: TextInputAssetPanel) => void
+  xhsImportFiles: Record<XhsImportPanel, File | null>
+  onSetXhsImportFile: (panel: XhsImportPanel, file: File | null) => void
+  onUploadXhsImport: (panel: XhsImportPanel) => void
 }
 
 const SAVE_STATE_BY_TEXT_INPUT_PANEL = {
@@ -76,6 +92,7 @@ const SAVE_STATE_BY_TEXT_INPUT_PANEL = {
   historical_posts: 'historicalSaveState',
   comments: 'commentsSaveState',
   video_creator_samples: 'videoSaveState',
+  xhs_creator_profiles: 'xhsSaveState',
 } as const
 
 export function InputAssetsPage(props: InputAssetsPageProps) {
@@ -85,12 +102,14 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
     historicalMaterials,
     commentsMaterials,
     trendMaterials,
-    videoCreatorSamplesMaterials,
+  videoCreatorSamplesMaterials,
+  xhsCreatorProfileMaterials,
     selectedProfileMaterial,
     historicalMaterial,
     commentsMaterial,
     trendMaterial,
-    videoCreatorSamplesMaterial,
+  videoCreatorSamplesMaterial,
+  xhsCreatorProfileMaterial,
   } = props
   const definition = INPUT_ASSET_DEFINITION_BY_PANEL[inputAssetPanel]
   const panelMaterials: InputAsset[] =
@@ -102,6 +121,8 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
           ? commentsMaterials
           : inputAssetPanel === 'trend_csv'
             ? trendMaterials
+            : inputAssetPanel === 'xhs_creator_profiles'
+              ? xhsCreatorProfileMaterials
             : videoCreatorSamplesMaterials
   const selectedPanelAsset: InputAsset | null =
     inputAssetPanel === 'account_profiles'
@@ -112,6 +133,8 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
           ? commentsMaterial || null
           : inputAssetPanel === 'trend_csv'
             ? trendMaterial || null
+            : inputAssetPanel === 'xhs_creator_profiles'
+              ? xhsCreatorProfileMaterial || null
             : videoCreatorSamplesMaterial || null
 
   const selectInputAsset = (asset: InputAsset) => {
@@ -150,7 +173,96 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
     </div>
   )
 
+  const renderXhsOfflineImport = (panel: XhsImportPanel) => (
+    <div className="source-editor-card">
+      <label htmlFor={`${panel}-xhs-import-file`}>小红书离线导入</label>
+      <input
+        id={`${panel}-xhs-import-file`}
+        type="file"
+        accept=".json,.md,.markdown,.txt"
+        onChange={(event) =>
+          props.onSetXhsImportFile(panel, event.target.files?.[0] || null)
+        }
+      />
+      <p className="subline">
+        使用独立 xhs local importer 导出的 JSON / Markdown；主平台不会访问小红书。
+      </p>
+      <div className="save-row">
+        <button className="save-button" onClick={() => props.onUploadXhsImport(panel)}>
+          上传并保存 XHS 导入
+        </button>
+        {props.xhsImportFiles[panel] && (
+          <span className="save-state saved" role="status">
+            {props.xhsImportFiles[panel]?.name}
+          </span>
+        )}
+        <SaveIndicator state={props[SAVE_STATE_BY_TEXT_INPUT_PANEL[panel]]} />
+      </div>
+    </div>
+  )
+
   const renderInputAssetDetail = () => {
+    if (inputAssetPanel === 'xhs_creator_profiles') {
+      return (
+        <>
+          <div className="detail-head">
+            <div>
+              <h2>
+                {xhsCreatorProfileMaterial
+                  ? xhsCreatorProfileMaterial.name
+                  : '新建小红书创作者主页'}
+              </h2>
+            </div>
+          </div>
+          <div className="source-editor-card">
+            <label htmlFor="xhs-creator-profile-draft-name">
+              小红书创作者主页名称
+            </label>
+            <input
+              id="xhs-creator-profile-draft-name"
+              value={props.xhsCreatorProfileDraftName}
+              onChange={(event) =>
+                props.onXhsCreatorProfileDraftNameChange(event.target.value)
+              }
+              placeholder="例：XHS QSheep 创作者主页"
+            />
+            <label htmlFor="xhs-creator-profile-content">
+              结构化主页 JSON（建议由 xhs local importer 导入）
+            </label>
+            <textarea
+              id="xhs-creator-profile-content"
+              rows={16}
+              value={props.xhsCreatorProfileContent}
+              onChange={(event) =>
+                props.onXhsCreatorProfileContentChange(event.target.value)
+              }
+              placeholder='{"schemaVersion":"xhs-creator-profile/v1","notes":[]}'
+            />
+            <div className="save-row">
+              <button className="save-button" onClick={props.onSaveXhsCreatorProfile}>
+                {xhsCreatorProfileMaterial
+                  ? '保存当前小红书主页'
+                  : '保存为小红书主页'}
+              </button>
+              <button
+                className="save-button"
+                onClick={props.onSaveXhsCreatorProfileAsNew}
+              >
+                另存为新小红书主页
+              </button>
+              <SaveIndicator state={props.xhsSaveState} />
+            </div>
+          </div>
+          {renderTextBatchImport(
+            'xhs_creator_profiles',
+            '小红书主页',
+            '表头支持 name/content、xhs_creator_profile、xhs_profile、小红书主页。',
+          )}
+          {renderXhsOfflineImport('xhs_creator_profiles')}
+        </>
+      )
+    }
+
     if (inputAssetPanel === 'account_profiles') {
       return (
         <>
@@ -379,6 +491,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
             '视频创作者样本',
             '表头支持 name/content、video_creator_samples、video_samples、创作者样本。',
           )}
+          {renderXhsOfflineImport('video_creator_samples')}
         </>
       )
     }
@@ -427,6 +540,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
           '历史笔记',
           '表头支持 name/content、historical_posts、posts、历史笔记、笔记。',
         )}
+        {renderXhsOfflineImport('historical_posts')}
       </>
     )
   }

@@ -247,6 +247,7 @@ BUILTIN_AGENTS = [
             "input_asset.format_comments",
             "input_asset.format_trend_csv_brief",
             "input_asset.format_video_creator_samples",
+            "input_asset.format_xhs_creator_profile",
         ],
         default_context_policy={
             "may_read": ["target input asset type", "raw pasted text"],

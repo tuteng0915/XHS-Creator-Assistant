@@ -57,6 +57,7 @@ from app.models import (
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspaceUpdate,
+    XhsOfflineImportResponse,
 )
 from app.services import (
     AgentConversationService,
@@ -73,6 +74,7 @@ from app.services import (
     WorkflowAssetService,
     WorkflowWorkerService,
     WorkspaceService,
+    XhsOfflineImportService,
 )
 from app.services.common import utc_now
 from app.workflows import (
@@ -133,6 +135,7 @@ def create_api_router(
     asset_proposal_service: AssetProposalService,
     workflow_asset_service: WorkflowAssetService,
     workflow_worker: WorkflowWorkerService,
+    xhs_import_service: XhsOfflineImportService,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -264,6 +267,29 @@ def create_api_router(
             workspace_id,
             material_type=material_type,
             filename=file.filename or "input-assets.csv",
+            content=await file.read(),
+        )
+
+    @router.post(
+        "/workspaces/{workspace_id}/input-assets/xhs-import",
+        response_model=XhsOfflineImportResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_xhs_offline_import(
+        workspace_id: str,
+        file: Annotated[UploadFile, File()],
+        type: Annotated[str, Form()] = SourceMaterialType.HISTORICAL_POSTS.value,
+        name: Annotated[str, Form()] = "",
+    ) -> XhsOfflineImportResponse:
+        try:
+            asset_type = SourceMaterialType(type)
+        except ValueError:
+            asset_type = SourceMaterialType.TREND_CSV
+        return xhs_import_service.import_file(
+            workspace_id,
+            asset_type=asset_type,
+            name=name,
+            filename=file.filename or "xhs-import.json",
             content=await file.read(),
         )
 

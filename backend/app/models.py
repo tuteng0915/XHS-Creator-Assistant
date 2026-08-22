@@ -50,6 +50,7 @@ class SourceMaterialType(StrEnum):
     COMMENTS = "comments"
     TREND_CSV = "trend_csv"
     VIDEO_CREATOR_SAMPLES = "video_creator_samples"
+    XHS_CREATOR_PROFILE = "xhs_creator_profile"
 
 
 class TextSourceMaterialCreate(APIModel):
@@ -58,6 +59,7 @@ class TextSourceMaterialCreate(APIModel):
         SourceMaterialType.HISTORICAL_POSTS,
         SourceMaterialType.COMMENTS,
         SourceMaterialType.VIDEO_CREATOR_SAMPLES,
+        SourceMaterialType.XHS_CREATOR_PROFILE,
     ]
     name: str = Field(min_length=1, max_length=160)
     content: str = Field(default="", max_length=1_000_000)
@@ -84,6 +86,7 @@ class TextSourceMaterialResponse(SourceMaterialBase):
         SourceMaterialType.HISTORICAL_POSTS,
         SourceMaterialType.COMMENTS,
         SourceMaterialType.VIDEO_CREATOR_SAMPLES,
+        SourceMaterialType.XHS_CREATOR_PROFILE,
     ]
     content: str
 
@@ -394,6 +397,8 @@ class AnalysisRunCreate(APIModel):
     trend_csv_material_id: str | None = None
     video_creator_samples_input_asset_id: str | None = None
     video_creator_samples_material_id: str | None = None
+    xhs_creator_profile_input_asset_id: str | None = None
+    xhs_creator_profile_material_id: str | None = None
     media_asset_ids: list[str] = Field(default_factory=list)
     mode: Literal["demo", "live"] = "demo"
 
@@ -403,6 +408,8 @@ class AnalysisRunBatchCreate(APIModel):
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=120)
     account_profile_input_asset_ids: list[str] = Field(default_factory=list)
     account_profile_material_ids: list[str] = Field(default_factory=list)
+    xhs_creator_profile_input_asset_ids: list[str] = Field(default_factory=list)
+    xhs_creator_profile_material_ids: list[str] = Field(default_factory=list)
     historical_posts_input_asset_id: str | None = None
     historical_posts_material_id: str | None = None
     comments_input_asset_id: str | None = None
@@ -421,6 +428,13 @@ class AccountProfileCsvImportResponse(APIModel):
 
 class TextInputAssetCsvImportResponse(APIModel):
     materials: list[TextSourceMaterialResponse]
+
+
+class XhsOfflineImportResponse(APIModel):
+    input_asset: TextInputAssetResponse
+    parsed_note_count: int
+    source_url: str = ""
+    warnings: list[str] = Field(default_factory=list)
 
 
 class AnalysisRunTransition(APIModel):

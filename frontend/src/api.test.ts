@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, mediaAssetApi } from './api'
-import type { MediaAsset } from './types'
+import { ApiError, inputAssetApi, mediaAssetApi } from './api'
+import type { MediaAsset, TextInputAsset } from './types'
 
 const imageAsset: MediaAsset = {
   id: 'media-image-1',
@@ -20,6 +20,16 @@ const imageAsset: MediaAsset = {
   fileUrl: '/api/media-assets/media-image-1/file',
   createdAt: '2026-07-11T10:00:00Z',
   updatedAt: '2026-07-11T10:00:00Z',
+}
+
+const historicalAsset: TextInputAsset = {
+  id: 'input-1',
+  workspaceId: 'workspace-1',
+  type: 'historical_posts',
+  name: 'XHS 导入',
+  content: '### 1. 留学申请复盘',
+  createdAt: '2026-08-22T00:00:00Z',
+  updatedAt: '2026-08-22T00:00:00Z',
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -98,5 +108,75 @@ describe('mediaAssetApi', () => {
         expectedUpdatedAt: imageAsset.updatedAt,
       }),
     ).rejects.toEqual(new ApiError('Media asset name cannot be blank', 422))
+  })
+})
+
+describe('inputAssetApi', () => {
+  it('uploads XHS offline import files through the backend only', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      await jsonResponse(
+        {
+          inputAsset: historicalAsset,
+          parsedNoteCount: 1,
+          sourceUrl: 'https://www.xiaohongshu.com/user/profile/u1',
+          warnings: [],
+        },
+        201,
+      ),
+    )
+    const file = new File(['{"schemaVersion":"xhs-profile-import/v1"}'], 'xhs.json', {
+      type: 'application/json',
+    })
+
+    const response = await inputAssetApi.uploadXhsImport(
+      'workspace-1',
+      'historical_posts',
+      file,
+    )
+
+    expect(response.inputAsset.id).toBe('input-1')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/workspace-1/input-assets/xhs-import',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+    )
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const form = init.body as FormData
+    expect(form.get('type')).toBe('historical_posts')
+    expect(form.get('file')).toBe(file)
+  })
+
+  it('uploads XHS creator profile imports as the dedicated input asset type', async () => {
+    const xhsAsset: TextInputAsset = {
+      ...historicalAsset,
+      id: 'xhs-profile-1',
+      type: 'xhs_creator_profile',
+      name: 'XHS QSheep 创作者主页',
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      await jsonResponse(
+        {
+          inputAsset: xhsAsset,
+          parsedNoteCount: 20,
+          sourceUrl: 'https://www.xiaohongshu.com/user/profile/u1',
+          warnings: [],
+        },
+        201,
+      ),
+    )
+    const file = new File(['{"schemaVersion":"xhs-creator-profile/v1"}'], 'xhs.json', {
+      type: 'application/json',
+    })
+
+    await inputAssetApi.uploadXhsImport(
+      'workspace-1',
+      'xhs_creator_profile',
+      file,
+      'XHS QSheep 创作者主页',
+    )
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const form = init.body as FormData
+    expect(form.get('type')).toBe('xhs_creator_profile')
+    expect(form.get('name')).toBe('XHS QSheep 创作者主页')
   })
 })

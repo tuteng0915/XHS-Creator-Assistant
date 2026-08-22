@@ -1,0 +1,133 @@
+# 小红书本地导入与主 Agent 接入设计
+
+## 固定样本
+
+当前已有两组本地 MediaCrawler 输出，作为离线 fixture 使用。原始数据保留在 `data/` 下，不纳入 git。
+
+| 代号 | 路径 | 笔记 | 一级评论 | 封面图 | 备注 |
+| --- | --- | ---: | ---: | ---: | --- |
+| `_tt` | `data/xhs-fixtures/_tt/xhs/` | 4 | 26 | 4 | 用户主页实际只有 4 条图文笔记，本地固定为 4 条。 |
+| `QSheep` | `data/xhs-fixtures/QSheep/xhs/` | 20 | 137 | 20 | 来源于小红书短链解析后的 QSheep 主页；包含 1 条视频笔记，但本轮只保存封面，不保存视频文件。 |
+
+每组目录结构与 MediaCrawler 保持一致：
+
+```text
+xhs/jsonl/creator_contents_2026-08-22.jsonl
+xhs/jsonl/creator_comments_2026-08-22.jsonl
+xhs/images/<note_id>/0.jpg
+```
+
+## 为什么不直接把爬虫放进主平台
+
+小红书数据获取依赖本地浏览器、手动登录、国内网络环境和低频访问控制。主平台当前运行环境主要服务于 LLM workflow，不适合作为爬虫运行环境。更稳妥的边界是：
+
+```text
+XHS local importer
+-> 离线导入包
+-> 主平台内容资产
+-> Agent / Workflow 读取内容资产
+```
+
+主平台只消费已经落盘或上传的离线导入包，不直接访问小红书，也不保存用户提供的任意外部路径。
+
+## 接入主 Agent 的推荐模型
+
+小红书主页数据进入主平台后，不应该只是一个“文件”，也不应该只被压扁成历史笔记和评论样本。当前采用一个独立 input asset type：
+
+- `xhs_creator_profile`：结构化保存主页、笔记、评论、互动数据和封面 `MediaAsset` 引用，schema 为 `xhs-creator-profile/v1`；
+- 账号概况、历史笔记、评论样本：作为兼容旧 workflow 和人工检查的 legacy 派生资产继续生成；
+- 图片资产：封面图作为笔记关联媒体；
+- 可选的视频创作者样本：如果后续抓视频文件或视频链接，再进入视频质量诊断链路。
+
+主平台上传入口兼容两种 JSON：
+
+- `xhs-profile-import/v1`：旧本地浏览器 importer 的可见页面导出；上传为 `xhs_creator_profile` 时会转换成 `xhs-creator-profile/v1`。
+- `xhs-creator-profile/v1`：当前推荐的结构化主页资产 schema，可直接保存并用于账号诊断。
+
+主 Agent 读取时应通过 Context Access Layer 获取全局视野，而不是只拿单个文件。推荐 context pack：
+
+```text
+creator profile summary
++ top / recent historical posts
++ comments grouped by note
++ cover image references
++ existing analysis / topics / drafts / simulations
++ available skills / agents / workflows catalog
+```
+
+## 最小实现步骤
+
+1. 增加 MediaCrawler JSONL converter。已完成。
+   - 输入：`creator_contents_*.jsonl`、`creator_comments_*.jsonl`、`images/<note_id>/0.jpg`。
+   - 当前实现：`scripts/xhs_mediacrawler_fixture.py`。
+   - 输出：`xhs-creator-profile/v1` 结构化 payload、账号概况 Markdown、历史笔记 Markdown、评论样本 Markdown，并保留封面文件引用。
+
+2. 增加一个本地 fixture 导入入口。已完成。
+   - 当前实现：`scripts/import_xhs_fixture_to_workspace.py`。
+   - 它直接写入本地 SQLite，不经过前端。
+   - 导入时创建四个 input assets：小红书创作者主页、账号概况、历史笔记、评论样本。
+   - 封面图片复制到主平台受控 upload 目录，并创建 `MediaAsset.image` 记录。
+   - 重复导入同一个 fixture 时，文本资产按名称更新，图片资产按名称复用。
+
+3. 增加主平台离线上传入口。已完成。
+   - 前端位置：内容资产 → 小红书创作者主页 → 小红书离线导入。
+   - 后端只接收上传文件，不访问小红书。
+   - 上传旧 `xhs-profile-import/v1` JSON 时会转换成 workflow 可直接读取的 `xhs-creator-profile/v1`。
+
+4. 复用现有 Agent context adapter。已验证。
+   - 主 Agent 不直接读取 MediaCrawler 原始文件。
+   - Agent 通过 Context Access Layer 读取已经入库的 input assets 和 media assets。
+
+5. 增加样本导入脚本。已完成。
+   - 支持从 `data/xhs-fixtures/_tt` 和 `data/xhs-fixtures/QSheep` 一键导入本地 SQLite。
+   - 用于 demo 和回归测试。
+
+5. 增加测试。部分完成。
+   - 已完成 converter 单元测试；
+   - 已完成 UTF-8 中文保真测试；
+   - 已完成短链解析 runner 单元测试；
+   - 已完成 media asset 相关回归测试；
+   - 后续可补：从 API 上传 zip 包的端到端测试。
+
+## 本地导入命令
+
+导入 `_tt`：
+
+```bash
+backend/.venv/bin/python scripts/import_xhs_fixture_to_workspace.py _tt
+```
+
+导入 `QSheep`：
+
+```bash
+backend/.venv/bin/python scripts/import_xhs_fixture_to_workspace.py QSheep
+```
+
+导入后会创建或更新两个工作区：
+
+```text
+XHS _tt 工作区
+XHS QSheep 工作区
+```
+
+每个工作区包含：
+
+- `XHS <code> 账号概况`
+- `XHS <code> 历史笔记`
+- `XHS <code> 评论样本`
+- 每条笔记一张封面 `MediaAsset.image`
+
+当前默认 SQLite 中已导入：
+
+| 代号 | workspace | input assets | media assets |
+| --- | --- | ---: | ---: |
+| `_tt` | `XHS _tt 工作区` | 4 | 4 |
+| `QSheep` | `XHS QSheep 工作区` | 4 | 20 |
+
+## 不做的事情
+
+- 不把小红书爬虫变成主平台后端服务；
+- 不在前端直接访问小红书；
+- 不把 MediaCrawler 原始目录暴露给 Agent；
+- 不允许用户提交任意本地文件路径；
+- 不在这一阶段抓取二级评论、下载完整图片集或下载视频文件。

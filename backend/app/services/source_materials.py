@@ -86,6 +86,7 @@ class SourceMaterialService:
             SourceMaterialType.HISTORICAL_POSTS,
             SourceMaterialType.COMMENTS,
             SourceMaterialType.VIDEO_CREATOR_SAMPLES,
+            SourceMaterialType.XHS_CREATOR_PROFILE,
         }:
             raise ValidationError("Only text input asset types support batch import")
         safe_filename = PurePosixPath(filename.replace("\\", "/")).name
@@ -138,6 +139,7 @@ class SourceMaterialService:
             SourceMaterialType.HISTORICAL_POSTS: "历史笔记",
             SourceMaterialType.COMMENTS: "评论样本",
             SourceMaterialType.VIDEO_CREATOR_SAMPLES: "视频创作者样本",
+            SourceMaterialType.XHS_CREATOR_PROFILE: "小红书创作者主页",
         }[material_type]
         value = (
             row.get("name")
@@ -196,6 +198,15 @@ class SourceMaterialService:
                 or row.get("creator_samples")
                 or row.get("视频创作者样本")
                 or row.get("创作者样本")
+                or ""
+            )
+        if material_type == SourceMaterialType.XHS_CREATOR_PROFILE:
+            return (
+                row.get("xhs_creator_profile")
+                or row.get("xhs_profile")
+                or row.get("xiaohongshu_profile")
+                or row.get("小红书主页")
+                or row.get("小红书创作者主页")
                 or ""
             )
         return ""

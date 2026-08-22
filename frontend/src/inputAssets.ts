@@ -11,6 +11,7 @@ export type InputAssetPanel =
   | 'comments'
   | 'trend_csv'
   | 'video_creator_samples'
+  | 'xhs_creator_profiles'
 
 export type InputAssetContentKind = 'text' | 'file'
 
@@ -103,6 +104,22 @@ export const INPUT_ASSET_DEFINITIONS: InputAssetTypeDefinition[] = [
     saveAsNewLabel: '另存为新视频创作者样本',
     workflowRoles: ['video_creator_samples'],
     contextSelectors: ['video_creator_samples_text'],
+  },
+  {
+    panel: 'xhs_creator_profiles',
+    type: 'xhs_creator_profile',
+    label: '小红书创作者主页',
+    singularLabel: '小红书创作者主页',
+    description:
+      '独立 xhs local importer 产出的结构化主页资产，保留笔记、评论、互动数据和封面关联。',
+    icon: '📕',
+    contentKind: 'text',
+    emptyLabel: '还没有已保存的小红书创作者主页。',
+    newLabel: '新建小红书创作者主页',
+    saveCurrentLabel: '保存当前小红书创作者主页',
+    saveAsNewLabel: '另存为新小红书创作者主页',
+    workflowRoles: ['xhs_creator_profile'],
+    contextSelectors: ['selected_xhs_creator_profile', 'media_assets_overview'],
   },
 ]
 

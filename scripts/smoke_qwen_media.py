@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402, I001
 """Smoke test Qwen media skills through the backend skill invocation path.
 
 This script reads credentials from `.env.local` / `backend/.env.local` or the
@@ -118,8 +119,16 @@ def _settings(args: argparse.Namespace, temp_dir: Path) -> Settings:
     settings = Settings.from_environment()
     return replace(
         settings,
-        database_path=Path(args.database_path) if args.database_path else temp_dir / "smoke.sqlite3",
-        upload_directory=Path(args.upload_directory) if args.upload_directory else temp_dir / "uploads",
+        database_path=(
+            Path(args.database_path)
+            if args.database_path
+            else temp_dir / "smoke.sqlite3"
+        ),
+        upload_directory=(
+            Path(args.upload_directory)
+            if args.upload_directory
+            else temp_dir / "uploads"
+        ),
         qwen_task_poll_interval_seconds=args.poll_interval,
         qwen_task_poll_attempts=args.poll_attempts,
     )

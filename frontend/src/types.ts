@@ -4,6 +4,7 @@ export type InputAssetType =
   | 'comments'
   | 'trend_csv'
   | 'video_creator_samples'
+  | 'xhs_creator_profile'
 
 export type SourceMaterialType = InputAssetType
 
@@ -31,6 +32,7 @@ export interface TextInputAsset extends InputAssetBase {
     | 'historical_posts'
     | 'comments'
     | 'video_creator_samples'
+    | 'xhs_creator_profile'
   content: string
 }
 
@@ -50,6 +52,13 @@ export type SourceMaterial = InputAsset
 export type TextSourceMaterial = TextInputAsset
 export type TrendCsvSourceMaterial = TrendCsvInputAsset
 export type SavePhase = 'idle' | 'saving' | 'saved' | 'error'
+
+export interface XhsOfflineImportResponse {
+  inputAsset: TextInputAsset
+  parsedNoteCount: number
+  sourceUrl: string
+  warnings: string[]
+}
 
 export type MediaAssetType = 'image' | 'video'
 export type MediaAssetSourceType = 'upload' | 'url' | 'generated' | 'extracted_frame'

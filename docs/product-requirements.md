@@ -214,6 +214,7 @@ workflow 执行不应依赖前端连接。
 | 评论样本 | 评论区痛点和用户表达 | SQLite text |
 | 趋势 CSV 数据 | 热点内容数据 | 文件落盘 + SQLite metadata/preview |
 | 视频创作者样本 | 视频创作者背景、视频样本、运营备注 | SQLite text |
+| 小红书创作者主页 | 本地爬取后解析出的主页、笔记、评论、互动和封面引用 | SQLite JSON text + 关联 MediaAsset |
 | 图片素材 | 主页截图、封面图、评论区截图、视觉参考 | 文件落盘 + SQLite metadata/derived JSON |
 | 视频素材 | 样本视频、视频参考、后续视频诊断输入 | 文件落盘 + SQLite metadata/derived JSON |
 
@@ -224,7 +225,7 @@ workflow 执行不应依赖前端连接。
 - 新建；
 - 显式保存；
 - 另存为；
-- CSV/TSV 批量导入文本资产；
+- CSV/TSV 批量导入文本资产，包括账号概况、历史笔记、评论样本、视频创作者样本和小红书创作者主页；
 - 趋势 CSV 上传和 preview；
 - workflow 运行前自动保存当前必要输入；
 - 输入素材整理 agent 生成草稿。
@@ -662,6 +663,7 @@ Capability Maker 产生的变更建议。
 当前能力：
 
 - 以多个账号概况为核心批量运行；
+- 账号诊断也可以以多个小红书创作者主页为核心批量运行；
 - 结果可下载 CSV。
 
 后续要求：

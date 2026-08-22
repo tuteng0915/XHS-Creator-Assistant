@@ -29,6 +29,12 @@ describe('inputAssets', () => {
     expect(INPUT_ASSET_DEFINITION_BY_PANEL.video_creator_samples.contextSelectors).toEqual([
       'video_creator_samples_text',
     ])
+    expect(INPUT_ASSET_DEFINITION_BY_PANEL.xhs_creator_profiles.type).toBe(
+      'xhs_creator_profile',
+    )
+    expect(INPUT_ASSET_DEFINITION_BY_PANEL.xhs_creator_profiles.workflowRoles).toEqual([
+      'xhs_creator_profile',
+    ])
   })
 
   it('recognizes text input assets and builds compact text previews', () => {
@@ -71,5 +77,16 @@ describe('inputAssets', () => {
     const before = { ...asset }
     expect(inputAssetUpdatedLabel(asset)).toContain('2026')
     expect(asset).toEqual(before)
+  })
+
+  it('treats XHS creator profiles as text input assets', () => {
+    const asset: TextInputAsset = {
+      ...base,
+      type: 'xhs_creator_profile',
+      content: '{"schemaVersion":"xhs-creator-profile/v1","notes":[]}',
+    }
+
+    expect(isTextInputAsset(asset)).toBe(true)
+    expect(inputAssetPreview(asset)).toContain('xhs-creator-profile/v1')
   })
 })

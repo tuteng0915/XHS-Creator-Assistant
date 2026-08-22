@@ -30,6 +30,7 @@ import type {
   WorkflowAssetStatus,
   WorkflowAssetSummary,
   WorkflowType,
+  XhsOfflineImportResponse,
 } from './types'
 
 export class ApiError extends Error {
@@ -102,7 +103,8 @@ export const inputAssetApi = {
       | 'account_profile'
       | 'historical_posts'
       | 'comments'
-      | 'video_creator_samples',
+      | 'video_creator_samples'
+      | 'xhs_creator_profile',
     name: string,
     content: string,
   ) =>
@@ -161,7 +163,8 @@ export const inputAssetApi = {
       | 'account_profile'
       | 'historical_posts'
       | 'comments'
-      | 'video_creator_samples',
+      | 'video_creator_samples'
+      | 'xhs_creator_profile',
     file: File,
   ) => {
     const form = new FormData()
@@ -169,6 +172,22 @@ export const inputAssetApi = {
     form.set('file', file)
     return request<{ materials: TextInputAsset[] }>(
       `/api/workspaces/${workspaceId}/input-assets/text-csv`,
+      { method: 'POST', body: form },
+    )
+  },
+
+  uploadXhsImport: (
+    workspaceId: string,
+    type: 'historical_posts' | 'video_creator_samples' | 'xhs_creator_profile',
+    file: File,
+    name = '',
+  ) => {
+    const form = new FormData()
+    form.set('type', type)
+    form.set('name', name)
+    form.set('file', file)
+    return request<XhsOfflineImportResponse>(
+      `/api/workspaces/${workspaceId}/input-assets/xhs-import`,
       { method: 'POST', body: form },
     )
   },
@@ -380,6 +399,7 @@ export const analysisRunApi = {
       commentsInputAssetId?: string
       trendCsvInputAssetId?: string
       videoCreatorSamplesInputAssetId?: string
+      xhsCreatorProfileInputAssetId?: string
       mediaAssetIds?: string[]
       mode: 'demo' | 'live'
       idempotencyKey?: string
@@ -396,10 +416,12 @@ export const analysisRunApi = {
     payload: {
       workflowType: WorkflowType
       accountProfileInputAssetIds: string[]
+      xhsCreatorProfileInputAssetIds?: string[]
       historicalPostsInputAssetId?: string
       commentsInputAssetId?: string
       trendCsvInputAssetId?: string
       videoCreatorSamplesInputAssetId?: string
+      xhsCreatorProfileInputAssetId?: string
       mediaAssetIds?: string[]
       mode: 'demo' | 'live'
       idempotencyKey?: string

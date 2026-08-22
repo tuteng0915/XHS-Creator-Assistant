@@ -96,12 +96,17 @@ type SaveKey =
   | 'comments'
   | 'trend'
   | 'video'
+  | 'xhs'
   | 'manualTopic'
   | 'topic'
   | 'draft'
 type WorkflowStageViews = Record<WorkflowTab, StageView[]>
 type WorkflowOutputKinds = Record<WorkflowTab, WorkflowOutputKind>
 type TextInputAssetPanel = Exclude<InputAssetPanel, 'trend_csv'>
+type XhsImportPanel = Extract<
+  TextInputAssetPanel,
+  'historical_posts' | 'video_creator_samples' | 'xhs_creator_profiles'
+>
 type ConversationContextTarget = {
   assetType: 'skill' | 'agent' | 'workflow'
   assetId: string
@@ -119,12 +124,27 @@ const TEXT_INPUT_ASSET_TYPE_BY_PANEL: Record<TextInputAssetPanel, TextInputAsset
   historical_posts: 'historical_posts',
   comments: 'comments',
   video_creator_samples: 'video_creator_samples',
+  xhs_creator_profiles: 'xhs_creator_profile',
 }
 const SAVE_KEY_BY_TEXT_INPUT_PANEL: Record<TextInputAssetPanel, SaveKey> = {
   account_profiles: 'accountProfiles',
   historical_posts: 'historical',
   comments: 'comments',
   video_creator_samples: 'video',
+  xhs_creator_profiles: 'xhs',
+}
+const SAVE_KEY_BY_XHS_IMPORT_PANEL: Record<XhsImportPanel, SaveKey> = {
+  historical_posts: 'historical',
+  video_creator_samples: 'video',
+  xhs_creator_profiles: 'xhs',
+}
+const XHS_IMPORT_TYPE_BY_PANEL: Record<
+  XhsImportPanel,
+  'historical_posts' | 'video_creator_samples' | 'xhs_creator_profile'
+> = {
+  historical_posts: 'historical_posts',
+  video_creator_samples: 'video_creator_samples',
+  xhs_creator_profiles: 'xhs_creator_profile',
 }
 const FORMATTER_SKILL_ID_BY_PANEL: Record<InputAssetPanel, string> = {
   account_profiles: 'input_asset.format_profile',
@@ -132,12 +152,19 @@ const FORMATTER_SKILL_ID_BY_PANEL: Record<InputAssetPanel, string> = {
   comments: 'input_asset.format_comments',
   trend_csv: 'input_asset.format_trend_csv_brief',
   video_creator_samples: 'input_asset.format_video_creator_samples',
+  xhs_creator_profiles: 'input_asset.format_xhs_creator_profile',
 }
 const emptyTextInputAssetBatchFiles = (): Record<TextInputAssetPanel, File | null> => ({
   account_profiles: null,
   historical_posts: null,
   comments: null,
   video_creator_samples: null,
+  xhs_creator_profiles: null,
+})
+const emptyXhsImportFiles = (): Record<XhsImportPanel, File | null> => ({
+  historical_posts: null,
+  video_creator_samples: null,
+  xhs_creator_profiles: null,
 })
 
 const idleState: SaveState = { phase: 'idle' }
@@ -165,6 +192,7 @@ const SAMPLE_ASSET_NAMES = {
   comments: '留学评论区合集',
   trendCsv: '数字游民趋势.csv',
   videoCreatorSamples: 'AI短剧创作者样本',
+  xhsCreatorProfile: 'XHS QSheep 创作者主页',
 } as const
 const EMPTY_INPUT_ASSET_NAMES = {
   account_profile: '',
@@ -172,6 +200,7 @@ const EMPTY_INPUT_ASSET_NAMES = {
   comments: '',
   trend_csv: '',
   video_creator_samples: '',
+  xhs_creator_profile: '',
 } as const
 const SAMPLE_ACCOUNT_INPUT = {
   positioning: `账号:@QSheep｜留学内容创作者,1.4K 粉。核心人群=正在准备/纠结出国读研的文科生(传媒、社科、人类学),目标英港新前30。
@@ -249,7 +278,7 @@ function errorMessage(error: unknown): string {
 
 function latestTextMaterial(
   materials: InputAsset[],
-  type: 'account_profile' | 'historical_posts' | 'comments' | 'video_creator_samples',
+  type: TextInputAsset['type'],
 ): TextInputAsset | undefined {
   return materials.find(
     (material): material is TextInputAsset => material.type === type,
@@ -443,10 +472,14 @@ function WorkspaceApp() {
   )
   const [videoCreatorSamplesDraftName, setVideoCreatorSamplesDraftName] =
     useState<string>(SAMPLE_ASSET_NAMES.videoCreatorSamples)
+  const [xhsCreatorProfileDraftName, setXhsCreatorProfileDraftName] =
+    useState<string>(SAMPLE_ASSET_NAMES.xhsCreatorProfile)
   const [selectedProfileInputAssetId, setSelectedProfileInputAssetId] = useState('')
   const [inputAssetBatchFiles, setInputAssetBatchFiles] = useState<
     Record<TextInputAssetPanel, File | null>
   >(emptyTextInputAssetBatchFiles)
+  const [xhsImportFiles, setXhsImportFiles] =
+    useState<Record<XhsImportPanel, File | null>>(emptyXhsImportFiles)
   const [inputAssetPanel, setInputAssetPanel] =
     useState<InputAssetPanel>('historical_posts')
   const [selectedHistoricalInputAssetId, setSelectedHistoricalInputAssetId] =
@@ -454,6 +487,8 @@ function WorkspaceApp() {
   const [selectedCommentsInputAssetId, setSelectedCommentsInputAssetId] = useState('')
   const [selectedTrendInputAssetId, setSelectedTrendInputAssetId] = useState('')
   const [selectedVideoInputAssetId, setSelectedVideoInputAssetId] = useState('')
+  const [selectedXhsCreatorProfileInputAssetId, setSelectedXhsCreatorProfileInputAssetId] =
+    useState('')
   const [selectedVideoWorkflowMediaAssetIds, setSelectedVideoWorkflowMediaAssetIds] =
     useState<string[]>([])
   const [historicalPosts, setHistoricalPosts] = useState('')
@@ -461,6 +496,7 @@ function WorkspaceApp() {
   const [trendKeyword, setTrendKeyword] = useState('')
   const [trendFile, setTrendFile] = useState<File | null>(null)
   const [videoCreatorSamples, setVideoCreatorSamples] = useState('')
+  const [xhsCreatorProfileContent, setXhsCreatorProfileContent] = useState('')
   const [inputAssetFormatterDraft, setInputAssetFormatterDraft] = useState('')
   const [inputAssetFormatterStatus, setInputAssetFormatterStatus] = useState('')
   const [simulationTopic, setSimulationTopic] = useState('')
@@ -482,6 +518,7 @@ function WorkspaceApp() {
     comments: idleState,
     trend: idleState,
     video: idleState,
+    xhs: idleState,
     manualTopic: idleState,
     topic: idleState,
     draft: idleState,
@@ -539,6 +576,14 @@ function WorkspaceApp() {
       ),
     [materials],
   )
+  const xhsCreatorProfileMaterials = useMemo(
+    () =>
+      materials.filter(
+        (material): material is TextInputAsset =>
+          material.type === 'xhs_creator_profile',
+      ),
+    [materials],
+  )
   const historicalMaterial = useMemo(
     () => {
       if (selectedHistoricalInputAssetId === NEW_INPUT_ASSET_ID) return undefined
@@ -577,6 +622,19 @@ function WorkspaceApp() {
       )
     },
     [videoCreatorSamplesMaterials, selectedVideoInputAssetId],
+  )
+  const xhsCreatorProfileMaterial = useMemo(
+    () => {
+      if (selectedXhsCreatorProfileInputAssetId === NEW_INPUT_ASSET_ID) {
+        return undefined
+      }
+      return (
+        xhsCreatorProfileMaterials.find(
+          (material) => material.id === selectedXhsCreatorProfileInputAssetId,
+        ) || undefined
+      )
+    },
+    [xhsCreatorProfileMaterials, selectedXhsCreatorProfileInputAssetId],
   )
   const trendMaterial = useMemo(
     () => {
@@ -734,12 +792,22 @@ function WorkspaceApp() {
           latestTextMaterial(loadedMaterials, 'video_creator_samples')?.name ||
             SAMPLE_ASSET_NAMES.videoCreatorSamples,
         )
+        setSelectedXhsCreatorProfileInputAssetId(
+          latestTextMaterial(loadedMaterials, 'xhs_creator_profile')?.id || '',
+        )
+        setXhsCreatorProfileDraftName(
+          latestTextMaterial(loadedMaterials, 'xhs_creator_profile')?.name ||
+            SAMPLE_ASSET_NAMES.xhsCreatorProfile,
+        )
         setHistoricalPosts(
           latestTextMaterial(loadedMaterials, 'historical_posts')?.content || '',
         )
         setComments(latestTextMaterial(loadedMaterials, 'comments')?.content || '')
         setVideoCreatorSamples(
           latestTextMaterial(loadedMaterials, 'video_creator_samples')?.content || '',
+        )
+        setXhsCreatorProfileContent(
+          latestTextMaterial(loadedMaterials, 'xhs_creator_profile')?.content || '',
         )
         setTrendKeyword(latestTrendMaterial(loadedMaterials)?.keyword || '')
         setSimulationTopic('')
@@ -764,6 +832,7 @@ function WorkspaceApp() {
           comments: idleState,
           trend: idleState,
           video: idleState,
+          xhs: idleState,
           manualTopic: idleState,
           topic: idleState,
           draft: idleState,
@@ -800,6 +869,7 @@ function WorkspaceApp() {
     setCommentsDraftName(SAMPLE_ASSET_NAMES.comments)
     setTrendCsvDraftName(SAMPLE_ASSET_NAMES.trendCsv)
     setVideoCreatorSamplesDraftName(SAMPLE_ASSET_NAMES.videoCreatorSamples)
+    setXhsCreatorProfileDraftName(SAMPLE_ASSET_NAMES.xhsCreatorProfile)
     setSelectedProfileInputAssetId('')
     setInputAssetBatchFiles(emptyTextInputAssetBatchFiles())
     setInputAssetPanel('historical_posts')
@@ -807,10 +877,12 @@ function WorkspaceApp() {
     setSelectedCommentsInputAssetId('')
     setSelectedTrendInputAssetId('')
     setSelectedVideoInputAssetId('')
+    setSelectedXhsCreatorProfileInputAssetId('')
     setSelectedVideoWorkflowMediaAssetIds([])
     setHistoricalPosts('')
     setComments('')
     setVideoCreatorSamples('')
+    setXhsCreatorProfileContent('')
     setTrendKeyword('')
     setCurrentRun(null)
     setSelectedSimulationRun(null)
@@ -827,6 +899,18 @@ function WorkspaceApp() {
     setAnalysisStageViewsByWorkflow(emptyWorkflowStageViews())
     setSimulationStageViews([])
     setWorkflowOutputKindByWorkflow(defaultWorkflowOutputKinds())
+    setSaveStates({
+      workspace: idleState,
+      accountProfiles: idleState,
+      historical: idleState,
+      comments: idleState,
+      trend: idleState,
+      video: idleState,
+      xhs: idleState,
+      manualTopic: idleState,
+      topic: idleState,
+      draft: idleState,
+    })
   }
 
   function setSaveState(key: SaveKey, state: SaveState) {
@@ -868,6 +952,13 @@ function WorkspaceApp() {
       setVideoCreatorSamplesDraftName(material.name)
       setVideoCreatorSamples(material.content)
       setSaveState('video', idleState)
+      return
+    }
+    if (material.type === 'xhs_creator_profile') {
+      setSelectedXhsCreatorProfileInputAssetId(material.id)
+      setXhsCreatorProfileDraftName(material.name)
+      setXhsCreatorProfileContent(material.content)
+      setSaveState('xhs', idleState)
     }
   }
 
@@ -908,6 +999,13 @@ function WorkspaceApp() {
       setTrendKeyword('')
       setTrendFile(null)
       setSaveState('trend', idleState)
+      return
+    }
+    if (panel === 'xhs_creator_profiles') {
+      setSelectedXhsCreatorProfileInputAssetId(NEW_INPUT_ASSET_ID)
+      setXhsCreatorProfileDraftName(EMPTY_INPUT_ASSET_NAMES.xhs_creator_profile)
+      setXhsCreatorProfileContent('')
+      setSaveState('xhs', idleState)
       return
     }
     setSelectedVideoInputAssetId(NEW_INPUT_ASSET_ID)
@@ -972,6 +1070,14 @@ function WorkspaceApp() {
         setTrendCsvDraftName(name || '整理后的趋势数据')
         setTrendKeyword(keyword)
         setSaveState('trend', idleState)
+        setInputAssetFormatterStatus(notes)
+        return
+      }
+      if (inputAssetPanel === 'xhs_creator_profiles') {
+        setSelectedXhsCreatorProfileInputAssetId(NEW_INPUT_ASSET_ID)
+        setXhsCreatorProfileDraftName(name || '整理后的小红书创作者主页')
+        setXhsCreatorProfileContent(content)
+        setSaveState('xhs', idleState)
         setInputAssetFormatterStatus(notes)
         return
       }
@@ -1103,7 +1209,8 @@ function WorkspaceApp() {
       | 'account_profile'
       | 'historical_posts'
       | 'comments'
-      | 'video_creator_samples',
+      | 'video_creator_samples'
+      | 'xhs_creator_profile',
     content: string,
     existing?: TextInputAsset,
     nameOverride?: string,
@@ -1116,7 +1223,9 @@ function WorkspaceApp() {
           ? SAMPLE_ASSET_NAMES.comments
           : type === 'account_profile'
             ? SAMPLE_ASSET_NAMES.qsheepProfile
-            : SAMPLE_ASSET_NAMES.videoCreatorSamples
+            : type === 'video_creator_samples'
+              ? SAMPLE_ASSET_NAMES.videoCreatorSamples
+              : SAMPLE_ASSET_NAMES.xhsCreatorProfile
     const nextName = (nameOverride || existing?.name || fallbackName).trim()
     if (!nextName) throw new Error('请填写输入资产名称。')
     if (existing && existing.content === content && existing.name === nextName) {
@@ -1156,6 +1265,11 @@ function WorkspaceApp() {
     if (type === 'video_creator_samples') {
       setSelectedVideoInputAssetId(saved.id)
       setVideoCreatorSamplesDraftName(saved.name)
+    }
+    if (type === 'xhs_creator_profile') {
+      setSelectedXhsCreatorProfileInputAssetId(saved.id)
+      setXhsCreatorProfileDraftName(saved.name)
+      setXhsCreatorProfileContent(saved.content)
     }
     return saved
   }
@@ -1231,6 +1345,48 @@ function WorkspaceApp() {
     }
   }
 
+  function setXhsImportFile(panel: XhsImportPanel, file: File | null) {
+    setXhsImportFiles((current) => ({ ...current, [panel]: file }))
+    setSaveState(SAVE_KEY_BY_XHS_IMPORT_PANEL[panel], idleState)
+  }
+
+  async function uploadXhsImport(panel: XhsImportPanel) {
+    const file = xhsImportFiles[panel]
+    const saveKey = SAVE_KEY_BY_XHS_IMPORT_PANEL[panel]
+    if (!workspace || !file) {
+      setSaveState(saveKey, {
+        phase: 'error',
+        message: '请选择 XHS 导出 JSON / Markdown 文件。',
+      })
+      return
+    }
+    setSaveState(saveKey, { phase: 'saving' })
+    try {
+      const imported = await inputAssetApi.uploadXhsImport(
+        workspace.id,
+        XHS_IMPORT_TYPE_BY_PANEL[panel],
+        file,
+      )
+      setMaterials((current) => [
+        imported.inputAsset,
+        ...current.filter((item) => item.id !== imported.inputAsset.id),
+      ])
+      chooseTextMaterial(imported.inputAsset)
+      setXhsImportFiles((current) => ({ ...current, [panel]: null }))
+      const warningSuffix =
+        imported.warnings.length > 0 ? `；${imported.warnings[0]}` : ''
+      setSaveState(saveKey, {
+        phase: 'saved',
+        message: `已导入 ${imported.parsedNoteCount} 条笔记${warningSuffix}`,
+      })
+    } catch (error) {
+      setSaveState(saveKey, {
+        phase: 'error',
+        message: errorMessage(error),
+      })
+    }
+  }
+
   async function ensureInputsSavedForRun(
     targetTab: WorkflowTab = workflowTab,
     includeProfile = true,
@@ -1241,6 +1397,7 @@ function WorkspaceApp() {
     comments?: TextInputAsset
     trend?: TrendCsvInputAsset
     video?: TextInputAsset
+    xhsCreatorProfile?: TextInputAsset
     simulationTopic: string
   }> {
     if (!workspace) throw new Error('No workspace selected')
@@ -1262,8 +1419,11 @@ function WorkspaceApp() {
       accountProfileInputAssetId?: string
       manualAccountProfile?: string
     } = {}
-    if (!includeProfile) {
+    const accountUsesXhsCreatorProfile =
+      targetTab === 'account' && Boolean(xhsCreatorProfileMaterial)
+    if (!includeProfile || accountUsesXhsCreatorProfile) {
       // Batch runs provide profile input asset IDs explicitly below.
+      // XHS creator profile runs derive a compact profile snapshot in the backend.
     } else {
       let material = selectedProfileMaterial
       if (!material && mode === 'demo') {
@@ -1288,6 +1448,13 @@ function WorkspaceApp() {
     }
 
     if (targetTab === 'account') {
+      if (xhsCreatorProfileMaterial) {
+        return {
+          ...profileInput,
+          xhsCreatorProfile: xhsCreatorProfileMaterial,
+          simulationTopic: nextSimulationTopic,
+        }
+      }
       const nextHistoricalPosts =
         mode === 'demo' && !historicalPosts.trim()
           ? SAMPLE_ACCOUNT_INPUT.historicalPosts
@@ -1446,6 +1613,7 @@ function WorkspaceApp() {
         commentsInputAssetId: savedInputs.comments?.id,
         trendCsvInputAssetId: savedInputs.trend?.id,
         videoCreatorSamplesInputAssetId: savedInputs.video?.id,
+        xhsCreatorProfileInputAssetId: savedInputs.xhsCreatorProfile?.id,
         mediaAssetIds:
           targetTab === 'video' ? selectedVideoWorkflowMediaAssetIds : undefined,
         mode,
@@ -1471,8 +1639,16 @@ function WorkspaceApp() {
 
   async function runBatchWorkflow(targetTab: WorkflowTab = workflowTab) {
     if (!workspace) return
-    if (accountProfileMaterials.length === 0) {
-      setRunError('请先在账号概况中上传或保存至少一个账号概况。')
+    const useXhsBatch = targetTab === 'account' && Boolean(xhsCreatorProfileMaterial)
+    const batchCount = useXhsBatch
+      ? xhsCreatorProfileMaterials.length
+      : accountProfileMaterials.length
+    if (batchCount === 0) {
+      setRunError(
+        useXhsBatch
+          ? '请先在小红书创作者主页中导入至少一个主页资产。'
+          : '请先在账号概况中上传或保存至少一个账号概况。',
+      )
       return
     }
     setWorkflowTab(targetTab)
@@ -1483,13 +1659,17 @@ function WorkspaceApp() {
       await analysisRunApi.createBatch(workspace.id, {
         workflowType: workflowFromTab(targetTab),
         idempotencyKey: newClientRequestKey(`analysis-batch-${targetTab}`),
-        accountProfileInputAssetIds: accountProfileMaterials.map(
-          (material) => material.id,
-        ),
+        accountProfileInputAssetIds: useXhsBatch
+          ? []
+          : accountProfileMaterials.map((material) => material.id),
+        xhsCreatorProfileInputAssetIds: useXhsBatch
+          ? xhsCreatorProfileMaterials.map((material) => material.id)
+          : undefined,
         historicalPostsInputAssetId: savedInputs.historical?.id,
         commentsInputAssetId: savedInputs.comments?.id,
         trendCsvInputAssetId: savedInputs.trend?.id,
         videoCreatorSamplesInputAssetId: savedInputs.video?.id,
+        xhsCreatorProfileInputAssetId: savedInputs.xhsCreatorProfile?.id,
         mediaAssetIds:
           targetTab === 'video' ? selectedVideoWorkflowMediaAssetIds : undefined,
         mode,
@@ -2560,6 +2740,36 @@ function WorkspaceApp() {
     }
   }
 
+  async function saveXhsCreatorProfile() {
+    setSaveState('xhs', { phase: 'saving' })
+    try {
+      await persistTextMaterial(
+        'xhs_creator_profile',
+        xhsCreatorProfileContent,
+        xhsCreatorProfileMaterial,
+        xhsCreatorProfileDraftName,
+      )
+      setSaveState('xhs', { phase: 'saved' })
+    } catch (error) {
+      setSaveState('xhs', { phase: 'error', message: errorMessage(error) })
+    }
+  }
+
+  async function saveXhsCreatorProfileAsNew() {
+    setSaveState('xhs', { phase: 'saving' })
+    try {
+      await persistTextMaterial(
+        'xhs_creator_profile',
+        xhsCreatorProfileContent,
+        undefined,
+        xhsCreatorProfileDraftName,
+      )
+      setSaveState('xhs', { phase: 'saved' })
+    } catch (error) {
+      setSaveState('xhs', { phase: 'error', message: errorMessage(error) })
+    }
+  }
+
   function renderAccountProfilePage() {
     return (
       <AccountProfilePage
@@ -2590,11 +2800,13 @@ function WorkspaceApp() {
         commentsMaterials={commentsMaterials}
         trendMaterials={trendMaterials}
         videoCreatorSamplesMaterials={videoCreatorSamplesMaterials}
+        xhsCreatorProfileMaterials={xhsCreatorProfileMaterials}
         selectedProfileMaterial={selectedProfileMaterial}
         historicalMaterial={historicalMaterial}
         commentsMaterial={commentsMaterial}
         trendMaterial={trendMaterial}
         videoCreatorSamplesMaterial={videoCreatorSamplesMaterial}
+        xhsCreatorProfileMaterial={xhsCreatorProfileMaterial}
         workspaceName={workspaceName}
         positioning={positioning}
         accountProfileDraftName={accountProfileDraftName}
@@ -2602,10 +2814,12 @@ function WorkspaceApp() {
         commentsDraftName={commentsDraftName}
         trendCsvDraftName={trendCsvDraftName}
         videoCreatorSamplesDraftName={videoCreatorSamplesDraftName}
+        xhsCreatorProfileDraftName={xhsCreatorProfileDraftName}
         historicalPosts={historicalPosts}
         comments={comments}
         trendKeyword={trendKeyword}
         videoCreatorSamples={videoCreatorSamples}
+        xhsCreatorProfileContent={xhsCreatorProfileContent}
         inputAssetFormatterDraft={inputAssetFormatterDraft}
         inputAssetFormatterStatus={inputAssetFormatterStatus}
         workspaceSaveState={saveStates.workspace}
@@ -2614,6 +2828,7 @@ function WorkspaceApp() {
         commentsSaveState={saveStates.comments}
         trendSaveState={saveStates.trend}
         videoSaveState={saveStates.video}
+        xhsSaveState={saveStates.xhs}
         onStartNewInputAsset={startNewInputAsset}
         onChooseTextMaterial={chooseTextMaterial}
         onChooseTrendMaterial={chooseTrendMaterial}
@@ -2676,8 +2891,21 @@ function WorkspaceApp() {
         }}
         onSaveVideoCreatorSamples={saveVideoCreatorSamples}
         onSaveVideoCreatorSamplesAsNew={saveVideoCreatorSamplesAsNew}
+        onXhsCreatorProfileDraftNameChange={(value) => {
+          setXhsCreatorProfileDraftName(value)
+          setSaveState('xhs', idleState)
+        }}
+        onXhsCreatorProfileContentChange={(value) => {
+          setXhsCreatorProfileContent(value)
+          setSaveState('xhs', idleState)
+        }}
+        onSaveXhsCreatorProfile={saveXhsCreatorProfile}
+        onSaveXhsCreatorProfileAsNew={saveXhsCreatorProfileAsNew}
         onSetInputAssetBatchFile={setInputAssetBatchFile}
         onUploadTextInputAssetsCsv={uploadTextInputAssetsCsv}
+        xhsImportFiles={xhsImportFiles}
+        onSetXhsImportFile={setXhsImportFile}
+        onUploadXhsImport={uploadXhsImport}
       />
     )
   }
@@ -2691,7 +2919,7 @@ function WorkspaceApp() {
         ? '🎬 视频博主质量诊断'
         : '🔥 热点分析'
     const description = isAccount
-      ? '使用账号概况、历史笔记和评论样本生成账号诊断。'
+      ? '优先使用小红书创作者主页资产；未选择时回退到账号概况、历史笔记和评论样本。'
       : isVideo
         ? '使用账号概况和视频创作者样本判断 AIGC 视频创作者质量与激励计划适配度。'
         : '使用账号概况和趋势 CSV 生成热点分析。'
@@ -2713,6 +2941,18 @@ function WorkspaceApp() {
         <em className={status}>{status}</em>
       </div>
     )
+    const xhsCreatorProfilePreview = (asset: TextInputAsset) => {
+      try {
+        const parsed = JSON.parse(asset.content) as {
+          notes?: unknown[]
+          creator?: { displayName?: string }
+        }
+        const displayName = parsed.creator?.displayName || asset.name
+        return `${displayName} · ${parsed.notes?.length || 0} 条笔记`
+      } catch {
+        return inputAssetPreview(asset)
+      }
+    }
     const mediaWorkflowPreview = (asset: MediaAsset) => {
       const hasUnderstanding = Boolean(
         asset.derived.qwenUnderstanding ||
@@ -2730,34 +2970,64 @@ function WorkspaceApp() {
         <section className="input-panel workflow-call-panel">
           <div className="panel-title">{panelTitle}</div>
           <p className="subline">{description}</p>
-          <div className="source-editor-card compact">
-            <label htmlFor="workflow-account-profile-material">
-              账号概况实例
-            </label>
-            <select
-              id="workflow-account-profile-material"
-              value={selectedProfileMaterial?.id || ''}
-              onChange={(event) => setSelectedProfileInputAssetId(event.target.value)}
-            >
-              {accountProfileMaterials.length === 0 ? (
-                <option value="">还没有保存的账号概况</option>
-              ) : (
-                accountProfileMaterials.map((material) => (
+          {isAccount && (
+            <div className="source-editor-card compact">
+              <label htmlFor="workflow-xhs-creator-profile-material">
+                小红书创作者主页实例
+              </label>
+              <select
+                id="workflow-xhs-creator-profile-material"
+                value={selectedXhsCreatorProfileInputAssetId}
+                onChange={(event) =>
+                  setSelectedXhsCreatorProfileInputAssetId(event.target.value)
+                }
+              >
+                <option value="">不使用，改用下方兼容输入</option>
+                {xhsCreatorProfileMaterials.map((material) => (
                   <option value={material.id} key={material.id}>
                     {material.name}
                   </option>
-                ))
+                ))}
+              </select>
+              {renderInputPreview(
+                '小红书创作者主页',
+                xhsCreatorProfileMaterial ? 'ready' : 'missing',
+                xhsCreatorProfileMaterial
+                  ? xhsCreatorProfilePreview(xhsCreatorProfileMaterial)
+                  : '未选择结构化小红书主页资产',
               )}
-            </select>
-            {renderInputPreview(
-              '账号概况',
-              selectedProfileMaterial ? 'ready' : 'missing',
-              selectedProfileMaterial
-                ? inputAssetPreview(selectedProfileMaterial)
-                : '未选择账号概况实例',
-            )}
-          </div>
-          {isAccount && (
+            </div>
+          )}
+          {!(isAccount && xhsCreatorProfileMaterial) && (
+            <div className="source-editor-card compact">
+              <label htmlFor="workflow-account-profile-material">
+                账号概况实例
+              </label>
+              <select
+                id="workflow-account-profile-material"
+                value={selectedProfileMaterial?.id || ''}
+                onChange={(event) => setSelectedProfileInputAssetId(event.target.value)}
+              >
+                {accountProfileMaterials.length === 0 ? (
+                  <option value="">还没有保存的账号概况</option>
+                ) : (
+                  accountProfileMaterials.map((material) => (
+                    <option value={material.id} key={material.id}>
+                      {material.name}
+                    </option>
+                  ))
+                )}
+              </select>
+              {renderInputPreview(
+                '账号概况',
+                selectedProfileMaterial ? 'ready' : 'missing',
+                selectedProfileMaterial
+                  ? inputAssetPreview(selectedProfileMaterial)
+                  : '未选择账号概况实例',
+              )}
+            </div>
+          )}
+          {isAccount && !xhsCreatorProfileMaterial && (
             <>
               <div className="source-editor-card compact">
                 <label htmlFor="workflow-historical-material">历史笔记实例</label>
@@ -2966,10 +3236,17 @@ function WorkspaceApp() {
           <div className="workflow-shortcuts">
             <button
               type="button"
-              disabled={running || accountProfileMaterials.length === 0}
+              disabled={
+                running ||
+                (isAccount && xhsCreatorProfileMaterial
+                  ? xhsCreatorProfileMaterials.length === 0
+                  : accountProfileMaterials.length === 0)
+              }
               onClick={() => runBatchWorkflow(targetTab)}
             >
-              批量运行当前 Workflow（{accountProfileMaterials.length} 个账号概况）
+              {isAccount && xhsCreatorProfileMaterial
+                ? `批量运行当前 Workflow（${xhsCreatorProfileMaterials.length} 个小红书主页）`
+                : `批量运行当前 Workflow（${accountProfileMaterials.length} 个账号概况）`}
             </button>
             <button type="button" onClick={() => downloadAnalysisRunsCsv(targetTab)}>
               下载结果 CSV

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402, I001
 """Smoke test the configured live model API through the backend model adapter.
 
 This script intentionally reads API keys only from environment variables and
@@ -154,7 +155,10 @@ def main() -> int:
     parser.add_argument(
         "--env-file",
         default=str(REPO_ROOT / ".env.local"),
-        help="Optional env file. Default: .env.local. Values do not override existing environment variables.",
+        help=(
+            "Optional env file. Default: .env.local. Values do not override "
+            "existing environment variables."
+        ),
     )
     parser.add_argument(
         "--operation",

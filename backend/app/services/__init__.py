@@ -24,6 +24,7 @@ from app.services.topics import TopicService
 from app.services.workflow_assets import WorkflowAssetService
 from app.services.workflow_worker import WorkflowWorkerService
 from app.services.workspaces import WorkspaceService
+from app.services.xhs_imports import XhsOfflineImportService
 
 __all__ = [
     "AgentService",
@@ -48,4 +49,5 @@ __all__ = [
     "WorkflowAssetService",
     "WorkflowWorkerService",
     "WorkspaceService",
+    "XhsOfflineImportService",
 ]
