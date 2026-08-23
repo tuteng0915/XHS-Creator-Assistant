@@ -172,6 +172,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
             account_profiles: accountProfileMaterials.length,
             historical_posts: historicalMaterials.length,
             comments: commentsMaterials.length,
+            video_creator_samples: videoCreatorSamplesMaterials.length,
           } as const
           return (
             <button
@@ -604,13 +605,13 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
               <h2>
                 {videoCreatorSamplesMaterial
                   ? videoCreatorSamplesMaterial.name
-                  : '新建视频创作者样本'}
+                  : '新建视频创作样本'}
               </h2>
             </div>
           </div>
           <div className="source-editor-card">
             <label htmlFor="video-creator-samples-draft-name">
-              视频创作者样本名称
+              视频创作样本名称
             </label>
             <input
               id="video-creator-samples-draft-name"
@@ -621,7 +622,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
               placeholder="例：AI短剧创作者样本"
             />
             <label htmlFor="video-creator-samples">
-              视频创作者样本（创作者背景、视频样本、互动数据、运营备注）
+              视频创作样本（创作者背景、视频样本、互动数据、运营备注）
             </label>
             <textarea
               id="video-creator-samples"
@@ -636,21 +637,21 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
                 onClick={props.onSaveVideoCreatorSamples}
               >
                 {videoCreatorSamplesMaterial
-                  ? '保存当前视频创作者样本'
-                  : '保存为视频创作者样本'}
+                  ? '保存当前视频创作样本'
+                  : '保存为视频创作样本'}
               </button>
               <button
                 className="save-button"
                 onClick={props.onSaveVideoCreatorSamplesAsNew}
               >
-                另存为新视频创作者样本
+                另存为新视频创作样本
               </button>
               <SaveIndicator state={props.videoSaveState} />
             </div>
           </div>
           {renderTextBatchImport(
             'video_creator_samples',
-            '视频创作者样本',
+            '视频创作样本',
             '表头支持 name/content、video_creator_samples、video_samples、创作者样本。',
           )}
           {renderXhsOfflineImport('video_creator_samples')}
@@ -715,7 +716,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
         </div>
         {isCreatorPanel && (
           <p className="subline">
-            小红书主页是上层结构化档案；账号概况、历史笔记和评论样本是其子视图或兼容输入。
+            小红书主页是上层结构化档案；账号概况、历史笔记、评论样本和视频创作样本是其子视图或兼容输入。
           </p>
         )}
         {renderCreatorProfileTabs()}

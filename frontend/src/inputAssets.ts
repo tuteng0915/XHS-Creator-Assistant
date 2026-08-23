@@ -18,6 +18,7 @@ export const CREATOR_INPUT_ASSET_PANELS = [
   'account_profiles',
   'historical_posts',
   'comments',
+  'video_creator_samples',
 ] as const satisfies readonly InputAssetPanel[]
 
 export type InputAssetContentKind = 'text' | 'file'
@@ -100,15 +101,15 @@ export const INPUT_ASSET_DEFINITIONS: InputAssetTypeDefinition[] = [
   {
     panel: 'video_creator_samples',
     type: 'video_creator_samples',
-    label: '视频创作者样本',
-    singularLabel: '视频创作者样本',
-    description: '视频创作者样本用于视频质量诊断和激励计划适配判断。',
+    label: '视频创作样本',
+    singularLabel: '视频创作样本',
+    description: '视频创作样本用于视频质量诊断和激励计划适配判断。',
     icon: '🎬',
     contentKind: 'text',
-    emptyLabel: '还没有已保存的视频创作者样本。',
-    newLabel: '新建视频创作者样本',
-    saveCurrentLabel: '保存当前视频创作者样本',
-    saveAsNewLabel: '另存为新视频创作者样本',
+    emptyLabel: '还没有已保存的视频创作样本。',
+    newLabel: '新建视频创作样本',
+    saveCurrentLabel: '保存当前视频创作样本',
+    saveAsNewLabel: '另存为新视频创作样本',
     workflowRoles: ['video_creator_samples'],
     contextSelectors: ['video_creator_samples_text'],
   },

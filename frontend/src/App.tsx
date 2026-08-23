@@ -1118,7 +1118,7 @@ function WorkspaceApp() {
         return
       }
       setSelectedVideoInputAssetId(NEW_INPUT_ASSET_ID)
-      setVideoCreatorSamplesDraftName(name || '整理后的视频创作者样本')
+      setVideoCreatorSamplesDraftName(name || '整理后的视频创作样本')
       setVideoCreatorSamples(content)
       setSaveState('video', idleState)
       setInputAssetFormatterStatus(notes)
@@ -1642,7 +1642,7 @@ function WorkspaceApp() {
         setVideoCreatorSamples(nextVideoCreatorSamples)
       }
       if (!nextVideoCreatorSamples.trim()) {
-        throw new Error('请填写视频创作者样本。')
+        throw new Error('请填写视频创作样本。')
       }
 
       setSaveState('video', { phase: 'saving' })
@@ -2545,7 +2545,7 @@ function WorkspaceApp() {
         video: {
           title: '视频博主质量诊断帮助',
           description:
-            '视频博主质量诊断会读取账号概况和视频创作者样本，判断创作者画像、视频质量和激励计划适配度。',
+            '视频博主质量诊断会读取账号概况和视频创作样本，判断创作者画像、视频质量和激励计划适配度。',
           bullets: [
             '样本应包含创作者背景、视频标题/数据、内容观察和运营备注。',
             '适合创作者运营批量评估 AIGC 视频创作者。',

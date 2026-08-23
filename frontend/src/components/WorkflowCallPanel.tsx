@@ -81,7 +81,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
   const description = isAccount
     ? '优先使用小红书创作者主页资产；未选择时回退到账号概况、历史笔记和评论样本。'
     : isVideo
-      ? '使用账号概况和视频创作者样本判断 AIGC 视频创作者质量与激励计划适配度。'
+      ? '使用账号概况和视频创作样本判断 AIGC 视频创作者质量与激励计划适配度。'
       : '使用账号概况和趋势 CSV 生成热点分析。'
   const runLabel = isAccount
     ? '⚡ 生成账号诊断'
@@ -240,7 +240,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
               props.onSelectXhsCreatorProfileInputAssetId(event.target.value)
             }
           >
-            <option value="">不使用，改用视频创作者样本</option>
+            <option value="">不使用，改用视频创作样本</option>
             {xhsCreatorProfileMaterials.map((material) => (
               <option value={material.id} key={material.id}>
                 {material.name}
@@ -377,7 +377,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
         <>
           {!xhsCreatorProfileMaterial && (
           <div className="source-editor-card compact">
-            <label htmlFor="workflow-video-material">视频创作者样本实例</label>
+            <label htmlFor="workflow-video-material">视频创作样本实例</label>
             <select
               id="workflow-video-material"
               value={videoCreatorSamplesMaterial?.id || ''}
@@ -389,7 +389,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
               }}
             >
               {videoCreatorSamplesMaterials.length === 0 ? (
-                <option value="">还没有保存的视频创作者样本</option>
+                <option value="">还没有保存的视频创作样本</option>
               ) : (
                 videoCreatorSamplesMaterials.map((material) => (
                   <option value={material.id} key={material.id}>
@@ -399,11 +399,11 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
               )}
             </select>
             {renderInputPreview(
-              '视频创作者样本',
+              '视频创作样本',
               videoCreatorSamplesMaterial ? 'ready' : 'missing',
               videoCreatorSamplesMaterial
                 ? inputAssetPreview(videoCreatorSamplesMaterial)
-                : '未选择视频创作者样本实例',
+                : '未选择视频创作样本实例',
             )}
           </div>
           )}

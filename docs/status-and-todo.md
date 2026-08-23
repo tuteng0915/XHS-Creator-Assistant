@@ -49,8 +49,8 @@ https://your-domain/api/...
   - 账号概况；
   - 历史笔记；
   - 评论样本；
+  - 视频创作样本；
 - 趋势 CSV 数据；
-- 视频创作者样本；
 - 图片素材；
 - 视频素材；
 - 分析结果；
@@ -64,7 +64,7 @@ https://your-domain/api/...
 - 显式保存；
 - workflow 运行前自动保存必要输入；
 - 账号概况批量 CSV/TSV 导入；
-- 历史笔记、评论样本、视频创作者样本的通用 CSV/TSV 批量导入 API 和前端入口；
+- 历史笔记、评论样本、视频创作样本的通用 CSV/TSV 批量导入 API 和前端入口；
 - 小红书创作者主页在后端仍是独立 input asset type，但前端归入“创作者档案”；它可由本地 MediaCrawler fixture 导入，并可直接作为账号诊断输入，也支持按主页资产批量运行账号诊断；
 - workflow 批量运行：账号概况批量、以及小红书创作者主页批量账号诊断；
 - 批量结果 CSV 导出；
@@ -118,7 +118,7 @@ https://your-domain/api/...
 - SSE 只作为观察通道；
 - 刷新后可重新打开历史 run；
 - 账号诊断、热点分析、受众模拟已经接入 LangGraph；
-- 视频博主质量诊断已按同一产品接口实现，支持小红书创作者主页派生 evidence pack，也兼容视频创作者样本文本，并可选择已保存的图片/视频素材 compact understanding 作为补充上下文；
+- 视频博主质量诊断已按同一产品接口实现，支持小红书创作者主页派生 evidence pack，也兼容视频创作样本文本，并可选择已保存的图片/视频素材 compact understanding 作为补充上下文；
 - 运行结果、stage 结果、错误和 input snapshot 会持久化。
 
 ### 能力资产
@@ -191,7 +191,7 @@ https://your-domain/api/...
 ### P1：批量导入与批量 workflow 体验
 
 - 账号概况批量导入后应更清晰地展示每个实例的状态。
-- 历史笔记、评论样本、视频创作者样本、小红书创作者主页批量导入已接入，后续需要更好的导入结果预览和错误行展示。
+- 历史笔记、评论样本、视频创作样本、小红书创作者主页批量导入已接入，后续需要更好的导入结果预览和错误行展示。
 - 批量运行进度需要更明确。
 - 批量导出 CSV 字段需要稳定成产品 contract。
 
@@ -252,7 +252,7 @@ agent conversation 现在已经不是同步等待模型完成：
 
 - Workflow assets 是产品能力目录和调用说明，不是前端可编辑的任意 nodegraph。
 - Skills 当前是产品内受控能力；formatter skills 与 media skills 支持直接 invoke，不支持任意代码工具调用。
-- 视频博主质量诊断优先使用小红书创作者主页派生的 compact evidence pack，兼容文本化视频创作者样本；如果用户先保存 Qwen 图片/视频理解结果，workflow 可以读取 compact media understanding，但不做自动视频抓取或本地视频直传。
+- 视频博主质量诊断优先使用小红书创作者主页派生的 compact evidence pack，兼容文本化视频创作样本；如果用户先保存 Qwen 图片/视频理解结果，workflow 可以读取 compact media understanding，但不做自动视频抓取或本地视频直传。
 - 图片/视频素材已经可以作为媒体资产保存；Qwen media skills 可理解图片、基于公开视频/帧 URL 或本地视频抽帧理解视频，并可生成图片/视频资产。
 - 本地上传的视频文件不会直接发送给 Qwen；当前本地视频理解入口依赖 ffmpeg 抽帧。
 - SSE 是可重连观察 replay，不是完整 durable event log。

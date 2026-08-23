@@ -106,7 +106,7 @@ const materials: Record<string, InputAsset[]> = {
       id: 'video-samples-2',
       workspaceId: 'workspace-2',
       type: 'video_creator_samples',
-      name: '视频创作者样本',
+      name: '视频创作样本',
       content: '创作者：@AI短剧研究所\n运营备注：剧情内容催更多，商单互动低。',
       createdAt: '2026-07-11T11:00:00Z',
       updatedAt: '2026-07-11T11:00:00Z',
@@ -901,7 +901,7 @@ describe('workspace UI', () => {
     expect(screen.queryByRole('button', { name: '管理输入资产' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /视频博主质量诊断/ }))
     await screen.findByText('视频创作者诊断待运行')
-    expect(screen.getAllByText('视频创作者样本').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('视频创作样本').length).toBeGreaterThan(0)
   })
 
   it('shows XHS creator profile workflow inputs as a derived asset source', async () => {
@@ -1071,7 +1071,7 @@ describe('workspace UI', () => {
     expect(await screen.findByText('本次视频诊断会由后端派生')).toBeInTheDocument()
     expect(screen.getByText('视频作者证据包')).toBeInTheDocument()
     expect(screen.getByText('视频：1')).toBeInTheDocument()
-    expect(screen.queryByLabelText('视频创作者样本实例')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('视频创作样本实例')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '⚡ 生成视频创作者诊断' }))
 
@@ -1686,10 +1686,10 @@ describe('workspace UI', () => {
       })
 
     render(<App />)
-    fireEvent.click(await screen.findByRole('button', { name: /视频创作者样本/ }))
+    await openCreatorAssetTab(/视频创作样本/)
     fireEvent.change(
       await screen.findByLabelText(
-        '视频创作者样本（创作者背景、视频样本、互动数据、运营备注）',
+        '视频创作样本（创作者背景、视频样本、互动数据、运营备注）',
       ),
       {
         target: {

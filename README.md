@@ -255,9 +255,9 @@ backend/.venv/bin/python scripts/xhs_profile_importer.py "URL" --skip-login-prom
 data/browser-profiles/xhs-importer/
 ```
 
-如果需要重新登录，删除这个目录即可。导出的 Markdown 可以人工检查后作为历史笔记、视频创作者样本或小红书创作者主页输入资产导入主应用。
+如果需要重新登录，删除这个目录即可。导出的 Markdown 可以人工检查后作为历史笔记、视频创作样本或小红书创作者主页输入资产导入主应用。
 
-主平台不会访问小红书。如果要把离线导入结果放进主应用，可以在内容资产里的“创作者档案 → 小红书主页”页面上传本地 importer 生成的 JSON；旧 `xhs-profile-import/v1` JSON 会转换成 workflow 可直接使用的 `xhs-creator-profile/v1`。兼容路径仍支持把 JSON / Markdown 导入历史笔记或视频创作者样本。后端只解析上传文件，并保存为受控 input asset。
+主平台不会访问小红书。如果要把离线导入结果放进主应用，可以在内容资产里的“创作者档案 → 小红书主页”页面上传本地 importer 生成的 JSON；旧 `xhs-profile-import/v1` JSON 会转换成 workflow 可直接使用的 `xhs-creator-profile/v1`。兼容路径仍支持把 JSON / Markdown 导入历史笔记或视频创作样本。后端只解析上传文件，并保存为受控 input asset。
 
 如果需要同时导入封面，推荐整理成离线导入包并在“创作者档案 → 小红书主页”页选择整个文件夹：
 
