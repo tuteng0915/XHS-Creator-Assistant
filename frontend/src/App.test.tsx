@@ -114,6 +114,36 @@ const materials: Record<string, InputAsset[]> = {
   ],
 }
 
+const qsheepXhsCreatorProfileAsset: InputAsset = {
+  id: 'xhs-profile-1',
+  workspaceId: 'workspace-1',
+  type: 'xhs_creator_profile',
+  name: 'XHS QSheep 创作者主页',
+  content: JSON.stringify({
+    schemaVersion: 'xhs-creator-profile/v1',
+    creator: { displayName: 'QSheep' },
+    notes: [
+      {
+        noteId: 'n1',
+        title: '中传大三专业第一，我为什么放弃保研',
+        desc: '申请季前梳理自己的履历发现写不下了。',
+        metrics: { liked: 1454, collected: 349, comments: 66, shares: 253 },
+        comments: [{ content: '太真实了' }],
+        cover: { relativePath: 'images/n1/0.jpg' },
+      },
+      {
+        noteId: 'n2',
+        title: 'lse 最后一节 gender 课',
+        desc: '老师说不要停止想象。',
+        metrics: { liked: 536, collected: 165, comments: 22, shares: 86 },
+        comments: [],
+      },
+    ],
+  }),
+  createdAt: '2026-07-11T10:00:00Z',
+  updatedAt: '2026-07-11T10:00:00Z',
+}
+
 const analysisRuns: Record<string, AnalysisRunSummary[]> = {
   'workspace-1': [
     {
@@ -865,6 +895,39 @@ describe('workspace UI', () => {
     fireEvent.click(screen.getByRole('button', { name: /视频博主质量诊断/ }))
     await screen.findByText('视频创作者诊断待运行')
     expect(screen.getAllByText('视频创作者样本').length).toBeGreaterThan(0)
+  })
+
+  it('shows XHS creator profile workflow inputs as a derived asset source', async () => {
+    const originalWorkspaceOneMaterials = materials['workspace-1']
+    materials['workspace-1'] = [
+      qsheepXhsCreatorProfileAsset,
+      ...originalWorkspaceOneMaterials,
+    ]
+    try {
+      installWorkspaceApiMock()
+      render(<App />)
+
+      await screen.findByText('账号诊断待运行')
+
+      expect(screen.getByLabelText('小红书创作者主页实例')).toHaveValue(
+        'xhs-profile-1',
+      )
+      expect(screen.getByText('账号：QSheep')).toBeInTheDocument()
+      expect(screen.getByText('笔记：2')).toBeInTheDocument()
+      expect(screen.getByText('评论：1')).toBeInTheDocument()
+      expect(screen.getByText('封面引用：1')).toBeInTheDocument()
+      expect(screen.getByText('本次账号诊断会由后端派生')).toBeInTheDocument()
+      expect(screen.getByText('账号概况快照')).toBeInTheDocument()
+      expect(screen.getByText('历史笔记摘要')).toBeInTheDocument()
+      expect(screen.getByText('评论痛点样本')).toBeInTheDocument()
+      expect(
+        screen.getByText('中传大三专业第一，我为什么放弃保研'),
+      ).toBeInTheDocument()
+      expect(screen.queryByLabelText('账号概况实例')).not.toBeInTheDocument()
+    } finally {
+      materials['workspace-1'] = originalWorkspaceOneMaterials
+      cleanup()
+    }
   })
 
   it('prefers a workspace with input assets when the newest workspace is empty', async () => {

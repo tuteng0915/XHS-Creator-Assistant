@@ -90,6 +90,7 @@ import {
 } from './workflows'
 import {
   previewXhsImportPackage,
+  xhsCreatorProfileSummaryFromAsset,
   xhsPackageRelativePaths,
   type XhsImportPackagePreview,
 } from './xhsCreatorProfile'
@@ -3082,17 +3083,72 @@ function WorkspaceApp() {
         <em className={status}>{status}</em>
       </div>
     )
-    const xhsCreatorProfilePreview = (asset: TextInputAsset) => {
-      try {
-        const parsed = JSON.parse(asset.content) as {
-          notes?: unknown[]
-          creator?: { displayName?: string }
-        }
-        const displayName = parsed.creator?.displayName || asset.name
-        return `${displayName} · ${parsed.notes?.length || 0} 条笔记`
-      } catch {
-        return inputAssetPreview(asset)
+    const renderXhsWorkflowInputPreview = (asset?: TextInputAsset) => {
+      if (!asset) {
+        return renderInputPreview(
+          '小红书创作者主页',
+          'missing',
+          '未选择结构化小红书主页资产',
+        )
       }
+      const summary = xhsCreatorProfileSummaryFromAsset(asset)
+      if (!summary) {
+        return (
+          <>
+            {renderInputPreview(
+              '小红书创作者主页',
+              'ready',
+              inputAssetPreview(asset),
+            )}
+            <p className="workflow-derived-note">
+              后端会尝试从该主页资产派生账号概况、历史笔记和评论样本快照。
+            </p>
+          </>
+        )
+      }
+      return (
+        <div className="xhs-summary-card workflow-xhs-preview">
+          <div className="xhs-summary-head">
+            <b>小红书创作者主页</b>
+            <span>{asset.name}</span>
+          </div>
+          <div className="xhs-summary-grid">
+            <span>账号：{summary.displayName}</span>
+            <span>笔记：{summary.noteCount}</span>
+            <span>评论：{summary.commentCount}</span>
+            <span>封面引用：{summary.coverReferenceCount}</span>
+          </div>
+          <div className="workflow-derived-assets">
+            <label>本次账号诊断会由后端派生</label>
+            <div>
+              <span>账号概况快照</span>
+              <span>历史笔记摘要</span>
+              <span>评论痛点样本</span>
+            </div>
+          </div>
+          {summary.topNotes.length > 0 && (
+            <div className="xhs-top-notes workflow-xhs-top-notes">
+              <label>高互动样本</label>
+              <ol>
+                {summary.topNotes.slice(0, 3).map((note) => (
+                  <li key={note.noteId || note.title}>
+                    <b>{note.title}</b>
+                    <span>
+                      赞 {note.liked ?? '-'} · 藏 {note.collected ?? '-'} · 评{' '}
+                      {note.comments ?? '-'} · 分享 {note.shares ?? '-'}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {summary.warnings.length > 0 && (
+            <p className="workflow-derived-note">
+              该主页资产有 {summary.warnings.length} 条导入提示，可在内容资产详情页查看。
+            </p>
+          )}
+        </div>
+      )
     }
     const mediaWorkflowPreview = (asset: MediaAsset) => {
       const hasUnderstanding = Boolean(
@@ -3130,13 +3186,7 @@ function WorkspaceApp() {
                   </option>
                 ))}
               </select>
-              {renderInputPreview(
-                '小红书创作者主页',
-                xhsCreatorProfileMaterial ? 'ready' : 'missing',
-                xhsCreatorProfileMaterial
-                  ? xhsCreatorProfilePreview(xhsCreatorProfileMaterial)
-                  : '未选择结构化小红书主页资产',
-              )}
+              {renderXhsWorkflowInputPreview(xhsCreatorProfileMaterial)}
             </div>
           )}
           {!(isAccount && xhsCreatorProfileMaterial) && (
