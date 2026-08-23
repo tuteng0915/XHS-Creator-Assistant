@@ -259,6 +259,18 @@ data/browser-profiles/xhs-importer/
 
 主平台不会访问小红书。如果要把离线导入结果放进主应用，可以在内容资产里的“小红书创作者主页”页面上传本地 importer 生成的 JSON；旧 `xhs-profile-import/v1` JSON 会转换成 workflow 可直接使用的 `xhs-creator-profile/v1`。兼容路径仍支持把 JSON / Markdown 导入历史笔记或视频创作者样本。后端只解析上传文件，并保存为受控 input asset。
 
+如果需要同时导入封面，推荐整理成离线导入包并在“小红书创作者主页”页选择整个文件夹：
+
+```text
+xhs_import_package/
+  xhs_creator_profile.json
+  images/
+    <note_id>/
+      0.jpg
+```
+
+`xhs_creator_profile.json` 里的笔记可写入 `cover.relativePath`，例如 `images/<note_id>/0.jpg`。导入后会创建小红书创作者主页 input asset，并把封面保存为图文资产；主页资产默认命名为 `XHS {小红书账号名} 创作者主页`，封面命名为 `笔记标题_封面`，caption 使用笔记正文。
+
 ### MediaCrawler 本地抓取入口
 
 如果需要更稳定地读取笔记详情、一级评论和封面，可以使用独立的 MediaCrawler 本地克隆。这个入口仍然只作为离线工具存在，不接入主平台后端。

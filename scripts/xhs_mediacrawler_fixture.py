@@ -14,6 +14,7 @@ from typing import Any
 class XhsMediaCrawlerNote:
     note_id: str
     note_type: str
+    nickname: str
     title: str
     desc: str
     note_url: str
@@ -73,6 +74,7 @@ def load_mediacrawler_export(base_dir: Path, *, code: str) -> XhsMediaCrawlerExp
 
 
 def build_account_profile_markdown(export: XhsMediaCrawlerExport) -> str:
+    display_name = infer_creator_display_name(export)
     type_counts = Counter(note.note_type or "unknown" for note in export.notes)
     tag_counts = Counter(tag for note in export.notes for tag in note.tag_list)
     top_notes = sorted(
@@ -85,7 +87,7 @@ def build_account_profile_markdown(export: XhsMediaCrawlerExport) -> str:
         reverse=True,
     )[:5]
     lines = [
-        f"# 小红书账号概况：{export.code}",
+        f"# 小红书账号概况：{display_name}",
         "",
         "这是一份由 MediaCrawler 离线导入结果生成的确定性摘要，不是 LLM 诊断结论。",
         "",
@@ -203,6 +205,7 @@ def build_xhs_creator_profile_payload(
     comments_by_note: dict[str, list[XhsMediaCrawlerComment]] = defaultdict(list)
     for comment in export.comments:
         comments_by_note[comment.note_id].append(comment)
+    display_name = infer_creator_display_name(export)
     return {
         "schemaVersion": "xhs-creator-profile/v1",
         "source": {
@@ -213,7 +216,7 @@ def build_xhs_creator_profile_payload(
             "baseDir": str(export.base_dir),
         },
         "creator": {
-            "displayName": export.code,
+            "displayName": display_name,
             "profileText": build_account_profile_markdown(export),
         },
         "notes": [
@@ -230,6 +233,10 @@ def build_xhs_creator_profile_payload(
                     "comments": note.comment_count,
                     "shares": note.share_count,
                 },
+                "cover": {
+                    "relativePath": _fixture_cover_relative_path(note),
+                    "caption": note.desc or note.title,
+                },
                 "coverMediaAssetId": media_asset_ids_by_note.get(note.note_id),
                 "comments": [
                     {
@@ -245,6 +252,19 @@ def build_xhs_creator_profile_payload(
             for note in export.notes
         ],
     }
+
+
+def _fixture_cover_relative_path(note: XhsMediaCrawlerNote) -> str:
+    if note.cover_path is None:
+        return ""
+    return f"images/{note.note_id}/{note.cover_path.name}"
+
+
+def infer_creator_display_name(export: XhsMediaCrawlerExport) -> str:
+    nicknames = Counter(note.nickname for note in export.notes if note.nickname)
+    if nicknames:
+        return nicknames.most_common(1)[0][0]
+    return export.code
 
 
 def _latest_matching_file(directory: Path, pattern: str, *, required: bool = True) -> Path | None:
@@ -274,6 +294,7 @@ def _parse_note(row: dict[str, Any], *, xhs_dir: Path) -> XhsMediaCrawlerNote:
     return XhsMediaCrawlerNote(
         note_id=note_id,
         note_type=_clean(row.get("type")),
+        nickname=_clean(row.get("nickname")),
         title=_clean(row.get("title")) or "未命名笔记",
         desc=_clean(row.get("desc")),
         note_url=_clean(row.get("note_url")),

@@ -30,6 +30,7 @@ import type {
   WorkflowAssetStatus,
   WorkflowAssetSummary,
   WorkflowType,
+  XhsOfflineImportPackageResponse,
   XhsOfflineImportResponse,
 } from './types'
 
@@ -188,6 +189,27 @@ export const inputAssetApi = {
     form.set('file', file)
     return request<XhsOfflineImportResponse>(
       `/api/workspaces/${workspaceId}/input-assets/xhs-import`,
+      { method: 'POST', body: form },
+    )
+  },
+
+  uploadXhsImportPackage: (
+    workspaceId: string,
+    profile: File,
+    files: File[],
+    relativePaths: string[],
+    name = '',
+  ) => {
+    const form = new FormData()
+    form.set('name', name)
+    form.set('profile', profile, profile.name)
+    files.forEach((file, index) => {
+      const relativePath = relativePaths[index] || file.name
+      form.append('files', file, relativePath)
+      form.append('relativePaths', relativePath)
+    })
+    return request<XhsOfflineImportPackageResponse>(
+      `/api/workspaces/${workspaceId}/input-assets/xhs-import-package`,
       { method: 'POST', body: form },
     )
   },

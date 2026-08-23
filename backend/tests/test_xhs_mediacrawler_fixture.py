@@ -35,6 +35,7 @@ def test_load_mediacrawler_export_preserves_notes_comments_and_cover(tmp_path: P
             {
                 "note_id": "n1",
                 "type": "normal",
+                "nickname": "秀***冰",
                 "title": "中传大三|专业第一，我为什么放弃保研",
                 "desc": "中文正文完整保留。",
                 "note_url": "https://www.xiaohongshu.com/explore/n1",
@@ -67,6 +68,7 @@ def test_load_mediacrawler_export_preserves_notes_comments_and_cover(tmp_path: P
 
     assert export.code == "QSheep"
     assert len(export.notes) == 1
+    assert export.notes[0].nickname == "秀***冰"
     assert export.notes[0].title == "中传大三|专业第一，我为什么放弃保研"
     assert export.notes[0].desc == "中文正文完整保留。"
     assert export.notes[0].tag_list == ["留学", "申请"]
@@ -85,6 +87,7 @@ def test_fixture_markdown_outputs_agent_readable_context(tmp_path: Path):
             {
                 "note_id": "n1",
                 "type": "normal",
+                "nickname": "秀***冰",
                 "title": "阿凡达3 看懂这一点，就再也回不去了",
                 "desc": "Eywa 真的是信仰吗？",
                 "tag_list": "科幻电影,影评",
@@ -104,6 +107,7 @@ def test_fixture_markdown_outputs_agent_readable_context(tmp_path: Path):
     )
     comments = module.build_comments_markdown(export)
 
+    assert "# 小红书账号概况：秀***冰" in profile
     assert "确定性摘要，不是 LLM 诊断结论" in profile
     assert "高频标签：科幻电影、影评" in profile
     assert "封面 MediaAsset：media-1" in posts
@@ -122,6 +126,7 @@ def test_build_xhs_creator_profile_payload_keeps_note_comment_media_relationship
             {
                 "note_id": "n1",
                 "type": "normal",
+                "nickname": "QSheep",
                 "title": "中传大三|专业第一，我为什么放弃保研",
                 "desc": "正文",
                 "note_url": "https://www.xiaohongshu.com/explore/n1",
@@ -145,6 +150,7 @@ def test_build_xhs_creator_profile_payload_keeps_note_comment_media_relationship
 
     assert payload["schemaVersion"] == "xhs-creator-profile/v1"
     assert payload["source"]["fixtureCode"] == "QSheep"
+    assert payload["creator"]["displayName"] == "QSheep"
     assert payload["notes"][0]["noteId"] == "n1"
     assert payload["notes"][0]["coverMediaAssetId"] == "media-1"
     assert payload["notes"][0]["metrics"]["liked"] == 1454

@@ -167,6 +167,10 @@ const emptyXhsImportFiles = (): Record<XhsImportPanel, File | null> => ({
   xhs_creator_profiles: null,
 })
 
+function fileRelativePath(file: File): string {
+  return (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+}
+
 const idleState: SaveState = { phase: 'idle' }
 const emptyWorkflowStageViews = (): WorkflowStageViews => ({
   account: [],
@@ -480,6 +484,7 @@ function WorkspaceApp() {
   >(emptyTextInputAssetBatchFiles)
   const [xhsImportFiles, setXhsImportFiles] =
     useState<Record<XhsImportPanel, File | null>>(emptyXhsImportFiles)
+  const [xhsPackageFiles, setXhsPackageFiles] = useState<File[]>([])
   const [inputAssetPanel, setInputAssetPanel] =
     useState<InputAssetPanel>('historical_posts')
   const [selectedHistoricalInputAssetId, setSelectedHistoricalInputAssetId] =
@@ -872,6 +877,8 @@ function WorkspaceApp() {
     setXhsCreatorProfileDraftName(SAMPLE_ASSET_NAMES.xhsCreatorProfile)
     setSelectedProfileInputAssetId('')
     setInputAssetBatchFiles(emptyTextInputAssetBatchFiles())
+    setXhsImportFiles(emptyXhsImportFiles())
+    setXhsPackageFiles([])
     setInputAssetPanel('historical_posts')
     setSelectedHistoricalInputAssetId('')
     setSelectedCommentsInputAssetId('')
@@ -1381,6 +1388,78 @@ function WorkspaceApp() {
       })
     } catch (error) {
       setSaveState(saveKey, {
+        phase: 'error',
+        message: errorMessage(error),
+      })
+    }
+  }
+
+  function setXhsImportPackageFiles(files: File[]) {
+    setXhsPackageFiles(files)
+    setSaveState('xhs', idleState)
+  }
+
+  async function uploadXhsImportPackage() {
+    if (!workspace) {
+      setSaveState('xhs', {
+        phase: 'error',
+        message: '工作区尚未加载。',
+      })
+      return
+    }
+    if (xhsPackageFiles.length === 0) {
+      setSaveState('xhs', {
+        phase: 'error',
+        message: '请选择包含 profile JSON 和 images 目录的文件夹。',
+      })
+      return
+    }
+
+    const profileFile =
+      xhsPackageFiles.find((file) =>
+        /(^|\/)(xhs_creator_profile|profile)\.json$/i.test(fileRelativePath(file)),
+      ) ||
+      xhsPackageFiles.find((file) =>
+        fileRelativePath(file).toLowerCase().endsWith('.json'),
+      )
+    if (!profileFile) {
+      setSaveState('xhs', {
+        phase: 'error',
+        message: '文件夹中没有找到 xhs_creator_profile.json 或 profile.json。',
+      })
+      return
+    }
+
+    const mediaFiles = xhsPackageFiles.filter((file) => file !== profileFile)
+    const relativePaths = mediaFiles.map(fileRelativePath)
+    setSaveState('xhs', { phase: 'saving' })
+    try {
+      const imported = await inputAssetApi.uploadXhsImportPackage(
+        workspace.id,
+        profileFile,
+        mediaFiles,
+        relativePaths,
+      )
+      setMaterials((current) => [
+        imported.inputAsset,
+        ...current.filter((item) => item.id !== imported.inputAsset.id),
+      ])
+      setMediaAssets((current) => [
+        ...imported.mediaAssets,
+        ...current.filter(
+          (item) => !imported.mediaAssets.some((asset) => asset.id === item.id),
+        ),
+      ])
+      chooseTextMaterial(imported.inputAsset)
+      setXhsPackageFiles([])
+      const warningSuffix =
+        imported.warnings.length > 0 ? `；${imported.warnings[0]}` : ''
+      setSaveState('xhs', {
+        phase: 'saved',
+        message: `已导入 ${imported.parsedNoteCount} 条笔记和 ${imported.mediaAssets.length} 张封面${warningSuffix}`,
+      })
+    } catch (error) {
+      setSaveState('xhs', {
         phase: 'error',
         message: errorMessage(error),
       })
@@ -2906,6 +2985,9 @@ function WorkspaceApp() {
         xhsImportFiles={xhsImportFiles}
         onSetXhsImportFile={setXhsImportFile}
         onUploadXhsImport={uploadXhsImport}
+        xhsPackageFiles={xhsPackageFiles}
+        onSetXhsPackageFiles={setXhsImportPackageFiles}
+        onUploadXhsImportPackage={uploadXhsImportPackage}
       />
     )
   }

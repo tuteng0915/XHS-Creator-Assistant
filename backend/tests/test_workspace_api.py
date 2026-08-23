@@ -575,6 +575,112 @@ def test_xhs_offline_json_import_accepts_creator_profile_schema(
     assert stored["notes"][0]["comments"][0]["content"] == "很有帮助"
 
 
+def test_xhs_offline_package_import_creates_profile_and_cover_media(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    payload = {
+        "schemaVersion": "xhs-creator-profile/v1",
+        "source": {
+            "platform": "xiaohongshu",
+            "sourceUrl": "https://www.xiaohongshu.com/user/profile/u2",
+            "crawler": "MediaCrawler",
+        },
+        "creator": {
+            "displayName": "QSheep",
+            "profileText": "小红书创作者主页：QSheep",
+        },
+        "notes": [
+            {
+                "noteId": "n2",
+                "type": "normal",
+                "title": "申请季复盘",
+                "desc": "复盘申请过程中的真实判断。",
+                "noteUrl": "https://www.xiaohongshu.com/explore/n2",
+                "tags": ["留学"],
+                "metrics": {"liked": 88, "collected": 12},
+                "cover": {
+                    "relativePath": "images/n2/0.jpg",
+                    "caption": "复盘申请过程中的真实判断。",
+                },
+                "comments": [{"commentId": "c2", "content": "很有帮助"}],
+            }
+        ],
+    }
+
+    imported = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import-package",
+        data={"relativePaths": "images/n2/0.jpg"},
+        files=[
+            (
+                "profile",
+                (
+                    "xhs_creator_profile.json",
+                    json.dumps(payload, ensure_ascii=False).encode(),
+                    "application/json",
+                ),
+            ),
+            ("files", ("images/n2/0.jpg", b"fake-jpeg", "image/jpeg")),
+        ],
+    )
+
+    assert imported.status_code == 201
+    body = imported.json()
+    assert body["inputAsset"]["type"] == "xhs_creator_profile"
+    assert body["inputAsset"]["name"] == "XHS QSheep 创作者主页"
+    assert len(body["mediaAssets"]) == 1
+    media_asset = body["mediaAssets"][0]
+    assert media_asset["name"] == "申请季复盘_封面"
+    assert media_asset["purpose"] == "小红书笔记封面"
+    assert media_asset["metadata"]["caption"] == "复盘申请过程中的真实判断。"
+    assert media_asset["metadata"]["relativePath"] == "images/n2/0.jpg"
+    assert media_asset["userNotes"] == "复盘申请过程中的真实判断。"
+
+    stored = json.loads(body["inputAsset"]["content"])
+    assert stored["notes"][0]["coverMediaAssetId"] == media_asset["id"]
+    assert stored["notes"][0]["cover"]["relativePath"] == "images/n2/0.jpg"
+
+
+def test_xhs_offline_package_import_rejects_path_escape(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    payload = {
+        "schemaVersion": "xhs-creator-profile/v1",
+        "source": {"platform": "xiaohongshu"},
+        "creator": {"displayName": "QSheep", "profileText": ""},
+        "notes": [
+            {
+                "noteId": "n2",
+                "title": "申请季复盘",
+                "desc": "正文",
+                "cover": {"relativePath": "../0.jpg"},
+            }
+        ],
+    }
+
+    imported = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import-package",
+        data={"relativePaths": "../0.jpg"},
+        files=[
+            (
+                "profile",
+                (
+                    "xhs_creator_profile.json",
+                    json.dumps(payload, ensure_ascii=False).encode(),
+                    "application/json",
+                ),
+            ),
+            ("files", ("0.jpg", b"fake-jpeg", "image/jpeg")),
+        ],
+    )
+
+    assert imported.status_code == 422
+    assert "inside the package" in imported.text
+
+
 def test_xhs_offline_markdown_import_can_create_video_creator_samples(
     app: FastAPI,
 ) -> None:

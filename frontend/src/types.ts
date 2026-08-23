@@ -60,6 +60,10 @@ export interface XhsOfflineImportResponse {
   warnings: string[]
 }
 
+export interface XhsOfflineImportPackageResponse extends XhsOfflineImportResponse {
+  mediaAssets: MediaAsset[]
+}
+
 export type MediaAssetType = 'image' | 'video'
 export type MediaAssetSourceType = 'upload' | 'url' | 'generated' | 'extracted_frame'
 

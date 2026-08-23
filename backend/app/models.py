@@ -437,6 +437,10 @@ class XhsOfflineImportResponse(APIModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class XhsOfflineImportPackageResponse(XhsOfflineImportResponse):
+    media_assets: list[MediaAssetResponse] = Field(default_factory=list)
+
+
 class AnalysisRunTransition(APIModel):
     status: AnalysisRunStatus
     model_metadata: dict[str, Any] = Field(default_factory=dict)

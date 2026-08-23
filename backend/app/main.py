@@ -106,7 +106,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         active_settings,
     )
     qwen_media_service = QwenMediaService(active_settings, media_asset_service)
-    xhs_import_service = XhsOfflineImportService(input_asset_service)
+    xhs_import_service = XhsOfflineImportService(
+        input_asset_service, media_asset_service
+    )
     analysis_service = AnalysisRunService(
         database,
         analysis_repository,

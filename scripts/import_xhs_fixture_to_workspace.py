@@ -21,6 +21,7 @@ from xhs_mediacrawler_fixture import (  # noqa: E402
     build_comments_markdown,
     build_historical_posts_markdown,
     build_xhs_creator_profile_payload,
+    infer_creator_display_name,
     load_mediacrawler_export,
 )
 
@@ -73,6 +74,7 @@ def main() -> int:
         workspace_name=args.workspace_name or f"XHS {args.code} 工作区",
         code=args.code,
     )
+    display_name = infer_creator_display_name(export)
     media_ids_by_note = (
         {} if args.skip_images else upsert_cover_media_assets(app, workspace.id, export)
     )
@@ -80,7 +82,8 @@ def main() -> int:
         app,
         workspace.id,
         asset_type=SourceMaterialType.XHS_CREATOR_PROFILE,
-        name=f"XHS {args.code} 创作者主页",
+        name=f"XHS {display_name} 创作者主页",
+        legacy_names=[f"XHS {args.code} 创作者主页"],
         content=json.dumps(
             build_xhs_creator_profile_payload(
                 export, media_asset_ids_by_note=media_ids_by_note
@@ -93,14 +96,16 @@ def main() -> int:
         app,
         workspace.id,
         asset_type=SourceMaterialType.ACCOUNT_PROFILE,
-        name=f"XHS {args.code} 账号概况",
+        name=f"XHS {display_name} 账号概况",
+        legacy_names=[f"XHS {args.code} 账号概况"],
         content=build_account_profile_markdown(export),
     )
     historical = upsert_text_asset(
         app,
         workspace.id,
         asset_type=SourceMaterialType.HISTORICAL_POSTS,
-        name=f"XHS {args.code} 历史笔记",
+        name=f"XHS {display_name} 历史笔记",
+        legacy_names=[f"XHS {args.code} 历史笔记"],
         content=build_historical_posts_markdown(
             export, media_asset_ids_by_note=media_ids_by_note
         ),
@@ -109,7 +114,8 @@ def main() -> int:
         app,
         workspace.id,
         asset_type=SourceMaterialType.COMMENTS,
-        name=f"XHS {args.code} 评论样本",
+        name=f"XHS {display_name} 评论样本",
+        legacy_names=[f"XHS {args.code} 评论样本"],
         content=build_comments_markdown(export),
     )
     print(f"workspace: {workspace.id} {workspace.name}")
@@ -142,11 +148,13 @@ def upsert_text_asset(
     *,
     asset_type: SourceMaterialType,
     name: str,
+    legacy_names: list[str] | None = None,
     content: str,
 ):
     service = app.state.input_asset_service
+    target_names = [name, *(legacy_names or [])]
     for asset in service.list(workspace_id, asset_type):
-        if asset.name == name:
+        if asset.name in target_names:
             return service.update(
                 asset.id,
                 SourceMaterialUpdate(
@@ -173,15 +181,35 @@ def upsert_cover_media_assets(
     for note in export.notes:
         if note.cover_path is None:
             continue
-        name = f"XHS {export.code} 封面 - {note.note_id}"
-        if name in existing:
-            media_ids_by_note[note.note_id] = existing[name].id
+        name = cover_media_asset_name(note.title)
+        legacy_name = f"XHS {export.code} 封面 - {note.note_id}"
+        caption = cover_media_asset_caption(note.desc, note.title)
+        matched = existing.get(name) or existing.get(legacy_name)
+        if matched:
+            updated = service.update(
+                matched.id,
+                MediaAssetUpdate(
+                    name=name,
+                    purpose="小红书笔记封面",
+                    metadata=cover_media_asset_metadata(
+                        matched.metadata,
+                        export=export,
+                        note=note,
+                        caption=caption,
+                    ),
+                    user_notes=caption,
+                    expected_updated_at=matched.updated_at,
+                ),
+            )
+            existing.pop(legacy_name, None)
+            existing[name] = updated
+            media_ids_by_note[note.note_id] = updated.id
             continue
         asset = service.create_upload(
             workspace_id,
             asset_type=MediaAssetType.IMAGE,
             name=name,
-            purpose=f"小红书笔记封面：{note.title}",
+            purpose="小红书笔记封面",
             filename=note.cover_path.name,
             media_type="image/jpeg",
             content=note.cover_path.read_bytes(),
@@ -190,18 +218,49 @@ def upsert_cover_media_assets(
             asset.id,
             MediaAssetUpdate(
                 expected_updated_at=asset.updated_at,
-                metadata={
-                    **asset.metadata,
-                    "source": "xhs_mediacrawler_fixture",
-                    "fixtureCode": export.code,
-                    "noteId": note.note_id,
-                    "noteUrl": note.note_url,
-                    "title": note.title,
-                },
+                metadata=cover_media_asset_metadata(
+                    asset.metadata,
+                    export=export,
+                    note=note,
+                    caption=caption,
+                ),
+                user_notes=caption,
             ),
         )
         media_ids_by_note[note.note_id] = asset.id
     return media_ids_by_note
+
+
+def cover_media_asset_name(title: str) -> str:
+    clean_title = " ".join((title or "未命名笔记").split())
+    for token in ["/", "\\", "\n", "\r", "\t"]:
+        clean_title = clean_title.replace(token, " ")
+    clean_title = " ".join(clean_title.split()) or "未命名笔记"
+    suffix = "_封面"
+    return f"{clean_title[:160 - len(suffix)]}{suffix}"
+
+
+def cover_media_asset_caption(desc: str, title: str) -> str:
+    caption = (desc or "").strip() or (title or "").strip()
+    return caption[:100_000]
+
+
+def cover_media_asset_metadata(
+    base_metadata: dict,
+    *,
+    export: XhsMediaCrawlerExport,
+    note,
+    caption: str,
+) -> dict:
+    return {
+        **base_metadata,
+        "source": "xhs_mediacrawler_fixture",
+        "fixtureCode": export.code,
+        "noteId": note.note_id,
+        "noteUrl": note.note_url,
+        "title": note.title,
+        "caption": caption,
+    }
 
 
 if __name__ == "__main__":

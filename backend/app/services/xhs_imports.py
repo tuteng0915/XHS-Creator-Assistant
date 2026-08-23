@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from app.errors import ValidationError
 from app.models import (
+    MediaAssetResponse,
+    MediaAssetType,
+    MediaAssetUpdate,
     SourceMaterialType,
     TextSourceMaterialCreate,
+    XhsOfflineImportPackageResponse,
     XhsOfflineImportResponse,
 )
 from app.services.input_assets import InputAssetService
+from app.services.media_assets import MediaAssetService
 
 SUPPORTED_XHS_SCHEMA = "xhs-profile-import/v1"
 SUPPORTED_XHS_CREATOR_PROFILE_SCHEMA = "xhs-creator-profile/v1"
@@ -20,11 +26,25 @@ XHS_IMPORTABLE_TYPES = {
     SourceMaterialType.VIDEO_CREATOR_SAMPLES,
     SourceMaterialType.XHS_CREATOR_PROFILE,
 }
+XHS_PACKAGE_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+@dataclass(frozen=True)
+class XhsPackageFile:
+    relative_path: str
+    filename: str
+    media_type: str
+    content: bytes
 
 
 class XhsOfflineImportService:
-    def __init__(self, input_asset_service: InputAssetService) -> None:
+    def __init__(
+        self,
+        input_asset_service: InputAssetService,
+        media_asset_service: MediaAssetService | None = None,
+    ) -> None:
         self.input_asset_service = input_asset_service
+        self.media_asset_service = media_asset_service
 
     def import_file(
         self,
@@ -74,7 +94,13 @@ class XhsOfflineImportService:
             parsed_note_count = len(parsed["notes"])
             source_url = parsed["sourceUrl"]
             warnings = parsed["warnings"]
-            default_name = self._default_asset_name(parsed, safe_filename)
+            default_name = (
+                self._default_creator_profile_asset_name(
+                    creator_profile, safe_filename
+                )
+                if asset_type == SourceMaterialType.XHS_CREATOR_PROFILE
+                else self._default_asset_name(parsed, safe_filename)
+            )
         else:
             asset_content = text.strip()
             if not asset_content:
@@ -98,6 +124,181 @@ class XhsOfflineImportService:
             source_url=source_url,
             warnings=warnings,
         )
+
+    def import_package(
+        self,
+        workspace_id: str,
+        *,
+        profile_filename: str,
+        profile_content: bytes,
+        files: list[XhsPackageFile],
+        name: str = "",
+    ) -> XhsOfflineImportPackageResponse:
+        if self.media_asset_service is None:
+            raise ValidationError("XHS package import is not configured")
+        if not profile_content:
+            raise ValidationError("XHS package profile JSON cannot be empty")
+        if len(profile_content) > self.input_asset_service.settings.max_upload_bytes:
+            raise ValidationError("XHS package profile JSON exceeds the upload size limit")
+
+        safe_profile_filename = PurePosixPath(profile_filename.replace("\\", "/")).name
+        if Path(safe_profile_filename).suffix.lower() != ".json":
+            raise ValidationError("XHS package profile file must be .json")
+        try:
+            text = profile_content.decode("utf-8-sig")
+        except UnicodeDecodeError as error:
+            raise ValidationError("XHS package profile JSON must use UTF-8 encoding") from error
+
+        raw = self._load_json_export(text)
+        schema_version = str(raw.get("schemaVersion") or raw.get("schema_version") or "")
+        if schema_version == SUPPORTED_XHS_CREATOR_PROFILE_SCHEMA:
+            creator_profile = self._parse_creator_profile_export(raw)
+            parsed = self._creator_profile_to_legacy_import(creator_profile)
+        else:
+            parsed = self._parse_profile_import_export(raw)
+            creator_profile = self._legacy_import_to_creator_profile(parsed)
+
+        package_files = self._normalize_package_files(files)
+        warnings = list(parsed["warnings"])
+        media_assets: list[MediaAssetResponse] = []
+        existing_media_by_name = {
+            asset.name: asset
+            for asset in self.media_asset_service.list(
+                workspace_id, asset_type=MediaAssetType.IMAGE
+            )
+        }
+
+        for note in creator_profile["notes"]:
+            relative_path = self._note_cover_relative_path(note, package_files)
+            if not relative_path:
+                warnings.append(f"笔记「{note['title']}」未找到本地封面图片。")
+                continue
+            package_file = package_files[relative_path]
+            caption = self.cover_media_asset_caption(note)
+            media_name = self.cover_media_asset_name(note["title"])
+            metadata = {
+                "source": "xhs_offline_import_package",
+                "relativePath": relative_path,
+                "noteId": note.get("noteId") or "",
+                "noteUrl": note.get("noteUrl") or "",
+                "title": note.get("title") or "",
+                "caption": caption,
+            }
+
+            media_asset = existing_media_by_name.get(media_name)
+            if media_asset is None:
+                media_asset = self.media_asset_service.create_upload(
+                    workspace_id,
+                    asset_type=MediaAssetType.IMAGE,
+                    name=media_name,
+                    purpose="小红书笔记封面",
+                    filename=package_file.filename,
+                    media_type=package_file.media_type,
+                    content=package_file.content,
+                    source_type="upload",
+                )
+                existing_media_by_name[media_name] = media_asset
+
+            media_asset = self.media_asset_service.update(
+                media_asset.id,
+                MediaAssetUpdate(
+                    metadata={**media_asset.metadata, **metadata},
+                    user_notes=caption,
+                    expected_updated_at=media_asset.updated_at,
+                ),
+            )
+            media_assets.append(media_asset)
+            note["coverMediaAssetId"] = media_asset.id
+            note["cover"] = {
+                "relativePath": relative_path,
+                "caption": caption,
+            }
+
+        asset_content = json.dumps(creator_profile, ensure_ascii=False, indent=2)
+        default_name = self._default_creator_profile_asset_name(
+            creator_profile, safe_profile_filename
+        )
+        material = self.input_asset_service.create_text(
+            workspace_id,
+            TextSourceMaterialCreate(
+                type=SourceMaterialType.XHS_CREATOR_PROFILE,
+                name=(name.strip() or default_name)[:160],
+                content=asset_content,
+            ),
+        )
+        return XhsOfflineImportPackageResponse(
+            input_asset=material,
+            media_assets=media_assets,
+            parsed_note_count=len(parsed["notes"]),
+            source_url=parsed["sourceUrl"],
+            warnings=warnings,
+        )
+
+    def _normalize_package_files(
+        self, files: list[XhsPackageFile]
+    ) -> dict[str, XhsPackageFile]:
+        normalized: dict[str, XhsPackageFile] = {}
+        for file in files:
+            relative_path = self._safe_package_relative_path(file.relative_path)
+            if not file.content:
+                continue
+            if len(file.content) > self.input_asset_service.settings.max_upload_bytes:
+                raise ValidationError(
+                    f"XHS package image exceeds the upload size limit: {relative_path}"
+                )
+            extension = Path(relative_path).suffix.lower()
+            if extension not in XHS_PACKAGE_IMAGE_EXTENSIONS:
+                continue
+            normalized[relative_path] = XhsPackageFile(
+                relative_path=relative_path,
+                filename=PurePosixPath(file.filename.replace("\\", "/")).name
+                or PurePosixPath(relative_path).name,
+                media_type=file.media_type.strip()
+                or self._default_image_media_type(extension),
+                content=file.content,
+            )
+        return normalized
+
+    @staticmethod
+    def _safe_package_relative_path(relative_path: str) -> str:
+        raw = str(relative_path or "").replace("\\", "/").strip()
+        if not raw:
+            raise ValidationError("XHS package file path cannot be blank")
+        path = PurePosixPath(raw)
+        if path.is_absolute() or any(part == ".." for part in path.parts):
+            raise ValidationError("XHS package file paths must stay inside the package")
+        return str(path)
+
+    def _note_cover_relative_path(
+        self, note: dict[str, Any], package_files: dict[str, XhsPackageFile]
+    ) -> str:
+        cover = note.get("cover") if isinstance(note.get("cover"), dict) else {}
+        candidates = [
+            cover.get("relativePath"),
+            cover.get("relative_path"),
+            note.get("coverRelativePath"),
+            note.get("cover_relative_path"),
+            note.get("coverPath"),
+            note.get("cover_path"),
+        ]
+        note_id = self._clean(note.get("noteId") or note.get("note_id"))
+        if note_id:
+            candidates.extend(
+                f"images/{note_id}/{index}{extension}"
+                for index in range(0, 3)
+                for extension in XHS_PACKAGE_IMAGE_EXTENSIONS
+            )
+            candidates.extend(
+                f"images/{note_id}{extension}"
+                for extension in XHS_PACKAGE_IMAGE_EXTENSIONS
+            )
+        for candidate in candidates:
+            if not candidate:
+                continue
+            relative_path = self._safe_package_relative_path(str(candidate))
+            if relative_path in package_files:
+                return relative_path
+        return ""
 
     def _load_json_export(self, text: str) -> dict[str, Any]:
         try:
@@ -181,6 +382,7 @@ class XhsOfflineImportService:
                 if isinstance(raw_note.get("comments"), list)
                 else []
             )
+            cover = raw_note.get("cover") if isinstance(raw_note.get("cover"), dict) else {}
             normalized_notes.append(
                 {
                     "noteId": note_id,
@@ -196,6 +398,16 @@ class XhsOfflineImportService:
                     if isinstance(raw_note.get("tags"), list)
                     else [],
                     "metrics": metrics,
+                    "cover": {
+                        "relativePath": self._clean(
+                            cover.get("relativePath") or cover.get("relative_path")
+                        ),
+                        "caption": self._clean(
+                            cover.get("caption"), max_chars=12_000
+                        ),
+                    }
+                    if cover
+                    else {},
                     "coverMediaAssetId": raw_note.get("coverMediaAssetId")
                     or raw_note.get("cover_media_asset_id"),
                     "comments": [
@@ -394,6 +606,22 @@ class XhsOfflineImportService:
         return f"小红书主页导入 - {label}"
 
     @staticmethod
+    def _default_creator_profile_asset_name(
+        creator_profile: dict[str, Any], filename: str
+    ) -> str:
+        creator = (
+            creator_profile.get("creator")
+            if isinstance(creator_profile.get("creator"), dict)
+            else {}
+        )
+        display_name = XhsOfflineImportService._clean(
+            creator.get("displayName"), max_chars=80
+        )
+        if display_name:
+            return f"XHS {display_name} 创作者主页"
+        return f"小红书主页导入 - {Path(filename).stem or '导入文件'}"
+
+    @staticmethod
     def _infer_creator_display_name(parsed: dict[str, Any]) -> str:
         profile_text = str(parsed.get("profileText") or "")
         first_token = profile_text.split()[0] if profile_text.split() else ""
@@ -419,6 +647,33 @@ class XhsOfflineImportService:
             if metric not in (None, ""):
                 parts.append(f"{label} {metric}")
         return " / ".join(parts)
+
+    @staticmethod
+    def cover_media_asset_name(title: Any) -> str:
+        cleaned = re.sub(
+            r"[\\/:*?\"<>|\n\r\t]+",
+            "_",
+            XhsOfflineImportService._clean(title, max_chars=120),
+        ).strip(" _.")
+        return f"{cleaned or '未命名笔记'}_封面"
+
+    @staticmethod
+    def cover_media_asset_caption(note: dict[str, Any]) -> str:
+        cover = note.get("cover") if isinstance(note.get("cover"), dict) else {}
+        caption = XhsOfflineImportService._clean(
+            cover.get("caption") or note.get("desc") or note.get("title"),
+            max_chars=12_000,
+        )
+        return caption or "小红书笔记封面"
+
+    @staticmethod
+    def _default_image_media_type(extension: str) -> str:
+        return {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+        }.get(extension.lower(), "image/jpeg")
 
     @staticmethod
     def _count_markdown_notes(text: str) -> int:

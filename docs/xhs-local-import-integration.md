@@ -44,6 +44,32 @@ XHS local importer
 - `xhs-profile-import/v1`：旧本地浏览器 importer 的可见页面导出；上传为 `xhs_creator_profile` 时会转换成 `xhs-creator-profile/v1`。
 - `xhs-creator-profile/v1`：当前推荐的结构化主页资产 schema，可直接保存并用于账号诊断。
 
+如果要同时导入封面，推荐把本地抓取结果整理成一个离线导入包，然后在前端选择整个文件夹：
+
+```text
+xhs_import_package/
+  xhs_creator_profile.json
+  images/
+    <note_id>/
+      0.jpg
+```
+
+`xhs_creator_profile.json` 中每条笔记可以显式写入：
+
+```json
+{
+  "noteId": "note-1",
+  "title": "笔记标题",
+  "desc": "笔记正文",
+  "cover": {
+    "relativePath": "images/note-1/0.jpg",
+    "caption": "笔记正文"
+  }
+}
+```
+
+后端只接受包内相对路径，不接受绝对路径或 `../`。导入时会创建 `xhs_creator_profile` input asset，并为每张封面创建或复用 `MediaAsset.image`。主页资产默认命名为 `XHS {小红书账号名} 创作者主页`；MediaCrawler fixture 会从笔记里的 `nickname` 推断账号名。封面命名规则是 `笔记标题_封面`，caption 和 user notes 优先使用笔记正文。
+
 主 Agent 读取时应通过 Context Access Layer 获取全局视野，而不是只拿单个文件。推荐 context pack：
 
 ```text
@@ -73,6 +99,7 @@ creator profile summary
    - 前端位置：内容资产 → 小红书创作者主页 → 小红书离线导入。
    - 后端只接收上传文件，不访问小红书。
    - 上传旧 `xhs-profile-import/v1` JSON 时会转换成 workflow 可直接读取的 `xhs-creator-profile/v1`。
+   - 推荐路径支持选择一个离线导入包文件夹；后端接收 profile JSON、图片文件和浏览器提供的相对路径，生成 XHS profile asset 与封面 media assets。
 
 4. 复用现有 Agent context adapter。已验证。
    - 主 Agent 不直接读取 MediaCrawler 原始文件。
@@ -82,12 +109,12 @@ creator profile summary
    - 支持从 `data/xhs-fixtures/_tt` 和 `data/xhs-fixtures/QSheep` 一键导入本地 SQLite。
    - 用于 demo 和回归测试。
 
-5. 增加测试。部分完成。
+6. 增加测试。已完成基础覆盖。
    - 已完成 converter 单元测试；
    - 已完成 UTF-8 中文保真测试；
    - 已完成短链解析 runner 单元测试；
    - 已完成 media asset 相关回归测试；
-   - 后续可补：从 API 上传 zip 包的端到端测试。
+   - 已完成从 API 上传离线导入包并创建封面资产的回归测试。
 
 ## 本地导入命令
 

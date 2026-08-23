@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
+from app.errors import ValidationError
 from app.models import (
     AccountProfileCsvImportResponse,
     AgentConversationCreate,
@@ -57,6 +58,7 @@ from app.models import (
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspaceUpdate,
+    XhsOfflineImportPackageResponse,
     XhsOfflineImportResponse,
 )
 from app.services import (
@@ -77,6 +79,7 @@ from app.services import (
     XhsOfflineImportService,
 )
 from app.services.common import utc_now
+from app.services.xhs_imports import XhsPackageFile
 from app.workflows import (
     ACCOUNT_STAGE_ORDER,
     SIMULATION_STAGE_ORDER,
@@ -291,6 +294,44 @@ def create_api_router(
             name=name,
             filename=file.filename or "xhs-import.json",
             content=await file.read(),
+        )
+
+    @router.post(
+        "/workspaces/{workspace_id}/input-assets/xhs-import-package",
+        response_model=XhsOfflineImportPackageResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def upload_xhs_offline_import_package(
+        workspace_id: str,
+        profile: Annotated[UploadFile, File()],
+        files: Annotated[list[UploadFile] | None, File()] = None,
+        relative_paths: Annotated[
+            list[str] | None, Form(alias="relativePaths")
+        ] = None,
+        name: Annotated[str, Form()] = "",
+    ) -> XhsOfflineImportPackageResponse:
+        uploaded_files = files or []
+        uploaded_relative_paths = relative_paths or []
+        if len(uploaded_files) != len(uploaded_relative_paths):
+            raise ValidationError(
+                "XHS package files and relativePaths must have the same length"
+            )
+        return xhs_import_service.import_package(
+            workspace_id,
+            profile_filename=profile.filename or "xhs_creator_profile.json",
+            profile_content=await profile.read(),
+            files=[
+                XhsPackageFile(
+                    relative_path=relative_path,
+                    filename=file.filename or relative_path,
+                    media_type=file.content_type or "",
+                    content=await file.read(),
+                )
+                for file, relative_path in zip(
+                    uploaded_files, uploaded_relative_paths, strict=True
+                )
+            ],
+            name=name,
         )
 
     @router.get(

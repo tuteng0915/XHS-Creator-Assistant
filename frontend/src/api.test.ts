@@ -179,4 +179,50 @@ describe('inputAssetApi', () => {
     expect(form.get('type')).toBe('xhs_creator_profile')
     expect(form.get('name')).toBe('XHS QSheep 创作者主页')
   })
+
+  it('uploads XHS import packages with profile JSON and relative media paths', async () => {
+    const xhsAsset: TextInputAsset = {
+      ...historicalAsset,
+      id: 'xhs-profile-1',
+      type: 'xhs_creator_profile',
+      name: 'XHS QSheep 创作者主页',
+    }
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      await jsonResponse(
+        {
+          inputAsset: xhsAsset,
+          mediaAssets: [imageAsset],
+          parsedNoteCount: 1,
+          sourceUrl: 'https://www.xiaohongshu.com/user/profile/u1',
+          warnings: [],
+        },
+        201,
+      ),
+    )
+    const profile = new File(
+      ['{"schemaVersion":"xhs-creator-profile/v1"}'],
+      'xhs_creator_profile.json',
+      { type: 'application/json' },
+    )
+    const cover = new File(['fake-image'], '0.jpg', { type: 'image/jpeg' })
+
+    const response = await inputAssetApi.uploadXhsImportPackage(
+      'workspace-1',
+      profile,
+      [cover],
+      ['images/n1/0.jpg'],
+    )
+
+    expect(response.mediaAssets).toHaveLength(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/workspace-1/input-assets/xhs-import-package',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+    )
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const form = init.body as FormData
+    expect(form.get('name')).toBe('')
+    expect((form.get('profile') as File).name).toBe('xhs_creator_profile.json')
+    expect((form.get('files') as File).name).toBe('images/n1/0.jpg')
+    expect(form.get('relativePaths')).toBe('images/n1/0.jpg')
+  })
 })

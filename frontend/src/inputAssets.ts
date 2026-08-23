@@ -142,7 +142,12 @@ export function inputAssetPreview(asset: InputAsset): string {
     return `${asset.originalFilename} · ${asset.rowCount} 行 · ${asset.keyword}`
   }
   const text = asset.content.trim().replace(/\s+/g, ' ')
-  return text || '空内容'
+  return truncatePreview(text || '空内容')
+}
+
+function truncatePreview(value: string, maxChars = 180): string {
+  if (value.length <= maxChars) return value
+  return `${value.slice(0, maxChars - 1).trimEnd()}…`
 }
 
 export function inputAssetUpdatedLabel(asset: InputAsset): string {

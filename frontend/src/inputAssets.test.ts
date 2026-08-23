@@ -83,10 +83,13 @@ describe('inputAssets', () => {
     const asset: TextInputAsset = {
       ...base,
       type: 'xhs_creator_profile',
-      content: '{"schemaVersion":"xhs-creator-profile/v1","notes":[]}',
+      content: `{"schemaVersion":"xhs-creator-profile/v1","notes":[${'"很长的笔记正文",'.repeat(40)}]}`,
     }
 
     expect(isTextInputAsset(asset)).toBe(true)
-    expect(inputAssetPreview(asset)).toContain('xhs-creator-profile/v1')
+    const preview = inputAssetPreview(asset)
+    expect(preview).toContain('xhs-creator-profile/v1')
+    expect(preview).toHaveLength(180)
+    expect(preview.endsWith('…')).toBe(true)
   })
 })

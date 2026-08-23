@@ -85,6 +85,9 @@ type InputAssetsPageProps = {
   xhsImportFiles: Record<XhsImportPanel, File | null>
   onSetXhsImportFile: (panel: XhsImportPanel, file: File | null) => void
   onUploadXhsImport: (panel: XhsImportPanel) => void
+  xhsPackageFiles: File[]
+  onSetXhsPackageFiles: (files: File[]) => void
+  onUploadXhsImportPackage: () => void
 }
 
 const SAVE_STATE_BY_TEXT_INPUT_PANEL = {
@@ -201,6 +204,35 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
     </div>
   )
 
+  const renderXhsPackageImport = () => (
+    <div className="source-editor-card">
+      <label htmlFor="xhs-package-directory">小红书离线文件夹导入</label>
+      <input
+        id="xhs-package-directory"
+        type="file"
+        multiple
+        {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+        onChange={(event) =>
+          props.onSetXhsPackageFiles(Array.from(event.target.files || []))
+        }
+      />
+      <p className="subline">
+        选择包含 xhs_creator_profile.json / profile.json 和 images/... 的导入包；封面会创建为图文资产。
+      </p>
+      <div className="save-row">
+        <button className="save-button" onClick={props.onUploadXhsImportPackage}>
+          上传文件夹并保存 XHS 主页
+        </button>
+        {props.xhsPackageFiles.length > 0 && (
+          <span className="save-state saved" role="status">
+            已选择 {props.xhsPackageFiles.length} 个文件
+          </span>
+        )}
+        <SaveIndicator state={props.xhsSaveState} />
+      </div>
+    </div>
+  )
+
   const renderInputAssetDetail = () => {
     if (inputAssetPanel === 'xhs_creator_profiles') {
       return (
@@ -259,6 +291,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
             '表头支持 name/content、xhs_creator_profile、xhs_profile、小红书主页。',
           )}
           {renderXhsOfflineImport('xhs_creator_profiles')}
+          {renderXhsPackageImport()}
         </>
       )
     }
