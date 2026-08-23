@@ -55,8 +55,8 @@ describe('WorkspaceShell', () => {
     const contentNav = screen.getByRole('navigation', { name: '内容资产导航' })
     const capabilityNav = screen.getByRole('navigation', { name: '能力资产导航' })
 
-    fireEvent.click(within(contentNav).getByRole('button', { name: /评论样本/ }))
-    expect(props.onOpenInputAsset).toHaveBeenCalledWith('comments')
+    fireEvent.click(within(contentNav).getByRole('button', { name: /创作者档案/ }))
+    expect(props.onOpenInputAsset).toHaveBeenCalledWith('historical_posts')
 
     fireEvent.click(within(capabilityNav).getByRole('button', { name: /热点分析/ }))
     expect(props.onSetWorkflowTab).toHaveBeenCalledWith('trend' satisfies WorkflowTab)

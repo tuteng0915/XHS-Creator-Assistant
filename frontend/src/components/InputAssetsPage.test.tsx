@@ -127,6 +127,7 @@ describe('InputAssetsPage', () => {
         xhsPackagePreviewError=""
         xhsImportWarnings={['导入提示一', '导入提示二']}
         matchingXhsPackageMaterial={xhsAsset}
+        onOpenInputAsset={vi.fn()}
         onSetXhsPackageFiles={vi.fn()}
         onUploadXhsImportPackage={vi.fn()}
       />,

@@ -1,7 +1,9 @@
 import {
+  CREATOR_INPUT_ASSET_PANELS,
   INPUT_ASSET_DEFINITION_BY_PANEL,
   inputAssetPreview,
   inputAssetUpdatedLabel,
+  isCreatorInputAssetPanel,
   isTrendCsvInputAsset,
   type InputAssetPanel,
 } from '../inputAssets'
@@ -56,6 +58,7 @@ type InputAssetsPageProps = {
   videoSaveState: SaveState
   xhsSaveState: SaveState
   onStartNewInputAsset: (panel: InputAssetPanel) => void
+  onOpenInputAsset: (panel: InputAssetPanel) => void
   onChooseTextMaterial: (material: TextInputAsset) => void
   onChooseTrendMaterial: (material: TrendCsvInputAsset) => void
   onFormatterDraftChange: (value: string) => void
@@ -124,6 +127,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
   xhsCreatorProfileMaterial,
   } = props
   const definition = INPUT_ASSET_DEFINITION_BY_PANEL[inputAssetPanel]
+  const isCreatorPanel = isCreatorInputAssetPanel(inputAssetPanel)
   const panelMaterials: InputAsset[] =
     inputAssetPanel === 'account_profiles'
       ? accountProfileMaterials
@@ -155,6 +159,34 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
       return
     }
     props.onChooseTextMaterial(asset)
+  }
+
+  const renderCreatorProfileTabs = () => {
+    if (!isCreatorPanel) return null
+    return (
+      <div className="asset-child-tabs" aria-label="创作者档案子类">
+        {CREATOR_INPUT_ASSET_PANELS.map((panel) => {
+          const childDefinition = INPUT_ASSET_DEFINITION_BY_PANEL[panel]
+          const counts = {
+            xhs_creator_profiles: xhsCreatorProfileMaterials.length,
+            account_profiles: accountProfileMaterials.length,
+            historical_posts: historicalMaterials.length,
+            comments: commentsMaterials.length,
+          } as const
+          return (
+            <button
+              key={panel}
+              type="button"
+              className={inputAssetPanel === panel ? 'active' : ''}
+              onClick={() => props.onOpenInputAsset(panel)}
+            >
+              <span>{childDefinition.label}</span>
+              <b>{counts[panel]}</b>
+            </button>
+          )
+        })}
+      </div>
+    )
   }
 
   const renderTextBatchImport = (
@@ -679,8 +711,14 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
     <div className="workspace-page asset-page">
       <section className="history-list">
         <div className="panel-title">
-          {definition.icon} {definition.label}
+          {isCreatorPanel ? '👤 创作者档案' : `${definition.icon} ${definition.label}`}
         </div>
+        {isCreatorPanel && (
+          <p className="subline">
+            小红书主页是上层结构化档案；账号概况、历史笔记和评论样本是其子视图或兼容输入。
+          </p>
+        )}
+        {renderCreatorProfileTabs()}
         <button
           className={`run-row ${selectedPanelAsset ? '' : 'active'}`}
           type="button"

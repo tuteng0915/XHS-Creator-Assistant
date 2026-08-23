@@ -792,6 +792,11 @@ afterEach(() => {
   cleanup()
 })
 
+async function openCreatorAssetTab(label: RegExp | string) {
+  fireEvent.click(await screen.findByRole('button', { name: /创作者档案/ }))
+  fireEvent.click((await screen.findAllByRole('button', { name: label }))[0])
+}
+
 describe('frontend health page', () => {
   it('remains available at /health', () => {
     window.history.pushState({}, '', '/health')
@@ -870,19 +875,19 @@ describe('workspace UI', () => {
     await screen.findByText('账号诊断待运行')
     expect(screen.queryByLabelText('选择工作区')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /新建工作区/ })).not.toBeInTheDocument()
-    fireEvent.click((await screen.findAllByRole('button', { name: /账号概况/ }))[0])
+    await openCreatorAssetTab(/账号概况/)
     expect(
       await screen.findByDisplayValue('帮助文科生做留学决策。'),
     ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /载入/ })).not.toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: /历史笔记/ })[0])
+    await openCreatorAssetTab(/历史笔记/)
     expect(await screen.findByLabelText('历史笔记名称')).toHaveValue(
       '留学帖子数据合集',
     )
     expect(
       await screen.findByDisplayValue('留学中介到底值不值｜赞1.1k｜爆'),
     ).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: /评论样本/ })[0])
+    await openCreatorAssetTab(/评论样本/)
     expect(await screen.findByLabelText('评论样本名称')).toHaveValue(
       '留学评论区合集',
     )
@@ -1088,7 +1093,7 @@ describe('workspace UI', () => {
       render(<App />)
 
       await screen.findByText('账号诊断待运行')
-      fireEvent.click((await screen.findAllByRole('button', { name: /历史笔记/ }))[0])
+      await openCreatorAssetTab(/历史笔记/)
 
       expect(
         await screen.findByDisplayValue('留学中介到底值不值｜赞1.1k｜爆'),
@@ -1114,7 +1119,7 @@ describe('workspace UI', () => {
     const fetchMock = installWorkspaceApiMock()
     render(<App />)
 
-    fireEvent.click((await screen.findAllByRole('button', { name: /历史笔记/ }))[0])
+    await openCreatorAssetTab(/历史笔记/)
     const historicalEditor = await screen.findByLabelText(
       '主页 / 历史笔记 + 数据（格式：标题 ｜ 数据 ｜ 爆/平/差）',
     )
@@ -1165,7 +1170,7 @@ describe('workspace UI', () => {
     const fetchMock = installWorkspaceApiMock()
     render(<App />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /评论样本/ }))
+    await openCreatorAssetTab(/评论样本/)
     fireEvent.change(
       await screen.findByPlaceholderText(/粘贴账号定位、历史帖子、评论/),
       {
@@ -1201,7 +1206,7 @@ describe('workspace UI', () => {
     const fetchMock = installWorkspaceApiMock()
     render(<App />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /评论样本/ }))
+    await openCreatorAssetTab(/评论样本/)
     const file = new File(['name,content\n评论合集,我很焦虑\n'], 'comments.csv', {
       type: 'text/csv',
     })
@@ -1459,14 +1464,14 @@ describe('workspace UI', () => {
       })
 
     render(<App />)
-    fireEvent.click((await screen.findAllByRole('button', { name: /历史笔记/ }))[0])
+    await openCreatorAssetTab(/历史笔记/)
     const historicalEditor = await screen.findByLabelText(
       '主页 / 历史笔记 + 数据（格式：标题 ｜ 数据 ｜ 爆/平/差）',
     )
     fireEvent.change(historicalEditor, {
       target: { value: '留学中介到底值不值｜赞1.1k｜爆' },
     })
-    fireEvent.click(screen.getAllByRole('button', { name: /评论样本/ })[0])
+    await openCreatorAssetTab(/评论样本/)
     const commentsEditor = await screen.findByLabelText('评论区原文（一行一条）')
     fireEvent.change(commentsEditor, { target: { value: '这是一条新评论' } })
 
@@ -1748,7 +1753,7 @@ describe('workspace UI', () => {
     expect(screen.queryByText('Input Assets')).not.toBeInTheDocument()
     expect(screen.queryByText('Reusable Outputs')).not.toBeInTheDocument()
     expect(screen.queryByText('Capability Assets')).not.toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: /账号概况/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /创作者档案/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /分析结果/ })).toBeInTheDocument()
     expect(screen.getAllByText('能力资产').length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: /Skills/ })).toBeInTheDocument()

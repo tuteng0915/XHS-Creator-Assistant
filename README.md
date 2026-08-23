@@ -257,9 +257,9 @@ data/browser-profiles/xhs-importer/
 
 如果需要重新登录，删除这个目录即可。导出的 Markdown 可以人工检查后作为历史笔记、视频创作者样本或小红书创作者主页输入资产导入主应用。
 
-主平台不会访问小红书。如果要把离线导入结果放进主应用，可以在内容资产里的“小红书创作者主页”页面上传本地 importer 生成的 JSON；旧 `xhs-profile-import/v1` JSON 会转换成 workflow 可直接使用的 `xhs-creator-profile/v1`。兼容路径仍支持把 JSON / Markdown 导入历史笔记或视频创作者样本。后端只解析上传文件，并保存为受控 input asset。
+主平台不会访问小红书。如果要把离线导入结果放进主应用，可以在内容资产里的“创作者档案 → 小红书主页”页面上传本地 importer 生成的 JSON；旧 `xhs-profile-import/v1` JSON 会转换成 workflow 可直接使用的 `xhs-creator-profile/v1`。兼容路径仍支持把 JSON / Markdown 导入历史笔记或视频创作者样本。后端只解析上传文件，并保存为受控 input asset。
 
-如果需要同时导入封面，推荐整理成离线导入包并在“小红书创作者主页”页选择整个文件夹：
+如果需要同时导入封面，推荐整理成离线导入包并在“创作者档案 → 小红书主页”页选择整个文件夹：
 
 ```text
 xhs_import_package/
@@ -333,7 +333,7 @@ backend/.venv/bin/python scripts/export_xhs_import_package.py \
   --output data/xhs-import-packages/my_creator
 ```
 
-输出目录会包含 `xhs_creator_profile.json` 和 `images/<note_id>/0.jpg`。之后在前端“内容资产 → 小红书创作者主页 → 小红书离线文件夹导入”中选择整个输出目录即可。
+输出目录会包含 `xhs_creator_profile.json` 和 `images/<note_id>/0.jpg`。之后在前端“内容资产 → 创作者档案 → 小红书主页 → 小红书离线文件夹导入”中选择整个输出目录即可。
 
 选择目录后，前端会先在本地预览账号名、笔记数、评论数、图片文件数、匹配封面数和缺失封面数。导入成功后，小红书创作者主页详情页会显示结构化摘要，并完整展示后端返回的导入提示。
 

@@ -2973,6 +2973,7 @@ function WorkspaceApp() {
         videoSaveState={saveStates.video}
         xhsSaveState={saveStates.xhs}
         onStartNewInputAsset={startNewInputAsset}
+        onOpenInputAsset={openInputAsset}
         onChooseTextMaterial={chooseTextMaterial}
         onChooseTrendMaterial={chooseTrendMaterial}
         onFormatterDraftChange={(value) => {

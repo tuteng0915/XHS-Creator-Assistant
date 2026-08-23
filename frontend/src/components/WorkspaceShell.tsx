@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react'
 
-import { INPUT_ASSET_DEFINITIONS, type InputAssetPanel } from '../inputAssets'
+import {
+  INPUT_ASSET_DEFINITIONS,
+  isCreatorInputAssetPanel,
+  type InputAssetPanel,
+} from '../inputAssets'
 import type { Workspace } from '../types'
 import type { WorkflowTab } from '../workflows'
 
@@ -64,7 +68,26 @@ export function WorkspaceShell({
 
         <nav aria-label="内容资产导航">
           <div className="nav-section-title">内容资产</div>
-          {INPUT_ASSET_DEFINITIONS.map((definition) => (
+          <button
+            className={
+              activePage === 'source-materials' &&
+              isCreatorInputAssetPanel(inputAssetPanel)
+                ? 'active'
+                : ''
+            }
+            onClick={() =>
+              onOpenInputAsset(
+                isCreatorInputAssetPanel(inputAssetPanel)
+                  ? inputAssetPanel
+                  : 'xhs_creator_profiles',
+              )
+            }
+          >
+            <span>👤</span> 创作者档案
+          </button>
+          {INPUT_ASSET_DEFINITIONS.filter(
+            (definition) => !isCreatorInputAssetPanel(definition.panel),
+          ).map((definition) => (
             <button
               key={definition.panel}
               className={

@@ -13,6 +13,13 @@ export type InputAssetPanel =
   | 'video_creator_samples'
   | 'xhs_creator_profiles'
 
+export const CREATOR_INPUT_ASSET_PANELS = [
+  'xhs_creator_profiles',
+  'account_profiles',
+  'historical_posts',
+  'comments',
+] as const satisfies readonly InputAssetPanel[]
+
 export type InputAssetContentKind = 'text' | 'file'
 
 export interface InputAssetTypeDefinition {
@@ -126,6 +133,14 @@ export const INPUT_ASSET_DEFINITIONS: InputAssetTypeDefinition[] = [
 export const INPUT_ASSET_DEFINITION_BY_PANEL = Object.fromEntries(
   INPUT_ASSET_DEFINITIONS.map((definition) => [definition.panel, definition]),
 ) as Record<InputAssetPanel, InputAssetTypeDefinition>
+
+export function isCreatorInputAssetPanel(
+  panel: InputAssetPanel,
+): panel is (typeof CREATOR_INPUT_ASSET_PANELS)[number] {
+  return CREATOR_INPUT_ASSET_PANELS.includes(
+    panel as (typeof CREATOR_INPUT_ASSET_PANELS)[number],
+  )
+}
 
 export function isTextInputAsset(asset: InputAsset): asset is TextInputAsset {
   return asset.type !== 'trend_csv'
