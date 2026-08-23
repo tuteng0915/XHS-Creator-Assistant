@@ -221,6 +221,8 @@ workflow 执行不应依赖前端连接。
 | 图片素材 | 主页截图、封面图、评论区截图、视觉参考 | 文件落盘 + SQLite metadata/derived JSON |
 | 视频素材 | 样本视频、视频参考、后续视频诊断输入 | 文件落盘 + SQLite metadata/derived JSON |
 
+创作者档案页需要展示一个组合概览，聚合当前选中的小红书主页、账号概况、历史笔记、评论样本和视频创作样本，并展示 ready/missing 状态。当前这是前端组合视图，不创建新的 `creator_dossier` 表，也不改变现有 input asset API。
+
 能力：
 
 - 列表；
@@ -614,6 +616,10 @@ xhs_import_package/
 - workflow graph state 只保存输入资产 ID、媒体资产 ID 和阶段结果，不保存完整 XHS JSON、完整媒体文件或完整 derived JSON；
 - 本地上传视频可通过 ffmpeg 抽取预览帧，再由 Qwen 图片/视频理解 skill 生成结构化理解草稿；
 - 当前不做真实视频链接抓取、平台数据抓取或完整本地视频直传；
+
+### 7.6 受众模拟输入
+
+右侧 workflow 调用区的“下期选题”不是账号诊断、热点分析或视频质量诊断的必填项。它只作为受众模拟的测试内容：用户可以手动输入，也可以从选题卡或选题库填入；demo 模式只在用户实际发起受众模拟时自动补样例。
 - 因此诊断必须显式受 evidence pack 的证据限制约束。
 
 输出：

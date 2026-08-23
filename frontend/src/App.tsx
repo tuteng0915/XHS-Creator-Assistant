@@ -1524,6 +1524,7 @@ function WorkspaceApp() {
   async function ensureInputsSavedForRun(
     targetTab: WorkflowTab = workflowTab,
     includeProfile = true,
+    includeSimulationTopic = false,
   ): Promise<{
     accountProfileInputAssetId?: string
     manualAccountProfile?: string
@@ -1542,7 +1543,7 @@ function WorkspaceApp() {
           ? SAMPLE_VIDEO_INPUT
           : SAMPLE_TREND_INPUT
     const nextSimulationTopic =
-      mode === 'demo' && !simulationTopic.trim()
+      includeSimulationTopic && mode === 'demo' && !simulationTopic.trim()
         ? sample.simulationTopic
         : simulationTopic
     if (nextSimulationTopic !== simulationTopic) {
@@ -1945,7 +1946,7 @@ function WorkspaceApp() {
     try {
       const savedInputs = draft
         ? { simulationTopic }
-        : await ensureInputsSavedForRun(targetTab)
+        : await ensureInputsSavedForRun(targetTab, true, true)
       if (draft) {
         setSaveState('workspace', { phase: 'saving' })
         await persistWorkspace()

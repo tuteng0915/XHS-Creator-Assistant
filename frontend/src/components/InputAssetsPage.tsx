@@ -190,6 +190,74 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
     )
   }
 
+  const renderDossierAssetSummary = (
+    label: string,
+    material: TextInputAsset | null | undefined,
+    empty: string,
+  ) => (
+    <div className={`dossier-summary-item ${material ? 'ready' : 'missing'}`}>
+      <div>
+        <b>{label}</b>
+        <span>{material ? material.name : empty}</span>
+        {material && <small>{inputAssetPreview(material)}</small>}
+      </div>
+      <em>{material ? 'ready' : 'missing'}</em>
+    </div>
+  )
+
+  const renderCreatorDossierOverview = () => {
+    if (!isCreatorPanel) return null
+    const xhsSummary = xhsCreatorProfileSummaryFromAsset(xhsCreatorProfileMaterial)
+    return (
+      <div className="creator-dossier-card">
+        <div className="creator-dossier-head">
+          <div>
+            <b>创作者档案概览</b>
+            <span>
+              组合当前选中的创作者相关资产；底层仍保留独立 input asset。
+            </span>
+          </div>
+          <em>{xhsCreatorProfileMaterial ? 'structured' : 'loose'}</em>
+        </div>
+        {xhsSummary && (
+          <div className="creator-dossier-metrics">
+            <span>账号：{xhsSummary.displayName}</span>
+            <span>笔记：{xhsSummary.noteCount}</span>
+            <span>视频：{xhsSummary.videoNoteCount}</span>
+            <span>评论：{xhsSummary.commentCount}</span>
+          </div>
+        )}
+        <div className="creator-dossier-assets">
+          {renderDossierAssetSummary(
+            '小红书主页',
+            xhsCreatorProfileMaterial,
+            '未选择结构化主页',
+          )}
+          {renderDossierAssetSummary(
+            '账号概况',
+            selectedProfileMaterial,
+            '未选择账号概况',
+          )}
+          {renderDossierAssetSummary(
+            '历史笔记',
+            historicalMaterial,
+            '未选择历史笔记',
+          )}
+          {renderDossierAssetSummary(
+            '评论样本',
+            commentsMaterial,
+            '未选择评论样本',
+          )}
+          {renderDossierAssetSummary(
+            '视频创作样本',
+            videoCreatorSamplesMaterial,
+            '未选择视频创作样本',
+          )}
+        </div>
+      </div>
+    )
+  }
+
   const renderTextBatchImport = (
     panel: TextInputAssetPanel,
     label: string,
@@ -719,6 +787,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
             小红书主页是上层结构化档案；账号概况、历史笔记、评论样本和视频创作样本是其子视图或兼容输入。
           </p>
         )}
+        {renderCreatorDossierOverview()}
         {renderCreatorProfileTabs()}
         <button
           className={`run-row ${selectedPanelAsset ? '' : 'active'}`}

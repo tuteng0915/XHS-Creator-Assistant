@@ -442,7 +442,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
         </>
       )}
       <div className="simulation-divider">
-        <label htmlFor="simulation-topic">👥 下期选题（受众模拟的测试内容）</label>
+        <label htmlFor="simulation-topic">👥 下期选题（可选，仅用于受众模拟）</label>
         <textarea
           id="simulation-topic"
           rows={2}

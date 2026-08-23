@@ -876,6 +876,8 @@ describe('workspace UI', () => {
     expect(screen.queryByLabelText('选择工作区')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /新建工作区/ })).not.toBeInTheDocument()
     await openCreatorAssetTab(/账号概况/)
+    expect(await screen.findByText('创作者档案概览')).toBeInTheDocument()
+    expect(screen.getByText(/底层仍保留独立 input asset/)).toBeInTheDocument()
     expect(
       await screen.findByDisplayValue('帮助文科生做留学决策。'),
     ).toBeInTheDocument()
@@ -1483,6 +1485,7 @@ describe('workspace UI', () => {
     ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /账号诊断/ }))
+    expect(screen.getByLabelText(/下期选题/)).toHaveValue('')
     fireEvent.click(screen.getByRole('button', { name: '⚡ 生成账号诊断' }))
 
     await waitFor(() => {
@@ -1490,6 +1493,7 @@ describe('workspace UI', () => {
         fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST'),
       ).toHaveLength(4)
     })
+    expect(screen.getByLabelText(/下期选题/)).toHaveValue('')
   })
 
   it('auto-saves video creation samples before creating a video quality run', async () => {
