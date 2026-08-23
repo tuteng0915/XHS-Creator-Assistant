@@ -82,7 +82,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
     ? '优先使用小红书创作者主页资产；未选择时回退到账号概况、历史笔记和评论样本。'
     : isVideo
       ? '使用账号概况和视频创作样本判断 AIGC 视频创作者质量与激励计划适配度。'
-      : '使用账号概况和趋势 CSV 生成热点分析。'
+      : '使用账号概况和趋势数据生成热点分析。'
   const runLabel = isAccount
     ? '⚡ 生成账号诊断'
     : isVideo
@@ -345,7 +345,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
       )}
       {targetTab === 'trend' && (
         <div className="source-editor-card compact">
-          <label htmlFor="workflow-trend-material">趋势 CSV 数据实例</label>
+          <label htmlFor="workflow-trend-material">趋势数据实例</label>
           <select
             id="workflow-trend-material"
             value={trendMaterial?.id || ''}
@@ -357,7 +357,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
             }}
           >
             {trendMaterials.length === 0 ? (
-              <option value="">还没有上传的趋势 CSV</option>
+              <option value="">还没有上传的趋势数据</option>
             ) : (
               trendMaterials.map((material) => (
                 <option value={material.id} key={material.id}>
@@ -367,9 +367,9 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
             )}
           </select>
           {renderInputPreview(
-            '趋势 CSV',
+            '趋势数据',
             trendMaterial ? 'ready' : 'missing',
-            trendMaterial ? inputAssetPreview(trendMaterial) : '未选择趋势 CSV 实例',
+            trendMaterial ? inputAssetPreview(trendMaterial) : '未选择趋势数据实例',
           )}
         </div>
       )}

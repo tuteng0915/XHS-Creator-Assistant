@@ -898,7 +898,7 @@ describe('workspace UI', () => {
     ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /热点分析/ }))
-    expect(await screen.findByText('趋势 CSV')).toBeInTheDocument()
+    expect(await screen.findByLabelText('趋势数据实例')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '管理账号概况' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '管理输入资产' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /视频博主质量诊断/ }))

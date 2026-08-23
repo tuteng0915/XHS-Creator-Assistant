@@ -599,11 +599,11 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
         <>
           <div className="detail-head">
             <div>
-              <h2>{trendMaterial ? trendMaterial.name : '上传新趋势 CSV'}</h2>
+              <h2>{trendMaterial ? trendMaterial.name : '上传新趋势数据'}</h2>
             </div>
           </div>
           <div className="source-editor-card">
-            <label htmlFor="trend-csv-draft-name">趋势 CSV 名称</label>
+            <label htmlFor="trend-csv-draft-name">趋势数据名称</label>
             <input
               id="trend-csv-draft-name"
               value={props.trendCsvDraftName}

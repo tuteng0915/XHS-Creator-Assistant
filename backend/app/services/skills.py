@@ -99,9 +99,9 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="source.upload_trend_csv",
-        display_name="Upload Trend CSV",
+        display_name="Upload Trend Data",
         category="input_asset",
-        purpose="Persist uploaded Trend CSV input assets with controlled server storage.",
+        purpose="Persist uploaded trend data input assets with controlled server storage.",
         required_inputs=["workspace_id", "keyword", "csv_or_tsv_file"],
         output_schema={"type": "InputAsset", "asset_type": "trend_csv"},
         artifact_effect="InputAsset.trend_csv",
@@ -173,7 +173,7 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="input_asset.format_trend_csv_brief",
-        display_name="Format Trend CSV Brief",
+        display_name="Format Trend Data Brief",
         category="input_asset",
         purpose=(
             "Extract a trend keyword and import notes from pasted trend "
@@ -1029,7 +1029,7 @@ class SkillService:
                 "assetType": target_type,
                 "name": self._generated_input_asset_name(target_type, lines, keyword[:80]),
                 "keyword": keyword[:80],
-                "notes": "已提取趋势关键词；趋势 CSV 仍需要上传 CSV / TSV 文件后才能保存。",
+                "notes": "已提取趋势关键词；趋势数据仍需要上传 CSV / TSV 文件后才能保存。",
             }
         if target_type == "xhs_creator_profile":
             return {

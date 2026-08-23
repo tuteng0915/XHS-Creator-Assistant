@@ -1317,7 +1317,7 @@ function WorkspaceApp() {
   ): Promise<TrendCsvInputAsset> {
     if (!workspace) throw new Error('No workspace selected')
     const cleanName = name.trim()
-    if (!cleanName) throw new Error('请填写趋势 CSV 名称。')
+    if (!cleanName) throw new Error('请填写趋势数据名称。')
     const uploaded = await inputAssetApi.uploadTrendCsv(
       workspace.id,
       cleanName,
@@ -2535,9 +2535,9 @@ function WorkspaceApp() {
         trend: {
           title: '热点分析帮助',
           description:
-            '热点分析会读取账号概况和趋势 CSV 数据，先确定性解析排名，再生成趋势洞察和候选选题。',
+            '热点分析会读取账号概况和趋势数据，先确定性解析排名，再生成趋势洞察和候选选题。',
           bullets: [
-            '趋势 CSV 上传后保存为输入素材；原始文件由后端托管，前端只展示 preview。',
+            '趋势数据上传后保存为输入素材；原始 CSV/TSV 文件由后端托管，前端只展示 preview。',
             'Workflow 会保留 top-50 engagement ranking 行为。',
             '运行时保存的是 compact input snapshot，不把完整 CSV 放进 graph state。',
             '适合用来把热点内容转成适配当前账号定位的选题。',

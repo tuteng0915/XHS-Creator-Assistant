@@ -20,7 +20,7 @@ Implemented and product-specific:
   - video creation samples
   - XHS creator profile
 - Other input/media assets:
-  - uploaded trend CSV
+  - uploaded trend data
   - image assets
   - video assets
 - Analysis runs:
@@ -468,7 +468,7 @@ These are user-facing creator records:
   - video creation samples
   - XHS creator profile
 - Other Input Asset
-  - trend CSV
+  - trend data
 - Analysis Run
 - Topic
 - Draft / Content Structure
