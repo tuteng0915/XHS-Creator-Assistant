@@ -70,6 +70,8 @@ xhs_import_package/
 
 后端只接受包内相对路径，不接受绝对路径或 `../`。导入时会创建 `xhs_creator_profile` input asset，并为每张封面创建或复用 `MediaAsset.image`。主页资产默认命名为 `XHS {小红书账号名} 创作者主页`；MediaCrawler fixture 会从笔记里的 `nickname` 推断账号名。封面命名规则是 `笔记标题_封面`，caption 和 user notes 优先使用笔记正文。
 
+前端选择文件夹后会先在本地读取 `xhs_creator_profile.json` 做预览，不上传文件也不调用模型。预览会显示账号名、笔记数、评论数、图片文件数、匹配封面数和缺失封面数。浏览器目录上传通常会给文件路径加上顶层文件夹名前缀，例如 `_tt/images/...`；前端会在上传前剥掉公共顶层目录，使它与 JSON 里的 `images/...` 匹配。
+
 主 Agent 读取时应通过 Context Access Layer 获取全局视野，而不是只拿单个文件。推荐 context pack：
 
 ```text
@@ -100,6 +102,7 @@ creator profile summary
    - 后端只接收上传文件，不访问小红书。
    - 上传旧 `xhs-profile-import/v1` JSON 时会转换成 workflow 可直接读取的 `xhs-creator-profile/v1`。
    - 推荐路径支持选择一个离线导入包文件夹；后端接收 profile JSON、图片文件和浏览器提供的相对路径，生成 XHS profile asset 与封面 media assets。
+   - 前端导入前会展示本地预览；导入后完整展示 warning 列表。
 
 4. 复用现有 Agent context adapter。已验证。
    - 主 Agent 不直接读取 MediaCrawler 原始文件。
@@ -165,6 +168,8 @@ backend/.venv/bin/python scripts/export_xhs_import_package.py \
 ```
 
 然后在前端选择整个 `data/xhs-import-packages/my_creator` 文件夹。
+
+小红书创作者主页详情页会优先展示结构化摘要，包括账号名、笔记数、评论数、封面引用数和高互动前 5 条；原始 JSON 仍保留在下方用于检查。
 
 ## 不做的事情
 

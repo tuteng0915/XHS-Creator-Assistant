@@ -88,6 +88,11 @@ import {
   VIDEO_CREATOR_STAGES,
   type WorkflowTab,
 } from './workflows'
+import {
+  previewXhsImportPackage,
+  xhsPackageRelativePaths,
+  type XhsImportPackagePreview,
+} from './xhsCreatorProfile'
 
 type SaveKey =
   | 'workspace'
@@ -485,6 +490,10 @@ function WorkspaceApp() {
   const [xhsImportFiles, setXhsImportFiles] =
     useState<Record<XhsImportPanel, File | null>>(emptyXhsImportFiles)
   const [xhsPackageFiles, setXhsPackageFiles] = useState<File[]>([])
+  const [xhsPackagePreview, setXhsPackagePreview] =
+    useState<XhsImportPackagePreview | null>(null)
+  const [xhsPackagePreviewError, setXhsPackagePreviewError] = useState('')
+  const [xhsImportWarnings, setXhsImportWarnings] = useState<string[]>([])
   const [inputAssetPanel, setInputAssetPanel] =
     useState<InputAssetPanel>('historical_posts')
   const [selectedHistoricalInputAssetId, setSelectedHistoricalInputAssetId] =
@@ -879,6 +888,9 @@ function WorkspaceApp() {
     setInputAssetBatchFiles(emptyTextInputAssetBatchFiles())
     setXhsImportFiles(emptyXhsImportFiles())
     setXhsPackageFiles([])
+    setXhsPackagePreview(null)
+    setXhsPackagePreviewError('')
+    setXhsImportWarnings([])
     setInputAssetPanel('historical_posts')
     setSelectedHistoricalInputAssetId('')
     setSelectedCommentsInputAssetId('')
@@ -924,6 +936,13 @@ function WorkspaceApp() {
     setSaveStates((current) => ({ ...current, [key]: state }))
   }
 
+  function clearXhsImportTransientState() {
+    setXhsPackageFiles([])
+    setXhsPackagePreview(null)
+    setXhsPackagePreviewError('')
+    setXhsImportWarnings([])
+  }
+
   function openInputAsset(panel: InputAssetPanel) {
     setInputAssetPanel(panel)
     setInputAssetFormatterDraft('')
@@ -965,6 +984,7 @@ function WorkspaceApp() {
       setSelectedXhsCreatorProfileInputAssetId(material.id)
       setXhsCreatorProfileDraftName(material.name)
       setXhsCreatorProfileContent(material.content)
+      clearXhsImportTransientState()
       setSaveState('xhs', idleState)
     }
   }
@@ -1012,6 +1032,7 @@ function WorkspaceApp() {
       setSelectedXhsCreatorProfileInputAssetId(NEW_INPUT_ASSET_ID)
       setXhsCreatorProfileDraftName(EMPTY_INPUT_ASSET_NAMES.xhs_creator_profile)
       setXhsCreatorProfileContent('')
+      clearXhsImportTransientState()
       setSaveState('xhs', idleState)
       return
     }
@@ -1354,6 +1375,7 @@ function WorkspaceApp() {
 
   function setXhsImportFile(panel: XhsImportPanel, file: File | null) {
     setXhsImportFiles((current) => ({ ...current, [panel]: file }))
+    setXhsImportWarnings([])
     setSaveState(SAVE_KEY_BY_XHS_IMPORT_PANEL[panel], idleState)
   }
 
@@ -1380,8 +1402,9 @@ function WorkspaceApp() {
       ])
       chooseTextMaterial(imported.inputAsset)
       setXhsImportFiles((current) => ({ ...current, [panel]: null }))
+      setXhsImportWarnings(imported.warnings)
       const warningSuffix =
-        imported.warnings.length > 0 ? `；${imported.warnings[0]}` : ''
+        imported.warnings.length > 0 ? `；${imported.warnings.length} 条提示` : ''
       setSaveState(saveKey, {
         phase: 'saved',
         message: `已导入 ${imported.parsedNoteCount} 条笔记${warningSuffix}`,
@@ -1394,9 +1417,25 @@ function WorkspaceApp() {
     }
   }
 
-  function setXhsImportPackageFiles(files: File[]) {
+  async function setXhsImportPackageFiles(files: File[]) {
     setXhsPackageFiles(files)
+    setXhsImportWarnings([])
+    setXhsPackagePreview(null)
+    setXhsPackagePreviewError('')
     setSaveState('xhs', idleState)
+    if (files.length === 0) return
+    try {
+      const preview = await previewXhsImportPackage(files)
+      if (!preview) {
+        setXhsPackagePreviewError(
+          '没有找到可预览的 xhs_creator_profile.json / profile.json。',
+        )
+        return
+      }
+      setXhsPackagePreview(preview)
+    } catch (error) {
+      setXhsPackagePreviewError(errorMessage(error))
+    }
   }
 
   async function uploadXhsImportPackage() {
@@ -1430,8 +1469,11 @@ function WorkspaceApp() {
       return
     }
 
+    const packageRelativePaths = xhsPackageRelativePaths(xhsPackageFiles)
     const mediaFiles = xhsPackageFiles.filter((file) => file !== profileFile)
-    const relativePaths = mediaFiles.map(fileRelativePath)
+    const relativePaths = mediaFiles.map(
+      (file) => packageRelativePaths[xhsPackageFiles.indexOf(file)] || file.name,
+    )
     setSaveState('xhs', { phase: 'saving' })
     try {
       const imported = await inputAssetApi.uploadXhsImportPackage(
@@ -1452,8 +1494,11 @@ function WorkspaceApp() {
       ])
       chooseTextMaterial(imported.inputAsset)
       setXhsPackageFiles([])
+      setXhsPackagePreview(null)
+      setXhsPackagePreviewError('')
+      setXhsImportWarnings(imported.warnings)
       const warningSuffix =
-        imported.warnings.length > 0 ? `；${imported.warnings[0]}` : ''
+        imported.warnings.length > 0 ? `；${imported.warnings.length} 条提示` : ''
       setSaveState('xhs', {
         phase: 'saved',
         message: `已导入 ${imported.parsedNoteCount} 条笔记和 ${imported.mediaAssets.length} 张封面${warningSuffix}`,
@@ -2986,6 +3031,9 @@ function WorkspaceApp() {
         onSetXhsImportFile={setXhsImportFile}
         onUploadXhsImport={uploadXhsImport}
         xhsPackageFiles={xhsPackageFiles}
+        xhsPackagePreview={xhsPackagePreview}
+        xhsPackagePreviewError={xhsPackagePreviewError}
+        xhsImportWarnings={xhsImportWarnings}
         onSetXhsPackageFiles={setXhsImportPackageFiles}
         onUploadXhsImportPackage={uploadXhsImportPackage}
       />

@@ -6,6 +6,11 @@ import {
   type InputAssetPanel,
 } from '../inputAssets'
 import type { InputAsset, TextInputAsset, TrendCsvInputAsset } from '../types'
+import {
+  xhsCreatorProfileSummaryFromAsset,
+  type XhsCreatorProfileSummary,
+  type XhsImportPackagePreview,
+} from '../xhsCreatorProfile'
 import { SaveIndicator, type SaveState } from './StageResultViews'
 
 type TextInputAssetPanel = Exclude<InputAssetPanel, 'trend_csv'>
@@ -86,6 +91,9 @@ type InputAssetsPageProps = {
   onSetXhsImportFile: (panel: XhsImportPanel, file: File | null) => void
   onUploadXhsImport: (panel: XhsImportPanel) => void
   xhsPackageFiles: File[]
+  xhsPackagePreview: XhsImportPackagePreview | null
+  xhsPackagePreviewError: string
+  xhsImportWarnings: string[]
   onSetXhsPackageFiles: (files: File[]) => void
   onUploadXhsImportPackage: () => void
 }
@@ -230,11 +238,80 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
         )}
         <SaveIndicator state={props.xhsSaveState} />
       </div>
+      {props.xhsPackagePreview && (
+        <div className="xhs-summary-card">
+          <div className="xhs-summary-head">
+            <b>导入前预览</b>
+            <span>{props.xhsPackagePreview.profileFileName}</span>
+          </div>
+          <div className="xhs-summary-grid">
+            <span>账号：{props.xhsPackagePreview.displayName}</span>
+            <span>笔记：{props.xhsPackagePreview.noteCount}</span>
+            <span>评论：{props.xhsPackagePreview.commentCount}</span>
+            <span>图片文件：{props.xhsPackagePreview.imageFileCount}</span>
+            <span>匹配封面：{props.xhsPackagePreview.matchedCoverFileCount}</span>
+            <span>缺失封面：{props.xhsPackagePreview.missingCoverCount}</span>
+          </div>
+        </div>
+      )}
+      {props.xhsPackagePreviewError && (
+        <p className="save-state error">{props.xhsPackagePreviewError}</p>
+      )}
+      {renderXhsWarnings(props.xhsImportWarnings)}
     </div>
   )
 
+  const renderXhsSummary = (summary: XhsCreatorProfileSummary | null) => {
+    if (!summary) return null
+    return (
+      <div className="source-editor-card">
+        <div className="xhs-summary-head">
+          <b>主页摘要</b>
+          <span>{summary.displayName}</span>
+        </div>
+        <div className="xhs-summary-grid">
+          <span>笔记：{summary.noteCount}</span>
+          <span>评论：{summary.commentCount}</span>
+          <span>封面引用：{summary.coverReferenceCount}</span>
+        </div>
+        {summary.topNotes.length > 0 && (
+          <div className="xhs-top-notes">
+            <label>高互动前 5 条</label>
+            <ol>
+              {summary.topNotes.map((note) => (
+                <li key={note.noteId || note.title}>
+                  <b>{note.title}</b>
+                  <span>
+                    赞 {note.liked ?? '-'} · 藏 {note.collected ?? '-'} · 评{' '}
+                    {note.comments ?? '-'} · 分享 {note.shares ?? '-'}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
+        {renderXhsWarnings(summary.warnings)}
+      </div>
+    )
+  }
+
+  const renderXhsWarnings = (warnings: string[]) => {
+    if (warnings.length === 0) return null
+    return (
+      <div className="xhs-warning-list">
+        <b>{warnings.length} 条导入提示</b>
+        <ul>
+          {warnings.map((warning, index) => (
+            <li key={`${index}-${warning}`}>{warning}</li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
+
   const renderInputAssetDetail = () => {
     if (inputAssetPanel === 'xhs_creator_profiles') {
+      const xhsSummary = xhsCreatorProfileSummaryFromAsset(xhsCreatorProfileMaterial)
       return (
         <>
           <div className="detail-head">
@@ -246,6 +323,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
               </h2>
             </div>
           </div>
+          {renderXhsSummary(xhsSummary)}
           <div className="source-editor-card">
             <label htmlFor="xhs-creator-profile-draft-name">
               小红书创作者主页名称
