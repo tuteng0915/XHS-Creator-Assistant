@@ -309,6 +309,7 @@ def create_api_router(
             list[str] | None, Form(alias="relativePaths")
         ] = None,
         name: Annotated[str, Form()] = "",
+        save_as_new: Annotated[bool, Form(alias="saveAsNew")] = False,
     ) -> XhsOfflineImportPackageResponse:
         uploaded_files = files or []
         uploaded_relative_paths = relative_paths or []
@@ -332,6 +333,7 @@ def create_api_router(
                 )
             ],
             name=name,
+            save_as_new=save_as_new,
         )
 
     @router.get(

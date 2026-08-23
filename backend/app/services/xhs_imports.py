@@ -12,7 +12,9 @@ from app.models import (
     MediaAssetType,
     MediaAssetUpdate,
     SourceMaterialType,
+    SourceMaterialUpdate,
     TextSourceMaterialCreate,
+    TextSourceMaterialResponse,
     XhsOfflineImportPackageResponse,
     XhsOfflineImportResponse,
 )
@@ -133,6 +135,7 @@ class XhsOfflineImportService:
         profile_content: bytes,
         files: list[XhsPackageFile],
         name: str = "",
+        save_as_new: bool = False,
     ) -> XhsOfflineImportPackageResponse:
         if self.media_asset_service is None:
             raise ValidationError("XHS package import is not configured")
@@ -218,14 +221,30 @@ class XhsOfflineImportService:
         default_name = self._default_creator_profile_asset_name(
             creator_profile, safe_profile_filename
         )
-        material = self.input_asset_service.create_text(
-            workspace_id,
-            TextSourceMaterialCreate(
-                type=SourceMaterialType.XHS_CREATOR_PROFILE,
-                name=(name.strip() or default_name)[:160],
-                content=asset_content,
-            ),
+        material_name = (name.strip() or default_name)[:160]
+        existing_material = (
+            None
+            if save_as_new or name.strip()
+            else self._find_existing_creator_profile(workspace_id, material_name)
         )
+        if existing_material is None:
+            material = self.input_asset_service.create_text(
+                workspace_id,
+                TextSourceMaterialCreate(
+                    type=SourceMaterialType.XHS_CREATOR_PROFILE,
+                    name=material_name,
+                    content=asset_content,
+                ),
+            )
+        else:
+            material = self.input_asset_service.update(
+                existing_material.id,
+                SourceMaterialUpdate(
+                    name=material_name,
+                    content=asset_content,
+                    expected_updated_at=existing_material.updated_at,
+                ),
+            )
         return XhsOfflineImportPackageResponse(
             input_asset=material,
             media_assets=media_assets,
@@ -299,6 +318,16 @@ class XhsOfflineImportService:
             if relative_path in package_files:
                 return relative_path
         return ""
+
+    def _find_existing_creator_profile(
+        self, workspace_id: str, name: str
+    ) -> TextSourceMaterialResponse | None:
+        for material in self.input_asset_service.list(
+            workspace_id, SourceMaterialType.XHS_CREATOR_PROFILE
+        ):
+            if getattr(material, "name", "") == name:
+                return material
+        return None
 
     def _load_json_export(self, text: str) -> dict[str, Any]:
         try:

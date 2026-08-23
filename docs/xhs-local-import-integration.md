@@ -72,6 +72,8 @@ xhs_import_package/
 
 前端选择文件夹后会先在本地读取 `xhs_creator_profile.json` 做预览，不上传文件也不调用模型。预览会显示账号名、笔记数、评论数、图片文件数、匹配封面数和缺失封面数。浏览器目录上传通常会给文件路径加上顶层文件夹名前缀，例如 `_tt/images/...`；前端会在上传前剥掉公共顶层目录，使它与 JSON 里的 `images/...` 匹配。
 
+重复导入同一个账号时，后端默认按同一 workspace 内的同名主页资产更新已有 `xhs_creator_profile`，避免列表膨胀。前端会在预览阶段提示“已存在，默认会更新已有资产”，并提供“另存为新主页”；该按钮通过 `saveAsNew=true` 强制创建新资产。封面媒体资产继续按 `笔记标题_封面` 复用。
+
 主 Agent 读取时应通过 Context Access Layer 获取全局视野，而不是只拿单个文件。推荐 context pack：
 
 ```text

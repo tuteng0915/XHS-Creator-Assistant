@@ -124,6 +124,7 @@ describe('InputAssetsPage', () => {
         }}
         xhsPackagePreviewError=""
         xhsImportWarnings={['导入提示一', '导入提示二']}
+        matchingXhsPackageMaterial={xhsAsset}
         onSetXhsPackageFiles={vi.fn()}
         onUploadXhsImportPackage={vi.fn()}
       />,
@@ -134,6 +135,9 @@ describe('InputAssetsPage', () => {
     expect(screen.getByText('高互动笔记')).toBeInTheDocument()
     expect(screen.getByText('导入前预览')).toBeInTheDocument()
     expect(screen.getByText('匹配封面：4')).toBeInTheDocument()
+    expect(screen.getByText(/默认会更新已有资产/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '更新已有 XHS 主页' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '另存为新主页' })).toBeInTheDocument()
     expect(screen.getByText('导入提示一')).toBeInTheDocument()
     expect(screen.getByText('导入提示二')).toBeInTheDocument()
   })

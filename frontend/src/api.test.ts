@@ -211,6 +211,8 @@ describe('inputAssetApi', () => {
       profile,
       [cover],
       ['images/n1/0.jpg'],
+      '',
+      true,
     )
 
     expect(response.mediaAssets).toHaveLength(1)
@@ -221,6 +223,7 @@ describe('inputAssetApi', () => {
     const init = fetchMock.mock.calls[0][1] as RequestInit
     const form = init.body as FormData
     expect(form.get('name')).toBe('')
+    expect(form.get('saveAsNew')).toBe('true')
     expect((form.get('profile') as File).name).toBe('xhs_creator_profile.json')
     expect((form.get('files') as File).name).toBe('images/n1/0.jpg')
     expect(form.get('relativePaths')).toBe('images/n1/0.jpg')

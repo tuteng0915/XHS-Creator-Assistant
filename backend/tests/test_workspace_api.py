@@ -643,6 +643,120 @@ def test_xhs_offline_package_import_creates_profile_and_cover_media(
     assert stored["notes"][0]["cover"]["relativePath"] == "images/n2/0.jpg"
 
 
+def test_xhs_offline_package_import_updates_existing_profile_by_default(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    payload = {
+        "schemaVersion": "xhs-creator-profile/v1",
+        "source": {"platform": "xiaohongshu"},
+        "creator": {"displayName": "QSheep", "profileText": "旧主页"},
+        "notes": [
+            {
+                "noteId": "n2",
+                "title": "申请季复盘",
+                "desc": "旧正文",
+                "cover": {"relativePath": "images/n2/0.jpg"},
+            }
+        ],
+    }
+
+    first = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import-package",
+        data={"relativePaths": "images/n2/0.jpg"},
+        files=[
+            (
+                "profile",
+                (
+                    "xhs_creator_profile.json",
+                    json.dumps(payload, ensure_ascii=False).encode(),
+                    "application/json",
+                ),
+            ),
+            ("files", ("images/n2/0.jpg", b"old-jpeg", "image/jpeg")),
+        ],
+    )
+    assert first.status_code == 201
+    first_body = first.json()
+    payload["notes"][0]["desc"] = "更新后的正文"
+    payload["notes"][0]["cover"]["caption"] = "更新后的正文"
+
+    second = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import-package",
+        data={"relativePaths": "images/n2/0.jpg"},
+        files=[
+            (
+                "profile",
+                (
+                    "xhs_creator_profile.json",
+                    json.dumps(payload, ensure_ascii=False).encode(),
+                    "application/json",
+                ),
+            ),
+            ("files", ("images/n2/0.jpg", b"new-jpeg", "image/jpeg")),
+        ],
+    )
+
+    assert second.status_code == 201
+    second_body = second.json()
+    assert second_body["inputAsset"]["id"] == first_body["inputAsset"]["id"]
+    assert "更新后的正文" in second_body["inputAsset"]["content"]
+    listed = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/input-assets?type=xhs_creator_profile",
+    ).json()
+    assert len(listed) == 1
+
+
+def test_xhs_offline_package_import_can_save_as_new(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    payload = {
+        "schemaVersion": "xhs-creator-profile/v1",
+        "source": {"platform": "xiaohongshu"},
+        "creator": {"displayName": "QSheep", "profileText": "主页"},
+        "notes": [{"noteId": "n2", "title": "申请季复盘", "desc": "正文"}],
+    }
+    files = [
+        (
+            "profile",
+            (
+                "xhs_creator_profile.json",
+                json.dumps(payload, ensure_ascii=False).encode(),
+                "application/json",
+            ),
+        )
+    ]
+
+    first = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import-package",
+        files=files,
+    )
+    second = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/input-assets/xhs-import-package",
+        data={"saveAsNew": "true"},
+        files=files,
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["inputAsset"]["id"] != second.json()["inputAsset"]["id"]
+    listed = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/input-assets?type=xhs_creator_profile",
+    ).json()
+    assert len(listed) == 2
+
+
 def test_xhs_offline_package_import_rejects_path_escape(app: FastAPI) -> None:
     workspace = create_workspace(app)
     payload = {

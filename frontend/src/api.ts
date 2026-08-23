@@ -199,9 +199,11 @@ export const inputAssetApi = {
     files: File[],
     relativePaths: string[],
     name = '',
+    saveAsNew = false,
   ) => {
     const form = new FormData()
     form.set('name', name)
+    form.set('saveAsNew', String(saveAsNew))
     form.set('profile', profile, profile.name)
     files.forEach((file, index) => {
       const relativePath = relativePaths[index] || file.name

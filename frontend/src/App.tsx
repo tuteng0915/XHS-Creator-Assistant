@@ -650,6 +650,14 @@ function WorkspaceApp() {
     },
     [xhsCreatorProfileMaterials, selectedXhsCreatorProfileInputAssetId],
   )
+  const matchingXhsPackageMaterial = useMemo(() => {
+    if (!xhsPackagePreview) return null
+    const expectedName = `XHS ${xhsPackagePreview.displayName} 创作者主页`
+    return (
+      xhsCreatorProfileMaterials.find((material) => material.name === expectedName) ||
+      null
+    )
+  }, [xhsCreatorProfileMaterials, xhsPackagePreview])
   const trendMaterial = useMemo(
     () => {
       if (selectedTrendInputAssetId === NEW_INPUT_ASSET_ID) return undefined
@@ -1438,7 +1446,7 @@ function WorkspaceApp() {
     }
   }
 
-  async function uploadXhsImportPackage() {
+  async function uploadXhsImportPackage(saveAsNew = false) {
     if (!workspace) {
       setSaveState('xhs', {
         phase: 'error',
@@ -1481,6 +1489,8 @@ function WorkspaceApp() {
         profileFile,
         mediaFiles,
         relativePaths,
+        '',
+        saveAsNew,
       )
       setMaterials((current) => [
         imported.inputAsset,
@@ -3034,6 +3044,7 @@ function WorkspaceApp() {
         xhsPackagePreview={xhsPackagePreview}
         xhsPackagePreviewError={xhsPackagePreviewError}
         xhsImportWarnings={xhsImportWarnings}
+        matchingXhsPackageMaterial={matchingXhsPackageMaterial}
         onSetXhsPackageFiles={setXhsImportPackageFiles}
         onUploadXhsImportPackage={uploadXhsImportPackage}
       />

@@ -94,8 +94,9 @@ type InputAssetsPageProps = {
   xhsPackagePreview: XhsImportPackagePreview | null
   xhsPackagePreviewError: string
   xhsImportWarnings: string[]
+  matchingXhsPackageMaterial: TextInputAsset | null
   onSetXhsPackageFiles: (files: File[]) => void
-  onUploadXhsImportPackage: () => void
+  onUploadXhsImportPackage: (saveAsNew?: boolean) => void
 }
 
 const SAVE_STATE_BY_TEXT_INPUT_PANEL = {
@@ -228,9 +229,22 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
         选择包含 xhs_creator_profile.json / profile.json 和 images/... 的导入包；封面会创建为图文资产。
       </p>
       <div className="save-row">
-        <button className="save-button" onClick={props.onUploadXhsImportPackage}>
-          上传文件夹并保存 XHS 主页
+        <button
+          className="save-button"
+          onClick={() => props.onUploadXhsImportPackage(false)}
+        >
+          {props.matchingXhsPackageMaterial
+            ? '更新已有 XHS 主页'
+            : '上传文件夹并保存 XHS 主页'}
         </button>
+        {props.matchingXhsPackageMaterial && (
+          <button
+            className="save-button"
+            onClick={() => props.onUploadXhsImportPackage(true)}
+          >
+            另存为新主页
+          </button>
+        )}
         {props.xhsPackageFiles.length > 0 && (
           <span className="save-state saved" role="status">
             已选择 {props.xhsPackageFiles.length} 个文件
@@ -252,6 +266,11 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
             <span>匹配封面：{props.xhsPackagePreview.matchedCoverFileCount}</span>
             <span>缺失封面：{props.xhsPackagePreview.missingCoverCount}</span>
           </div>
+          {props.matchingXhsPackageMaterial && (
+            <p className="xhs-existing-note">
+              已存在：{props.matchingXhsPackageMaterial.name}。默认会更新已有资产。
+            </p>
+          )}
         </div>
       )}
       {props.xhsPackagePreviewError && (
