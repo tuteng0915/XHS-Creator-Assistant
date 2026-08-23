@@ -408,9 +408,9 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
           </div>
           )}
           <div className="source-editor-card compact">
-            <label>关联图片/视频素材</label>
+            <label>关联图文/视频素材</label>
             {mediaAssets.length === 0 ? (
-              <div className="empty-card">还没有图片或视频素材。</div>
+              <div className="empty-card">还没有图文或视频素材。</div>
             ) : (
               <div className="asset-mini-list">
                 {mediaAssets.map((asset) => (
@@ -436,7 +436,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
               videoWorkflowMediaAssets.length ? 'ready' : 'missing',
               videoWorkflowMediaAssets.length
                 ? videoWorkflowMediaAssets.map(mediaWorkflowPreview).join('\n')
-                : '可选。建议先在图片/视频素材页保存 Qwen 理解结果。',
+                : '可选。建议先在图文/视频素材页保存 Qwen 理解结果。',
             )}
           </div>
         </>

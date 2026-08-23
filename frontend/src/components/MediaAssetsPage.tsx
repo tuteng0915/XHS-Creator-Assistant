@@ -18,9 +18,9 @@ type PreviewFrame = { mediaAssetId: string; fileUrl: string; frameIndex?: number
 const MEDIA_LABEL = {
   image: {
     icon: '🖼',
-    label: '图片素材',
-    singular: '图片素材',
-    empty: '还没有已上传的图片素材。',
+    label: '图文素材',
+    singular: '图文素材',
+    empty: '还没有已上传的图文素材。',
     accept: 'image/*',
     upload: '上传图片',
   },
@@ -555,7 +555,7 @@ export function MediaAssetsPage({
         <div className="source-editor-card">
           <div className="detail-head">
             <div>
-              <h2>{mediaType === 'image' ? '生成图片素材' : '生成视频素材'}</h2>
+              <h2>{mediaType === 'image' ? '生成图文素材' : '生成视频素材'}</h2>
               <p>
                 当前模式：{mode}。live 会调用 Qwen / DashScope，并把生成结果保存为媒体资产。
               </p>

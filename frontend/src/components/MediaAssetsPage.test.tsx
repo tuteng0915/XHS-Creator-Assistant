@@ -111,7 +111,7 @@ describe('MediaAssetsPage', () => {
     fireEvent.change(screen.getByLabelText('用户备注'), {
       target: { value: '截图来自小红书主页。' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '保存图片素材' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存图文素材' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     expect(onAssetsChange).toHaveBeenCalledWith([
@@ -198,7 +198,7 @@ describe('MediaAssetsPage', () => {
     fireEvent.change(screen.getByLabelText('derived JSON'), {
       target: { value: 'not-json' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '保存图片素材' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存图文素材' }))
 
     expect(fetchMock).not.toHaveBeenCalled()
     expect(onAssetsChange).not.toHaveBeenCalled()
@@ -218,7 +218,7 @@ describe('MediaAssetsPage', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('图片素材名称'), {
+    fireEvent.change(screen.getByLabelText('图文素材名称'), {
       target: { value: '主页截图' },
     })
     fireEvent.click(screen.getByRole('button', { name: '上传图片' }))
@@ -294,7 +294,7 @@ describe('MediaAssetsPage', () => {
             id: 'skill-understand-image',
             workspaceId: 'workspace-1',
             skillId: 'media.understand_image',
-            displayName: 'Understand Image Asset',
+            displayName: 'Understand Image-text Asset',
             category: 'media',
             purpose: '',
             artifactEffect: '',
@@ -364,7 +364,7 @@ describe('MediaAssetsPage', () => {
             id: 'skill-generate-image',
             workspaceId: 'workspace-1',
             skillId: 'media.generate_image',
-            displayName: 'Generate Image Asset',
+            displayName: 'Generate Image-text Asset',
             category: 'media',
             purpose: '',
             artifactEffect: '',

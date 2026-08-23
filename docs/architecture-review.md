@@ -21,7 +21,7 @@ Implemented and product-specific:
   - XHS creator profile
 - Other input/media assets:
   - uploaded trend data
-  - image assets
+  - image-text assets
   - video assets
 - Analysis runs:
   - account diagnosis

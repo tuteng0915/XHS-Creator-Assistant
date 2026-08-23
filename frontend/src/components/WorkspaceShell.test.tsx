@@ -67,7 +67,7 @@ describe('WorkspaceShell', () => {
     const props = renderShell()
     const contentNav = screen.getByRole('navigation', { name: '内容资产导航' })
 
-    fireEvent.click(within(contentNav).getByRole('button', { name: /图片素材/ }))
+    fireEvent.click(within(contentNav).getByRole('button', { name: /图文素材/ }))
     expect(props.onSetActivePage).toHaveBeenCalledWith('image-assets')
 
     fireEvent.click(within(contentNav).getByRole('button', { name: /视频素材/ }))

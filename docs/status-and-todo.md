@@ -51,7 +51,7 @@ https://your-domain/api/...
   - 评论样本；
   - 视频创作样本；
 - 趋势数据；
-- 图片素材；
+- 图文素材；
 - 视频素材；
 - 分析结果；
 - 选题库；
@@ -71,7 +71,7 @@ https://your-domain/api/...
 - 批量结果 CSV 导出；
 - 输入素材整理 agent 草稿入口；
 - 输入素材整理通过后端 `input_asset.format_*` skills 调用，不再是纯前端假整理。
-- 图片/视频媒体资产基础层：
+- 图文/视频媒体资产基础层：
   - 上传图片/视频；
   - 文件由后端受控落盘；
   - SQLite 保存 metadata、derived JSON、用户备注和文件引用；
@@ -79,7 +79,7 @@ https://your-domain/api/...
   - Context Access Layer 已包含 `media_assets_overview`，并会携带 compact `imageUnderstanding` / `videoUnderstanding` / `videoPreview`；
   - Qwen 图片理解和视频理解可作为受控 media skills 调用；
   - Qwen 图片生成和视频生成可作为受控 media skills 调用；
-  - 本地上传视频可通过 ffmpeg 抽取预览帧，帧会作为 `extracted_frame` 图片素材保存；
+  - 本地上传视频可通过 ffmpeg 抽取预览帧，帧会作为 `extracted_frame` 图文素材保存；
   - Qwen 理解结果会先作为草稿展示，用户确认后写入 `MediaAsset.derived`；
   - 生成类 media skills 会把远程结果下载到本地受控 media storage，并登记为 `MediaAsset`。
 
@@ -119,7 +119,7 @@ https://your-domain/api/...
 - SSE 只作为观察通道；
 - 刷新后可重新打开历史 run；
 - 账号诊断、热点分析、受众模拟已经接入 LangGraph；
-- 视频博主质量诊断已按同一产品接口实现，支持小红书创作者主页派生 evidence pack，也兼容视频创作样本文本，并可选择已保存的图片/视频素材 compact understanding 作为补充上下文；
+- 视频博主质量诊断已按同一产品接口实现，支持小红书创作者主页派生 evidence pack，也兼容视频创作样本文本，并可选择已保存的图文/视频素材 compact understanding 作为补充上下文；
 - 运行结果、stage 结果、错误和 input snapshot 会持久化。
 - “下期选题”只用于受众模拟，不是账号诊断、热点分析或视频质量诊断的必填输入。
 
@@ -163,7 +163,7 @@ https://your-domain/api/...
 - 本地上传视频理解会先抽取预览帧，再把帧作为图片输入发送给 Qwen；完整视频文件不会直接发送；
 - 图片生成和视频生成已通过 DashScope async task 接入为受控 skills；
 - 生成类 media skills 会下载返回的远程结果到本地 media storage，并登记为 `MediaAsset`；远程 URL 只作为 `externalUrl` 来源记录；
-- 图片/视频素材页面已经提供 Qwen 理解与生成入口；
+- 图文/视频素材页面已经提供 Qwen 理解与生成入口；
 - 视频质量诊断 live 路径不会把完整媒体文件放入 graph state，只保存媒体资产 ID 和 compact immutable snapshot；
 - 理解结果先展示为草稿，用户确认后才写回 `MediaAsset.derived`；
 - `scripts/smoke_qwen_media.py` 可用于真实 API smoke test，不进入常规自动化测试；
@@ -255,7 +255,7 @@ agent conversation 现在已经不是同步等待模型完成：
 - Workflow assets 是产品能力目录和调用说明，不是前端可编辑的任意 nodegraph。
 - Skills 当前是产品内受控能力；formatter skills 与 media skills 支持直接 invoke，不支持任意代码工具调用。
 - 视频博主质量诊断优先使用小红书创作者主页派生的 compact evidence pack，兼容文本化视频创作样本；如果用户先保存 Qwen 图片/视频理解结果，workflow 可以读取 compact media understanding，但不做自动视频抓取或本地视频直传。
-- 图片/视频素材已经可以作为媒体资产保存；Qwen media skills 可理解图片、基于公开视频/帧 URL 或本地视频抽帧理解视频，并可生成图片/视频资产。
+- 图文/视频素材已经可以作为媒体资产保存；Qwen media skills 可理解图片、基于公开视频/帧 URL 或本地视频抽帧理解视频，并可生成图片/视频资产。
 - 本地上传的视频文件不会直接发送给 Qwen；当前本地视频理解入口依赖 ffmpeg 抽帧。
 - SSE 是可重连观察 replay，不是完整 durable event log。
 - 安全边界、认证、权限、多用户部署暂不作为当前版本目标。

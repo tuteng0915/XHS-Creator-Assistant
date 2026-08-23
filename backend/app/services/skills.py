@@ -234,7 +234,7 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="media.understand_image",
-        display_name="Understand Image Asset",
+        display_name="Understand Image-text Asset",
         category="media",
         purpose=(
             "Use Qwen vision models to describe, OCR, or inspect an image from a "
@@ -308,7 +308,7 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="media.generate_image",
-        display_name="Generate Image Asset",
+        display_name="Generate Image-text Asset",
         category="media",
         purpose=(
             "Generate an image through Qwen/DashScope image generation and persist "

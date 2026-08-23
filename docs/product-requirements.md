@@ -149,7 +149,7 @@ workflow 执行不应依赖前端连接。
   - 评论样本；
   - 视频创作样本；
 - 趋势数据；
-- 图片素材；
+- 图文素材；
 - 视频素材；
 - 分析结果；
 - 选题库；
@@ -218,7 +218,7 @@ workflow 执行不应依赖前端连接。
 | 评论样本 | 创作者档案子类；评论区痛点和用户表达 | SQLite text |
 | 视频创作样本 | 创作者档案子类；视频创作者背景、视频样本、运营备注 | SQLite text |
 | 趋势数据 | 热点内容数据，当前通过 CSV/TSV 上传 | 文件落盘 + SQLite metadata/preview |
-| 图片素材 | 主页截图、封面图、评论区截图、视觉参考 | 文件落盘 + SQLite metadata/derived JSON |
+| 图文素材 | 主页截图、封面图、评论区截图、视觉参考 | 文件落盘 + SQLite metadata/derived JSON |
 | 视频素材 | 样本视频、视频参考、后续视频诊断输入 | 文件落盘 + SQLite metadata/derived JSON |
 
 创作者档案页需要展示一个组合概览，聚合当前选中的小红书主页、账号概况、历史笔记、评论样本和视频创作样本，并展示 ready/missing 状态。当前这是前端组合视图，不创建新的 `creator_dossier` 表，也不改变现有 input asset API。
@@ -605,7 +605,7 @@ xhs_import_package/
 - 账号概况实例；
 - 小红书创作者主页实例，后端确定性派生 video creator evidence pack；
 - 或兼容路径：视频创作样本实例；
-- 可选图片/视频素材实例，用于提供已保存的 compact media understanding。
+- 可选图文/视频素材实例，用于提供已保存的 compact media understanding。
 
 注意：
 
@@ -890,7 +890,7 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 ## 14. 当前已知限制
 
 1. 视频博主质量诊断优先使用小红书创作者主页派生的 compact evidence pack，兼容文本样本；可读取已保存的 compact media understanding，但不自动抓取或解析视频链接。
-2. 图片/视频素材已经接入 Qwen 理解、生成和本地视频预览抽帧；仍没有独立 OCR、ASR、平台抓取或长视频语义切片。
+2. 图文/视频素材已经接入 Qwen 理解、生成和本地视频预览抽帧；仍没有独立 OCR、ASR、平台抓取或长视频语义切片。
 3. Skills 是受控产品能力，不是任意代码工具；formatter skills 与 media skills 可直接 invoke。
 4. Workflow assets 不是可视化 nodegraph editor。
 5. Conversation 后端执行是 in-process task，不是完整 durable job queue。

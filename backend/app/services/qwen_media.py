@@ -62,7 +62,7 @@ class QwenMediaService:
             if asset.workspace_id != workspace_id:
                 raise ValidationError("Media asset does not belong to this workspace")
             if asset.type != MediaAssetType.IMAGE:
-                raise ValidationError("mediaAssetId must reference an image asset")
+                raise ValidationError("mediaAssetId must reference an image media asset")
             source_asset = {"mediaAssetId": asset.id, "name": asset.name}
         if not image_url:
             raise ValidationError("imageUrl or mediaAssetId is required")

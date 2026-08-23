@@ -105,7 +105,7 @@ export function WorkspaceShell({
             className={activePage === 'image-assets' ? 'active' : ''}
             onClick={() => onSetActivePage('image-assets')}
           >
-            <span>🖼</span> 图片素材
+            <span>🖼</span> 图文素材
           </button>
           <button
             className={activePage === 'video-assets' ? 'active' : ''}

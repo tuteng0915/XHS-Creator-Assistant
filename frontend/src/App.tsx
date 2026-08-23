@@ -2503,9 +2503,9 @@ function WorkspaceApp() {
     if (activePage === 'image-assets' || activePage === 'video-assets') {
       const isImage = activePage === 'image-assets'
       return {
-        title: `${isImage ? '图片素材' : '视频素材'}帮助`,
+        title: `${isImage ? '图文素材' : '视频素材'}帮助`,
         description:
-          '媒体素材是内容资产的一部分，用于保存创作者图片/视频材料和后续可复用的派生信息。',
+          '媒体素材是内容资产的一部分，用于保存创作者图文/视频材料和后续可复用的派生信息。',
         bullets: [
           '当前版本只做上传、metadata、derived JSON 和用户备注，不做视频理解或图片理解。',
           '原始文件由后端受控保存，前端通过 /api/media-assets/{id}/file 预览。',
