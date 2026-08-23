@@ -61,9 +61,12 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="source.save_historical_posts",
-        display_name="Save Historical Posts",
+        display_name="Save Creator Dossier Historical Posts",
         category="input_asset",
-        purpose="Persist a reusable Historical Posts input asset for account diagnosis.",
+        purpose=(
+            "Persist reusable Historical Posts as a child asset of the creator "
+            "dossier for account diagnosis."
+        ),
         required_inputs=["workspace_id", "historical_posts_text"],
         output_schema={"type": "InputAsset", "asset_type": "historical_posts"},
         artifact_effect="InputAsset.historical_posts",
@@ -77,9 +80,12 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="source.save_comments",
-        display_name="Save Comment Samples",
+        display_name="Save Creator Dossier Comment Samples",
         category="input_asset",
-        purpose="Persist reusable Comment Samples input assets for pain-point analysis.",
+        purpose=(
+            "Persist reusable Comment Samples as child assets of the creator "
+            "dossier for pain-point analysis."
+        ),
         required_inputs=["workspace_id", "comments_text"],
         output_schema={"type": "InputAsset", "asset_type": "comments"},
         artifact_effect="InputAsset.comments",
@@ -106,11 +112,12 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="input_asset.format_profile",
-        display_name="Format Account Profile",
+        display_name="Format Creator Dossier Account Profile",
         category="input_asset",
         purpose=(
-            "Turn pasted raw creator/account notes into an editable Profile draft "
-            "without saving it automatically."
+            "Turn pasted raw creator/account notes into an editable Account "
+            "Profile child-asset draft inside the creator dossier, without "
+            "saving it automatically."
         ),
         required_inputs=["raw_text", "target_asset_type"],
         output_schema={
@@ -126,11 +133,11 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="input_asset.format_historical_posts",
-        display_name="Format Historical Posts",
+        display_name="Format Creator Dossier Historical Posts",
         category="input_asset",
         purpose=(
             "Turn pasted post lists, titles, or metrics into an editable "
-            "Historical Posts draft."
+            "Historical Posts child-asset draft inside the creator dossier."
         ),
         required_inputs=["raw_text", "target_asset_type"],
         output_schema={
@@ -146,11 +153,11 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="input_asset.format_comments",
-        display_name="Format Comment Samples",
+        display_name="Format Creator Dossier Comment Samples",
         category="input_asset",
         purpose=(
             "Turn pasted comment blocks into one-comment-per-line editable "
-            "Comment Samples drafts."
+            "Comment Samples child-asset drafts inside the creator dossier."
         ),
         required_inputs=["raw_text", "target_asset_type"],
         output_schema={
@@ -186,11 +193,11 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="input_asset.format_video_creator_samples",
-        display_name="Format Video Creator Samples",
+        display_name="Format Creator Dossier Video Creation Samples",
         category="input_asset",
         purpose=(
-            "Turn pasted video creator observations into editable Video Creator "
-            "Samples drafts."
+            "Turn pasted video creator observations into editable Video Creation "
+            "Samples child-asset drafts inside the creator dossier."
         ),
         required_inputs=["raw_text", "target_asset_type"],
         output_schema={
@@ -206,11 +213,12 @@ BUILTIN_SKILLS = [
     ),
     BuiltinSkillDefinition(
         skill_id="input_asset.format_xhs_creator_profile",
-        display_name="Format XHS Creator Profile",
+        display_name="Format XHS Creator Dossier Profile",
         category="input_asset",
         purpose=(
             "Turn pasted Xiaohongshu crawler/export text into an editable "
-            "XHS Creator Profile draft without saving it automatically."
+            "XHS Creator Profile draft as the structured root of a creator "
+            "dossier, without saving it automatically."
         ),
         required_inputs=["raw_text", "target_asset_type"],
         output_schema={
@@ -755,6 +763,7 @@ BUILTIN_SKILLS = [
         context_policy={
             "allowed_fields": [
                 "workspace profile",
+                "creator dossier overview",
                 "input asset overview",
                 "existing skills",
                 "existing agents",
@@ -801,6 +810,7 @@ BUILTIN_SKILLS = [
         context_policy={
             "allowed_fields": [
                 "workspace profile",
+                "creator dossier overview",
                 "existing skills",
                 "existing agents",
                 "existing workflows",
@@ -845,6 +855,7 @@ BUILTIN_SKILLS = [
         context_policy={
             "allowed_fields": [
                 "workspace profile",
+                "creator dossier overview",
                 "input asset overview",
                 "existing skills",
                 "existing agents",
@@ -1034,7 +1045,7 @@ class SkillService:
             "assetType": target_type,
             "name": self._generated_input_asset_name(target_type, lines),
             "content": "\n".join(lines),
-            "notes": "已整理为视频创作者样本草稿；保存前请确认观察来自真实样本记录。",
+            "notes": "已整理为视频创作样本草稿；保存前请确认观察来自真实样本记录。",
         }
 
     @staticmethod
@@ -1090,9 +1101,9 @@ class SkillService:
                     creator = first.split(marker, 1)[-1].split("｜", 1)[0].strip()
                     break
             return (
-                f"{creator.replace('@', '')} 视频创作者样本"
+                f"{creator.replace('@', '')} 视频创作样本"
                 if creator
-                else "整理后的视频创作者样本"
+                else "整理后的视频创作样本"
             )
         if target_type == "xhs_creator_profile":
             return "整理后的小红书创作者主页"

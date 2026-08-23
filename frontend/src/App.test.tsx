@@ -1492,7 +1492,7 @@ describe('workspace UI', () => {
     })
   })
 
-  it('auto-saves video creator samples before creating a video quality run', async () => {
+  it('auto-saves video creation samples before creating a video quality run', async () => {
     class MockEventSource {
       private listeners = new Map<string, EventListener[]>()
 

@@ -356,6 +356,15 @@ class ContextAccessService:
             "name": row["name"],
             "updatedAt": row["updated_at"],
         }
+        if row["type"] in {
+            "xhs_creator_profile",
+            "account_profile",
+            "historical_posts",
+            "comments",
+            "video_creator_samples",
+        }:
+            summary["assetGroup"] = "creator_dossier"
+            summary["assetGroupLabel"] = "创作者档案"
         if row["type"] == "trend_csv":
             return {
                 **summary,

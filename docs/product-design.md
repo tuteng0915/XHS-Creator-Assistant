@@ -67,7 +67,7 @@ workflow 不由 SSE 连接启动。当前执行模型是：前端 POST 创建 ru
 | 选题库 | 保存、编辑、选择、归档、发送到结构生成/受众模拟 | 复用选题资产 |
 | 受众模拟 | 历史列表、重新打开 | 复用模拟结果 |
 
-输入素材整理已经从纯前端逻辑迁到后端 skill invocation。用户可以直接粘贴材料，由 Input Asset Formatter agent / formatter skills 整理成对应资产草稿。当前 formatter 是确定性代码实现，适合稳定生成字段；如果后续需要更强理解能力，可以把 formatter skills 切到模型调用，但仍然保持“返回草稿，用户确认后保存”的原则。
+输入素材整理已经从纯前端逻辑迁到后端 skill invocation。用户可以直接粘贴材料，由 Creator Dossier Formatter agent / formatter skills 整理成对应的创作者档案子资产草稿。当前 formatter 是确定性代码实现，适合稳定生成字段；如果后续需要更强理解能力，可以把 formatter skills 切到模型调用，但仍然保持“返回草稿，用户确认后保存”的原则。
 
 ### 3.2 媒体资产和 Qwen 多模态
 
@@ -105,7 +105,7 @@ workflow 不由 SSE 连接启动。当前执行模型是：前端 POST 创建 ru
 
 Skill 不应该只是 prompt 文本。当前产品里的 skill 是受控能力 contract，可选带后端 invoke 实现。一个 skill 应该描述稳定 ID、版本、产品目的、输入 schema、输出 schema、context policy、artifact effect、side effects、failure mode、可组合对象和 implementation refs。当前可直接 invoke 的主要是 `input_asset.format_*` formatter skills，以及 `media.understand_image`、`media.understand_video`、`media.generate_image`、`media.generate_video`。系统不支持任意代码工具调用。
 
-Agent 是 system prompt、多个 skills 和默认 context policy 的组合。当前 agent 是产品角色，不是用户任意配置的 autonomous agent。典型 agent 包括 Account Diagnosis Strategist、Trend Opportunity Strategist、Video Creator Quality Analyst、Topic and Draft Editor、Audience Simulation Researcher、Capability Maker、Input Asset Formatter 和 Media Generation Operator。
+Agent 是 system prompt、多个 skills 和默认 context policy 的组合。当前 agent 是产品角色，不是用户任意配置的 autonomous agent。典型 agent 包括 Creator Dossier Curator、Account Diagnosis Strategist、Trend Opportunity Strategist、Video Creator Quality Analyst、Topic and Draft Editor、Audience Simulation Researcher、Capability Maker、Creator Dossier Formatter 和 Media Generation Operator。
 
 Workflow 是产品拥有的任务计划，可以理解为 multi-agent / multi-task 的产品流程，但当前不是用户可编辑 nodegraph。代码层可以用 LangGraph 实现 workflow 执行；前端只看到产品级 run、stage 和结果，不暴露 LangGraph thread、checkpoint、node 等术语。
 

@@ -138,7 +138,7 @@ class SourceMaterialService:
             SourceMaterialType.ACCOUNT_PROFILE: "账号概况",
             SourceMaterialType.HISTORICAL_POSTS: "历史笔记",
             SourceMaterialType.COMMENTS: "评论样本",
-            SourceMaterialType.VIDEO_CREATOR_SAMPLES: "视频创作者样本",
+            SourceMaterialType.VIDEO_CREATOR_SAMPLES: "视频创作样本",
             SourceMaterialType.XHS_CREATOR_PROFILE: "小红书创作者主页",
         }[material_type]
         value = (
@@ -196,6 +196,7 @@ class SourceMaterialService:
                 row.get("video_creator_samples")
                 or row.get("video_samples")
                 or row.get("creator_samples")
+                or row.get("视频创作样本")
                 or row.get("视频创作者样本")
                 or row.get("创作者样本")
                 or ""

@@ -28,12 +28,19 @@ class BuiltinAgentDefinition:
 BUILTIN_AGENTS = [
     BuiltinAgentDefinition(
         agent_id="creator_material_curator",
-        display_name="Creator Material Curator",
-        purpose="Keeps creator profile and input assets ready for workflow use.",
+        display_name="Creator Dossier Curator",
+        purpose=(
+            "Keeps creator dossier child assets ready for workflow use, including "
+            "XHS profiles, account profiles, historical posts, comments, and "
+            "video creation samples."
+        ),
         system_prompt=(
-            "You manage creator workspace materials. Preserve user-provided content, "
-            "avoid inventing input asset content, and prepare only product-specific "
-            "inputs needed by downstream creator workflows."
+            "You manage creator dossier materials in this workspace. Treat the XHS "
+            "profile as the structured root when present, and account profile, "
+            "historical posts, comment samples, and video creation samples as "
+            "child assets. Preserve user-provided content, avoid inventing asset "
+            "content, and prepare only product-specific inputs needed by downstream "
+            "creator workflows."
         ),
         skill_ids=[
             "workspace.update_profile",
@@ -43,7 +50,7 @@ BUILTIN_AGENTS = [
             "trend.rank_posts",
         ],
         default_context_policy={
-            "may_read": ["workspace profile", "input asset metadata"],
+            "may_read": ["workspace profile", "creator dossier asset metadata"],
             "must_not_read": ["unrelated workspace artifacts"],
         },
     ),
@@ -97,7 +104,7 @@ BUILTIN_AGENTS = [
         ),
         system_prompt=(
             "You are an AIGC video creator operations analyst. Use collected video "
-            "samples, transcripts, observation notes, and metrics to classify the "
+            "creation samples, transcripts, observation notes, and metrics to classify the "
             "creator's operating motivation, diagnose video quality, and recommend "
             "whether they fit an incentive program. Treat script-driven creators as "
             "usually better incentive fits, commercial-driven creators as hard to "
@@ -113,7 +120,7 @@ BUILTIN_AGENTS = [
         default_context_policy={
             "may_read": [
                 "positioning snapshot",
-                "selected video creator samples",
+                "selected creator dossier video creation samples",
                 "related analysis history",
             ],
             "must_not_read": ["unrelated input assets", "raw uploaded video files"],
@@ -217,6 +224,7 @@ BUILTIN_AGENTS = [
         default_context_policy={
             "may_read": [
                 "workspace profile",
+                "creator dossier overview",
                 "input asset overview",
                 "existing skills",
                 "existing agents",
@@ -229,17 +237,20 @@ BUILTIN_AGENTS = [
     ),
     BuiltinAgentDefinition(
         agent_id="input_asset_formatter",
-        display_name="Input Asset Formatter",
+        display_name="Creator Dossier Formatter",
         purpose=(
-            "Turns pasted raw creator materials into editable input asset drafts "
-            "without silently saving or overwriting user data."
+            "Turns pasted raw creator materials into editable creator dossier "
+            "child-asset drafts without silently saving or overwriting user data."
         ),
         system_prompt=(
-            "You format raw pasted creator materials into the selected input asset "
-            "type. Preserve user facts exactly, remove only obvious numbering or "
-            "format noise, and never invent missing source content. Return a draft "
-            "that the user can inspect and explicitly save. For CSV assets, extract "
-            "metadata such as keyword but do not pretend a CSV file was uploaded."
+            "You format raw pasted creator materials into the selected creator "
+            "dossier child asset type. Supported child assets include account "
+            "profiles, historical posts, comment samples, video creation samples, "
+            "and XHS creator profiles. Preserve user facts exactly, remove only "
+            "obvious numbering or format noise, and never invent missing source "
+            "content. Return a draft that the user can inspect and explicitly "
+            "save. For CSV assets, extract metadata such as keyword but do not "
+            "pretend a CSV file was uploaded."
         ),
         skill_ids=[
             "input_asset.format_profile",
@@ -250,7 +261,7 @@ BUILTIN_AGENTS = [
             "input_asset.format_xhs_creator_profile",
         ],
         default_context_policy={
-            "may_read": ["target input asset type", "raw pasted text"],
+            "may_read": ["target creator dossier child asset type", "raw pasted text"],
             "must_not_read": ["unrelated workspace artifacts", "secrets"],
             "write_policy": "draft_only",
         },

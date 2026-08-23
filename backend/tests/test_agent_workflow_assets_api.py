@@ -32,8 +32,11 @@ def test_workspace_agents_are_materialized_from_builtin_assets(
         "meta.design_workflow_asset",
     ]
     formatter = next(agent for agent in agents if agent["agentId"] == "input_asset_formatter")
+    assert formatter["displayName"] == "Creator Dossier Formatter"
     assert "input_asset.format_profile" in formatter["skillIds"]
     assert "input_asset.format_comments" in formatter["skillIds"]
+    curator = next(agent for agent in agents if agent["agentId"] == "creator_material_curator")
+    assert curator["displayName"] == "Creator Dossier Curator"
     media_agent = next(agent for agent in agents if agent["agentId"] == "media_generation_operator")
     assert media_agent["skillIds"] == [
         "media.understand_image",

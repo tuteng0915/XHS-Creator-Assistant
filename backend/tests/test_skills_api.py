@@ -36,6 +36,14 @@ def test_workspace_skills_are_materialized_from_builtin_catalog(
     )
     assert formatter["category"] == "input_asset"
     assert formatter["artifactEffect"] == "Draft InputAsset.comments"
+    video_formatter = next(
+        skill
+        for skill in skills
+        if skill["skillId"] == "input_asset.format_video_creator_samples"
+    )
+    assert video_formatter["displayName"] == (
+        "Format Creator Dossier Video Creation Samples"
+    )
     media_skill = next(skill for skill in skills if skill["skillId"] == "media.generate_image")
     assert media_skill["category"] == "media"
     assert media_skill["artifactEffect"] == "MediaAsset.image"

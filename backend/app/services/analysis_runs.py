@@ -575,7 +575,7 @@ class AnalysisRunService:
                     "source": "xhs_creator_profile",
                     "inputAssetId": xhs_asset["id"],
                     "materialId": xhs_asset["id"],
-                    "name": f"{xhs_asset['name']} · 派生视频创作者样本",
+                    "name": f"{xhs_asset['name']} · 派生视频创作样本",
                     "content": self._derive_video_creator_samples_from_evidence_pack(
                         evidence_pack
                     ),
@@ -642,7 +642,7 @@ class AnalysisRunService:
             or payload.video_creator_samples_material_id,
             workspace["id"],
             SourceMaterialType.VIDEO_CREATOR_SAMPLES.value,
-            "Video creator samples input asset is required",
+            "Video creation samples input asset is required",
         )
         workflow_snapshot = {
             **base,
@@ -869,7 +869,7 @@ class AnalysisRunService:
         creator = evidence_pack.get("creator", {})
         stats = evidence_pack.get("noteStats", {})
         lines = [
-            f"# 视频创作者样本（由 {source_type} 派生）",
+            f"# 视频创作样本（由 {source_type} 派生）",
             "",
             f"- 创作者：{creator.get('displayName') or '未知'}",
             f"- 笔记数：{stats.get('totalNotes')}",

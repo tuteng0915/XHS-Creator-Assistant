@@ -130,7 +130,7 @@ https://your-domain/api/...
 - Workflows；
 - agent conversation；
 - Capability Maker agent；
-- Input Asset Formatter agent；
+- Creator Dossier Formatter agent；
 - AssetProposal apply/reject 流程。
 
 当前定位：
@@ -179,7 +179,7 @@ https://your-domain/api/...
 
 ### P1：输入素材整理继续模型化
 
-当前已经有 Input Asset Formatter agent、formatter skills 和后端 invoke API。当前实现是确定性 formatter，适合稳定生成草稿字段。
+当前已经有 Creator Dossier Formatter agent、formatter skills 和后端 invoke API。当前实现是确定性 formatter，适合稳定生成草稿字段。
 
 后续如果需要更强整理能力，可以把这些 formatter skills 的实现从确定性代码切到模型调用：
 

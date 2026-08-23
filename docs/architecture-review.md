@@ -13,12 +13,14 @@ generic agent platform.
 Implemented and product-specific:
 
 - Default workspace
-- Input assets:
+- Creator Dossier input assets:
   - 账号概况
   - historical posts
   - comment samples
+  - video creation samples
+  - XHS creator profile
+- Other input/media assets:
   - uploaded trend CSV
-  - video creator samples
   - image assets
   - video assets
 - Analysis runs:
@@ -45,7 +47,7 @@ Implemented as internal workspace assets:
 The newest capability additions are:
 
 - one `Capability Maker` agent with Skill / Agent / Workflow design skills;
-- one `Input Asset Formatter` agent with formatter skills for product input assets;
+- one `Creator Dossier Formatter` agent with formatter skills for creator dossier child assets;
 - one `Media Generation Operator` agent with Qwen media understanding and
   generation skills.
 
@@ -238,14 +240,14 @@ conversation job table with persisted leases or idempotency keys.
 
 ### Improved — input asset formatter is now a backend skill invocation
 
-Older risk: the Input Asset Formatter agent existed in the UI, but pasted input
+Older risk: the Creator Dossier Formatter agent existed in the UI, but pasted input
 was transformed by local frontend helper logic.
 
 Current status: improved.
 
 The formatter path now uses:
 
-- `Input Asset Formatter` agent as the product role;
+- `Creator Dossier Formatter` agent as the product role;
 - `input_asset.format_*` skills as the callable capability contracts;
 - `POST /api/skills/{skill_asset_id}/invoke` as the backend invocation path;
 - deterministic backend formatter implementations for the current product
@@ -459,12 +461,14 @@ Recommended fix:
 These are user-facing creator records:
 
 - Workspace
-- Input Asset
+- Creator Dossier
   - 账号概况
   - historical posts
   - comment samples
+  - video creation samples
+  - XHS creator profile
+- Other Input Asset
   - trend CSV
-  - video creator samples
 - Analysis Run
 - Topic
 - Draft / Content Structure

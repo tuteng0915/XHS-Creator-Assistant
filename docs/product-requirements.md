@@ -381,14 +381,14 @@ Agent = system prompt + 多个 skills + 默认 context policy。
 
 当前内置 agent：
 
-- Creator Material Curator；
+- Creator Dossier Curator；
 - Account Diagnosis Strategist；
 - Trend Opportunity Strategist；
 - Video Creator Quality Analyst；
 - Topic and Draft Editor；
 - Audience Simulation Researcher；
 - Capability Maker；
-- Input Asset Formatter。
+- Creator Dossier Formatter。
 
 #### Workflow
 

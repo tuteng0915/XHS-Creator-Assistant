@@ -263,7 +263,7 @@ def test_video_creator_samples_material_lifecycle_preserves_utf8(
         f"/api/workspaces/{workspace['id']}/source-materials",
         json={
             "type": "video_creator_samples",
-            "name": "视频创作者样本",
+            "name": "视频创作样本",
             "content": content,
         },
     )

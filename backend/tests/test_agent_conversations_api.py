@@ -50,7 +50,7 @@ def test_agent_conversation_uses_broad_workspace_context(app: FastAPI) -> None:
     user_message, assistant_message = body["messages"]
     assert user_message["role"] == "user"
     assert assistant_message["role"] == "assistant"
-    assert "Creator Material Curator" in assistant_message["content"]
+    assert "Creator Dossier Curator" in assistant_message["content"]
     assert assistant_message["contextPack"]["mode"] == "workspace_pack"
     assert assistant_message["contextPack"]["scope"] == "broad"
     item_keys = {item["key"] for item in assistant_message["contextPack"]["items"]}
@@ -63,6 +63,12 @@ def test_agent_conversation_uses_broad_workspace_context(app: FastAPI) -> None:
         "simulation_history_overview",
         "capability_catalog",
     }.issubset(item_keys)
+    input_overview = next(
+        item for item in assistant_message["contextPack"]["items"]
+        if item["key"] == "input_assets_overview"
+    )
+    assert input_overview["data"][0]["assetGroup"] == "creator_dossier"
+    assert input_overview["data"][0]["assetGroupLabel"] == "创作者档案"
     catalog = next(
         item for item in assistant_message["contextPack"]["items"]
         if item["key"] == "capability_catalog"
