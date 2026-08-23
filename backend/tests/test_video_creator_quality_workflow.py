@@ -299,6 +299,10 @@ def test_video_creator_run_can_use_xhs_profile_evidence_pack(app: FastAPI) -> No
         "未提供已确认的视频理解结果" in item
         for item in evidence_pack["evidenceLimitations"]
     )
+    assert evidence_pack["evidenceScope"]["hasVideoNotes"] is True
+    assert evidence_pack["evidenceScope"]["hasVideoUnderstanding"] is False
+    assert evidence_pack["evidenceScope"]["hasImageUnderstanding"] is True
+    assert evidence_pack["recommendedNextEvidence"]
     assert snapshot["mediaAssets"][0]["name"] == "短剧爆款封面"
     assert evidence_pack["mediaAssetRefs"][0]["hasImageUnderstanding"] is True
 
@@ -353,15 +357,21 @@ def test_fake_video_creator_graph_routes_and_persists_successful_stages(
 
     completed = send(app, "GET", f"/api/analysis-runs/{run['id']}").json()
     assert completed["status"] == "completed"
-    assert (
-        completed["stageResults"]["creator_profile"]["creatorProfile"]["creatorType"]
-        == "script_driven"
+    creator_profile = completed["stageResults"]["creator_profile"]["creatorProfile"]
+    video_quality = completed["stageResults"]["video_quality"]["videoQuality"]
+    incentive_fit = completed["stageResults"]["incentive_fit"]["incentiveFit"]
+    assert creator_profile["creatorType"] == "script_driven"
+    assert creator_profile["evidenceConfidence"] == "低"
+    assert any(
+        "未提供已确认的视频理解结果" in item
+        for item in creator_profile["evidenceLimitations"]
     )
-    assert completed["stageResults"]["video_quality"]["videoQuality"]["overallScore"]
-    assert (
-        completed["stageResults"]["incentive_fit"]["incentiveFit"]["recommendation"]
-        == "strong_fit"
-    )
+    assert video_quality["overallScore"]
+    assert video_quality["evidenceConfidence"] == "低"
+    assert any("镜头调度" in item for item in video_quality["cannotAssess"])
+    assert video_quality["recommendedNextEvidence"]
+    assert incentive_fit["recommendation"] == "strong_fit"
+    assert incentive_fit["evidenceLimitations"]
 
 
 def test_video_creator_stage_failure_allows_partial_result(app: FastAPI) -> None:

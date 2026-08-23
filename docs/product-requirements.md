@@ -613,11 +613,8 @@ xhs_import_package/
 - workflow graph state 只保存输入资产 ID、媒体资产 ID 和阶段结果，不保存完整 XHS JSON、完整媒体文件或完整 derived JSON；
 - 本地上传视频可通过 ffmpeg 抽取预览帧，再由 Qwen 图片/视频理解 skill 生成结构化理解草稿；
 - 当前不做真实视频链接抓取、平台数据抓取或完整本地视频直传；
-
-### 7.6 受众模拟输入
-
-右侧 workflow 调用区的“下期选题”不是账号诊断、热点分析或视频质量诊断的必填项。它只作为受众模拟的测试内容：用户可以手动输入，也可以从选题卡或选题库填入；demo 模式只在用户实际发起受众模拟时自动补样例。
-- 因此诊断必须显式受 evidence pack 的证据限制约束。
+- 因此诊断必须显式受 evidence pack 的证据限制约束，并在每个 stage result 中持久化 evidenceScope、evidenceConfidence、evidenceLimitations 和 recommendedNextEvidence；
+- video quality stage 还必须持久化 cannotAssess，用于说明因为缺少视频/图片理解而不能可靠判断的维度。
 
 输出：
 
@@ -630,6 +627,8 @@ xhs_import_package/
 - 剧本驱动型：通常更适合激励计划；
 - 商单驱动型：激励计划较难改变其行为；
 - 技术探索驱动型：需要结合内容稳定性、受众反馈和创作动机分类讨论。
+
+补充规则：右侧 workflow 调用区的“下期选题”不是账号诊断、热点分析或视频质量诊断的必填项。它只作为受众模拟的测试内容：用户可以手动输入，也可以从选题卡或选题库填入；demo 模式只在用户实际发起受众模拟时自动补样例。
 
 ### 7.6 选题库流程
 

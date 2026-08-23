@@ -28,6 +28,53 @@ export function ListBlock({ title, items }: { title: string; items: unknown }) {
   )
 }
 
+function EvidenceBoundaryPanel({ data }: { data: Record<string, unknown> }) {
+  const confidence = String(data.evidenceConfidence || '')
+  const scope = (data.evidenceScope || {}) as Record<string, unknown>
+  const scopeEntries = [
+    ['来源', scope.sourceType],
+    ['有视频笔记', scope.hasVideoNotes],
+    ['有视频理解', scope.hasVideoUnderstanding],
+    ['有图片理解', scope.hasImageUnderstanding],
+    ['有评论样本', scope.hasComments],
+    ['媒体资产数', scope.mediaAssetCount],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== '')
+
+  if (
+    !confidence &&
+    scopeEntries.length === 0 &&
+    !Array.isArray(data.evidenceLimitations) &&
+    !Array.isArray(data.recommendedNextEvidence) &&
+    !Array.isArray(data.cannotAssess)
+  ) {
+    return null
+  }
+
+  return (
+    <div className="structure-card">
+      <h4>证据边界</h4>
+      {confidence && (
+        <p>
+          <b>证据置信度：</b> {confidence}
+        </p>
+      )}
+      {scopeEntries.length > 0 && (
+        <div className="why">
+          {scopeEntries.map(([label, value]) => (
+            <span key={String(label)}>
+              <b>{String(label)}：</b> {String(value)}
+              <br />
+            </span>
+          ))}
+        </div>
+      )}
+      <ListBlock title="证据限制" items={data.evidenceLimitations} />
+      <ListBlock title="无法可靠评估" items={data.cannotAssess} />
+      <ListBlock title="建议补充证据" items={data.recommendedNextEvidence} />
+    </div>
+  )
+}
+
 export function ProfileView({ data }: { data: Record<string, unknown> }) {
   const pillars = Array.isArray(data.pillars) ? data.pillars : []
   const formulas = Array.isArray(data.titleFormulas) ? data.titleFormulas : []
@@ -374,6 +421,7 @@ export function VideoCreatorProfileView({ data }: { data: Record<string, unknown
       <ListBlock title="驱动信号" items={data.motivationSignals} />
       <ListBlock title="证据" items={data.evidence} />
       <ListBlock title="不确定项" items={data.uncertainties} />
+      <EvidenceBoundaryPanel data={data} />
     </div>
   )
 }
@@ -409,6 +457,7 @@ export function VideoQualityView({ data }: { data: Record<string, unknown> }) {
       <ListBlock title="优势" items={data.strengths} />
       <ListBlock title="短板" items={data.weaknesses} />
       <ListBlock title="证据" items={data.evidence} />
+      <EvidenceBoundaryPanel data={data} />
     </div>
   )
 }
@@ -434,6 +483,7 @@ export function IncentiveFitView({ data }: { data: Record<string, unknown> }) {
       <ListBlock title="适配条件" items={data.conditions} />
       <ListBlock title="风险" items={data.risks} />
       <ListBlock title="运营动作" items={data.operatorActions} />
+      <EvidenceBoundaryPanel data={data} />
     </div>
   )
 }

@@ -74,6 +74,10 @@ class CreatorProfileData(BaseModel):
     motivationSignals: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
     uncertainties: list[str] = Field(default_factory=list)
+    evidenceScope: dict[str, Any] = Field(default_factory=dict)
+    evidenceConfidence: str = ""
+    evidenceLimitations: list[str] = Field(default_factory=list)
+    recommendedNextEvidence: list[str] = Field(default_factory=list)
 
 
 class CreatorProfileStageResult(BaseModel):
@@ -93,6 +97,11 @@ class VideoQualityData(BaseModel):
     strengths: list[str] = Field(default_factory=list)
     weaknesses: list[str] = Field(default_factory=list)
     evidence: list[str] = Field(default_factory=list)
+    evidenceScope: dict[str, Any] = Field(default_factory=dict)
+    evidenceConfidence: str = ""
+    evidenceLimitations: list[str] = Field(default_factory=list)
+    cannotAssess: list[str] = Field(default_factory=list)
+    recommendedNextEvidence: list[str] = Field(default_factory=list)
 
 
 class VideoQualityStageResult(BaseModel):
@@ -113,6 +122,10 @@ class IncentiveFitData(BaseModel):
     risks: list[str] = Field(default_factory=list)
     operatorActions: list[str] = Field(default_factory=list)
     programMatch: ProgramMatch = Field(default_factory=ProgramMatch)
+    evidenceScope: dict[str, Any] = Field(default_factory=dict)
+    evidenceConfidence: str = ""
+    evidenceLimitations: list[str] = Field(default_factory=list)
+    recommendedNextEvidence: list[str] = Field(default_factory=list)
 
 
 class IncentiveFitStageResult(BaseModel):
@@ -158,6 +171,10 @@ SAMPLE_VIDEO_CREATOR_RESULT = {
         "motivationSignals": ["持续更新同一世界观", "评论区催更", "不以商单口播为主"],
         "evidence": ["样本记录显示 8 条视频使用同一主角设定", "高互动视频集中在剧情反转段落"],
         "uncertainties": ["缺少完整 30 天更新频次数据"],
+        "evidenceScope": {},
+        "evidenceConfidence": "",
+        "evidenceLimitations": [],
+        "recommendedNextEvidence": [],
     },
     "videoQuality": {
         "overallScore": 82,
@@ -171,6 +188,11 @@ SAMPLE_VIDEO_CREATOR_RESULT = {
         "strengths": ["叙事驱动强", "系列化潜力高", "AIGC 视觉与内容目标一致"],
         "weaknesses": ["部分镜头连贯性不足", "缺少明确商业化边界"],
         "evidence": ["三条最高互动视频都有明确冲突和结尾悬念"],
+        "evidenceScope": {},
+        "evidenceConfidence": "",
+        "evidenceLimitations": [],
+        "cannotAssess": [],
+        "recommendedNextEvidence": [],
     },
     "incentiveFit": {
         "recommendation": "strong_fit",
@@ -184,6 +206,10 @@ SAMPLE_VIDEO_CREATOR_RESULT = {
             "why": "创作者有明确世界观和可复制剧本结构",
             "avoid": "不要只按单条播放量补贴",
         },
+        "evidenceScope": {},
+        "evidenceConfidence": "",
+        "evidenceLimitations": [],
+        "recommendedNextEvidence": [],
     },
 }
 
@@ -488,6 +514,7 @@ class _VideoCreatorQualityGraphExecution:
             result = CreatorProfileStageResult.model_validate(output).model_dump(
                 mode="json"
             )
+            result = self.with_evidence_guardrails(result, "creatorProfile")
             self.service.analysis_service.update_stage(
                 self.run_id,
                 "creator_profile",
@@ -527,6 +554,7 @@ class _VideoCreatorQualityGraphExecution:
             result = VideoQualityStageResult.model_validate(output).model_dump(
                 mode="json"
             )
+            result = self.with_evidence_guardrails(result, "videoQuality")
             self.service.analysis_service.update_stage(
                 self.run_id,
                 "video_quality",
@@ -563,6 +591,7 @@ class _VideoCreatorQualityGraphExecution:
             result = IncentiveFitStageResult.model_validate(output).model_dump(
                 mode="json"
             )
+            result = self.with_evidence_guardrails(result, "incentiveFit")
             self.service.analysis_service.update_stage(
                 self.run_id,
                 "incentive_fit",
@@ -618,6 +647,106 @@ class _VideoCreatorQualityGraphExecution:
 
     def snapshot(self) -> dict[str, Any]:
         return self.service.analysis_service.get(self.run_id).input_snapshot
+
+    def with_evidence_guardrails(
+        self, result: dict[str, Any], root_key: str
+    ) -> dict[str, Any]:
+        root = dict(result.get(root_key) or {})
+        evidence_pack = self.snapshot().get("videoCreatorEvidencePack", {})
+        scope = self.evidence_scope(evidence_pack)
+        root["evidenceScope"] = {**dict(root.get("evidenceScope") or {}), **scope}
+        root["evidenceLimitations"] = self.merge_strings(
+            root.get("evidenceLimitations"), evidence_pack.get("evidenceLimitations")
+        )
+        root["recommendedNextEvidence"] = self.merge_strings(
+            root.get("recommendedNextEvidence"),
+            evidence_pack.get("recommendedNextEvidence")
+            or self.recommended_next_evidence(scope),
+        )
+        root["evidenceConfidence"] = self.evidence_confidence(scope)
+        if root_key == "videoQuality":
+            cannot_assess = []
+            if not scope.get("hasVideoUnderstanding"):
+                cannot_assess.extend(
+                    [
+                        "无法可靠评估完整视频的镜头调度、剪辑节奏、口型一致性和音频表现。",
+                        "无法确认视频实际完播体验，只能基于标题、正文、评论、封面或已有转写做间接判断。",
+                    ]
+                )
+            if scope.get("mediaAssetCount", 0) and not scope.get(
+                "hasImageUnderstanding"
+            ):
+                cannot_assess.append(
+                    "存在封面或截图资产但缺少图片理解结果，无法可靠评价视觉完成度。"
+                )
+            root["cannotAssess"] = self.merge_strings(root.get("cannotAssess"), cannot_assess)
+        return {root_key: root}
+
+    @staticmethod
+    def evidence_scope(evidence_pack: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(evidence_pack.get("evidenceScope"), dict):
+            return dict(evidence_pack["evidenceScope"])
+        media_refs = (
+            evidence_pack.get("mediaAssetRefs")
+            if isinstance(evidence_pack.get("mediaAssetRefs"), list)
+            else []
+        )
+        note_stats = (
+            evidence_pack.get("noteStats")
+            if isinstance(evidence_pack.get("noteStats"), dict)
+            else {}
+        )
+        return {
+            "sourceType": (evidence_pack.get("source") or {}).get("type"),
+            "hasVideoNotes": bool(evidence_pack.get("videoNotes")),
+            "hasVideoUnderstanding": any(
+                isinstance(ref, dict) and ref.get("hasVideoUnderstanding")
+                for ref in media_refs
+            ),
+            "hasImageUnderstanding": any(
+                isinstance(ref, dict) and ref.get("hasImageUnderstanding")
+                for ref in media_refs
+            ),
+            "hasComments": bool(note_stats.get("commentCount")),
+            "mediaAssetCount": len(media_refs),
+        }
+
+    @staticmethod
+    def evidence_confidence(scope: dict[str, Any]) -> str:
+        if scope.get("hasVideoUnderstanding"):
+            return "高"
+        if scope.get("hasImageUnderstanding") or scope.get("hasVideoNotes"):
+            return "中"
+        return "低"
+
+    @staticmethod
+    def recommended_next_evidence(scope: dict[str, Any]) -> list[str]:
+        recommendations: list[str] = []
+        if not scope.get("hasVideoUnderstanding"):
+            recommendations.append(
+                "补充至少 1 条代表视频的视频理解结果、关键帧理解结果或人工转写。"
+            )
+        if scope.get("mediaAssetCount", 0) and not scope.get("hasImageUnderstanding"):
+            recommendations.append("补充封面或关键截图的图片理解结果。")
+        if not scope.get("hasComments"):
+            recommendations.append("补充评论样本，验证受众反馈和催更/转化信号。")
+        return recommendations
+
+    @staticmethod
+    def merge_strings(primary: Any, fallback: Any) -> list[str]:
+        values: list[str] = []
+        for source in [primary, fallback]:
+            if isinstance(source, list):
+                candidates = source
+            elif source:
+                candidates = [source]
+            else:
+                candidates = []
+            for candidate in candidates:
+                text = str(candidate).strip()
+                if text and text not in values:
+                    values.append(text)
+        return values
 
     async def stage_failed(
         self, stage_key: str, error: Exception, state: dict[str, Any]

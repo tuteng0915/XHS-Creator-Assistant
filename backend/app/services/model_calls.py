@@ -106,12 +106,16 @@ PROMPT_VIDEO_CREATOR_PROFILE = """你是 AIGC 视频创作者运营分析师。�
 - unclear：证据不足
 要求：
 - evidence 必须引用输入中的具体观察，不要编造视频内容
-- 必须遵守 evidenceLimitations；如果没有 video_understanding，不要声称看过镜头、剪辑、口型或完整视频
+- 必须遵守 videoCreatorEvidencePack.evidenceLimitations；如果没有 hasVideoUnderstanding，不要声称看过镜头、剪辑、口型或完整视频
 - 对推断性判断要标明“基于标题/正文/评论/封面推测”
 - 不要把单个爆款等同于长期能力
+- evidenceScope 直接复述输入证据包里的 evidenceScope
+- evidenceConfidence 根据证据范围填写 高/中/低
+- evidenceLimitations 必须包含输入证据包里的限制
+- recommendedNextEvidence 说明还需要补什么证据才能提升判断可靠性
 - 输出中文
 只输出 JSON，不要解释。schema:
-{"creatorProfile":{"creatorType":"","typeConfidence":"高/中/低","summary":"","audiencePositioning":"","contentPillars":[],"motivationSignals":[],"evidence":[],"uncertainties":[]}}"""
+{"creatorProfile":{"creatorType":"","typeConfidence":"高/中/低","summary":"","audiencePositioning":"","contentPillars":[],"motivationSignals":[],"evidence":[],"uncertainties":[],"evidenceScope":{},"evidenceConfidence":"高/中/低","evidenceLimitations":[],"recommendedNextEvidence":[]}}"""
 
 PROMPT_VIDEO_QUALITY_ANALYSIS = """你是 AIGC 视频质量评审。基于创作者证据包和已确认媒体理解结果，评估其内容质量、可持续生产能力和可被运营放大的程度。
 评估维度：
@@ -126,9 +130,14 @@ PROMPT_VIDEO_QUALITY_ANALYSIS = """你是 AIGC 视频质量评审。基于创作
 - 如果没有 video_understanding，只能评估内容方向、系列化、互动和间接质量信号
 - 如果只有封面/截图理解，visualExecution 只能给保守判断
 - 不要编造未提供的视频画面、音频、转写、剪辑节奏
+- evidenceScope 直接复述输入证据包里的 evidenceScope
+- evidenceConfidence 根据证据范围填写 高/中/低
+- evidenceLimitations 必须包含输入证据包里的限制
+- cannotAssess 列出因为缺少视频/图片理解而不能可靠判断的维度
+- recommendedNextEvidence 说明还需要补什么证据才能提升判断可靠性
 score 为 0-100 的整数。必须给出 strengths、weaknesses 和 evidence。
 只输出 JSON，不要解释。schema:
-{"videoQuality":{"overallScore":0,"level":"高/中/低","dimensionScores":[{"dimension":"","score":0,"reason":""}],"strengths":[],"weaknesses":[],"evidence":[]}}"""
+{"videoQuality":{"overallScore":0,"level":"高/中/低","dimensionScores":[{"dimension":"","score":0,"reason":""}],"strengths":[],"weaknesses":[],"evidence":[],"evidenceScope":{},"evidenceConfidence":"高/中/低","evidenceLimitations":[],"cannotAssess":[],"recommendedNextEvidence":[]}}"""
 
 PROMPT_INCENTIVE_FIT_ANALYSIS = """你是创作者激励计划策略负责人。基于创作者画像和视频质量诊断，判断该 AIGC 视频创作者是否适配平台激励计划。
 判断逻辑：
@@ -142,8 +151,9 @@ PROMPT_INCENTIVE_FIT_ANALYSIS = """你是创作者激励计划策略负责人。
 - weak_fit
 - not_fit
 并给出 rationale、conditions、risks、operatorActions。
+- evidenceScope、evidenceConfidence、evidenceLimitations 和 recommendedNextEvidence 必须继承前序诊断的证据边界；不要把证据不足包装成确定结论。
 只输出 JSON，不要解释。schema:
-{"incentiveFit":{"recommendation":"","fitScore":0,"rationale":"","conditions":[],"risks":[],"operatorActions":[],"programMatch":{"bestProgramType":"","why":"","avoid":""}}}"""
+{"incentiveFit":{"recommendation":"","fitScore":0,"rationale":"","conditions":[],"risks":[],"operatorActions":[],"programMatch":{"bestProgramType":"","why":"","avoid":""},"evidenceScope":{},"evidenceConfidence":"高/中/低","evidenceLimitations":[],"recommendedNextEvidence":[]}}}"""
 
 
 MAX_TOKENS = {

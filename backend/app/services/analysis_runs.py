@@ -713,6 +713,7 @@ class AnalysisRunService:
     def _build_text_video_creator_evidence_pack(
         self, samples_text: str, media_assets: list[dict]
     ) -> dict:
+        media_refs = self._media_asset_refs(media_assets)
         has_video_understanding = any(
             asset.get("type") == "video"
             and (asset.get("derived") or {}).get("videoUnderstanding")
@@ -735,6 +736,14 @@ class AnalysisRunService:
             limitations.append(
                 "未提供已确认的封面/截图理解结果；视觉判断只能来自用户文本备注。"
             )
+        scope = {
+            "sourceType": "video_creator_samples",
+            "hasVideoNotes": None,
+            "hasVideoUnderstanding": has_video_understanding,
+            "hasImageUnderstanding": has_cover_or_image_understanding,
+            "hasComments": "评论" in samples_text,
+            "mediaAssetCount": len(media_refs),
+        }
         return {
             "schemaVersion": "video-creator-evidence-pack/v1",
             "source": {"type": "video_creator_samples"},
@@ -767,8 +776,10 @@ class AnalysisRunService:
                 ["评论", "催更", "收藏", "转发", "粉丝", "互动"],
                 "operator_note",
             ),
-            "mediaAssetRefs": self._media_asset_refs(media_assets),
+            "mediaAssetRefs": media_refs,
+            "evidenceScope": scope,
             "evidenceLimitations": limitations,
+            "recommendedNextEvidence": self._video_evidence_recommendations(scope),
         }
 
     def _build_xhs_video_creator_evidence_pack(
@@ -824,6 +835,14 @@ class AnalysisRunService:
             limitations.append(
                 "存在封面媒体资产，但未保存图片理解结果；视觉判断只能引用封面 caption 或用户备注。"
             )
+        scope = {
+            "sourceType": "xhs_creator_profile",
+            "hasVideoNotes": bool(video_notes),
+            "hasVideoUnderstanding": has_video_understanding,
+            "hasImageUnderstanding": has_cover_understanding,
+            "hasComments": comment_count > 0,
+            "mediaAssetCount": len(media_refs),
+        }
         return {
             "schemaVersion": "video-creator-evidence-pack/v1",
             "source": {
@@ -861,7 +880,9 @@ class AnalysisRunService:
             ),
             "audienceSignals": self._audience_signals_from_xhs(notes),
             "mediaAssetRefs": media_refs,
+            "evidenceScope": scope,
             "evidenceLimitations": limitations,
+            "recommendedNextEvidence": self._video_evidence_recommendations(scope),
         }
 
     def _derive_video_creator_samples_from_evidence_pack(self, evidence_pack: dict) -> str:
@@ -1034,6 +1055,19 @@ class AnalysisRunService:
                 }
             )
         return refs
+
+    @staticmethod
+    def _video_evidence_recommendations(scope: dict) -> list[str]:
+        recommendations: list[str] = []
+        if not scope.get("hasVideoUnderstanding"):
+            recommendations.append(
+                "补充至少 1 条代表视频的视频理解结果、关键帧理解结果或人工转写。"
+            )
+        if scope.get("mediaAssetCount", 0) and not scope.get("hasImageUnderstanding"):
+            recommendations.append("补充封面或关键截图的图片理解结果。")
+        if not scope.get("hasComments"):
+            recommendations.append("补充评论样本，验证受众反馈和催更/转化信号。")
+        return recommendations
 
     @staticmethod
     def _keyword_signals(text: str, keywords: list[str], evidence_type: str) -> list[dict]:
