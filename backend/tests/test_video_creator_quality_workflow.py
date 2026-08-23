@@ -101,6 +101,130 @@ def create_video_creator_run_with_media(app: FastAPI) -> dict:
     return response.json()
 
 
+def create_video_creator_run_from_xhs_profile(app: FastAPI) -> dict:
+    workspace = create_workspace(app)
+    uploaded = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/media-assets/upload",
+        data={"type": "image", "name": "短剧爆款封面", "purpose": "小红书笔记封面"},
+        files={"file": ("cover.png", b"\x89PNG\r\n\x1a\nfake-image", "image/png")},
+    )
+    assert uploaded.status_code == 201
+    image = uploaded.json()
+    updated = send(
+        app,
+        "PATCH",
+        f"/api/media-assets/{image['id']}",
+        json={
+            "derived": {
+                "visualSummary": "封面突出机器人女友和强冲突标题。",
+                "imageUnderstanding": {
+                    "visualSummary": "封面突出机器人女友和强冲突标题。",
+                    "creatorSignals": ["短剧", "角色驱动"],
+                    "risks": [],
+                    "uncertainties": [],
+                },
+            },
+            "expectedUpdatedAt": image["updatedAt"],
+        },
+    )
+    assert updated.status_code == 200
+    xhs_profile = {
+        "schemaVersion": "xhs-creator-profile/v1",
+        "source": {
+            "platform": "xiaohongshu",
+            "fixtureCode": "video-demo",
+            "crawler": "MediaCrawler",
+        },
+        "creator": {
+            "displayName": "AI短剧研究所",
+            "profileText": "AIGC 短剧创作者，主打连续角色设定。",
+        },
+        "notes": [
+            {
+                "noteId": "video-1",
+                "type": "video",
+                "title": "机器人女友觉醒后删除了我的记忆",
+                "desc": "连续短剧第一集，主角设定明确，结尾反转。",
+                "tags": ["AIGC", "短剧", "机器人女友"],
+                "metrics": {
+                    "liked": 23000,
+                    "collected": 5100,
+                    "comments": 1800,
+                    "shares": 900,
+                },
+                "coverMediaAssetId": image["id"],
+                "comments": [
+                    {
+                        "commentId": "c1",
+                        "content": "快更新第二集，剧情很上头",
+                        "likeCount": 120,
+                        "subCommentCount": 3,
+                    }
+                ],
+            },
+            {
+                "noteId": "normal-1",
+                "type": "normal",
+                "title": "用 5 个 AI 工具做一支广告片",
+                "desc": "技术教程和工具链拆解。",
+                "tags": ["AI工具", "教程"],
+                "metrics": {
+                    "liked": 3200,
+                    "collected": 5100,
+                    "comments": 300,
+                    "shares": 120,
+                },
+                "comments": [],
+            },
+        ],
+    }
+    xhs_asset = create_text_material(
+        app,
+        workspace["id"],
+        "xhs_creator_profile",
+        json.dumps(xhs_profile, ensure_ascii=False),
+    )
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+        json={
+            "workflowType": "video_creator_quality",
+            "xhsCreatorProfileInputAssetId": xhs_asset["id"],
+            "mode": "demo",
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def create_minimal_xhs_profile_asset(app: FastAPI, workspace_id: str, name: str) -> dict:
+    payload = {
+        "schemaVersion": "xhs-creator-profile/v1",
+        "source": {"platform": "xiaohongshu", "fixtureCode": name},
+        "creator": {"displayName": name, "profileText": f"{name} AIGC 创作者"},
+        "notes": [
+            {
+                "noteId": f"{name}-1",
+                "type": "video",
+                "title": f"{name} 连续短剧第一集",
+                "desc": "剧情反转明确，评论区催更。",
+                "tags": ["AIGC", "短剧"],
+                "metrics": {"liked": 100, "collected": 20, "comments": 8, "shares": 3},
+                "comments": [{"commentId": "c1", "content": "快更下一集"}],
+            }
+        ],
+    }
+    return create_text_material(
+        app,
+        workspace_id,
+        "xhs_creator_profile",
+        json.dumps(payload, ensure_ascii=False),
+    )
+
+
 def collect(app: FastAPI, run_id: str, stop_after_node: str | None = None) -> list[dict]:
     return asyncio.run(
         app.state.video_workflow_service.collect_events(
@@ -154,6 +278,66 @@ def test_video_creator_snapshot_uses_compact_media_asset_context(
     assert state["media_asset_ids"] == [media_assets[0]["mediaAssetId"]]
     dumped_state = json.dumps(state, ensure_ascii=False)
     assert "主页强调连续 AI 短剧角色设定" not in dumped_state
+
+
+def test_video_creator_run_can_use_xhs_profile_evidence_pack(app: FastAPI) -> None:
+    run = create_video_creator_run_from_xhs_profile(app)
+
+    snapshot = run["inputSnapshot"]
+    evidence_pack = snapshot["videoCreatorEvidencePack"]
+    assert snapshot["videoCreatorSamples"]["source"] == "xhs_creator_profile"
+    assert snapshot["xhsCreatorProfile"]["name"] == "xhs_creator_profile"
+    assert evidence_pack["source"]["type"] == "xhs_creator_profile"
+    assert evidence_pack["creator"]["displayName"] == "AI短剧研究所"
+    assert evidence_pack["noteStats"]["totalNotes"] == 2
+    assert evidence_pack["noteStats"]["videoNotes"] == 1
+    assert evidence_pack["videoNotes"][0]["title"] == "机器人女友觉醒后删除了我的记忆"
+    assert evidence_pack["scriptDrivenSignals"]
+    assert evidence_pack["techExplorationSignals"]
+    assert evidence_pack["audienceSignals"][0]["evidenceType"] == "comment"
+    assert any(
+        "未提供已确认的视频理解结果" in item
+        for item in evidence_pack["evidenceLimitations"]
+    )
+    assert snapshot["mediaAssets"][0]["name"] == "短剧爆款封面"
+    assert evidence_pack["mediaAssetRefs"][0]["hasImageUnderstanding"] is True
+
+    state = app.state.video_workflow_service.initial_state_for_run(run["id"])
+    dumped_state = json.dumps(state, ensure_ascii=False)
+    assert "机器人女友觉醒" not in dumped_state
+    assert state["xhs_creator_profile_material_id"] == snapshot["xhsCreatorProfile"][
+        "materialId"
+    ]
+
+
+def test_video_creator_batch_can_use_multiple_xhs_profiles(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    first = create_minimal_xhs_profile_asset(app, workspace["id"], "CreatorA")
+    second = create_minimal_xhs_profile_asset(app, workspace["id"], "CreatorB")
+
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs/batch",
+        json={
+            "workflowType": "video_creator_quality",
+            "xhsCreatorProfileInputAssetIds": [first["id"], second["id"]],
+            "mode": "demo",
+        },
+    )
+
+    assert response.status_code == 201
+    runs = response.json()
+    assert len(runs) == 2
+    assert runs[0]["workflowType"] == "video_creator_quality"
+    assert runs[0]["inputSnapshot"]["xhsCreatorProfile"]["materialId"] == first["id"]
+    assert runs[1]["inputSnapshot"]["xhsCreatorProfile"]["materialId"] == second["id"]
+    assert runs[0]["inputSnapshot"]["videoCreatorEvidencePack"]["creator"][
+        "displayName"
+    ] == "CreatorA"
+    assert runs[1]["inputSnapshot"]["videoCreatorEvidencePack"]["creator"][
+        "displayName"
+    ] == "CreatorB"
 
 
 def test_fake_video_creator_graph_routes_and_persists_successful_stages(

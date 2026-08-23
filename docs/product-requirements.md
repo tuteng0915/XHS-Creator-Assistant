@@ -598,17 +598,20 @@ xhs_import_package/
 输入：
 
 - 账号概况实例；
-- 视频创作者样本实例；
+- 小红书创作者主页实例，后端确定性派生 video creator evidence pack；
+- 或兼容路径：视频创作者样本实例；
 - 可选图片/视频素材实例，用于提供已保存的 compact media understanding。
 
 注意：
 
-- 当前主要分析文本化的视频创作者样本；
+- XHS evidence pack 应包含 video note 数量、高互动内容、评论反馈、封面媒体引用、商业/剧本/技术探索信号和证据限制；
+- 如果没有已确认的 video understanding，模型不得声称看过完整视频、镜头、剪辑、口型或音频；
+- 文本化视频创作者样本仍作为兼容输入；
 - 如果用户先保存 Qwen 图片/视频理解结果，workflow 可以读取 compact media understanding；
-- workflow graph state 只保存媒体资产 ID，不保存完整媒体文件或完整 derived JSON；
+- workflow graph state 只保存输入资产 ID、媒体资产 ID 和阶段结果，不保存完整 XHS JSON、完整媒体文件或完整 derived JSON；
 - 本地上传视频可通过 ffmpeg 抽取预览帧，再由 Qwen 图片/视频理解 skill 生成结构化理解草稿；
 - 当前不做真实视频链接抓取、平台数据抓取或完整本地视频直传；
-- 因此文本样本仍然需要提供足够的样本描述、脚本/画面/数据/运营备注。
+- 因此诊断必须显式受 evidence pack 的证据限制约束。
 
 输出：
 
@@ -877,7 +880,7 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 
 ## 14. 当前已知限制
 
-1. 视频博主质量诊断主要分析文本化样本；可读取已保存的 compact media understanding，但不自动抓取或解析视频链接。
+1. 视频博主质量诊断优先使用小红书创作者主页派生的 compact evidence pack，兼容文本样本；可读取已保存的 compact media understanding，但不自动抓取或解析视频链接。
 2. 图片/视频素材已经接入 Qwen 理解、生成和本地视频预览抽帧；仍没有独立 OCR、ASR、平台抓取或长视频语义切片。
 3. Skills 是受控产品能力，不是任意代码工具；formatter skills 与 media skills 可直接 invoke。
 4. Workflow assets 不是可视化 nodegraph editor。

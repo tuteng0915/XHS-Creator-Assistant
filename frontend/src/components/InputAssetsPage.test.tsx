@@ -115,6 +115,8 @@ describe('InputAssetsPage', () => {
           selectedFileCount: 5,
           imageFileCount: 4,
           noteCount: 4,
+          videoNoteCount: 0,
+          normalNoteCount: 4,
           commentCount: 26,
           coverReferenceCount: 4,
           matchedCoverFileCount: 4,

@@ -57,6 +57,7 @@ class VideoCreatorQualityState(TypedDict, total=False):
     workspace_id: str
     positioning_snapshot: str
     video_creator_samples_material_id: str
+    xhs_creator_profile_material_id: str
     media_asset_ids: list[str]
     creator_profile: dict[str, Any]
     video_quality: dict[str, Any]
@@ -124,6 +125,7 @@ class VideoCreatorQualityModelProvider(Protocol):
         *,
         positioning: str,
         video_creator_samples: str,
+        video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
     ) -> dict[str, Any]: ...
 
@@ -132,6 +134,7 @@ class VideoCreatorQualityModelProvider(Protocol):
         *,
         positioning: str,
         video_creator_samples: str,
+        video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
         creator_profile: dict[str, Any] | None,
     ) -> dict[str, Any]: ...
@@ -195,6 +198,7 @@ class FakeVideoCreatorQualityModelProvider:
         *,
         positioning: str,
         video_creator_samples: str,
+        video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
     ) -> dict[str, Any]:
         self.calls.append("creator_profile")
@@ -207,6 +211,7 @@ class FakeVideoCreatorQualityModelProvider:
         *,
         positioning: str,
         video_creator_samples: str,
+        video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
         creator_profile: dict[str, Any] | None,
     ) -> dict[str, Any]:
@@ -237,6 +242,7 @@ class RealVideoCreatorQualityModelProvider:
         *,
         positioning: str,
         video_creator_samples: str,
+        video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
     ) -> dict[str, Any]:
         response = await self.model_call_service.call_operation(
@@ -244,6 +250,7 @@ class RealVideoCreatorQualityModelProvider:
             {
                 "positioning": positioning,
                 "videoCreatorSamples": video_creator_samples,
+                "videoCreatorEvidencePack": video_creator_evidence_pack,
                 "mediaAssets": media_assets,
             },
         )
@@ -254,6 +261,7 @@ class RealVideoCreatorQualityModelProvider:
         *,
         positioning: str,
         video_creator_samples: str,
+        video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
         creator_profile: dict[str, Any] | None,
     ) -> dict[str, Any]:
@@ -262,6 +270,7 @@ class RealVideoCreatorQualityModelProvider:
             {
                 "positioning": positioning,
                 "videoCreatorSamples": video_creator_samples,
+                "videoCreatorEvidencePack": video_creator_evidence_pack,
                 "mediaAssets": media_assets,
                 "creatorProfile": creator_profile,
             },
@@ -313,11 +322,17 @@ class VideoCreatorQualityWorkflowService:
             raise ValidationError("Only video creator quality runs can use this workflow")
         snapshot = run.input_snapshot
         samples = snapshot["videoCreatorSamples"]
+        xhs_profile = snapshot.get("xhsCreatorProfile") or {}
         return VideoCreatorQualityState(
             run_id=run.id,
             workspace_id=run.workspace_id,
             positioning_snapshot=str(snapshot["accountPositioning"]),
             video_creator_samples_material_id=str(samples["materialId"]),
+            xhs_creator_profile_material_id=(
+                str(xhs_profile.get("materialId"))
+                if isinstance(xhs_profile, dict) and xhs_profile.get("materialId")
+                else ""
+            ),
             media_asset_ids=[
                 str(asset.get("mediaAssetId"))
                 for asset in snapshot.get("mediaAssets", [])
@@ -465,6 +480,9 @@ class _VideoCreatorQualityGraphExecution:
                 video_creator_samples=str(
                     self.snapshot()["videoCreatorSamples"]["content"]
                 ),
+                video_creator_evidence_pack=self.snapshot().get(
+                    "videoCreatorEvidencePack", {}
+                ),
                 media_assets=self.snapshot().get("mediaAssets", []),
             )
             result = CreatorProfileStageResult.model_validate(output).model_dump(
@@ -499,6 +517,9 @@ class _VideoCreatorQualityGraphExecution:
                 positioning=str(self.snapshot()["accountPositioning"]),
                 video_creator_samples=str(
                     self.snapshot()["videoCreatorSamples"]["content"]
+                ),
+                video_creator_evidence_pack=self.snapshot().get(
+                    "videoCreatorEvidencePack", {}
                 ),
                 media_assets=self.snapshot().get("mediaAssets", []),
                 creator_profile=updated.get("creator_profile"),
@@ -617,6 +638,9 @@ class _VideoCreatorQualityGraphExecution:
             "positioning_snapshot": state.get("positioning_snapshot"),
             "video_creator_samples_material_id": state.get(
                 "video_creator_samples_material_id"
+            ),
+            "xhs_creator_profile_material_id": state.get(
+                "xhs_creator_profile_material_id"
             ),
             "media_asset_ids": state.get("media_asset_ids", []),
             "creator_profile": state.get("creator_profile"),

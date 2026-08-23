@@ -112,7 +112,7 @@ BUILTIN_WORKFLOW_ASSETS = [
         agent_plan={
             "tasks": [
                 {
-                    "taskId": "prepare_video_creator_samples",
+                    "taskId": "prepare_video_creator_evidence",
                     "agentId": "creator_material_curator",
                     "skillIds": ["workspace.update_profile"],
                     "dependsOn": [],
@@ -121,7 +121,7 @@ BUILTIN_WORKFLOW_ASSETS = [
                     "taskId": "profile_video_creator",
                     "agentId": "video_creator_quality_analyst",
                     "skillIds": ["analysis.video_creator_profile"],
-                    "dependsOn": ["prepare_video_creator_samples"],
+                    "dependsOn": ["prepare_video_creator_evidence"],
                 },
                 {
                     "taskId": "diagnose_video_quality",

@@ -115,9 +115,13 @@ class AnalysisRunService:
             raise ValidationError(
                 "Batch run accepts either account profiles or XHS creator profiles, not both"
             )
-        if xhs_profile_asset_ids and payload.workflow_type != WorkflowType.ACCOUNT_DIAGNOSIS:
+        if xhs_profile_asset_ids and payload.workflow_type not in {
+            WorkflowType.ACCOUNT_DIAGNOSIS,
+            WorkflowType.VIDEO_CREATOR_QUALITY,
+        }:
             raise ValidationError(
-                "XHS creator profile batch input is only supported for account diagnosis"
+                "XHS creator profile batch input is only supported for "
+                "account diagnosis or video creator quality"
             )
         batch_asset_ids = profile_asset_ids or xhs_profile_asset_ids
         if not batch_asset_ids:
@@ -350,15 +354,14 @@ class AnalysisRunService:
         workspace: dict,
         payload: AnalysisRunCreate,
     ) -> dict:
-        if payload.workflow_type == WorkflowType.ACCOUNT_DIAGNOSIS:
-            xhs_asset_id = (
-                payload.xhs_creator_profile_input_asset_id
-                or payload.xhs_creator_profile_material_id
+        xhs_asset_id = (
+            payload.xhs_creator_profile_input_asset_id
+            or payload.xhs_creator_profile_material_id
+        )
+        if payload.workflow_type == WorkflowType.ACCOUNT_DIAGNOSIS and xhs_asset_id:
+            return self._build_xhs_account_diagnosis_snapshot(
+                connection, workspace, payload, xhs_asset_id
             )
-            if xhs_asset_id:
-                return self._build_xhs_account_diagnosis_snapshot(
-                    connection, workspace, payload, xhs_asset_id
-                )
 
         profile = self._resolve_account_profile(connection, workspace, payload)
         base = {
@@ -531,6 +534,108 @@ class AnalysisRunService:
             )
             return workflow_snapshot
 
+        media_assets = self._resolve_media_asset_snapshots(
+            connection,
+            workspace["id"],
+            payload.media_asset_ids,
+        )
+        if xhs_asset_id:
+            xhs_asset = self._require_material(
+                connection,
+                xhs_asset_id,
+                workspace["id"],
+                SourceMaterialType.XHS_CREATOR_PROFILE.value,
+                "XHS creator profile input asset is required",
+            )
+            xhs_profile = self._parse_xhs_creator_profile(
+                xhs_asset["text_content"] or ""
+            )
+            media_assets = self._resolve_media_asset_snapshots(
+                connection,
+                workspace["id"],
+                self._xhs_cover_media_asset_ids(xhs_profile) + payload.media_asset_ids,
+            )
+            evidence_pack = self._build_xhs_video_creator_evidence_pack(
+                xhs_profile, media_assets
+            )
+            workflow_snapshot = {
+                **base,
+                "xhsCreatorProfile": {
+                    "inputAssetId": xhs_asset["id"],
+                    "materialId": xhs_asset["id"],
+                    "name": xhs_asset["name"],
+                    "updatedAt": xhs_asset["updated_at"],
+                    "schemaVersion": xhs_profile.get("schemaVersion"),
+                    "source": xhs_profile.get("source", {}),
+                    "creator": xhs_profile.get("creator", {}),
+                    "noteCount": evidence_pack["noteStats"]["totalNotes"],
+                    "commentCount": evidence_pack["noteStats"]["commentCount"],
+                },
+                "videoCreatorSamples": {
+                    "source": "xhs_creator_profile",
+                    "inputAssetId": xhs_asset["id"],
+                    "materialId": xhs_asset["id"],
+                    "name": f"{xhs_asset['name']} · 派生视频创作者样本",
+                    "content": self._derive_video_creator_samples_from_evidence_pack(
+                        evidence_pack
+                    ),
+                    "updatedAt": xhs_asset["updated_at"],
+                    "derivedFrom": "xhs_creator_profile",
+                },
+                "videoCreatorEvidencePack": evidence_pack,
+                "mediaAssets": media_assets,
+            }
+            workflow_snapshot["contextPack"] = (
+                self.context_access_service.build_workspace_pack(
+                    connection,
+                    workspace=workspace,
+                    requester={
+                        "workflowId": payload.workflow_type.value,
+                        "agentId": "video_creator_quality_workflow",
+                        "skillId": "analysis.video_creator_quality",
+                    },
+                    purpose="create_video_creator_quality_analysis_run_from_xhs_creator_profile",
+                    selectors=[
+                        "account_positioning",
+                        "xhs_creator_profile",
+                        "input_assets_overview",
+                        "analysis_history_overview",
+                        "topic_library_overview",
+                        "draft_history_overview",
+                        "simulation_history_overview",
+                        "media_assets_overview",
+                    ],
+                    deep_items=[
+                        self.context_access_service.deep_item(
+                            key="selected_xhs_creator_profile_for_video_quality",
+                            asset_type="input_asset",
+                            asset_id=xhs_asset["id"],
+                            selector="xhs_video_creator_evidence_pack",
+                            role="xhs_creator_profile",
+                            data={
+                                "workspaceId": workspace["id"],
+                                "materialId": xhs_asset["id"],
+                                "name": xhs_asset["name"],
+                                "updatedAt": xhs_asset["updated_at"],
+                                "evidencePack": evidence_pack,
+                            },
+                        )
+                    ]
+                    + [
+                        self.context_access_service.deep_item(
+                            key=f"selected_media_asset_{media['mediaAssetId']}",
+                            asset_type="media_asset",
+                            asset_id=media["mediaAssetId"],
+                            selector="media_asset_derived_snapshot",
+                            role="media_asset",
+                            data=media,
+                        )
+                        for media in workflow_snapshot["mediaAssets"]
+                    ],
+                )
+            )
+            return workflow_snapshot
+
         video_samples = self._require_material(
             connection,
             payload.video_creator_samples_input_asset_id
@@ -548,11 +653,10 @@ class AnalysisRunService:
                 "content": video_samples["text_content"],
                 "updatedAt": video_samples["updated_at"],
             },
-            "mediaAssets": self._resolve_media_asset_snapshots(
-                connection,
-                workspace["id"],
-                payload.media_asset_ids,
+            "videoCreatorEvidencePack": self._build_text_video_creator_evidence_pack(
+                video_samples["text_content"] or "", media_assets
             ),
+            "mediaAssets": media_assets,
         }
         workflow_snapshot["contextPack"] = (
             self.context_access_service.build_workspace_pack(
@@ -605,6 +709,367 @@ class AnalysisRunService:
             )
         )
         return workflow_snapshot
+
+    def _build_text_video_creator_evidence_pack(
+        self, samples_text: str, media_assets: list[dict]
+    ) -> dict:
+        has_video_understanding = any(
+            asset.get("type") == "video"
+            and (asset.get("derived") or {}).get("videoUnderstanding")
+            for asset in media_assets
+        )
+        has_cover_or_image_understanding = any(
+            asset.get("type") == "image"
+            and (
+                (asset.get("derived") or {}).get("imageUnderstanding")
+                or (asset.get("derived") or {}).get("visualSummary")
+            )
+            for asset in media_assets
+        )
+        limitations = []
+        if not has_video_understanding:
+            limitations.append(
+                "未提供已确认的视频理解结果；不得声称看过完整视频、镜头、剪辑或口型。"
+            )
+        if not has_cover_or_image_understanding:
+            limitations.append(
+                "未提供已确认的封面/截图理解结果；视觉判断只能来自用户文本备注。"
+            )
+        return {
+            "schemaVersion": "video-creator-evidence-pack/v1",
+            "source": {"type": "video_creator_samples"},
+            "creator": {"displayName": self._infer_creator_name_from_text(samples_text)},
+            "noteStats": {
+                "totalNotes": None,
+                "videoNotes": None,
+                "normalNotes": None,
+                "commentCount": None,
+            },
+            "videoNotes": [],
+            "topEngagementNotes": [],
+            "scriptDrivenSignals": self._keyword_signals(
+                samples_text,
+                ["剧情", "短剧", "剧本", "角色", "主角", "反转", "世界观", "连续"],
+                "operator_note",
+            ),
+            "commercialSignals": self._keyword_signals(
+                samples_text,
+                ["商单", "品牌", "合作", "广告", "带货", "种草", "推广"],
+                "operator_note",
+            ),
+            "techExplorationSignals": self._keyword_signals(
+                samples_text,
+                ["AI", "AIGC", "工具", "模型", "教程", "技术", "prompt", "工作流"],
+                "operator_note",
+            ),
+            "audienceSignals": self._keyword_signals(
+                samples_text,
+                ["评论", "催更", "收藏", "转发", "粉丝", "互动"],
+                "operator_note",
+            ),
+            "mediaAssetRefs": self._media_asset_refs(media_assets),
+            "evidenceLimitations": limitations,
+        }
+
+    def _build_xhs_video_creator_evidence_pack(
+        self, profile: dict, media_assets: list[dict]
+    ) -> dict:
+        creator = profile.get("creator") if isinstance(profile.get("creator"), dict) else {}
+        source = profile.get("source") if isinstance(profile.get("source"), dict) else {}
+        notes = [note for note in profile.get("notes", []) if isinstance(note, dict)]
+        video_notes = [note for note in notes if str(note.get("type") or "") == "video"]
+        normal_notes = [note for note in notes if str(note.get("type") or "") != "video"]
+        comment_count = sum(
+            len(note.get("comments", []))
+            for note in notes
+            if isinstance(note.get("comments"), list)
+        )
+        top_notes = sorted(notes, key=self._engagement_score, reverse=True)[:10]
+        searchable_text = "\n".join(
+            " ".join(
+                [
+                    str(note.get("title") or ""),
+                    str(note.get("desc") or ""),
+                    " ".join(str(tag) for tag in note.get("tags", []) or []),
+                    " ".join(
+                        str(comment.get("content") or "")
+                        for comment in note.get("comments", [])[:5]
+                        if isinstance(comment, dict)
+                    )
+                    if isinstance(note.get("comments"), list)
+                    else "",
+                ]
+            )
+            for note in notes
+        )
+        media_refs = self._xhs_media_asset_refs(notes, media_assets)
+        has_video_understanding = any(
+            ref.get("type") == "video" and ref.get("hasVideoUnderstanding")
+            for ref in media_refs
+        )
+        has_cover_understanding = any(
+            ref.get("type") == "image" and ref.get("hasImageUnderstanding")
+            for ref in media_refs
+        )
+        limitations = []
+        if not video_notes:
+            limitations.append(
+                "该主页导入结果没有 video 类型笔记；视频质量只能基于图文/封面/评论等间接证据判断。"
+            )
+        if not has_video_understanding:
+            limitations.append(
+                "未提供已确认的视频理解结果；不得声称看过完整视频、镜头、剪辑或口型。"
+            )
+        if media_refs and not has_cover_understanding:
+            limitations.append(
+                "存在封面媒体资产，但未保存图片理解结果；视觉判断只能引用封面 caption 或用户备注。"
+            )
+        return {
+            "schemaVersion": "video-creator-evidence-pack/v1",
+            "source": {
+                "type": "xhs_creator_profile",
+                "platform": source.get("platform", "xiaohongshu"),
+                "fixtureCode": source.get("fixtureCode"),
+                "crawler": source.get("crawler"),
+            },
+            "creator": {
+                "displayName": creator.get("displayName") or source.get("fixtureCode") or "未知",
+                "profileText": self._truncate(creator.get("profileText"), 1000),
+            },
+            "noteStats": {
+                "totalNotes": len(notes),
+                "videoNotes": len(video_notes),
+                "normalNotes": len(normal_notes),
+                "commentCount": comment_count,
+            },
+            "videoNotes": [self._compact_xhs_note(note) for note in video_notes[:20]],
+            "topEngagementNotes": [self._compact_xhs_note(note) for note in top_notes],
+            "scriptDrivenSignals": self._keyword_signals(
+                searchable_text,
+                ["剧情", "短剧", "剧本", "角色", "主角", "反转", "世界观", "连续"],
+                "text_observation",
+            ),
+            "commercialSignals": self._keyword_signals(
+                searchable_text,
+                ["商单", "品牌", "合作", "广告", "带货", "种草", "推广"],
+                "text_observation",
+            ),
+            "techExplorationSignals": self._keyword_signals(
+                searchable_text,
+                ["AI", "AIGC", "工具", "模型", "教程", "技术", "prompt", "工作流"],
+                "text_observation",
+            ),
+            "audienceSignals": self._audience_signals_from_xhs(notes),
+            "mediaAssetRefs": media_refs,
+            "evidenceLimitations": limitations,
+        }
+
+    def _derive_video_creator_samples_from_evidence_pack(self, evidence_pack: dict) -> str:
+        source_type = evidence_pack.get("source", {}).get("type")
+        creator = evidence_pack.get("creator", {})
+        stats = evidence_pack.get("noteStats", {})
+        lines = [
+            f"# 视频创作者样本（由 {source_type} 派生）",
+            "",
+            f"- 创作者：{creator.get('displayName') or '未知'}",
+            f"- 笔记数：{stats.get('totalNotes')}",
+            f"- 视频笔记数：{stats.get('videoNotes')}",
+            f"- 一级评论数：{stats.get('commentCount')}",
+            "",
+        ]
+        top_notes = evidence_pack.get("topEngagementNotes") or []
+        if top_notes:
+            lines.extend(["## 高互动内容", ""])
+            for index, note in enumerate(top_notes[:10], start=1):
+                metrics = note.get("metrics") or {}
+                lines.extend(
+                    [
+                        f"{index}. {note.get('title') or '未命名笔记'}",
+                        (
+                            f"   - 类型：{note.get('type') or 'unknown'}；"
+                            f"赞：{metrics.get('liked')}; 收藏：{metrics.get('collected')}; "
+                            f"评论：{metrics.get('comments')}; 分享：{metrics.get('shares')}"
+                        ),
+                        f"   - 摘要：{note.get('descSnippet') or '无'}",
+                    ]
+                )
+        for key, label in [
+            ("scriptDrivenSignals", "剧本/叙事信号"),
+            ("commercialSignals", "商单/商业信号"),
+            ("techExplorationSignals", "技术探索信号"),
+            ("audienceSignals", "受众反馈信号"),
+            ("evidenceLimitations", "证据限制"),
+        ]:
+            values = evidence_pack.get(key) or []
+            if values:
+                lines.extend(["", f"## {label}", ""])
+                for value in values:
+                    if isinstance(value, dict):
+                        evidence_type = value.get("evidenceType") or "inference"
+                        evidence_text = value.get("text") or value
+                        lines.append(
+                            f"- [{evidence_type}] {evidence_text}"
+                        )
+                    else:
+                        lines.append(f"- {value}")
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _compact_xhs_note(self, note: dict) -> dict:
+        metrics = note.get("metrics") if isinstance(note.get("metrics"), dict) else {}
+        comments = note.get("comments") if isinstance(note.get("comments"), list) else []
+        return {
+            "noteId": note.get("noteId") or "",
+            "type": note.get("type") or "normal",
+            "title": self._truncate(note.get("title"), 120),
+            "descSnippet": self._truncate(note.get("desc"), 240),
+            "tags": note.get("tags")[:8] if isinstance(note.get("tags"), list) else [],
+            "metrics": {
+                "liked": metrics.get("liked"),
+                "collected": metrics.get("collected"),
+                "comments": metrics.get("comments"),
+                "shares": metrics.get("shares"),
+                "engagementScore": self._engagement_score(note),
+            },
+            "topComments": [
+                self._truncate(comment.get("content"), 120)
+                for comment in comments[:5]
+                if isinstance(comment, dict) and comment.get("content")
+            ],
+            "coverMediaAssetId": note.get("coverMediaAssetId") or "",
+        }
+
+    def _audience_signals_from_xhs(self, notes: list[dict]) -> list[dict]:
+        signals: list[dict] = []
+        for note in notes[:20]:
+            comments = note.get("comments") if isinstance(note.get("comments"), list) else []
+            for comment in comments[:3]:
+                if not isinstance(comment, dict) or not comment.get("content"):
+                    continue
+                signals.append(
+                    {
+                        "evidenceType": "comment",
+                        "text": self._truncate(
+                            f"{note.get('title') or '未命名笔记'}：{comment.get('content')}",
+                            180,
+                        ),
+                    }
+                )
+        return signals[:12]
+
+    def _xhs_media_asset_refs(
+        self, notes: list[dict], media_assets: list[dict]
+    ) -> list[dict]:
+        by_id = {asset["mediaAssetId"]: asset for asset in media_assets}
+        refs: list[dict] = []
+        for note in notes:
+            media_asset_id = note.get("coverMediaAssetId")
+            if not media_asset_id:
+                continue
+            asset = by_id.get(media_asset_id)
+            derived = (asset or {}).get("derived") or {}
+            refs.append(
+                {
+                    "noteId": note.get("noteId") or "",
+                    "noteTitle": self._truncate(note.get("title"), 120),
+                    "mediaAssetId": media_asset_id,
+                    "type": (asset or {}).get("type", "image"),
+                    "name": (asset or {}).get("name", ""),
+                    "hasImageUnderstanding": bool(
+                        derived.get("imageUnderstanding")
+                        or derived.get("visualSummary")
+                        or derived.get("qwenUnderstanding")
+                    ),
+                    "hasVideoUnderstanding": bool(derived.get("videoUnderstanding")),
+                }
+            )
+        for asset in media_assets:
+            if not any(ref["mediaAssetId"] == asset["mediaAssetId"] for ref in refs):
+                derived = asset.get("derived") or {}
+                refs.append(
+                    {
+                        "noteId": "",
+                        "noteTitle": "",
+                        "mediaAssetId": asset["mediaAssetId"],
+                        "type": asset.get("type", ""),
+                        "name": asset.get("name", ""),
+                        "hasImageUnderstanding": bool(
+                            derived.get("imageUnderstanding")
+                            or derived.get("visualSummary")
+                            or derived.get("qwenUnderstanding")
+                        ),
+                        "hasVideoUnderstanding": bool(derived.get("videoUnderstanding")),
+                    }
+                )
+        return refs
+
+    @staticmethod
+    def _xhs_cover_media_asset_ids(profile: dict) -> list[str]:
+        ids: list[str] = []
+        seen: set[str] = set()
+        notes = profile.get("notes") if isinstance(profile.get("notes"), list) else []
+        for note in notes:
+            if not isinstance(note, dict):
+                continue
+            media_asset_id = str(note.get("coverMediaAssetId") or "").strip()
+            if media_asset_id and media_asset_id not in seen:
+                ids.append(media_asset_id)
+                seen.add(media_asset_id)
+        return ids
+
+    def _media_asset_refs(self, media_assets: list[dict]) -> list[dict]:
+        refs: list[dict] = []
+        for asset in media_assets:
+            derived = asset.get("derived") or {}
+            refs.append(
+                {
+                    "mediaAssetId": asset.get("mediaAssetId"),
+                    "type": asset.get("type"),
+                    "name": asset.get("name"),
+                    "hasImageUnderstanding": bool(
+                        derived.get("imageUnderstanding")
+                        or derived.get("visualSummary")
+                        or derived.get("qwenUnderstanding")
+                    ),
+                    "hasVideoUnderstanding": bool(derived.get("videoUnderstanding")),
+                }
+            )
+        return refs
+
+    @staticmethod
+    def _keyword_signals(text: str, keywords: list[str], evidence_type: str) -> list[dict]:
+        signals: list[dict] = []
+        lower_text = text.lower()
+        for keyword in keywords:
+            if keyword.lower() in lower_text:
+                signals.append(
+                    {
+                        "evidenceType": evidence_type,
+                        "text": f"输入中出现“{keyword}”相关线索。",
+                    }
+                )
+        return signals[:8]
+
+    @staticmethod
+    def _infer_creator_name_from_text(text: str) -> str:
+        for marker in ["创作者：", "账号：", "@"]:
+            if marker not in text:
+                continue
+            fragment = text.split(marker, 1)[1].strip()
+            return fragment.splitlines()[0].strip()[:80]
+        return ""
+
+    @staticmethod
+    def _truncate(value, limit: int) -> str:
+        text = str(value or "").strip()
+        return text if len(text) <= limit else text[: limit - 1] + "…"
+
+    def _engagement_score(self, note: dict) -> int:
+        return (
+            self._metric(note, "liked")
+            + self._metric(note, "collected")
+            + self._metric(note, "comments")
+            + self._metric(note, "shares")
+        )
 
     def _build_xhs_account_diagnosis_snapshot(
         self,

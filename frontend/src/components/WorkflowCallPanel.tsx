@@ -88,6 +88,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
     : isVideo
       ? '⚡ 生成视频创作者诊断'
       : '⚡ 生成热点分析'
+  const usesXhsBatch = (isAccount || isVideo) && Boolean(xhsCreatorProfileMaterial)
 
   const renderInputPreview = (
     name: string,
@@ -103,7 +104,10 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
     </div>
   )
 
-  const renderXhsWorkflowInputPreview = (asset?: TextInputAsset) => {
+  const renderXhsWorkflowInputPreview = (
+    asset: TextInputAsset | undefined,
+    purpose: 'account' | 'video' = 'account',
+  ) => {
     if (!asset) {
       return renderInputPreview(
         '小红书创作者主页',
@@ -131,17 +135,30 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
         <div className="xhs-summary-grid">
           <span>账号：{summary.displayName}</span>
           <span>笔记：{summary.noteCount}</span>
+          <span>视频：{summary.videoNoteCount}</span>
           <span>评论：{summary.commentCount}</span>
           <span>封面引用：{summary.coverReferenceCount}</span>
         </div>
-        <div className="workflow-derived-assets">
-          <label>本次账号诊断会由后端派生</label>
-          <div>
-            <span>账号概况快照</span>
-            <span>历史笔记摘要</span>
-            <span>评论痛点样本</span>
+        {purpose === 'account' ? (
+          <div className="workflow-derived-assets">
+            <label>本次账号诊断会由后端派生</label>
+            <div>
+              <span>账号概况快照</span>
+              <span>历史笔记摘要</span>
+              <span>评论痛点样本</span>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="workflow-derived-assets">
+            <label>本次视频诊断会由后端派生</label>
+            <div>
+              <span>视频作者证据包</span>
+              <span>{summary.videoNoteCount > 0 ? '包含视频笔记' : '未发现视频笔记'}</span>
+              <span>{summary.coverReferenceCount > 0 ? '包含封面引用' : '无封面引用'}</span>
+              <span>{summary.commentCount > 0 ? '包含评论反馈' : '无评论反馈'}</span>
+            </div>
+          </div>
+        )}
         {summary.topNotes.length > 0 && (
           <div className="xhs-top-notes workflow-xhs-top-notes">
             <label>高互动样本</label>
@@ -161,6 +178,11 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
         {summary.warnings.length > 0 && (
           <p className="workflow-derived-note">
             该主页资产有 {summary.warnings.length} 条导入提示，可在内容资产详情页查看。
+          </p>
+        )}
+        {purpose === 'video' && summary.videoNoteCount === 0 && (
+          <p className="workflow-derived-note">
+            当前主页没有 video 类型笔记；视频质量判断会按图文/封面/评论的间接证据保守输出。
           </p>
         )}
       </div>
@@ -204,6 +226,28 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
             ))}
           </select>
           {renderXhsWorkflowInputPreview(xhsCreatorProfileMaterial)}
+        </div>
+      )}
+      {isVideo && (
+        <div className="source-editor-card compact">
+          <label htmlFor="workflow-video-xhs-creator-profile-material">
+            小红书创作者主页实例
+          </label>
+          <select
+            id="workflow-video-xhs-creator-profile-material"
+            value={selectedXhsCreatorProfileInputAssetId}
+            onChange={(event) =>
+              props.onSelectXhsCreatorProfileInputAssetId(event.target.value)
+            }
+          >
+            <option value="">不使用，改用视频创作者样本</option>
+            {xhsCreatorProfileMaterials.map((material) => (
+              <option value={material.id} key={material.id}>
+                {material.name}
+              </option>
+            ))}
+          </select>
+          {renderXhsWorkflowInputPreview(xhsCreatorProfileMaterial, 'video')}
         </div>
       )}
       {!(isAccount && xhsCreatorProfileMaterial) && (
@@ -331,6 +375,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
       )}
       {isVideo && (
         <>
+          {!xhsCreatorProfileMaterial && (
           <div className="source-editor-card compact">
             <label htmlFor="workflow-video-material">视频创作者样本实例</label>
             <select
@@ -361,6 +406,7 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
                 : '未选择视频创作者样本实例',
             )}
           </div>
+          )}
           <div className="source-editor-card compact">
             <label>关联图片/视频素材</label>
             {mediaAssets.length === 0 ? (
@@ -444,13 +490,13 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
           type="button"
           disabled={
             running ||
-            (isAccount && xhsCreatorProfileMaterial
+            (usesXhsBatch
               ? xhsCreatorProfileMaterials.length === 0
               : accountProfileMaterials.length === 0)
           }
           onClick={() => props.onRunBatchWorkflow(targetTab)}
         >
-          {isAccount && xhsCreatorProfileMaterial
+          {usesXhsBatch
             ? `批量运行当前 Workflow（${xhsCreatorProfileMaterials.length} 个小红书主页）`
             : `批量运行当前 Workflow（${accountProfileMaterials.length} 个账号概况）`}
         </button>

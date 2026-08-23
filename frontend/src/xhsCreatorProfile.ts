@@ -3,6 +3,8 @@ import type { TextInputAsset } from './types'
 export type XhsCreatorProfileSummary = {
   displayName: string
   noteCount: number
+  videoNoteCount: number
+  normalNoteCount: number
   commentCount: number
   coverReferenceCount: number
   topNotes: Array<{
@@ -71,6 +73,8 @@ export function summarizeXhsCreatorProfile(
   return {
     displayName,
     noteCount: notes.length,
+    videoNoteCount: notes.filter((note) => cleanText(note.type) === 'video').length,
+    normalNoteCount: notes.filter((note) => cleanText(note.type) !== 'video').length,
     commentCount: notes.reduce((total, note) => {
       const comments = note.comments
       return total + (Array.isArray(comments) ? comments.length : 0)

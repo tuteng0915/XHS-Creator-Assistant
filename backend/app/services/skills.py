@@ -460,9 +460,19 @@ BUILTIN_SKILLS = [
             "Classify an AIGC video creator by motivation and content operating "
             "pattern from collected video samples."
         ),
-        required_inputs=["positioning_snapshot", "video_creator_samples_material_id"],
+        required_inputs=["positioning_snapshot", "video_creator_evidence_pack"],
+        optional_inputs=[
+            "video_creator_samples_material_id",
+            "xhs_creator_profile_material_id",
+            "media_asset_ids",
+        ],
         context_policy={
-            "allowed_fields": ["positioning", "videoCreatorSamples"],
+            "allowed_fields": [
+                "positioning",
+                "videoCreatorEvidencePack",
+                "videoCreatorSamples",
+                "mediaAssets",
+            ],
             "disallowed_fields": ["full_workspace", "unrelated input assets"],
         },
         output_schema={"root": "creatorProfile"},
@@ -488,11 +498,22 @@ BUILTIN_SKILLS = [
         ),
         required_inputs=[
             "positioning_snapshot",
-            "video_creator_samples_material_id",
+            "video_creator_evidence_pack",
             "creatorProfile",
         ],
+        optional_inputs=[
+            "video_creator_samples_material_id",
+            "xhs_creator_profile_material_id",
+            "media_asset_ids",
+        ],
         context_policy={
-            "allowed_fields": ["positioning", "videoCreatorSamples", "creatorProfile"],
+            "allowed_fields": [
+                "positioning",
+                "videoCreatorEvidencePack",
+                "videoCreatorSamples",
+                "mediaAssets",
+                "creatorProfile",
+            ],
             "disallowed_fields": ["full_workspace", "unrelated input assets"],
         },
         output_schema={"root": "videoQuality"},

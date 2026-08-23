@@ -26,6 +26,7 @@ describe('xhsCreatorProfile', () => {
         notes: [
           {
             noteId: 'n1',
+            type: 'normal',
             title: '低互动',
             metrics: { liked: 1, collected: 1, comments: 1, shares: 1 },
             comments: [{ content: '评论' }],
@@ -33,6 +34,7 @@ describe('xhsCreatorProfile', () => {
           },
           {
             noteId: 'n2',
+            type: 'video',
             title: '高互动',
             metrics: { liked: 100, collected: 20, comments: 3, shares: 4 },
             comments: [],
@@ -44,6 +46,8 @@ describe('xhsCreatorProfile', () => {
 
     expect(summary?.displayName).toBe('秀***冰')
     expect(summary?.noteCount).toBe(2)
+    expect(summary?.videoNoteCount).toBe(1)
+    expect(summary?.normalNoteCount).toBe(1)
     expect(summary?.commentCount).toBe(1)
     expect(summary?.coverReferenceCount).toBe(1)
     expect(summary?.topNotes[0].title).toBe('高互动')

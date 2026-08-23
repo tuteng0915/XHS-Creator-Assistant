@@ -97,7 +97,7 @@ PROMPT_AGENT_CHAT = """你是创作者 workspace 中的产品内 Agent。
 只输出 JSON。schema:
 {"reply":"","proposedActions":[{"type":"","status":"requires_confirmation","description":"","payload":{}}]}"""
 
-PROMPT_VIDEO_CREATOR_PROFILE = """你是 AIGC 视频创作者运营分析师。基于创作者的视频样本记录、链接备注、转写、画面观察和数据线索，给出创作者画像。
+PROMPT_VIDEO_CREATOR_PROFILE = """你是 AIGC 视频创作者运营分析师。基于创作者证据包、视频样本记录、链接备注、转写、画面观察和数据线索，给出创作者画像。
 重点判断创作者主要驱动类型：
 - script_driven：剧本/叙事/角色设定驱动，适合被激励计划放大
 - commercial_driven：商单/带货/品牌合作驱动，平台激励计划通常很难改变行为
@@ -106,12 +106,14 @@ PROMPT_VIDEO_CREATOR_PROFILE = """你是 AIGC 视频创作者运营分析师。�
 - unclear：证据不足
 要求：
 - evidence 必须引用输入中的具体观察，不要编造视频内容
+- 必须遵守 evidenceLimitations；如果没有 video_understanding，不要声称看过镜头、剪辑、口型或完整视频
+- 对推断性判断要标明“基于标题/正文/评论/封面推测”
 - 不要把单个爆款等同于长期能力
 - 输出中文
 只输出 JSON，不要解释。schema:
 {"creatorProfile":{"creatorType":"","typeConfidence":"高/中/低","summary":"","audiencePositioning":"","contentPillars":[],"motivationSignals":[],"evidence":[],"uncertainties":[]}}"""
 
-PROMPT_VIDEO_QUALITY_ANALYSIS = """你是 AIGC 视频质量评审。基于视频创作者样本，评估其内容质量、可持续生产能力和可被运营放大的程度。
+PROMPT_VIDEO_QUALITY_ANALYSIS = """你是 AIGC 视频质量评审。基于创作者证据包和已确认媒体理解结果，评估其内容质量、可持续生产能力和可被运营放大的程度。
 评估维度：
 - scriptAndNarrative：剧本、叙事、冲突、完播潜力
 - visualExecution：画面完成度、镜头、剪辑、审美一致性
@@ -120,6 +122,10 @@ PROMPT_VIDEO_QUALITY_ANALYSIS = """你是 AIGC 视频质量评审。基于视频
 - consistency：账号连续性和系列化潜力
 - audienceFit：目标人群清晰度
 - productionRepeatability：稳定产能和复制能力
+证据边界：
+- 如果没有 video_understanding，只能评估内容方向、系列化、互动和间接质量信号
+- 如果只有封面/截图理解，visualExecution 只能给保守判断
+- 不要编造未提供的视频画面、音频、转写、剪辑节奏
 score 为 0-100 的整数。必须给出 strengths、weaknesses 和 evidence。
 只输出 JSON，不要解释。schema:
 {"videoQuality":{"overallScore":0,"level":"高/中/低","dimensionScores":[{"dimension":"","score":0,"reason":""}],"strengths":[],"weaknesses":[],"evidence":[]}}"""
@@ -365,7 +371,9 @@ class ModelCallService:
         if operation == ModelOperation.VIDEO_CREATOR_PROFILE:
             return (
                 PROMPT_VIDEO_CREATOR_PROFILE,
-                f"激励计划/运营目标：\n{positioning}\n\n视频创作者样本：\n"
+                f"激励计划/运营目标：\n{positioning}\n\n视频创作者证据包：\n"
+                f"{json.dumps(context.get('videoCreatorEvidencePack', {}), ensure_ascii=False)}\n\n"
+                "兼容文本样本：\n"
                 f"{context.get('videoCreatorSamples', '')}\n\n"
                 "已确认的图片/视频媒体理解结果（compact snapshot）：\n"
                 f"{json.dumps(context.get('mediaAssets', []), ensure_ascii=False)}",
@@ -376,7 +384,9 @@ class ModelCallService:
                 "激励计划/运营目标：\n"
                 f"{positioning}\n\n创作者画像：\n"
                 f"{json.dumps(context.get('creatorProfile'), ensure_ascii=False)}\n\n"
-                "视频创作者样本：\n"
+                "视频创作者证据包：\n"
+                f"{json.dumps(context.get('videoCreatorEvidencePack', {}), ensure_ascii=False)}\n\n"
+                "兼容文本样本：\n"
                 f"{context.get('videoCreatorSamples', '')}\n\n"
                 "已确认的图片/视频媒体理解结果（compact snapshot）：\n"
                 f"{json.dumps(context.get('mediaAssets', []), ensure_ascii=False)}",

@@ -125,6 +125,7 @@ const qsheepXhsCreatorProfileAsset: InputAsset = {
     notes: [
       {
         noteId: 'n1',
+        type: 'video',
         title: '中传大三专业第一，我为什么放弃保研',
         desc: '申请季前梳理自己的履历发现写不下了。',
         metrics: { liked: 1454, collected: 349, comments: 66, shares: 253 },
@@ -133,6 +134,7 @@ const qsheepXhsCreatorProfileAsset: InputAsset = {
       },
       {
         noteId: 'n2',
+        type: 'normal',
         title: 'lse 最后一节 gender 课',
         desc: '老师说不要停止想象。',
         metrics: { liked: 536, collected: 165, comments: 22, shares: 86 },
@@ -928,6 +930,154 @@ describe('workspace UI', () => {
       materials['workspace-1'] = originalWorkspaceOneMaterials
       cleanup()
     }
+  })
+
+  it('uses an XHS creator profile as the video quality input source', async () => {
+    class MockEventSource {
+      private listeners = new Map<string, EventListener[]>()
+
+      constructor(readonly url: string) {
+        setTimeout(() => {
+          this.dispatch('run.succeeded', {
+            eventId: 'event-video-xhs',
+            runId: 'run-video-xhs',
+            runType: 'video_creator_quality',
+            stageKey: null,
+            status: 'completed',
+            sequence: 1,
+            occurredAt: '2026-07-11T12:00:01Z',
+            data: { eventType: 'run.succeeded' },
+          })
+        }, 0)
+      }
+
+      addEventListener(type: string, listener: EventListener) {
+        this.listeners.set(type, [...(this.listeners.get(type) || []), listener])
+      }
+
+      close() {
+        // Test double does not keep an open network connection.
+      }
+
+      private dispatch(type: string, payload: unknown) {
+        const event = new MessageEvent(type, { data: JSON.stringify(payload) })
+        ;(this.listeners.get(type) || []).forEach((listener) => listener(event))
+      }
+    }
+
+    vi.stubGlobal('EventSource', MockEventSource)
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((input, init) => {
+        const url = String(input)
+        const method = init?.method || 'GET'
+        if (url === '/api/workspaces' && method === 'GET') {
+          return jsonResponse([workspaceOne])
+        }
+        if (url === '/api/workspaces/workspace-1' && method === 'GET') {
+          return jsonResponse(workspaceOne)
+        }
+        if (
+          url === '/api/workspaces/workspace-1/input-assets' &&
+          method === 'GET'
+        ) {
+          return jsonResponse([qsheepXhsCreatorProfileAsset])
+        }
+        if (url.startsWith('/api/workspaces/workspace-1/') && method === 'GET') {
+          return jsonResponse([])
+        }
+        if (
+          url === '/api/workspaces/workspace-1/input-assets' &&
+          method === 'POST'
+        ) {
+          const body = JSON.parse(String(init?.body)) as {
+            type: InputAsset['type']
+            name: string
+            content: string
+          }
+          expect(body.type).toBe('account_profile')
+          return jsonResponse(
+            {
+              id: 'new-video-program-profile',
+              workspaceId: 'workspace-1',
+              type: body.type,
+              name: body.name,
+              content: body.content,
+              createdAt: '2026-07-11T12:00:00Z',
+              updatedAt: '2026-07-11T12:00:00Z',
+            },
+            201,
+          )
+        }
+        if (
+          url === '/api/workspaces/workspace-1/analysis-runs' &&
+          method === 'POST'
+        ) {
+          const body = JSON.parse(String(init?.body)) as {
+            workflowType?: string
+            accountProfileInputAssetId?: string
+            videoCreatorSamplesInputAssetId?: string
+            xhsCreatorProfileInputAssetId?: string
+          }
+          expect(body.workflowType).toBe('video_creator_quality')
+          expect(body.accountProfileInputAssetId).toBe('new-video-program-profile')
+          expect(body.videoCreatorSamplesInputAssetId).toBeUndefined()
+          expect(body.xhsCreatorProfileInputAssetId).toBe('xhs-profile-1')
+          return jsonResponse(
+            {
+              id: 'run-video-xhs',
+              workspaceId: 'workspace-1',
+              workflowType: 'video_creator_quality',
+              status: 'running',
+              inputSnapshot: {},
+              stageResults: {},
+              stageErrors: {},
+              modelMetadata: { mode: 'demo' },
+              createdAt: '2026-07-11T12:00:00Z',
+              startedAt: null,
+              completedAt: null,
+              updatedAt: '2026-07-11T12:00:00Z',
+            },
+            201,
+          )
+        }
+        if (url === '/api/analysis-runs/run-video-xhs' && method === 'GET') {
+          return jsonResponse({
+            id: 'run-video-xhs',
+            workspaceId: 'workspace-1',
+            workflowType: 'video_creator_quality',
+            status: 'completed',
+            inputSnapshot: {},
+            stageResults: {},
+            stageErrors: {},
+            modelMetadata: { mode: 'demo' },
+            createdAt: '2026-07-11T12:00:00Z',
+            startedAt: '2026-07-11T12:00:00Z',
+            completedAt: '2026-07-11T12:00:01Z',
+            updatedAt: '2026-07-11T12:00:01Z',
+          })
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`)
+      })
+
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /视频博主质量诊断/ }))
+    expect(await screen.findByText('本次视频诊断会由后端派生')).toBeInTheDocument()
+    expect(screen.getByText('视频作者证据包')).toBeInTheDocument()
+    expect(screen.getByText('视频：1')).toBeInTheDocument()
+    expect(screen.queryByLabelText('视频创作者样本实例')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '⚡ 生成视频创作者诊断' }))
+
+    await waitFor(() => {
+      const createRunCall = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/workspaces/workspace-1/analysis-runs' &&
+          init?.method === 'POST',
+      )
+      expect(createRunCall).toBeTruthy()
+    })
   })
 
   it('prefers a workspace with input assets when the newest workspace is empty', async () => {

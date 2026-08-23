@@ -1627,6 +1627,13 @@ function WorkspaceApp() {
     }
 
     if (targetTab === 'video') {
+      if (xhsCreatorProfileMaterial) {
+        return {
+          ...profileInput,
+          xhsCreatorProfile: xhsCreatorProfileMaterial,
+          simulationTopic: nextSimulationTopic,
+        }
+      }
       const nextVideoCreatorSamples =
         mode === 'demo' && !videoCreatorSamples.trim()
           ? SAMPLE_VIDEO_INPUT.videoCreatorSamples
@@ -1773,7 +1780,9 @@ function WorkspaceApp() {
 
   async function runBatchWorkflow(targetTab: WorkflowTab = workflowTab) {
     if (!workspace) return
-    const useXhsBatch = targetTab === 'account' && Boolean(xhsCreatorProfileMaterial)
+    const useXhsBatch =
+      (targetTab === 'account' || targetTab === 'video') &&
+      Boolean(xhsCreatorProfileMaterial)
     const batchCount = useXhsBatch
       ? xhsCreatorProfileMaterials.length
       : accountProfileMaterials.length
