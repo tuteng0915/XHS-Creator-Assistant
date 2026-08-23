@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
-import shutil
 import sys
 from pathlib import Path
 
@@ -14,7 +12,7 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
 from xhs_mediacrawler_fixture import (  # noqa: E402
-    build_xhs_creator_profile_payload,
+    export_xhs_import_package,
     load_mediacrawler_export,
 )
 
@@ -47,29 +45,18 @@ def main() -> int:
     fixture_dir = args.fixture_root / args.code
     output_dir = args.output_root / args.code
     export = load_mediacrawler_export(fixture_dir, code=args.code)
+    summary = export_xhs_import_package(export, output_dir)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    images_dir = output_dir / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
-
-    profile_payload = build_xhs_creator_profile_payload(export)
-    (output_dir / "xhs_creator_profile.json").write_text(
-        json.dumps(profile_payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-    copied_covers = 0
-    for note in export.notes:
-        if note.cover_path is None:
-            continue
-        note_image_dir = images_dir / note.note_id
-        note_image_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(note.cover_path, note_image_dir / note.cover_path.name)
-        copied_covers += 1
-
-    print(f"package_dir: {output_dir}")
-    print(f"profile: {output_dir / 'xhs_creator_profile.json'}")
-    print(f"covers: {copied_covers}")
+    print(f"package_dir: {summary.output_dir}")
+    print(f"profile: {summary.profile_path}")
+    print(f"display_name: {summary.display_name}")
+    print(f"notes: {summary.note_count}")
+    print(f"comments: {summary.comment_count}")
+    print(f"covers: {summary.copied_cover_count}")
+    if summary.warnings:
+        print("warnings:")
+        for warning in summary.warnings:
+            print(f"- {warning}")
     return 0
 
 

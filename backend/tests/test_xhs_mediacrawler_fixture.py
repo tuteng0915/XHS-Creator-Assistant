@@ -155,3 +155,49 @@ def test_build_xhs_creator_profile_payload_keeps_note_comment_media_relationship
     assert payload["notes"][0]["coverMediaAssetId"] == "media-1"
     assert payload["notes"][0]["metrics"]["liked"] == 1454
     assert payload["notes"][0]["comments"][0]["commentId"] == "c1"
+
+
+def test_export_xhs_import_package_writes_profile_and_cover_files(tmp_path: Path):
+    module = load_fixture_module()
+    base = tmp_path / "crawler-output" / "xhs"
+    write_jsonl(
+        base / "jsonl" / "creator_contents_2026-08-22.jsonl",
+        [
+            {
+                "note_id": "n1",
+                "type": "normal",
+                "nickname": "秀***冰",
+                "title": "木马，非礼也",
+                "desc": "正文一",
+                "note_url": "https://www.xiaohongshu.com/explore/n1",
+            },
+            {
+                "note_id": "n2",
+                "type": "normal",
+                "nickname": "秀***冰",
+                "title": "无封面笔记",
+                "desc": "正文二",
+            },
+        ],
+    )
+    write_jsonl(
+        base / "jsonl" / "creator_comments_2026-08-22.jsonl",
+        [{"comment_id": "c1", "note_id": "n1", "content": "评论"}],
+    )
+    cover = base / "images" / "n1" / "0.jpg"
+    cover.parent.mkdir(parents=True)
+    cover.write_bytes(b"jpg")
+    export = module.load_mediacrawler_export(base, code="crawler-output")
+
+    summary = module.export_xhs_import_package(export, tmp_path / "package")
+
+    assert summary.display_name == "秀***冰"
+    assert summary.note_count == 2
+    assert summary.comment_count == 1
+    assert summary.copied_cover_count == 1
+    assert summary.missing_cover_count == 1
+    assert (tmp_path / "package" / "images" / "n1" / "0.jpg").read_bytes() == b"jpg"
+    payload = json.loads((tmp_path / "package" / "xhs_creator_profile.json").read_text())
+    assert payload["creator"]["displayName"] == "秀***冰"
+    assert payload["notes"][0]["cover"]["relativePath"] == "images/n1/0.jpg"
+    assert "无封面笔记" in summary.warnings[0]

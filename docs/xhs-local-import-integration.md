@@ -109,7 +109,12 @@ creator profile summary
    - 支持从 `data/xhs-fixtures/_tt` 和 `data/xhs-fixtures/QSheep` 一键导入本地 SQLite。
    - 用于 demo 和回归测试。
 
-6. 增加测试。已完成基础覆盖。
+6. 增加通用导入包导出脚本。已完成。
+   - 当前实现：`scripts/export_xhs_import_package.py`。
+   - 输入任意 MediaCrawler `xhs/` 输出目录，生成前端可上传的 `xhs_creator_profile.json` 与 `images/<note_id>/0.jpg`。
+   - 输出 summary：账号名、笔记数、评论数、封面数、缺失封面 warning。
+
+7. 增加测试。已完成基础覆盖。
    - 已完成 converter 单元测试；
    - 已完成 UTF-8 中文保真测试；
    - 已完成短链解析 runner 单元测试；
@@ -150,6 +155,16 @@ XHS QSheep 工作区
 | --- | --- | ---: | ---: |
 | `_tt` | `XHS _tt 工作区` | 4 | 4 |
 | `QSheep` | `XHS QSheep 工作区` | 4 | 20 |
+
+如果要把任意 MediaCrawler 输出整理成前端可上传导入包：
+
+```bash
+backend/.venv/bin/python scripts/export_xhs_import_package.py \
+  --input data/external/MediaCrawler/data/xhslink-20-comment-cover-test/xhs \
+  --output data/xhs-import-packages/my_creator
+```
+
+然后在前端选择整个 `data/xhs-import-packages/my_creator` 文件夹。
 
 ## 不做的事情
 

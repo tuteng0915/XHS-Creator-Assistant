@@ -324,3 +324,13 @@ backend/.venv/bin/python scripts/import_xhs_fixture_to_workspace.py QSheep
 ```
 
 导入后会创建或更新 `XHS _tt 工作区`、`XHS QSheep 工作区`，并生成账号概况、历史笔记、评论样本和封面图片媒体资产。Agent 通过现有 Context Access Layer 读取这些资产，不直接读取 MediaCrawler 原始目录。
+
+如果要把任意 MediaCrawler 输出整理成前端可上传的离线导入包：
+
+```bash
+backend/.venv/bin/python scripts/export_xhs_import_package.py \
+  --input data/external/MediaCrawler/data/xhslink-20-comment-cover-test/xhs \
+  --output data/xhs-import-packages/my_creator
+```
+
+输出目录会包含 `xhs_creator_profile.json` 和 `images/<note_id>/0.jpg`。之后在前端“内容资产 → 小红书创作者主页 → 小红书离线文件夹导入”中选择整个输出目录即可。

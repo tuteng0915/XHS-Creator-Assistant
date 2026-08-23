@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -44,6 +45,18 @@ class XhsMediaCrawlerExport:
     comments: list[XhsMediaCrawlerComment]
 
 
+@dataclass(frozen=True)
+class XhsImportPackageSummary:
+    output_dir: Path
+    profile_path: Path
+    display_name: str
+    note_count: int
+    comment_count: int
+    copied_cover_count: int
+    missing_cover_count: int
+    warnings: list[str]
+
+
 def load_mediacrawler_export(base_dir: Path, *, code: str) -> XhsMediaCrawlerExport:
     xhs_dir = base_dir / "xhs"
     if not xhs_dir.exists() and (base_dir / "jsonl").exists():
@@ -70,6 +83,59 @@ def load_mediacrawler_export(base_dir: Path, *, code: str) -> XhsMediaCrawlerExp
             for comment in comments
             if comment.note_id and (comment.content or comment.comment_id)
         ],
+    )
+
+
+def export_xhs_import_package(
+    export: XhsMediaCrawlerExport,
+    output_dir: Path,
+    *,
+    overwrite: bool = True,
+) -> XhsImportPackageSummary:
+    if output_dir.exists() and not overwrite and any(output_dir.iterdir()):
+        raise FileExistsError(f"Output directory already exists and is not empty: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    images_dir = output_dir / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    profile_payload = build_xhs_creator_profile_payload(export)
+    profile_path = output_dir / "xhs_creator_profile.json"
+    profile_path.write_text(
+        json.dumps(profile_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    copied_covers = 0
+    missing_covers = 0
+    warnings: list[str] = []
+    for note in export.notes:
+        if note.cover_path is None:
+            missing_covers += 1
+            warnings.append(f"笔记缺少封面：{note.note_id} {note.title}")
+            continue
+        note_image_dir = images_dir / note.note_id
+        note_image_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(note.cover_path, note_image_dir / note.cover_path.name)
+        copied_covers += 1
+
+    missing_relative_paths = [
+        note["cover"]["relativePath"]
+        for note in profile_payload["notes"]
+        if note.get("cover", {}).get("relativePath")
+        and not (output_dir / note["cover"]["relativePath"]).is_file()
+    ]
+    for relative_path in missing_relative_paths:
+        warnings.append(f"profile JSON 中的封面相对路径不存在：{relative_path}")
+
+    return XhsImportPackageSummary(
+        output_dir=output_dir,
+        profile_path=profile_path,
+        display_name=infer_creator_display_name(export),
+        note_count=len(export.notes),
+        comment_count=len(export.comments),
+        copied_cover_count=copied_covers,
+        missing_cover_count=missing_covers,
+        warnings=warnings,
     )
 
 
