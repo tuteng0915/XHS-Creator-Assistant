@@ -405,7 +405,7 @@ class ModelCallService:
     @classmethod
     def _parse_model_output(cls, operation: ModelOperation, text: str) -> dict[str, Any]:
         try:
-            return cls._parse_json(text)
+            value = cls._parse_json(text)
         except ValidationError:
             if operation != ModelOperation.AGENT_CHAT:
                 raise
@@ -413,6 +413,47 @@ class ModelCallService:
             if not reply:
                 raise
             return {"reply": reply, "proposedActions": []}
+        return cls._validate_model_output(operation, value)
+
+    @classmethod
+    def _validate_model_output(
+        cls, operation: ModelOperation, value: dict[str, Any]
+    ) -> dict[str, Any]:
+        requirements: dict[ModelOperation, dict[str, type | tuple[type, ...]]] = {
+            ModelOperation.PROFILE: {"profile": dict},
+            ModelOperation.PAIN_POINTS: {"painPoints": list},
+            ModelOperation.TOPICS: {"topics": list},
+            ModelOperation.STRUCTURE: {"structure": dict},
+            ModelOperation.TREND_ANALYSIS: {"trendAnalysis": dict},
+            ModelOperation.TREND_TOPICS: {"topics": list},
+            ModelOperation.SIMULATION_PERSONAS: {"personas": list},
+            ModelOperation.SIMULATION_REACTION: {"reaction": dict},
+            ModelOperation.SIMULATION_DEBATE: {"debateResponse": dict},
+            ModelOperation.SIMULATION_SYNTHESIS: {"synthesis": dict},
+            ModelOperation.AGENT_CHAT: {"reply": str, "proposedActions": list},
+            ModelOperation.VIDEO_CREATOR_PROFILE: {"creatorProfile": dict},
+            ModelOperation.VIDEO_QUALITY_ANALYSIS: {"videoQuality": dict},
+            ModelOperation.INCENTIVE_FIT_ANALYSIS: {"incentiveFit": dict},
+        }
+        for key, expected_type in requirements.get(operation, {}).items():
+            if key not in value:
+                raise ValidationError(
+                    f"Model response for {operation.value} missing {key}"
+                )
+            if not isinstance(value[key], expected_type):
+                expected_name = cls._type_name(expected_type)
+                raise ValidationError(
+                    f"Model response field {key} must be {expected_name}"
+                )
+        if operation == ModelOperation.AGENT_CHAT and not value["reply"].strip():
+            raise ValidationError("Model response field reply must not be blank")
+        return value
+
+    @staticmethod
+    def _type_name(expected_type: type | tuple[type, ...]) -> str:
+        if isinstance(expected_type, tuple):
+            return " or ".join(item.__name__ for item in expected_type)
+        return expected_type.__name__
 
     @staticmethod
     def _parse_json(text: str) -> dict[str, Any]:

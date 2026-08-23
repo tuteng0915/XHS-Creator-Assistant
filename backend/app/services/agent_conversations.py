@@ -272,7 +272,24 @@ class AgentConversationService:
         with self.database.read() as connection:
             self.workspace_repository.get(connection, workspace_id)
             rows = self.repository.list(connection, workspace_id)
-        return [AgentConversationSummary.model_validate(row) for row in rows]
+            messages_by_id = {
+                row["id"]: self.repository.list_messages(connection, row["id"])
+                for row in rows
+            }
+        return [
+            AgentConversationSummary.model_validate(
+                {
+                    **row,
+                    "context_target": json.loads(
+                        row.get("context_target_json") or "{}"
+                    ),
+                    "execution_status": self._execution_status(
+                        messages_by_id[row["id"]]
+                    ),
+                }
+            )
+            for row in rows
+        ]
 
     def get(self, conversation_id: str) -> AgentConversationResponse:
         with self.database.read() as connection:
@@ -286,6 +303,10 @@ class AgentConversationService:
         now = utc_now()
         with self.database.transaction() as connection:
             conversation = self.repository.get(connection, conversation_id)
+            existing_messages = self.repository.list_messages(connection, conversation_id)
+            pending_assistant = self._pending_assistant_message(existing_messages)
+            if pending_assistant is not None:
+                return self._to_response(conversation, existing_messages)
             agent = self.agent_repository.get(connection, conversation["agent_asset_id"])
             if agent["status"] != "enabled":
                 raise ValidationError("Agent is disabled")
@@ -582,9 +603,43 @@ class AgentConversationService:
             {
                 **row,
                 "context_target": json.loads(row.get("context_target_json") or "{}"),
+                "execution_status": self._execution_status(messages),
                 "messages": [self._to_message(message) for message in messages],
             }
         )
+
+    @staticmethod
+    def _execution_status(messages: list[dict]) -> str:
+        assistant_messages = [
+            message for message in messages if message.get("role") == "assistant"
+        ]
+        if not assistant_messages:
+            return "idle"
+        latest = assistant_messages[-1]
+        try:
+            metadata = json.loads(latest["model_metadata_json"])
+        except (json.JSONDecodeError, TypeError):
+            return "completed"
+        status = str(metadata.get("status") or "")
+        if status in {"queued", "running"}:
+            return "running"
+        if status == "failed":
+            return "failed"
+        return "completed"
+
+    @classmethod
+    def _pending_assistant_message(cls, messages: list[dict]) -> dict | None:
+        for message in reversed(messages):
+            if message.get("role") != "assistant":
+                continue
+            try:
+                metadata = json.loads(message["model_metadata_json"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if metadata.get("status") in {"queued", "running"}:
+                return message
+            return None
+        return None
 
     def _to_message(self, row: dict) -> AgentMessageResponse:
         return AgentMessageResponse.model_validate(

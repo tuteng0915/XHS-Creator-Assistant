@@ -185,6 +185,68 @@ def test_qwen_provider_repairs_json_wrapped_in_prose(monkeypatch) -> None:
     assert response.output["painPoints"][0]["theme"] == "选校焦虑"
 
 
+def test_qwen_provider_rejects_wrong_structured_root(monkeypatch) -> None:
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.response_status_code = 200
+    FakeAsyncClient.response_body = {
+        "model": "qwen-plus",
+        "choices": [{"message": {"content": '{"items":[]}'}}],
+        "usage": {"total_tokens": 12},
+    }
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    service = ModelCallService(
+        settings(
+            model_provider="qwen",
+            qwen_api_key="placeholder-key",
+            qwen_model="qwen-plus",
+        )
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Model response for pain_points missing painPoints",
+    ):
+        asyncio.run(
+            service.call_operation(ModelOperation.PAIN_POINTS, {"sourceText": "太贵了"})
+        )
+
+
+def test_agent_chat_json_requires_proposed_actions_list(monkeypatch) -> None:
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.response_status_code = 200
+    FakeAsyncClient.response_body = {
+        "model": "qwen-plus",
+        "choices": [{"message": {"content": '{"reply":"ok"}'}}],
+        "usage": {"total_tokens": 12},
+    }
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    service = ModelCallService(
+        settings(
+            model_provider="qwen",
+            qwen_api_key="placeholder-key",
+            qwen_model="qwen-plus",
+        )
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="Model response for agent_chat missing proposedActions",
+    ):
+        asyncio.run(
+            service.call_operation(
+                ModelOperation.AGENT_CHAT,
+                {
+                    "agent": {"displayName": "测试 Agent"},
+                    "contextPack": {"items": []},
+                    "messages": [],
+                    "userMessage": "请确认。",
+                },
+            )
+        )
+
+
 def test_agent_chat_accepts_plain_text_model_reply(monkeypatch) -> None:
     FakeAsyncClient.requests = []
     FakeAsyncClient.response_status_code = 200

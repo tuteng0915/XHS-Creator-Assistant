@@ -104,3 +104,38 @@ class AssetProposalRepository:
             (status, result_json, error, now, status, now, proposal_id),
         )
         return self.get(connection, proposal_id)
+
+    def update_pending(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        proposal_id: str,
+        title: str | None,
+        description: str | None,
+        proposed_action_json: str | None,
+        expected_updated_at: str,
+        now: str,
+    ) -> dict:
+        current = self.get(connection, proposal_id)
+        if current["status"] != "pending":
+            raise ConflictError("Only pending asset proposals can be edited")
+        if current["updated_at"] != expected_updated_at:
+            raise ConflictError("Asset proposal has changed")
+        next_title = title if title is not None else current["title"]
+        next_description = (
+            description if description is not None else current["description"]
+        )
+        next_action_json = (
+            proposed_action_json
+            if proposed_action_json is not None
+            else current["proposed_action_json"]
+        )
+        connection.execute(
+            """
+            UPDATE asset_proposals
+            SET title = ?, description = ?, proposed_action_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (next_title, next_description, next_action_json, now, proposal_id),
+        )
+        return self.get(connection, proposal_id)

@@ -384,6 +384,21 @@ export const assetProposalApi = {
       method: 'POST',
     }),
 
+  update: (
+    proposalId: string,
+    payload: {
+      title?: string
+      description?: string
+      proposedAction?: Record<string, unknown>
+      expectedUpdatedAt: string
+    },
+  ) =>
+    request<AssetProposal>(`/api/asset-proposals/${proposalId}`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+
   reject: (proposalId: string) =>
     request<AssetProposal>(`/api/asset-proposals/${proposalId}/reject`, {
       method: 'POST',

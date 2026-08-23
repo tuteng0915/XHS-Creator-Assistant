@@ -328,7 +328,8 @@ Remaining risks:
 - in-process task loss on process crash;
 - no SQLite claim/lease table for conversation replies;
 - no per-message idempotency key;
-- retrying from the UI can still create repeated user messages.
+- explicit duplicate sends are guarded while a queued/running assistant message
+  exists, but there is still no client-provided idempotency key.
 
 Recommended fix:
 
@@ -368,6 +369,10 @@ Implemented:
 - Qwen requests include `response_format: {"type": "json_object"}`;
 - parser handles fenced JSON;
 - parser extracts the first JSON object from responses with surrounding prose;
+- parsed output is validated against operation-level required root fields and
+  basic container types;
+- agent chat can still gracefully treat plain text as a reply, but malformed
+  JSON that is missing required fields is rejected.
 - Qwen media understanding requests require structured `imageUnderstanding` /
   `videoUnderstanding` output;
 - local uploaded video understanding derives preview frames first and sends those
@@ -543,7 +548,7 @@ A workflow is a product-owned task graph:
 2. Add durable worker claim/lease metadata if repeated external calls become a
    practical problem.
 3. Add durable conversation job records if conversations become central.
-4. Add proposal editing and per-action schema validation.
+4. Add per-action proposal schema validation.
 5. Continue splitting `frontend/src/App.tsx` into shell/page/hooks modules.
 
 ## Acceptance criteria for the next architecture pass

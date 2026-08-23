@@ -176,7 +176,8 @@ https://your-domain/api/...
 
 - Capability Maker 已经可以拿到 capability catalog。
 - Maker conversation 已经可以携带当前正在查看的具体 Skill / Agent / Workflow 作为 context target。
-- 下一步是让资产 proposal 支持编辑后再 apply。
+- Asset proposal 已支持 pending 状态下编辑 title、description 和 proposed action JSON 后再 apply。
+- Apply / reject 会持久化状态、结果和错误；非 pending proposal 不可重复编辑或应用。
 - proposed action validation 还需要按 action type 定义 schema。
 
 ### P1：输入素材整理继续模型化
@@ -204,26 +205,30 @@ agent conversation 现在已经不是同步等待模型完成：
 - 发送消息会先创建用户消息和 assistant 占位消息；
 - 后端 in-process task 生成回复；
 - 前端轮询观察 queued/running/completed/failed 状态；
+- conversation summary 已包含派生 `executionStatus`；
+- 同一 conversation 存在 queued/running assistant message 时，重复发送不会创建新的 user message 或重复执行；
 - provider 失败会留下 assistant failure message。
 
 剩余问题：
 
 - 这仍是进程内任务，不是 SQLite durable job；
 - 进程崩溃时只能按 queued/running message 尝试恢复；
-- 没有 conversation message 级 idempotency key。
+- 没有显式 conversation message 级 idempotency key。
 
 ### P1：qwen 结构化输出继续加固
 
 - 继续保持 fake provider 作为默认自动化测试路径。
 - 已支持 JSON response format、fenced JSON 和前后带解释文字的 JSON 提取。
+- 已按 model operation 校验必要根字段和基本字段类型，例如 `painPoints` 必须是 list，`creatorProfile` 必须是 object。
 - 图片/视频理解已要求结构化 JSON，并把 `imageUnderstanding` / `videoUnderstanding` 保存到 media asset derived JSON。
 - 后续为更多 qwen 真实响应补充脱敏 fixture。
-- 对部分 schema 缺失做更明确的 repair/validation。
+- 后续仍可增加 action-type 级 schema、字段级 repair 和真实响应 fixture。
 
 ### P1：前端结构继续拆分
 
 - 已将 stage/result 纯展示组件从 `App.tsx` 拆到 `frontend/src/components/StageResultViews.tsx`。
 - 已拆出 `WorkspaceShell`、媒体资产页、输入资产页、账号概况页、workflow 调用面板、workflow 输出面板和 conversation pending polling hook。
+- 已拆出帮助内容模块、workflow stage view 纯工具、AssetProposalsPanel。
 - 下一步继续拆：
   - TopicLibraryPage；
   - AgentConversationPanel；

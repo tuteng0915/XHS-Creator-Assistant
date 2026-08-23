@@ -243,6 +243,55 @@ def test_live_agent_conversation_post_returns_queued_message_without_waiting(
     assert messages[1]["role"] == "assistant"
     assert messages[1]["content"] == "Agent 正在生成回复…"
     assert messages[1]["modelMetadata"]["status"] in {"queued", "running"}
+    listed = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+    ).json()
+    assert listed[0]["executionStatus"] == "running"
+
+
+def test_agent_conversation_does_not_duplicate_while_reply_is_pending(
+    app: FastAPI,
+) -> None:
+    class SlowProvider:
+        async def reply(self, *, agent, user_content, context_pack, messages):
+            await asyncio.sleep(0.1)
+            return AgentConversationReply(
+                reply="slow reply",
+                proposed_actions=[],
+                model_metadata={"provider": "slow", "operation": "agent_chat"},
+            )
+
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    agent = next(item for item in agents if item["agentId"] == "creator_material_curator")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": agent["id"]},
+    ).json()
+    app.state.agent_conversation_service.live_provider = SlowProvider()
+
+    first = send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "第一条", "mode": "live"},
+    ).json()
+    second = send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "第二条不应创建", "mode": "live"},
+    ).json()
+
+    assert len(first["messages"]) == 2
+    assert len(second["messages"]) == 2
+    assert second["messages"][0]["content"] == "第一条"
+    assert second["messages"][1]["role"] == "assistant"
+    assert second["executionStatus"] == "running"
 
 
 def test_live_agent_conversation_can_call_qwen_compatible_api_with_mocked_http(
@@ -379,6 +428,64 @@ def test_asset_proposal_apply_creates_topic(app: FastAPI) -> None:
     assert body["result"]["assetType"] == "topic"
     topics = send(app, "GET", f"/api/workspaces/{workspace['id']}/topics").json()
     assert topics[0]["title"] == "帮我新增一个选题：AI短剧激励计划"
+
+
+def test_asset_proposal_can_be_edited_before_apply(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    agent = next(item for item in agents if item["agentId"] == "creator_material_curator")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": agent["id"]},
+    ).json()
+    send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "帮我新增一个选题：原始标题"},
+    )
+    proposal = next(
+        proposal
+        for proposal in send(
+            app,
+            "GET",
+            f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+        ).json()
+        if proposal["actionType"] == "topic.create_or_update"
+    )
+
+    edited = send(
+        app,
+        "PATCH",
+        f"/api/asset-proposals/{proposal['id']}",
+        json={
+            "title": "编辑后的选题提案",
+            "description": "确认后创建编辑后的 Topic。",
+            "expectedUpdatedAt": proposal["updatedAt"],
+            "proposedAction": {
+                **proposal["proposedAction"],
+                "payload": {
+                    "title": "编辑后的标题",
+                    "angle": "编辑后的角度",
+                    "associatedPainPoint": "预算焦虑",
+                    "whyItFits": "更贴合账号定位",
+                },
+            },
+        },
+    )
+
+    assert edited.status_code == 200
+    body = edited.json()
+    assert body["title"] == "编辑后的选题提案"
+    assert body["proposedAction"]["payload"]["title"] == "编辑后的标题"
+
+    applied = send(app, "POST", f"/api/asset-proposals/{proposal['id']}/apply")
+    assert applied.status_code == 200
+    topics = send(app, "GET", f"/api/workspaces/{workspace['id']}/topics").json()
+    assert topics[0]["title"] == "编辑后的标题"
+    assert topics[0]["angle"] == "编辑后的角度"
 
 
 def test_live_agent_conversation_failure_is_saved_as_assistant_message(

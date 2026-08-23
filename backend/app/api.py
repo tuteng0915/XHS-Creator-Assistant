@@ -20,6 +20,7 @@ from app.models import (
     AnalysisRunResponse,
     AnalysisRunSummary,
     AssetProposalResponse,
+    AssetProposalUpdate,
     DraftGenerateRequest,
     DraftResponse,
     DraftSummary,
@@ -545,6 +546,15 @@ def create_api_router(
     )
     def apply_asset_proposal(proposal_id: str) -> AssetProposalResponse:
         return asset_proposal_service.apply(proposal_id)
+
+    @router.patch(
+        "/asset-proposals/{proposal_id}",
+        response_model=AssetProposalResponse,
+    )
+    def update_asset_proposal(
+        proposal_id: str, payload: AssetProposalUpdate
+    ) -> AssetProposalResponse:
+        return asset_proposal_service.update(proposal_id, payload)
 
     @router.post(
         "/asset-proposals/{proposal_id}/reject",

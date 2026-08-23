@@ -139,4 +139,4 @@ Live 通过后端模型 provider 调用，不在浏览器持有 API key。当前
 
 ## 10. 当前优先级
 
-下一阶段建议先做真实 Qwen / workflow smoke test，然后加固 Qwen 结构化输出和真实响应 fixture；之后再处理批量导入 / 批量 workflow 体验、AssetProposal 编辑和 per-action schema validation，以及继续拆 `App.tsx`。OCR、ASR 和长视频切片是否值得做，应该等真实视频样本跑过当前抽帧方案后再决定。
+下一阶段建议先做真实 Qwen / workflow smoke test，然后继续补真实响应 fixture 和 action-type 级 proposal schema；之后再处理批量导入 / 批量 workflow 体验，以及继续拆 `App.tsx`。OCR、ASR 和长视频切片是否值得做，应该等真实视频样本跑过当前抽帧方案后再决定。

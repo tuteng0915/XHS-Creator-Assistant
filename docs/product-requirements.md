@@ -895,8 +895,8 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 4. Workflow assets 不是可视化 nodegraph editor。
 5. Conversation 后端执行是 in-process task，不是完整 durable job queue。
 6. SSE 是 observation replay，不是完整 durable event log。
-7. AssetProposal apply 前还不能编辑。
-8. qwen 结构化输出仍需要更多真实响应 fixture 加固。
+7. AssetProposal 已支持 pending 状态下编辑后 apply，但还缺 action-type 级字段校验。
+8. qwen 结构化输出已有 operation-level 根字段校验，仍需要更多真实响应 fixture 加固。
 9. 批量运行体验还需要更清楚的进度和错误展示。
 
 ## 15. 成功指标
@@ -936,8 +936,8 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 
 - qwen live workflow smoke test；
 - 更多真实模型响应 fixture；
-- AssetProposal 编辑后 apply；
-- conversation message idempotency；
+- AssetProposal action-type 级字段校验；
+- conversation message 显式 idempotency key；
 - workflow 输入区更清晰地展示 XHS 创作者主页摘要和派生输入关系；
 - batch workflow 进度与错误展示。
 

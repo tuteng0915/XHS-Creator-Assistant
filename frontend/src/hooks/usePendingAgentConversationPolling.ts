@@ -53,6 +53,7 @@ export function usePendingAgentConversationPolling({
               ? {
                   ...item,
                   status: conversation.status,
+                  executionStatus: conversation.executionStatus,
                   updatedAt: conversation.updatedAt,
                 }
               : item,

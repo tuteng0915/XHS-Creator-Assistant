@@ -301,6 +301,7 @@ class AgentConversationSummary(APIModel):
     agent_asset_id: str
     title: str
     status: AgentConversationStatus
+    execution_status: Literal["idle", "running", "failed", "completed"] = "idle"
     context_target: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
@@ -332,6 +333,13 @@ class AssetProposalResponse(APIModel):
     created_at: datetime
     updated_at: datetime
     applied_at: datetime | None = None
+
+
+class AssetProposalUpdate(APIModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=2_000)
+    proposed_action: dict[str, Any] | None = None
+    expected_updated_at: datetime
 
 
 class WorkflowAssetStatus(StrEnum):

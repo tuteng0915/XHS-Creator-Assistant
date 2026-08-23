@@ -160,6 +160,7 @@ export interface AgentConversationSummary {
   agentAssetId: string
   title: string
   status: AgentConversationStatus
+  executionStatus?: 'idle' | 'running' | 'failed' | 'completed'
   contextTarget: Record<string, unknown>
   createdAt: string
   updatedAt: string

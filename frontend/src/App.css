@@ -428,11 +428,30 @@ th { position: sticky; top: 0; background: #fff; }
   display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
   margin-bottom: 0;
 }
+.asset-requirement[open] {
+  display: block;
+}
+.asset-requirement summary {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+  cursor: pointer;
+}
+.proposal-editor {
+  margin-top: 10px; display: grid; gap: 8px;
+}
+.proposal-editor input, .proposal-editor textarea {
+  width: 100%; border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 9px; font: inherit; color: var(--text); background: #fff;
+}
+.proposal-editor textarea { resize: vertical; }
 .asset-requirement em {
   padding: 2px 7px; border-radius: 999px; font-size: 10.5px; font-style: normal; font-weight: 800;
 }
 .asset-requirement em.ready { color: var(--ok); background: #f0fdf4; }
 .asset-requirement em.missing { color: #92400e; background: #fef3c7; }
+.asset-requirement em.pending { color: #1d4ed8; background: #eff6ff; }
+.asset-requirement em.applied { color: var(--ok); background: #f0fdf4; }
+.asset-requirement em.rejected { color: #6b7280; background: #f3f4f6; }
+.asset-requirement em.failed { color: #b91c1c; background: #fef2f2; }
 .workflow-input-preview { margin-top: 10px; }
 .workflow-xhs-preview { margin-top: 10px; }
 .workflow-derived-assets {

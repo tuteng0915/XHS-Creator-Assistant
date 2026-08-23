@@ -15,6 +15,7 @@ import type {
   AgentConversationSummary,
   AgentSummary,
   AnalysisRunSummary,
+  AssetProposal,
   DraftSummary,
   SimulationRunSummary,
   Skill,
@@ -337,6 +338,10 @@ const agentConversations: Record<string, AgentConversationSummary[]> = {
   'workspace-2': [],
 }
 
+const assetProposals: Record<string, AssetProposal[]> = {
+  'conversation-1': [],
+}
+
 const agentDetail: Agent = {
   ...agentSummary,
   systemPrompt:
@@ -593,6 +598,29 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
         mode: 'demo' | 'live'
       }
       const conversation = agentConversations['workspace-1'][0]
+      assetProposals['conversation-1'] = [
+        {
+          id: 'proposal-1',
+          workspaceId: 'workspace-1',
+          conversationId: 'conversation-1',
+          messageId: 'message-agent',
+          actionType: 'workspace.update_profile',
+          title: '更新 Account Profile',
+          description: '建议更新账号定位。',
+          status: 'pending',
+          proposedAction: {
+            type: 'workspace.update_profile',
+            status: 'requires_confirmation',
+            description: '建议更新账号定位。',
+            payload: { accountPositioning: body.content },
+          },
+          result: {},
+          error: '',
+          createdAt: '2026-07-11T14:00:02Z',
+          updatedAt: '2026-07-11T14:00:02Z',
+          appliedAt: null,
+        },
+      ]
       return jsonResponse({
         ...conversation,
         messages: [
@@ -629,6 +657,52 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
           },
         ],
       })
+    }
+    if (
+      url === '/api/agent-conversations/conversation-1/asset-proposals' &&
+      method === 'GET'
+    ) {
+      return jsonResponse(assetProposals['conversation-1'])
+    }
+    if (url === '/api/asset-proposals/proposal-1' && method === 'PATCH') {
+      const body = JSON.parse(String(init?.body)) as {
+        title?: string
+        description?: string
+        proposedAction?: Record<string, unknown>
+      }
+      const current = assetProposals['conversation-1'][0]
+      const updated: AssetProposal = {
+        ...current,
+        title: body.title || current.title,
+        description:
+          body.description === undefined ? current.description : body.description,
+        proposedAction: body.proposedAction || current.proposedAction,
+        updatedAt: '2026-07-11T14:05:00Z',
+      }
+      assetProposals['conversation-1'] = [updated]
+      return jsonResponse(updated)
+    }
+    if (url === '/api/asset-proposals/proposal-1/apply' && method === 'POST') {
+      const current = assetProposals['conversation-1'][0]
+      const updated: AssetProposal = {
+        ...current,
+        status: 'applied',
+        result: { assetType: 'account_profile', assetId: 'workspace-1' },
+        updatedAt: '2026-07-11T14:06:00Z',
+        appliedAt: '2026-07-11T14:06:00Z',
+      }
+      assetProposals['conversation-1'] = [updated]
+      return jsonResponse(updated)
+    }
+    if (url === '/api/asset-proposals/proposal-1/reject' && method === 'POST') {
+      const current = assetProposals['conversation-1'][0]
+      const updated: AssetProposal = {
+        ...current,
+        status: 'rejected',
+        updatedAt: '2026-07-11T14:06:00Z',
+      }
+      assetProposals['conversation-1'] = [updated]
+      return jsonResponse(updated)
     }
     if (url === '/api/agents/agent-account' && method === 'GET') {
       return jsonResponse(agentDetail)
@@ -784,6 +858,7 @@ beforeEach(() => {
   window.history.pushState({}, '', '/')
   agentConversations['workspace-1'] = []
   agentConversations['workspace-2'] = []
+  assetProposals['conversation-1'] = []
 })
 
 afterEach(() => {
@@ -1274,6 +1349,58 @@ describe('workspace UI', () => {
     ).toBeInTheDocument()
     const composer = screen.getByPlaceholderText(/直接和这个 Agent 对话/)
     await waitFor(() => expect(composer).toHaveFocus())
+  })
+
+  it('lets users edit and apply asset proposals from agent conversations', async () => {
+    installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Agents/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Account Diagnosis Strategist/ }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /开始对话/ }))
+
+    const composer = await screen.findByPlaceholderText(/直接和这个 Agent 对话/)
+    fireEvent.change(composer, {
+      target: { value: '把账号定位改成更关注 DIY 申请' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /发送给 Agent/ }))
+
+    expect(await screen.findByText('Asset Proposals')).toBeInTheDocument()
+    expect(await screen.findByText('更新 Account Profile')).toBeInTheDocument()
+    const actionEditor = screen.getByDisplayValue(
+      /把账号定位改成更关注 DIY 申请/,
+    )
+    fireEvent.change(actionEditor, {
+      target: {
+        value: JSON.stringify(
+          {
+            type: 'workspace.update_profile',
+            status: 'requires_confirmation',
+            description: '建议更新账号定位。',
+            payload: {
+              accountPositioning: '更关注 DIY 申请和预算决策',
+            },
+          },
+          null,
+          2,
+        ),
+      },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存提案' }))
+
+    await waitFor(() =>
+      expect(assetProposals['conversation-1'][0].proposedAction).toMatchObject({
+        payload: { accountPositioning: '更关注 DIY 申请和预算决策' },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() =>
+      expect(assetProposals['conversation-1'][0].status).toBe('applied'),
+    )
+    expect(await screen.findByText('applied')).toBeInTheDocument()
   })
 
   it('shows workspace workflows as multi-agent task plans', async () => {

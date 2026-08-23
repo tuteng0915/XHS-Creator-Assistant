@@ -6,6 +6,7 @@ from typing import Any
 from app.db.database import SQLiteDatabase
 from app.errors import ValidationError
 from app.models import AssetProposalResponse
+from app.models import AssetProposalUpdate
 from app.repositories.agents import AgentRepository
 from app.repositories.asset_proposals import AssetProposalRepository
 from app.repositories.skills import SkillRepository
@@ -79,6 +80,32 @@ class AssetProposalService:
                 )
         return self._to_response(row)
 
+    def update(
+        self, proposal_id: str, payload: AssetProposalUpdate
+    ) -> AssetProposalResponse:
+        now = utc_now()
+        proposed_action_json = None
+        if payload.proposed_action is not None:
+            self._validate_action_payload(payload.proposed_action)
+            proposed_action_json = json.dumps(
+                payload.proposed_action, ensure_ascii=False
+            )
+        with self.database.transaction() as connection:
+            row = self.repository.update_pending(
+                connection,
+                proposal_id=proposal_id,
+                title=payload.title.strip() if payload.title is not None else None,
+                description=(
+                    payload.description
+                    if payload.description is not None
+                    else None
+                ),
+                proposed_action_json=proposed_action_json,
+                expected_updated_at=payload.expected_updated_at.isoformat(),
+                now=now,
+            )
+        return self._to_response(row)
+
     def reject(self, proposal_id: str) -> AssetProposalResponse:
         now = utc_now()
         with self.database.transaction() as connection:
@@ -91,6 +118,17 @@ class AssetProposalService:
                 now=now,
             )
         return self._to_response(row)
+
+    def _validate_action_payload(self, action: dict[str, Any]) -> None:
+        action_type = action.get("type")
+        if not isinstance(action_type, str) or not action_type.strip():
+            raise ValidationError("Proposal action requires type")
+        status = action.get("status")
+        if status is not None and status != "requires_confirmation":
+            raise ValidationError("Proposal status must remain requires_confirmation")
+        payload = action.get("payload")
+        if payload is not None and not isinstance(payload, dict):
+            raise ValidationError("Proposal action payload must be an object")
 
     def _apply_action(
         self,
