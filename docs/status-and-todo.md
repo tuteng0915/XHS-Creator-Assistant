@@ -220,9 +220,8 @@ agent conversation 现在已经不是同步等待模型完成：
 ### P1：前端结构继续拆分
 
 - 已将 stage/result 纯展示组件从 `App.tsx` 拆到 `frontend/src/components/StageResultViews.tsx`。
-- 已拆出 `WorkspaceShell`、媒体资产页、输入资产页、账号概况页、workflow 输出面板和 conversation pending polling hook。
+- 已拆出 `WorkspaceShell`、媒体资产页、输入资产页、账号概况页、workflow 调用面板、workflow 输出面板和 conversation pending polling hook。
 - 下一步继续拆：
-  - WorkflowCallPanel；
   - TopicLibraryPage；
   - AgentConversationPanel；
   - shared workspace data hooks。
