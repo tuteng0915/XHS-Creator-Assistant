@@ -227,6 +227,7 @@ workflow 执行不应依赖前端连接。
 - 另存为；
 - CSV/TSV 批量导入文本资产，包括账号概况、历史笔记、评论样本、视频创作者样本和小红书创作者主页；
 - 趋势 CSV 上传和 preview；
+- 小红书离线导入包上传，生成结构化主页资产和封面图文资产；
 - workflow 运行前自动保存当前必要输入；
 - 输入素材整理 agent 生成草稿。
 
@@ -453,7 +454,81 @@ Capability Maker 产生的变更建议。
 - 新建资产必须有名称字段；
 - 批量导入后每条记录成为独立资产实例。
 
-### 7.2 账号诊断 workflow
+### 7.2 小红书创作者主页离线导入
+
+目标：把本地获取的小红书主页数据整理为主平台可复用的结构化输入资产，同时保留笔记封面作为媒体资产。
+
+边界：
+
+- 小红书数据获取在主平台外部完成；
+- 主平台不访问小红书、不抓取页面、不保存客户端提供的任意本地路径；
+- 推荐使用 MediaCrawler 本地输出，经 `scripts/export_xhs_import_package.py` 整理成离线导入包；
+- 旧 `xhs-profile-import/v1` JSON / Markdown 仍作为兼容导入路径。
+
+离线导入包结构：
+
+```text
+xhs_import_package/
+  xhs_creator_profile.json
+  images/
+    <note_id>/
+      0.jpg
+```
+
+`xhs_creator_profile.json` schema 为 `xhs-creator-profile/v1`，至少应包含：
+
+- `creator.displayName`；
+- `creator.profileText`；
+- `notes[].noteId`；
+- `notes[].title`；
+- `notes[].desc`；
+- `notes[].metrics`；
+- `notes[].comments[]`；
+- `notes[].cover.relativePath`；
+- `notes[].cover.caption`。
+
+前端流程：
+
+1. 用户进入内容资产 → 小红书创作者主页。
+2. 用户选择离线导入包文件夹。
+3. 前端本地读取 `xhs_creator_profile.json` 做导入前预览，不上传文件、不调用模型。
+4. 预览展示账号名、笔记数、评论数、图片文件数、匹配封面数和缺失封面数。
+5. 如果当前 workspace 已存在同名 `XHS {账号名} 创作者主页`，前端提示默认会更新已有资产。
+6. 用户点击更新 / 导入，或选择另存为新主页。
+7. 后端接收 profile JSON、图片文件和浏览器提供的相对路径，保存主页资产和封面媒体资产。
+8. 导入完成后，前端选中新资产或更新后的资产，并完整展示后端 warning 列表。
+
+后端要求：
+
+- 只接受包内相对路径；
+- 拒绝绝对路径和包含 `../` 的路径；
+- 浏览器目录上传产生的公共顶层目录前缀应在前端剥离，使路径与 JSON 中的 `images/...` 匹配；
+- 主页资产默认命名为 `XHS {小红书账号名} 创作者主页`；
+- 封面媒体资产命名为 `笔记标题_封面`；
+- 封面 caption 和 user notes 优先使用笔记正文；
+- 重复导入同名主页时，默认更新同 workspace 下的已有 `xhs_creator_profile`；
+- `saveAsNew=true` 时强制创建新主页资产；
+- 封面媒体资产按名称复用，不重复创建同一封面。
+
+详情页要求：
+
+- 优先展示结构化摘要：账号名、笔记数、评论数、封面引用数和高互动前 5 条；
+- 保留原始 JSON 编辑区，用于检查和必要的人工修正；
+- warning 必须完整展示，不只展示第一条。
+
+验收标准：
+
+- `_tt` 导入包可生成 `XHS 秀***冰 创作者主页`；
+- `QSheep` 导入包可生成 `XHS QSheep 创作者主页` 或脱敏 nickname 对应名称；
+- 选择文件夹后无需上传即可看到本地预览；
+- 导入后能看到结构化摘要和完整 warning；
+- 重复导入默认更新已有主页资产，不增加重复列表项；
+- 选择“另存为新主页”时会创建新资产；
+- 封面媒体资产保留 `笔记标题_封面` 命名和正文 caption；
+- 后端测试覆盖创建、默认更新、另存为新、路径逃逸拒绝；
+- 前端测试覆盖本地预览、同名提示和 warning 列表。
+
+### 7.3 账号诊断 workflow
 
 目标：基于账号概况、历史笔记、评论样本生成账号诊断和选题。
 
@@ -491,7 +566,7 @@ Capability Maker 产生的变更建议。
 - stage result 成功后立即持久化；
 - 保留当前可见的渐进渲染体验。
 
-### 7.3 热点分析 workflow
+### 7.4 热点分析 workflow
 
 目标：基于账号概况和趋势 CSV 识别热点机会并生成选题。
 
@@ -516,7 +591,7 @@ Capability Maker 产生的变更建议。
 - title variants；
 - AnalysisRun。
 
-### 7.4 视频博主质量诊断 workflow
+### 7.5 视频博主质量诊断 workflow
 
 目标：帮助创作者运营判断 AIGC 视频创作者质量和激励计划适配度。
 
@@ -547,7 +622,7 @@ Capability Maker 产生的变更建议。
 - 商单驱动型：激励计划较难改变其行为；
 - 技术探索驱动型：需要结合内容稳定性、受众反馈和创作动机分类讨论。
 
-### 7.5 选题库流程
+### 7.6 选题库流程
 
 目标：把 workflow 生成的候选选题沉淀为可复用 Topic。
 
@@ -566,7 +641,7 @@ Capability Maker 产生的变更建议。
 - 手动创建 topic 也应进入同一 Topic 模型；
 - 当前选题可以被后续 workflow 引用。
 
-### 7.6 内容结构 / Draft 流程
+### 7.7 内容结构 / Draft 流程
 
 目标：从选题生成可继续编辑的内容结构。
 
@@ -584,7 +659,7 @@ Capability Maker 产生的变更建议。
 - 每个生成结果必须有 Draft record；
 - 用户编辑不覆盖 generated snapshot。
 
-### 7.7 受众模拟 workflow
+### 7.8 受众模拟 workflow
 
 目标：对选题或草稿进行多 persona 反应模拟。
 
@@ -616,7 +691,7 @@ Capability Maker 产生的变更建议。
 - previous simulation 可以重新打开；
 - simulation history 出现在 workspace 内。
 
-### 7.8 Agent conversation / Capability Maker
+### 7.9 Agent conversation / Capability Maker
 
 目标：通过对话生成 Skill / Agent / Workflow 或资产修改 proposal。
 
@@ -647,12 +722,16 @@ Capability Maker 产生的变更建议。
 - 账号概况；
 - 历史笔记；
 - 评论样本；
-- 视频创作者样本。
+- 视频创作者样本；
+- 小红书创作者主页 CSV/TSV 文本导入；
+- 小红书创作者主页离线导入包文件夹导入。
 
 要求：
 
 - CSV/TSV 每行生成一个资产实例；
 - 支持常见中文/英文字段名；
+- XHS 离线导入包应在上传前提供本地预览；
+- XHS 离线导入包重复导入默认更新已有主页，另存为新需要显式选择；
 - 失败行后续应展示具体错误；
 - 导入完成后可直接用于 workflow 选择。
 
@@ -837,7 +916,7 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 ### P0：当前版本 close 前
 
 - 保持前后端测试通过；
-- 补齐文档和 PRD；
+- 保持 README、PRD、产品设计和 XHS 导入文档一致；
 - 继续拆分前端页面组件，降低 `App.tsx` 复杂度；
 - 明确所有 fake / demo / live 边界。
 
@@ -847,6 +926,7 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 - 更多真实模型响应 fixture；
 - AssetProposal 编辑后 apply；
 - conversation message idempotency；
+- workflow 输入区更清晰地展示 XHS 创作者主页摘要和派生输入关系；
 - batch workflow 进度与错误展示。
 
 ### P2：下一阶段产品能力
@@ -863,6 +943,7 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 
 - 默认 workspace 可自动进入；
 - 左侧内容资产可管理；
+- 小红书创作者主页可通过离线导入包导入、预览、更新和另存为新资产；
 - 右侧 workflow 可运行；
 - 账号诊断、热点分析、视频质量诊断、受众模拟结果可持久化；
 - 生成 topic 可进入选题库；
