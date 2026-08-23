@@ -88,8 +88,6 @@ type InputAssetsPageProps = {
   onXhsCreatorProfileContentChange: (value: string) => void
   onSaveXhsCreatorProfile: () => void
   onSaveXhsCreatorProfileAsNew: () => void
-  onSetInputAssetBatchFile: (panel: TextInputAssetPanel, file: File | null) => void
-  onUploadTextInputAssetsCsv: (panel: TextInputAssetPanel) => void
   xhsImportFiles: Record<XhsImportPanel, File | null>
   onSetXhsImportFile: (panel: XhsImportPanel, file: File | null) => void
   onUploadXhsImport: (panel: XhsImportPanel) => void
@@ -102,10 +100,8 @@ type InputAssetsPageProps = {
   onUploadXhsImportPackage: (saveAsNew?: boolean) => void
 }
 
-const SAVE_STATE_BY_TEXT_INPUT_PANEL = {
-  account_profiles: 'accountProfilesSaveState',
+const SAVE_STATE_BY_XHS_IMPORT_PANEL = {
   historical_posts: 'historicalSaveState',
-  comments: 'commentsSaveState',
   video_creator_samples: 'videoSaveState',
   xhs_creator_profiles: 'xhsSaveState',
 } as const
@@ -258,34 +254,6 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
     )
   }
 
-  const renderTextBatchImport = (
-    panel: TextInputAssetPanel,
-    label: string,
-    hint: string,
-  ) => (
-    <div className="source-editor-card">
-      <label htmlFor={`${panel}-batch-file`}>{label}批量导入（CSV / TSV）</label>
-      <input
-        id={`${panel}-batch-file`}
-        type="file"
-        accept=".csv,.tsv"
-        onChange={(event) =>
-          props.onSetInputAssetBatchFile(panel, event.target.files?.[0] || null)
-        }
-      />
-      <p className="subline">{hint}</p>
-      <div className="save-row">
-        <button
-          className="save-button"
-          onClick={() => props.onUploadTextInputAssetsCsv(panel)}
-        >
-          上传并保存{label}
-        </button>
-        <SaveIndicator state={props[SAVE_STATE_BY_TEXT_INPUT_PANEL[panel]]} />
-      </div>
-    </div>
-  )
-
   const renderXhsOfflineImport = (panel: XhsImportPanel) => (
     <div className="source-editor-card">
       <label htmlFor={`${panel}-xhs-import-file`}>小红书离线导入</label>
@@ -309,7 +277,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
             {props.xhsImportFiles[panel]?.name}
           </span>
         )}
-        <SaveIndicator state={props[SAVE_STATE_BY_TEXT_INPUT_PANEL[panel]]} />
+        <SaveIndicator state={props[SAVE_STATE_BY_XHS_IMPORT_PANEL[panel]]} />
       </div>
     </div>
   )
@@ -483,11 +451,6 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
               <SaveIndicator state={props.xhsSaveState} />
             </div>
           </div>
-          {renderTextBatchImport(
-            'xhs_creator_profiles',
-            '小红书主页',
-            '表头支持 name/content、xhs_creator_profile、xhs_profile、小红书主页。',
-          )}
           {renderXhsOfflineImport('xhs_creator_profiles')}
           {renderXhsPackageImport()}
         </>
@@ -543,11 +506,6 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
               当前实现会同步更新 workspace 默认定位；后续可拆成纯资产编辑。
             </p>
           </div>
-          {renderTextBatchImport(
-            'account_profiles',
-            '账号概况',
-            '表头支持 name/profile、profile_name/account_profile、账号/定位。',
-          )}
         </>
       )
     }
@@ -585,11 +543,6 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
               <SaveIndicator state={props.commentsSaveState} />
             </div>
           </div>
-          {renderTextBatchImport(
-            'comments',
-            '评论样本',
-            '表头支持 name/content、comments、comment_samples、评论、评论样本。',
-          )}
         </>
       )
     }
@@ -717,11 +670,6 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
               <SaveIndicator state={props.videoSaveState} />
             </div>
           </div>
-          {renderTextBatchImport(
-            'video_creator_samples',
-            '视频创作样本',
-            '表头支持 name/content、video_creator_samples、video_samples、创作者样本。',
-          )}
           {renderXhsOfflineImport('video_creator_samples')}
         </>
       )
@@ -766,11 +714,6 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
             <SaveIndicator state={props.historicalSaveState} />
           </div>
         </div>
-        {renderTextBatchImport(
-          'historical_posts',
-          '历史笔记',
-          '表头支持 name/content、historical_posts、posts、历史笔记、笔记。',
-        )}
         {renderXhsOfflineImport('historical_posts')}
       </>
     )

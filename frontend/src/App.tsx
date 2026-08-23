@@ -132,20 +132,6 @@ const MAKER_AGENT_IDS = {
 const NEW_INPUT_ASSET_ID = '__new_input_asset__'
 const DEFAULT_WORKSPACE_NAME = '默认创作者工作区'
 
-const TEXT_INPUT_ASSET_TYPE_BY_PANEL: Record<TextInputAssetPanel, TextInputAsset['type']> = {
-  account_profiles: 'account_profile',
-  historical_posts: 'historical_posts',
-  comments: 'comments',
-  video_creator_samples: 'video_creator_samples',
-  xhs_creator_profiles: 'xhs_creator_profile',
-}
-const SAVE_KEY_BY_TEXT_INPUT_PANEL: Record<TextInputAssetPanel, SaveKey> = {
-  account_profiles: 'accountProfiles',
-  historical_posts: 'historical',
-  comments: 'comments',
-  video_creator_samples: 'video',
-  xhs_creator_profiles: 'xhs',
-}
 const SAVE_KEY_BY_XHS_IMPORT_PANEL: Record<XhsImportPanel, SaveKey> = {
   historical_posts: 'historical',
   video_creator_samples: 'video',
@@ -167,13 +153,6 @@ const FORMATTER_SKILL_ID_BY_PANEL: Record<InputAssetPanel, string> = {
   video_creator_samples: 'input_asset.format_video_creator_samples',
   xhs_creator_profiles: 'input_asset.format_xhs_creator_profile',
 }
-const emptyTextInputAssetBatchFiles = (): Record<TextInputAssetPanel, File | null> => ({
-  account_profiles: null,
-  historical_posts: null,
-  comments: null,
-  video_creator_samples: null,
-  xhs_creator_profiles: null,
-})
 const emptyXhsImportFiles = (): Record<XhsImportPanel, File | null> => ({
   historical_posts: null,
   video_creator_samples: null,
@@ -411,9 +390,6 @@ function WorkspaceApp() {
   const [xhsCreatorProfileDraftName, setXhsCreatorProfileDraftName] =
     useState<string>(SAMPLE_ASSET_NAMES.xhsCreatorProfile)
   const [selectedProfileInputAssetId, setSelectedProfileInputAssetId] = useState('')
-  const [inputAssetBatchFiles, setInputAssetBatchFiles] = useState<
-    Record<TextInputAssetPanel, File | null>
-  >(emptyTextInputAssetBatchFiles)
   const [xhsImportFiles, setXhsImportFiles] =
     useState<Record<XhsImportPanel, File | null>>(emptyXhsImportFiles)
   const [xhsPackageFiles, setXhsPackageFiles] = useState<File[]>([])
@@ -714,7 +690,6 @@ function WorkspaceApp() {
           latestTextMaterial(loadedMaterials, 'account_profile')?.name ||
             SAMPLE_ASSET_NAMES.qsheepProfile,
         )
-        setInputAssetBatchFiles(emptyTextInputAssetBatchFiles())
         setSelectedHistoricalInputAssetId(
           latestTextMaterial(loadedMaterials, 'historical_posts')?.id || '',
         )
@@ -820,7 +795,6 @@ function WorkspaceApp() {
     setVideoCreatorSamplesDraftName(SAMPLE_ASSET_NAMES.videoCreatorSamples)
     setXhsCreatorProfileDraftName(SAMPLE_ASSET_NAMES.xhsCreatorProfile)
     setSelectedProfileInputAssetId('')
-    setInputAssetBatchFiles(emptyTextInputAssetBatchFiles())
     setXhsImportFiles(emptyXhsImportFiles())
     setXhsPackageFiles([])
     setXhsPackagePreview(null)
@@ -1273,41 +1247,6 @@ function WorkspaceApp() {
     }
   }
 
-  function setInputAssetBatchFile(panel: TextInputAssetPanel, file: File | null) {
-    setInputAssetBatchFiles((current) => ({ ...current, [panel]: file }))
-    setSaveState(SAVE_KEY_BY_TEXT_INPUT_PANEL[panel], idleState)
-  }
-
-  async function uploadTextInputAssetsCsv(panel: TextInputAssetPanel) {
-    const file = inputAssetBatchFiles[panel]
-    const saveKey = SAVE_KEY_BY_TEXT_INPUT_PANEL[panel]
-    if (!workspace || !file) {
-      setSaveState(saveKey, {
-        phase: 'error',
-        message: '请选择 CSV / TSV 文件。',
-      })
-      return
-    }
-    setSaveState(saveKey, { phase: 'saving' })
-    try {
-      const imported = await inputAssetApi.uploadTextCsv(
-        workspace.id,
-        TEXT_INPUT_ASSET_TYPE_BY_PANEL[panel],
-        file,
-      )
-      setMaterials((current) => [...imported.materials, ...current])
-      const first = imported.materials[0]
-      if (first) chooseTextMaterial(first)
-      setInputAssetBatchFiles((current) => ({ ...current, [panel]: null }))
-      setSaveState(saveKey, { phase: 'saved' })
-    } catch (error) {
-      setSaveState(saveKey, {
-        phase: 'error',
-        message: errorMessage(error),
-      })
-    }
-  }
-
   function setXhsImportFile(panel: XhsImportPanel, file: File | null) {
     setXhsImportFiles((current) => ({ ...current, [panel]: file }))
     setXhsImportWarnings([])
@@ -1484,7 +1423,6 @@ function WorkspaceApp() {
     const accountUsesXhsCreatorProfile =
       targetTab === 'account' && Boolean(xhsCreatorProfileMaterial)
     if (!includeProfile || accountUsesXhsCreatorProfile) {
-      // Batch runs provide profile input asset IDs explicitly below.
       // XHS creator profile runs derive a compact profile snapshot in the backend.
     } else {
       let material = selectedProfileMaterial
@@ -1690,63 +1628,6 @@ function WorkspaceApp() {
       setCurrentRun(created)
       await runAnalysisGraphWorkflow(created, targetTab)
       await refreshWorkspaceSummary()
-    } catch (error) {
-      const message = errorMessage(error)
-      setRunError(message)
-      setSaveStates((current) =>
-        Object.fromEntries(
-          Object.entries(current).map(([key, state]) => [
-            key,
-            state.phase === 'saving' ? { phase: 'error', message } : state,
-          ]),
-        ) as Record<SaveKey, SaveState>,
-      )
-    } finally {
-      setRunning(false)
-    }
-  }
-
-  async function runBatchWorkflow(targetTab: WorkflowTab = workflowTab) {
-    if (!workspace) return
-    const useXhsBatch =
-      (targetTab === 'account' || targetTab === 'video') &&
-      Boolean(xhsCreatorProfileMaterial)
-    const batchCount = useXhsBatch
-      ? xhsCreatorProfileMaterials.length
-      : accountProfileMaterials.length
-    if (batchCount === 0) {
-      setRunError(
-        useXhsBatch
-          ? '请先在小红书创作者主页中导入至少一个主页资产。'
-          : '请先在账号概况中上传或保存至少一个账号概况。',
-      )
-      return
-    }
-    setWorkflowTab(targetTab)
-    setRunError('')
-    setRunning(true)
-    try {
-      const savedInputs = await ensureInputsSavedForRun(targetTab, false)
-      await analysisRunApi.createBatch(workspace.id, {
-        workflowType: workflowFromTab(targetTab),
-        idempotencyKey: newClientRequestKey(`analysis-batch-${targetTab}`),
-        accountProfileInputAssetIds: useXhsBatch
-          ? []
-          : accountProfileMaterials.map((material) => material.id),
-        xhsCreatorProfileInputAssetIds: useXhsBatch
-          ? xhsCreatorProfileMaterials.map((material) => material.id)
-          : undefined,
-        historicalPostsInputAssetId: savedInputs.historical?.id,
-        commentsInputAssetId: savedInputs.comments?.id,
-        trendCsvInputAssetId: savedInputs.trend?.id,
-        videoCreatorSamplesInputAssetId: savedInputs.video?.id,
-        xhsCreatorProfileInputAssetId: savedInputs.xhsCreatorProfile?.id,
-        mediaAssetIds:
-          targetTab === 'video' ? selectedVideoWorkflowMediaAssetIds : undefined,
-        mode,
-      })
-      await refreshWorkspaceSummary()
-      setActivePage('history')
     } catch (error) {
       const message = errorMessage(error)
       setRunError(message)
@@ -2802,8 +2683,6 @@ function WorkspaceApp() {
         }}
         onSaveXhsCreatorProfile={saveXhsCreatorProfile}
         onSaveXhsCreatorProfileAsNew={saveXhsCreatorProfileAsNew}
-        onSetInputAssetBatchFile={setInputAssetBatchFile}
-        onUploadTextInputAssetsCsv={uploadTextInputAssetsCsv}
         xhsImportFiles={xhsImportFiles}
         onSetXhsImportFile={setXhsImportFile}
         onUploadXhsImport={uploadXhsImport}
@@ -2858,7 +2737,6 @@ function WorkspaceApp() {
           onApplyDemoSample={applyDemoSample}
           onRunDiagnosis={runDiagnosis}
           onRunAudienceSimulation={runAudienceSimulation}
-          onRunBatchWorkflow={runBatchWorkflow}
           onDownloadAnalysisRunsCsv={downloadAnalysisRunsCsv}
         />
         {renderWorkflowOutputPanel(

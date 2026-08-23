@@ -99,8 +99,6 @@ describe('InputAssetsPage', () => {
         onXhsCreatorProfileContentChange={vi.fn()}
         onSaveXhsCreatorProfile={vi.fn()}
         onSaveXhsCreatorProfileAsNew={vi.fn()}
-        onSetInputAssetBatchFile={vi.fn()}
-        onUploadTextInputAssetsCsv={vi.fn()}
         xhsImportFiles={{
           historical_posts: null,
           video_creator_samples: null,

@@ -45,7 +45,7 @@ export const INPUT_ASSET_DEFINITIONS: InputAssetTypeDefinition[] = [
     type: 'account_profile',
     label: '账号概况',
     singularLabel: '账号概况',
-    description: '可复用的账号/创作者定位，用于单次选择或批量运行 workflow。',
+    description: '可复用的账号/创作者定位，用于选择后运行 workflow。',
     icon: '◎',
     contentKind: 'text',
     emptyLabel: '还没有已保存的账号概况。',

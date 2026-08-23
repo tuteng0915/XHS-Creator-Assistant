@@ -474,29 +474,6 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
         201,
       )
     }
-    const textCsvImportMatch = url.match(
-      /^\/api\/workspaces\/(workspace-[12])\/input-assets\/text-csv$/,
-    )
-    if (textCsvImportMatch && method === 'POST') {
-      const form = init?.body as FormData
-      const type = form.get('type') as InputAsset['type']
-      return jsonResponse(
-        {
-          materials: [
-            {
-              id: `imported-${type}`,
-              workspaceId: textCsvImportMatch[1],
-              type,
-              name: '批量导入资产',
-              content: '批量导入内容',
-              createdAt: '2026-07-11T15:00:00Z',
-              updatedAt: '2026-07-11T15:00:00Z',
-            },
-          ],
-        },
-        201,
-      )
-    }
     const inputAssetMatch = url.match(/^\/api\/input-assets\/(.+)$/)
     if (inputAssetMatch && method === 'PATCH') {
       const body = JSON.parse(String(init?.body)) as {
@@ -1279,33 +1256,16 @@ describe('workspace UI', () => {
     ).toHaveLength(0)
   })
 
-  it('supports batch CSV import for non-profile text input assets', async () => {
-    const fetchMock = installWorkspaceApiMock()
+  it('does not expose batch CSV import in input asset pages', async () => {
+    installWorkspaceApiMock()
     render(<App />)
 
     await openCreatorAssetTab(/评论样本/)
-    const file = new File(['name,content\n评论合集,我很焦虑\n'], 'comments.csv', {
-      type: 'text/csv',
-    })
-    fireEvent.change(await screen.findByLabelText('评论样本批量导入（CSV / TSV）'), {
-      target: { files: [file] },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '上传并保存评论样本' }))
 
-    await waitFor(() => {
-      const importCall = fetchMock.mock.calls.find(
-        ([url, init]) =>
-          String(url) === '/api/workspaces/workspace-1/input-assets/text-csv' &&
-          init?.method === 'POST',
-      )
-      expect(importCall).toBeTruthy()
-      const body = importCall?.[1]?.body as FormData
-      expect(body.get('type')).toBe('comments')
-    })
-    await waitFor(() => {
-      expect(screen.getAllByText('已保存').length).toBeGreaterThan(0)
-    })
-    expect(screen.getByDisplayValue('批量导入内容')).toBeInTheDocument()
+    expect(screen.queryByText(/批量导入/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /上传并保存评论样本/ }),
+    ).not.toBeInTheDocument()
   })
 
   it('shows workspace skills as product assets', async () => {

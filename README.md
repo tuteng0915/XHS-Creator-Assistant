@@ -176,8 +176,6 @@ export ANTHROPIC_MESSAGES_URL=https://your-qwen-host/apps/anthropic/v1/messages
 - workflow execution；
 - LangGraph-backed workflows；
 - 分析结果、选题库、草稿和受众模拟历史；
-- 账号概况批量导入；
-- workflow 批量运行；
 - Qwen / Anthropic 后端模型 provider；
 - Qwen 图片/视频理解与生成；
 - 本地视频 ffmpeg 抽帧后再进入视频理解。

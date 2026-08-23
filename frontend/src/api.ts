@@ -149,34 +149,6 @@ export const inputAssetApi = {
     )
   },
 
-  uploadAccountProfilesCsv: (workspaceId: string, file: File) => {
-    const form = new FormData()
-    form.set('file', file)
-    return request<{ materials: TextInputAsset[] }>(
-      `/api/workspaces/${workspaceId}/input-assets/account-profiles-csv`,
-      { method: 'POST', body: form },
-    )
-  },
-
-  uploadTextCsv: (
-    workspaceId: string,
-    type:
-      | 'account_profile'
-      | 'historical_posts'
-      | 'comments'
-      | 'video_creator_samples'
-      | 'xhs_creator_profile',
-    file: File,
-  ) => {
-    const form = new FormData()
-    form.set('type', type)
-    form.set('file', file)
-    return request<{ materials: TextInputAsset[] }>(
-      `/api/workspaces/${workspaceId}/input-assets/text-csv`,
-      { method: 'POST', body: form },
-    )
-  },
-
   uploadXhsImport: (
     workspaceId: string,
     type: 'historical_posts' | 'video_creator_samples' | 'xhs_creator_profile',
@@ -445,28 +417,6 @@ export const analysisRunApi = {
     },
   ) =>
     request<AnalysisRun>(`/api/workspaces/${workspaceId}/analysis-runs`, {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify(payload),
-    }),
-
-  createBatch: (
-    workspaceId: string,
-    payload: {
-      workflowType: WorkflowType
-      accountProfileInputAssetIds: string[]
-      xhsCreatorProfileInputAssetIds?: string[]
-      historicalPostsInputAssetId?: string
-      commentsInputAssetId?: string
-      trendCsvInputAssetId?: string
-      videoCreatorSamplesInputAssetId?: string
-      xhsCreatorProfileInputAssetId?: string
-      mediaAssetIds?: string[]
-      mode: 'demo' | 'live'
-      idempotencyKey?: string
-    },
-  ) =>
-    request<AnalysisRun[]>(`/api/workspaces/${workspaceId}/analysis-runs/batch`, {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify(payload),

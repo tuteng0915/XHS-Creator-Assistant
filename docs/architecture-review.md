@@ -117,7 +117,7 @@ Current status: improved.
 
 Analysis run creation now accepts an `idempotencyKey`. Repeating the same
 workspace + key returns the existing run instead of creating another one. The
-frontend sends a client-generated key for single and batch workflow creation.
+frontend sends a client-generated key for user-triggered single workflow creation.
 
 Remaining gap: the in-process worker still has no durable SQLite claim/lease
 metadata.

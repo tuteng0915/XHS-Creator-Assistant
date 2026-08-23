@@ -44,7 +44,6 @@ type WorkflowCallPanelProps = {
     draft?: Draft,
     targetTab?: WorkflowTab,
   ) => void | Promise<void>
-  onRunBatchWorkflow: (targetTab?: WorkflowTab) => void | Promise<void>
   onDownloadAnalysisRunsCsv: (targetTab?: WorkflowTab) => void
 }
 
@@ -88,8 +87,6 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
     : isVideo
       ? '⚡ 生成视频创作者诊断'
       : '⚡ 生成热点分析'
-  const usesXhsBatch = (isAccount || isVideo) && Boolean(xhsCreatorProfileMaterial)
-
   const renderInputPreview = (
     name: string,
     status: 'ready' | 'missing',
@@ -486,20 +483,6 @@ export function WorkflowCallPanel(props: WorkflowCallPanelProps) {
         </button>
       </div>
       <div className="workflow-shortcuts">
-        <button
-          type="button"
-          disabled={
-            running ||
-            (usesXhsBatch
-              ? xhsCreatorProfileMaterials.length === 0
-              : accountProfileMaterials.length === 0)
-          }
-          onClick={() => props.onRunBatchWorkflow(targetTab)}
-        >
-          {usesXhsBatch
-            ? `批量运行当前 Workflow（${xhsCreatorProfileMaterials.length} 个小红书主页）`
-            : `批量运行当前 Workflow（${accountProfileMaterials.length} 个账号概况）`}
-        </button>
         <button type="button" onClick={() => props.onDownloadAnalysisRunsCsv(targetTab)}>
           下载结果 CSV
         </button>
