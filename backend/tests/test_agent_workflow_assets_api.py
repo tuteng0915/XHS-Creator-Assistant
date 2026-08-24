@@ -466,6 +466,45 @@ def test_workspace_workflows_are_materialized_from_builtin_assets(
     assert audience_workflow["callBinding"] == ""
 
 
+def test_builtin_workflow_call_bindings_are_repaired_for_existing_workspaces(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    workflows = send(
+        app, "GET", f"/api/workspaces/{workspace['id']}/workflows"
+    ).json()
+    runnable_workflow_ids = {
+        "account_diagnosis",
+        "trend_analysis",
+        "video_creator_quality",
+    }
+    runnable_ids = [
+        workflow["id"]
+        for workflow in workflows
+        if workflow["workflowId"] in runnable_workflow_ids
+    ]
+
+    with app.state.database.transaction() as connection:
+        connection.executemany(
+            """
+            UPDATE workspace_workflows
+            SET call_binding = ''
+            WHERE id = ?
+            """,
+            [(workflow_id,) for workflow_id in runnable_ids],
+        )
+
+    repaired = send(
+        app, "GET", f"/api/workspaces/{workspace['id']}/workflows"
+    ).json()
+    bindings = {workflow["workflowId"]: workflow["callBinding"] for workflow in repaired}
+
+    assert bindings["account_diagnosis"] == "account"
+    assert bindings["trend_analysis"] == "trend"
+    assert bindings["video_creator_quality"] == "video"
+    assert bindings["audience_simulation"] == ""
+
+
 def test_workflow_detail_and_editable_asset_fields(app: FastAPI) -> None:
     workspace = create_workspace(app)
     workflows = send(

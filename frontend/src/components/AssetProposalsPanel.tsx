@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 
-import type { AssetProposal, AssetProposalPreview } from '../types'
+import type {
+  AgentSummary,
+  AssetProposal,
+  AssetProposalPreview,
+  SkillSummary,
+} from '../types'
 
 type AssetProposalDraft = {
   title: string
@@ -13,6 +18,8 @@ type AssetProposalDraft = {
 
 type AssetProposalsPanelProps = {
   proposals: AssetProposal[]
+  availableSkills?: SkillSummary[]
+  availableAgents?: AgentSummary[]
   onUpdate: (
     proposal: AssetProposal,
     patch: {
@@ -32,6 +39,14 @@ type ProposalPreviewState = {
   confirmationMessage: string
   proposalUpdatedAt: string
   data: AssetProposalPreview | null
+}
+
+type WorkflowTaskDraft = {
+  taskId: string
+  agentId: string
+  skillIds: string
+  dependsOn: string
+  parallel: boolean
 }
 
 function draftFromProposal(proposal: AssetProposal): AssetProposalDraft {
@@ -73,8 +88,89 @@ function jsonText(value: unknown): string {
   return JSON.stringify(value, null, 2)
 }
 
+function textFromList(items: string[]): string {
+  return items.join('\n')
+}
+
+function listFromText(value: string): string[] {
+  return value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function parsedAction(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function definitionFromAction(
+  action: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  const payload = objectValue(action?.payload)
+  if (!payload) return null
+  return objectValue(payload.definition) || payload
+}
+
+function updateActionDefinitionText(
+  actionText: string,
+  patch: Record<string, unknown>,
+): string | null {
+  const action = parsedAction(actionText)
+  if (!action) return null
+  const payload = objectValue(action.payload)
+  if (!payload) return null
+  const definition = objectValue(payload.definition)
+  const nextPayload = definition
+    ? { ...payload, definition: { ...definition, ...patch } }
+    : { ...payload, ...patch }
+  return JSON.stringify({ ...action, payload: nextPayload }, null, 2)
+}
+
+function workflowTasksFromDefinition(
+  definition: Record<string, unknown> | null,
+): WorkflowTaskDraft[] | null {
+  const agentPlan = objectValue(definition?.agentPlan)
+  if (!agentPlan) return []
+  const tasks = agentPlan.tasks
+  if (tasks === undefined) return []
+  if (!Array.isArray(tasks)) return null
+  return tasks.map((task, index) => {
+    const item =
+      task && typeof task === 'object' && !Array.isArray(task)
+        ? (task as Record<string, unknown>)
+        : {}
+    return {
+      taskId:
+        typeof item.taskId === 'string' && item.taskId
+          ? item.taskId
+          : `task_${index + 1}`,
+      agentId: typeof item.agentId === 'string' ? item.agentId : '',
+      skillIds: Array.isArray(item.skillIds)
+        ? textFromList(
+            item.skillIds.filter((value): value is string => typeof value === 'string'),
+          )
+        : '',
+      dependsOn: Array.isArray(item.dependsOn)
+        ? textFromList(
+            item.dependsOn.filter((value): value is string => typeof value === 'string'),
+          )
+        : '',
+      parallel: item.parallel === true,
+    }
+  })
+}
+
 export function AssetProposalsPanel({
   proposals,
+  availableSkills = [],
+  availableAgents = [],
   onUpdate,
   onPreview,
   onApply,
@@ -141,6 +237,44 @@ export function AssetProposalsPanel({
       return null
     }
     return { draft, proposedAction }
+  }
+
+  function updateProposalDefinition(
+    proposalId: string,
+    currentActionText: string,
+    patch: Record<string, unknown>,
+  ) {
+    const nextText = updateActionDefinitionText(currentActionText, patch)
+    if (!nextText) {
+      updateDraft(proposalId, {
+        error: '当前 Proposed Action JSON 无法结构化编辑。请先修复 JSON。',
+      })
+      return
+    }
+    updateDraft(proposalId, { proposedActionText: nextText, error: '' })
+  }
+
+  function updateWorkflowTasks(
+    proposalId: string,
+    currentActionText: string,
+    definition: Record<string, unknown>,
+    tasks: WorkflowTaskDraft[],
+  ) {
+    const currentPlan = objectValue(definition.agentPlan) || {}
+    updateProposalDefinition(proposalId, currentActionText, {
+      agentPlan: {
+        ...currentPlan,
+        tasks: tasks
+          .filter((task) => task.taskId.trim())
+          .map((task) => ({
+            taskId: task.taskId.trim(),
+            agentId: task.agentId.trim(),
+            skillIds: listFromText(task.skillIds),
+            dependsOn: listFromText(task.dependsOn),
+            parallel: task.parallel,
+          })),
+      },
+    })
   }
 
   async function saveProposal(proposal: AssetProposal) {
@@ -254,6 +388,371 @@ export function AssetProposalsPanel({
     await onApply(proposalToApply)
   }
 
+  function renderStructuredDefinitionEditor(
+    proposal: AssetProposal,
+    draft: AssetProposalDraft,
+    isPending: boolean,
+  ) {
+    const action = parsedAction(draft.proposedActionText)
+    const definition = definitionFromAction(action)
+    if (!definition) return null
+
+    if (proposal.actionType === 'agent.propose_definition') {
+      const skillIds = Array.isArray(definition.skillIds)
+        ? definition.skillIds.filter((value): value is string => typeof value === 'string')
+        : []
+      return (
+        <div className="structured-editor-card">
+          <div className="asset-section-head">
+            <h3>Agent Proposal 表单</h3>
+            <span>structured</span>
+          </div>
+          <label htmlFor={`${proposal.id}-agent-name`}>Agent 名称</label>
+          <input
+            id={`${proposal.id}-agent-name`}
+            disabled={!isPending}
+            value={typeof definition.displayName === 'string' ? definition.displayName : ''}
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                displayName: event.target.value,
+              })
+            }
+          />
+          <label htmlFor={`${proposal.id}-agent-purpose`}>用途 / 调优说明</label>
+          <textarea
+            id={`${proposal.id}-agent-purpose`}
+            disabled={!isPending}
+            rows={3}
+            value={typeof definition.purpose === 'string' ? definition.purpose : ''}
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                purpose: event.target.value,
+              })
+            }
+          />
+          <label htmlFor={`${proposal.id}-agent-system-prompt`}>System Prompt</label>
+          <textarea
+            id={`${proposal.id}-agent-system-prompt`}
+            disabled={!isPending}
+            rows={5}
+            value={
+              typeof definition.systemPrompt === 'string'
+                ? definition.systemPrompt
+                : ''
+            }
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                systemPrompt: event.target.value,
+              })
+            }
+          />
+          <label htmlFor={`${proposal.id}-agent-skills`}>Skill IDs（一行一个）</label>
+          <textarea
+            id={`${proposal.id}-agent-skills`}
+            disabled={!isPending}
+            rows={4}
+            value={textFromList(skillIds)}
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                skillIds: listFromText(event.target.value),
+              })
+            }
+          />
+          {availableSkills.length > 0 && (
+            <div className="capability-checkbox-list compact">
+              {availableSkills.map((skill) => {
+                const selected = skillIds.includes(skill.skillId)
+                return (
+                  <label key={skill.id}>
+                    <input
+                      type="checkbox"
+                      disabled={!isPending}
+                      checked={selected}
+                      onChange={(event) => {
+                        const next = new Set(skillIds)
+                        if (event.target.checked) next.add(skill.skillId)
+                        else next.delete(skill.skillId)
+                        updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                          skillIds: [...next],
+                        })
+                      }}
+                    />
+                    <span>
+                      <b>{skill.displayName}</b>
+                      <small>{skill.skillId}</small>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          )}
+          <label htmlFor={`${proposal.id}-agent-version`}>版本</label>
+          <input
+            id={`${proposal.id}-agent-version`}
+            disabled={!isPending}
+            value={typeof definition.version === 'string' ? definition.version : ''}
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                version: event.target.value,
+              })
+            }
+          />
+        </div>
+      )
+    }
+
+    if (proposal.actionType === 'workflow.propose_definition') {
+      const entryAgentIds = Array.isArray(definition.entryAgentIds)
+        ? definition.entryAgentIds.filter(
+            (value): value is string => typeof value === 'string',
+          )
+        : []
+      const taskDrafts = workflowTasksFromDefinition(definition)
+      return (
+        <div className="structured-editor-card">
+          <div className="asset-section-head">
+            <h3>Workflow Proposal 表单</h3>
+            <span>structured</span>
+          </div>
+          <label htmlFor={`${proposal.id}-workflow-name`}>Workflow 名称</label>
+          <input
+            id={`${proposal.id}-workflow-name`}
+            disabled={!isPending}
+            value={typeof definition.displayName === 'string' ? definition.displayName : ''}
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                displayName: event.target.value,
+              })
+            }
+          />
+          <label htmlFor={`${proposal.id}-workflow-purpose`}>用途 / 调优说明</label>
+          <textarea
+            id={`${proposal.id}-workflow-purpose`}
+            disabled={!isPending}
+            rows={3}
+            value={typeof definition.purpose === 'string' ? definition.purpose : ''}
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                purpose: event.target.value,
+              })
+            }
+          />
+          <label htmlFor={`${proposal.id}-workflow-entry-agents`}>
+            Entry Agent IDs（一行一个）
+          </label>
+          <textarea
+            id={`${proposal.id}-workflow-entry-agents`}
+            disabled={!isPending}
+            rows={3}
+            value={textFromList(entryAgentIds)}
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                entryAgentIds: listFromText(event.target.value),
+              })
+            }
+          />
+          <label htmlFor={`${proposal.id}-workflow-artifact-effect`}>
+            Artifact Effect
+          </label>
+          <input
+            id={`${proposal.id}-workflow-artifact-effect`}
+            disabled={!isPending}
+            value={
+              typeof definition.artifactEffect === 'string'
+                ? definition.artifactEffect
+                : ''
+            }
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                artifactEffect: event.target.value,
+              })
+            }
+          />
+          <label htmlFor={`${proposal.id}-workflow-call-binding`}>调用注册</label>
+          <select
+            id={`${proposal.id}-workflow-call-binding`}
+            disabled={!isPending}
+            value={typeof definition.callBinding === 'string' ? definition.callBinding : ''}
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                callBinding: event.target.value,
+              })
+            }
+          >
+            <option value="">不注册为调用入口</option>
+            <option value="account">账号诊断执行入口</option>
+            <option value="trend">热点分析执行入口</option>
+            <option value="video">视频博主质量诊断执行入口</option>
+          </select>
+          <label>Workflow Tasks</label>
+          {taskDrafts === null ? (
+            <div className="err">agentPlan.tasks 当前不是数组，无法表格化编辑。</div>
+          ) : (
+            <>
+              <div className="workflow-task-editor">
+                {taskDrafts.map((task, index) => (
+                  <div className="workflow-task-card" key={`${task.taskId}-${index}`}>
+                    <div className="asset-section-head">
+                      <h3>Task {index + 1}</h3>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={!isPending}
+                        onClick={() =>
+                          updateWorkflowTasks(
+                            proposal.id,
+                            draft.proposedActionText,
+                            definition,
+                            taskDrafts.filter((_, itemIndex) => itemIndex !== index),
+                          )
+                        }
+                      >
+                        删除
+                      </button>
+                    </div>
+                    <div className="compact-grid two-col">
+                      <div>
+                        <label htmlFor={`${proposal.id}-task-id-${index}`}>Task ID</label>
+                        <input
+                          id={`${proposal.id}-task-id-${index}`}
+                          disabled={!isPending}
+                          value={task.taskId}
+                          onChange={(event) => {
+                            const next = [...taskDrafts]
+                            next[index] = { ...task, taskId: event.target.value }
+                            updateWorkflowTasks(
+                              proposal.id,
+                              draft.proposedActionText,
+                              definition,
+                              next,
+                            )
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`${proposal.id}-task-agent-${index}`}>Agent</label>
+                        <select
+                          id={`${proposal.id}-task-agent-${index}`}
+                          disabled={!isPending}
+                          value={task.agentId}
+                          onChange={(event) => {
+                            const next = [...taskDrafts]
+                            next[index] = { ...task, agentId: event.target.value }
+                            updateWorkflowTasks(
+                              proposal.id,
+                              draft.proposedActionText,
+                              definition,
+                              next,
+                            )
+                          }}
+                        >
+                          <option value="">未选择</option>
+                          {availableAgents.map((agent) => (
+                            <option key={agent.id} value={agent.agentId}>
+                              {agent.displayName} · {agent.agentId}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <label htmlFor={`${proposal.id}-task-skills-${index}`}>
+                      Skill IDs（一行一个）
+                    </label>
+                    <textarea
+                      id={`${proposal.id}-task-skills-${index}`}
+                      disabled={!isPending}
+                      rows={3}
+                      value={task.skillIds}
+                      onChange={(event) => {
+                        const next = [...taskDrafts]
+                        next[index] = { ...task, skillIds: event.target.value }
+                        updateWorkflowTasks(
+                          proposal.id,
+                          draft.proposedActionText,
+                          definition,
+                          next,
+                        )
+                      }}
+                    />
+                    <label htmlFor={`${proposal.id}-task-depends-${index}`}>
+                      Depends On（一行一个 taskId）
+                    </label>
+                    <textarea
+                      id={`${proposal.id}-task-depends-${index}`}
+                      disabled={!isPending}
+                      rows={2}
+                      value={task.dependsOn}
+                      onChange={(event) => {
+                        const next = [...taskDrafts]
+                        next[index] = { ...task, dependsOn: event.target.value }
+                        updateWorkflowTasks(
+                          proposal.id,
+                          draft.proposedActionText,
+                          definition,
+                          next,
+                        )
+                      }}
+                    />
+                    <label className="checkbox-line">
+                      <input
+                        type="checkbox"
+                        disabled={!isPending}
+                        checked={task.parallel}
+                        onChange={(event) => {
+                          const next = [...taskDrafts]
+                          next[index] = { ...task, parallel: event.target.checked }
+                          updateWorkflowTasks(
+                            proposal.id,
+                            draft.proposedActionText,
+                            definition,
+                            next,
+                          )
+                        }}
+                      />
+                      可并行执行
+                    </label>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={!isPending}
+                onClick={() =>
+                  updateWorkflowTasks(proposal.id, draft.proposedActionText, definition, [
+                    ...taskDrafts,
+                    {
+                      taskId: `task_${taskDrafts.length + 1}`,
+                      agentId: '',
+                      skillIds: '',
+                      dependsOn: '',
+                      parallel: false,
+                    },
+                  ])
+                }
+              >
+                添加 Task
+              </button>
+            </>
+          )}
+          <label htmlFor={`${proposal.id}-workflow-version`}>版本</label>
+          <input
+            id={`${proposal.id}-workflow-version`}
+            disabled={!isPending}
+            value={typeof definition.version === 'string' ? definition.version : ''}
+            onChange={(event) =>
+              updateProposalDefinition(proposal.id, draft.proposedActionText, {
+                version: event.target.value,
+              })
+            }
+          />
+        </div>
+      )
+    }
+
+    return null
+  }
+
   return (
     <div className="source-editor-card">
       <label>Asset Proposals</label>
@@ -301,6 +800,7 @@ export function AssetProposalsPanel({
                   updateDraft(proposal.id, { description: event.target.value })
                 }
               />
+              {renderStructuredDefinitionEditor(proposal, draft, isPending)}
               <label>Proposed Action JSON</label>
               <textarea
                 disabled={!isPending}

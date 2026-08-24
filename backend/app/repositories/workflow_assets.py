@@ -144,6 +144,27 @@ class WorkflowAssetRepository:
             raise ConflictError("Workflow changed since it was loaded")
         return self.get(connection, workflow_asset_id)
 
+    def repair_builtin_call_binding(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        workflow_asset_id: str,
+        call_binding: str,
+        now: str,
+    ) -> dict:
+        current = self.get(connection, workflow_asset_id)
+        if current["source"] != "builtin":
+            return current
+        connection.execute(
+            """
+            UPDATE workspace_workflows
+            SET call_binding = ?, updated_at = ?
+            WHERE id = ? AND source = 'builtin'
+            """,
+            (call_binding, now, workflow_asset_id),
+        )
+        return self.get(connection, workflow_asset_id)
+
     def update_builtin_definition(
         self,
         connection: sqlite3.Connection,

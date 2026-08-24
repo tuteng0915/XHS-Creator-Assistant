@@ -5182,6 +5182,8 @@ function WorkspaceApp() {
               )}
               <AssetProposalsPanel
                 proposals={assetProposals}
+                availableSkills={skills}
+                availableAgents={agents}
                 onUpdate={updateAssetProposal}
                 onPreview={previewAssetProposal}
                 onApply={applyAssetProposal}
@@ -5510,6 +5512,8 @@ function WorkspaceApp() {
                   </div>
 	                  <AssetProposalsPanel
 	                    proposals={assetProposals}
+	                    availableSkills={skills}
+	                    availableAgents={agents}
 	                    onUpdate={updateAssetProposal}
 	                    onPreview={previewAssetProposal}
 	                    onApply={applyAssetProposal}

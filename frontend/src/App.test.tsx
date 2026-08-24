@@ -935,29 +935,88 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
           createdAt: '2026-07-11T14:00:02Z',
         },
       ]
-      assetProposals['conversation-1'] = [
-        {
-          id: 'proposal-1',
-          workspaceId: 'workspace-1',
-          conversationId: 'conversation-1',
-          messageId: 'message-agent',
-          actionType: 'workspace.update_profile',
-          title: '更新 Account Profile',
-          description: '建议更新账号定位。',
-          status: 'pending',
-          proposedAction: {
-            type: 'workspace.update_profile',
-            status: 'requires_confirmation',
-            description: '建议更新账号定位。',
-            payload: { accountPositioning: body.content },
-          },
-          result: {},
-          error: '',
-          createdAt: '2026-07-11T14:00:02Z',
-          updatedAt: '2026-07-11T14:00:02Z',
-          appliedAt: null,
-        },
-      ]
+      const baseProposal = {
+        id: 'proposal-1',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+        messageId: 'message-agent',
+        status: 'pending' as const,
+        result: {},
+        error: '',
+        createdAt: '2026-07-11T14:00:02Z',
+        updatedAt: '2026-07-11T14:00:02Z',
+        appliedAt: null,
+      }
+      const nextProposal: AssetProposal = body.content.includes('workflow proposal')
+        ? {
+            ...baseProposal,
+            actionType: 'workflow.propose_definition',
+            title: '新增 Workflow Proposal',
+            description: '建议新增工作流。',
+            proposedAction: {
+              type: 'workflow.propose_definition',
+              status: 'requires_confirmation',
+              description: '建议新增工作流。',
+              payload: {
+                definition: {
+                  workflowId: 'generated.creator_review_workflow',
+                  displayName: 'Creator Review Workflow',
+                  purpose: 'Review creator assets.',
+                  entryAgentIds: ['creator_material_curator'],
+                  agentPlan: {
+                    tasks: [
+                      {
+                        taskId: 'review_creator',
+                        agentId: 'creator_material_curator',
+                        skillIds: ['input_asset.format_account_profile'],
+                        dependsOn: [],
+                        parallel: false,
+                      },
+                    ],
+                  },
+                  artifactEffect: 'AssetProposal',
+                  callBinding: '',
+                  version: 'v1',
+                },
+              },
+            },
+          }
+        : body.content.includes('agent proposal')
+          ? {
+              ...baseProposal,
+              actionType: 'agent.propose_definition',
+              title: '新增 Agent Proposal',
+              description: '建议新增 Agent。',
+              proposedAction: {
+                type: 'agent.propose_definition',
+                status: 'requires_confirmation',
+                description: '建议新增 Agent。',
+                payload: {
+                  definition: {
+                    agentId: 'generated.creator_reviewer',
+                    displayName: 'Creator Reviewer',
+                    purpose: 'Review creator assets.',
+                    systemPrompt: 'Review creator assets with evidence.',
+                    skillIds: ['input_asset.format_account_profile'],
+                    defaultContextPolicy: {},
+                    version: 'v1',
+                  },
+                },
+              },
+            }
+          : {
+              ...baseProposal,
+              actionType: 'workspace.update_profile',
+              title: '更新 Account Profile',
+              description: '建议更新账号定位。',
+              proposedAction: {
+                type: 'workspace.update_profile',
+                status: 'requires_confirmation',
+                description: '建议更新账号定位。',
+                payload: { accountPositioning: body.content },
+              },
+            }
+      assetProposals['conversation-1'] = [nextProposal]
       const updatedConversation: AgentConversation = {
         ...conversation,
         messages,
@@ -991,8 +1050,41 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
     }
     if (url === '/api/asset-proposals/proposal-1/preview' && method === 'GET') {
       const current = assetProposals['conversation-1'][0]
-      const payload = current.proposedAction.payload as {
-        accountPositioning?: string
+      const payload = current.proposedAction.payload as Record<string, unknown>
+      const definition = (payload.definition || payload) as Record<string, unknown>
+      if (current.actionType === 'agent.propose_definition') {
+        return jsonResponse({
+          proposalId: 'proposal-1',
+          actionType: current.actionType,
+          operation: 'create',
+          targetAssetType: 'agent',
+          targetAssetId: null,
+          targetStableId: definition.agentId,
+          changedFields: [
+            { field: 'displayName', current: undefined, proposed: definition.displayName },
+            { field: 'skillIds', current: undefined, proposed: definition.skillIds },
+          ],
+          currentSnapshot: {},
+          proposedSnapshot: definition,
+          validationErrors: [],
+        })
+      }
+      if (current.actionType === 'workflow.propose_definition') {
+        return jsonResponse({
+          proposalId: 'proposal-1',
+          actionType: current.actionType,
+          operation: 'create',
+          targetAssetType: 'workflow',
+          targetAssetId: null,
+          targetStableId: definition.workflowId,
+          changedFields: [
+            { field: 'displayName', current: undefined, proposed: definition.displayName },
+            { field: 'agentPlan', current: undefined, proposed: definition.agentPlan },
+          ],
+          currentSnapshot: {},
+          proposedSnapshot: definition,
+          validationErrors: [],
+        })
       }
       return jsonResponse({
         proposalId: 'proposal-1',
@@ -2349,6 +2441,88 @@ describe('workspace UI', () => {
       expect(assetProposals['conversation-1'][0].status).toBe('applied'),
     )
     expect(await screen.findByText('applied')).toBeInTheDocument()
+  })
+
+  it('lets PM edit an agent proposal with structured fields', async () => {
+    installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Agents/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Account Diagnosis Strategist/ }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /开始对话/ }))
+
+    const composer = await screen.findByPlaceholderText(/直接和这个 Agent 对话/)
+    fireEvent.change(composer, {
+      target: { value: '请生成一个 agent proposal' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /发送给 Agent/ }))
+
+    expect(await screen.findByText('Agent Proposal 表单')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Agent 名称'), {
+      target: { value: 'PM Creator Reviewer' },
+    })
+    fireEvent.click(screen.getByLabelText(/Generate Creative Brief/))
+    fireEvent.click(screen.getByRole('button', { name: '保存提案' }))
+
+    await waitFor(() => {
+      const payload = assetProposals['conversation-1'][0].proposedAction
+        .payload as { definition: Record<string, unknown> }
+      const definition = payload.definition
+      expect(definition.displayName).toBe('PM Creator Reviewer')
+      expect(definition.skillIds).toEqual(
+        expect.arrayContaining(['topic.refine_to_brief']),
+      )
+    })
+    expect(await screen.findByText('提案已保存，请预览 diff 后再应用。')).toBeInTheDocument()
+  })
+
+  it('lets PM edit a workflow proposal task plan before previewing diff', async () => {
+    installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Agents/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Account Diagnosis Strategist/ }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /开始对话/ }))
+
+    const composer = await screen.findByPlaceholderText(/直接和这个 Agent 对话/)
+    fireEvent.change(composer, {
+      target: { value: '请生成一个 workflow proposal' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /发送给 Agent/ }))
+
+    expect(await screen.findByText('Workflow Proposal 表单')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Workflow 名称'), {
+      target: { value: 'PM Creator Review Workflow' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添加 Task' }))
+    const newTaskId = document.querySelector(
+      '#proposal-1-task-id-1',
+    ) as HTMLInputElement | null
+    if (!newTaskId) throw new Error('Missing workflow proposal task input')
+    fireEvent.change(newTaskId, { target: { value: 'pm_review_assets' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存提案' }))
+
+    await waitFor(() => {
+      const payload = assetProposals['conversation-1'][0].proposedAction
+        .payload as { definition: Record<string, unknown> }
+      const definition = payload.definition
+      const agentPlan = definition.agentPlan as { tasks: Array<{ taskId: string }> }
+      expect(definition.displayName).toBe('PM Creator Review Workflow')
+      expect(agentPlan.tasks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ taskId: 'pm_review_assets' }),
+        ]),
+      )
+    })
+
+    expect(await screen.findByText('提案已保存，请预览 diff 后再应用。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '预览 Diff' }))
+    expect(await screen.findByText(/将创建\s+workflow/)).toBeInTheDocument()
+    expect(screen.getByText('agentPlan')).toBeInTheDocument()
   })
 
   it('surfaces saved agent conversations in the content asset sidebar', async () => {

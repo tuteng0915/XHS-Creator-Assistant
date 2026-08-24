@@ -196,6 +196,7 @@ https://your-domain/api/...
 - Capability Maker 已经可以拿到 capability catalog。
 - Maker conversation 已经可以携带当前正在查看的具体 Skill / Agent / Workflow 作为 context target。
 - Asset proposal 已支持 pending 状态下编辑 title、description 和 proposed action JSON 后再 apply。
+- Agent / Workflow proposal 已支持结构化辅助编辑，并同步 proposed action JSON。
 - Asset proposal 已支持 apply 前 diff preview；用户需要先查看将创建/更新的目标资产字段，再确认应用。
 - Apply / reject 会持久化状态、结果和错误；非 pending proposal 不可重复编辑或应用。
 - Skill / Agent / Workflow proposal 已有基础字段校验、stable id 不可变校验和引用存在性校验。

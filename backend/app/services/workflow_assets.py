@@ -561,11 +561,12 @@ class WorkflowAssetService:
                     "definition_hash": definition_hash,
                 }
                 if existing:
+                    synced = existing
                     if (
                         existing["source"] == "builtin"
                         and existing.get("definition_hash") != definition_hash
                     ):
-                        self.repository.update_builtin_definition(
+                        synced = self.repository.update_builtin_definition(
                             connection,
                             workflow_asset_id=existing["id"],
                             display_name=payload["display_name"],
@@ -575,6 +576,17 @@ class WorkflowAssetService:
                             artifact_effect=payload["artifact_effect"],
                             version=payload["version"],
                             definition_hash=payload["definition_hash"],
+                            now=now,
+                        )
+                    if (
+                        synced["source"] == "builtin"
+                        and definition.call_binding
+                        and not synced.get("call_binding")
+                    ):
+                        self.repository.repair_builtin_call_binding(
+                            connection,
+                            workflow_asset_id=synced["id"],
+                            call_binding=definition.call_binding,
                             now=now,
                         )
                     continue

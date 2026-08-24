@@ -502,6 +502,7 @@ Capability Maker 产生的变更建议。
 
 - 保存 proposal；
 - pending proposal 可编辑 title、description 和 proposed action JSON；
+- Agent / Workflow proposal 的常见字段可用结构化表单编辑，并同步回 proposed action JSON；
 - apply 前展示 diff preview，包括 operation、target asset、changed fields 和 validation errors；
 - apply；
 - reject。
