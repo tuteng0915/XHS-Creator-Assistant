@@ -24,6 +24,7 @@ data/
 !.env.example
 key
 backup/key
+SqsAgent-dev-snapshot*.tar.gz
 
 # Editor and OS files
 .DS_Store
