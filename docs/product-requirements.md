@@ -897,7 +897,8 @@ xhs_import_package/
 
 - `pain_points` 通过；
 - `agent_chat` 通过；
-- `image-understand` 在临时映射 `QWEN_API_KEY=$ANTHROPIC_API_KEY` 且配置自定义 Qwen base URL 后通过。
+- `image-understand` 通过；
+- 当前本地 `backend/.env.local` 已补齐文本模型和 media skills 所需变量，且被 git ignore。
 
 这些 smoke test 不进入常规自动化测试，因为会消耗真实模型额度，也依赖网络环境。
 

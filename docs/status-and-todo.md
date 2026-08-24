@@ -195,8 +195,8 @@ https://your-domain/api/...
 
 - `scripts/smoke_model_api.py --operation pain_points` 通过；
 - `scripts/smoke_model_api.py --operation agent_chat` 通过；
-- `scripts/smoke_qwen_media.py image-understand` 在临时映射 `QWEN_API_KEY=$ANTHROPIC_API_KEY` 且配置自定义 Qwen base URL 后通过；
-- 当前 `backend/.env.local` 如果只填 `ANTHROPIC_*`，文本模型可用，但 media skills 会提示缺少 `QWEN_API_KEY` 或 `DASHSCOPE_API_KEY`。
+- `scripts/smoke_qwen_media.py image-understand` 通过；
+- 当前 `backend/.env.local` 已补齐 `ANTHROPIC_*` 与 `QWEN_*`，文本模型和 media skills 都可用；该文件已被 git ignore，不会提交。
 
 ## 当前 TODO
 

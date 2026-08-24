@@ -197,7 +197,7 @@ backend/.venv/bin/python scripts/smoke_qwen_media.py image-understand \
 
 当前仍然有意不包含 Docker、authentication、多租户、Redis、Postgres 或部署基础设施。
 
-建议先读 [`docs/product-design.md`](./docs/product-design.md) 理解产品设计、能力模型和当前功能地图，再读 [`docs/status-and-todo.md`](./docs/status-and-todo.md) 查看当前实现状态和 TODO。
+建议先读 [`docs/product-design.md`](./docs/product-design.md) 理解产品设计、能力模型和当前功能地图，再读 [`docs/status-and-todo.md`](./docs/status-and-todo.md) 查看当前实现状态和 TODO。如果准备提交 GitHub 或打版本 tag，先按 [`docs/release-checklist.md`](./docs/release-checklist.md) 做发布前检查。
 
 ## 本地小红书主页导入 Demo
 

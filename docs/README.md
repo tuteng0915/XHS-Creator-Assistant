@@ -9,6 +9,7 @@
 3. `pm-capability-tuning-plan.md` — 查看交付给 PM 使用前，能力资产调优前端要怎么铺路。
 4. `status-and-todo.md` — 查看当前完成状态、明确限制和下一步 TODO。
 5. `architecture-review.md` — 查看当前架构风险、已解决问题和工程优先级。
+6. `release-checklist.md` — 准备提交 GitHub 或打 tag 前做发布检查。
 
 ## 当前有效文档
 
@@ -17,6 +18,7 @@
 - `status-and-todo.md` — 当前实现状态、已完成事项、明确限制、部署/API 路径说明和 TODO。
 - `pm-capability-tuning-plan.md` — 面向施琦姗实际调优 Skill / Agent / Workflow 的前端能力建设计划。
 - `architecture-review.md` — 当前架构 review 与优先风险。
+- `release-checklist.md` — GitHub 发布前检查清单，包括敏感信息、自动化测试、真实 API smoke 和建议 tag。
 
 ## 历史参考
 

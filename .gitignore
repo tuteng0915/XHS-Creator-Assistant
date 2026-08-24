@@ -23,6 +23,7 @@ data/
 .env.*
 !.env.example
 key
+backup/key
 
 # Editor and OS files
 .DS_Store
