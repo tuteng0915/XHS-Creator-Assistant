@@ -121,6 +121,8 @@ Agent 是 system prompt、多个 skills 和默认 context policy 的组合。当
 
 Workflow 是产品拥有的任务计划，可以理解为 multi-agent / multi-task 的产品流程，但当前不是用户可编辑 nodegraph。代码层可以用 LangGraph 实现 workflow 执行；前端只看到产品级 run、stage 和结果，不暴露 LangGraph thread、checkpoint、node 等术语。
 
+PM 调优界面允许对 Agent 和 Workflow 做有限的结构化辅助编辑：Agent 可以通过 checklist 组合已有 Skills，同时保留手动 stable id 文本输入；Workflow 可以用 task 表格编辑 `agentPlan.tasks` 的 taskId、agentId、skillIds、dependsOn 和 parallel 标记，同时保留 JSON editor 作为高级入口。这个能力是为了调产品内置资产，不是通用 nodegraph builder。
+
 Workflow asset 可以通过 `callBinding` 注册到右侧 workflow 调用区。当前允许的绑定只有 `account`、`trend`、`video`，分别对应已有的账号诊断、热点分析和视频博主质量诊断产品执行入口。这个绑定只表示“把某个 workflow asset 作为入口展示，并复用对应产品执行路径”，不表示系统已经能执行任意用户生成的 workflow graph。内置三个主 workflow 默认注册；新生成或手动修改的 workflow 如果设置了 `callBinding`，也会出现在右侧调用区。
 
 Capability Maker 是当前维护能力资产的最小闭环。用户在 Skill / Agent / Workflow 页面描述需求，Maker conversation 会读取 capability catalog 和可选的当前资产详情，生成 AssetProposal。Proposal 在 pending 状态下可编辑 title、description 和 action JSON；apply 前由后端生成 diff preview，显示将创建或更新的目标资产、变更字段和 validation errors；apply 后可以创建新的 generated capability asset，也可以用 targetAssetId 或 stable id 命中已有资产并更新为 workspace-level generated override。内置 builtin 定义仍由代码 seed，但被 proposal 覆盖后的 workspace asset 会转为 generated，避免后续 seed 静默覆盖用户确认过的修改。

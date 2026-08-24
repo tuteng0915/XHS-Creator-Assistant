@@ -200,11 +200,12 @@ https://your-domain/api/...
 - Apply / reject 会持久化状态、结果和错误；非 pending proposal 不可重复编辑或应用。
 - Skill / Agent / Workflow proposal 已有基础字段校验、stable id 不可变校验和引用存在性校验。
 - Skill 详情页已经支持直接编辑 contract；视频诊断 Skill 已支持 Rubric 表单化编辑。
+- Agent 详情页已经支持用 checklist 组合 Skills；Workflow 详情页已经支持用 task 表格编辑 agentPlan.tasks。
 - Skill 详情页已经有最小 Skill Test 面板，可直接测试 `input_asset.format_*` 和 `media.*` 这类已有 invoke 实现的受控 Skill。
 
 仍需增强：
 
-- Agent / Workflow 详情页更友好的表单化辅助编辑；当前第一版已经可以编辑并保存 definition，但 task plan 仍主要是 JSON editor；
+- Agent / Workflow 详情页更完整的表单化校验；当前已有结构化辅助编辑，但复杂字段仍保留 JSON editor；
 - Skill dry-run，用当前 workspace 资产快速测试分析类 Skill 的输入 context、模型输出和 validation；当前最小 Skill Test 只支持已有 direct invoke 的 formatter/media skills；
 - conversation message 显式 idempotency key。
 

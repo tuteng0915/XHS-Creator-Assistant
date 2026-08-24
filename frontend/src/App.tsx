@@ -179,6 +179,13 @@ type WorkflowDefinitionDraft = {
   version: string
   userNotes: string
 }
+type WorkflowTaskDraft = {
+  taskId: string
+  agentId: string
+  skillIds: string
+  dependsOn: string
+  parallel: boolean
+}
 type VideoRubricTextDraft = {
   creatorTypes: string
   qualityDimensions: string
@@ -493,6 +500,68 @@ function workflowToDefinitionDraft(
     version: workflowAsset.version,
     userNotes: workflowAsset.userNotes,
   }
+}
+
+function workflowTasksFromPlanJson(agentPlanJson: string): WorkflowTaskDraft[] | null {
+  try {
+    const parsed = JSON.parse(agentPlanJson) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const tasks = (parsed as { tasks?: unknown }).tasks
+    if (!Array.isArray(tasks)) return []
+    return tasks.map((task, index) => {
+      const item =
+        task && typeof task === 'object' && !Array.isArray(task)
+          ? (task as Record<string, unknown>)
+          : {}
+      return {
+        taskId:
+          typeof item.taskId === 'string' && item.taskId
+            ? item.taskId
+            : `task_${index + 1}`,
+        agentId: typeof item.agentId === 'string' ? item.agentId : '',
+        skillIds: Array.isArray(item.skillIds)
+          ? textFromList(item.skillIds.filter((value): value is string => typeof value === 'string'))
+          : '',
+        dependsOn: Array.isArray(item.dependsOn)
+          ? textFromList(item.dependsOn.filter((value): value is string => typeof value === 'string'))
+          : '',
+        parallel: item.parallel === true,
+      }
+    })
+  } catch {
+    return null
+  }
+}
+
+function agentPlanJsonWithTasks(
+  agentPlanJson: string,
+  taskDrafts: WorkflowTaskDraft[],
+): string {
+  let base: Record<string, unknown> = {}
+  try {
+    const parsed = JSON.parse(agentPlanJson) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      base = parsed as Record<string, unknown>
+    }
+  } catch {
+    base = {}
+  }
+  return JSON.stringify(
+    {
+      ...base,
+      tasks: taskDrafts
+        .filter((task) => task.taskId.trim())
+        .map((task) => ({
+          taskId: task.taskId.trim(),
+          agentId: task.agentId.trim(),
+          skillIds: listFromText(task.skillIds),
+          dependsOn: listFromText(task.dependsOn),
+          parallel: task.parallel,
+        })),
+    },
+    null,
+    2,
+  )
 }
 
 function isVideoRubricSkill(skillId: string): boolean {
@@ -4552,6 +4621,40 @@ function WorkspaceApp() {
           value={agentDefinitionDraft.skillIds}
           onChange={(event) => updateDraft({ skillIds: event.target.value })}
         />
+        <div className="structured-editor-card">
+          <div className="asset-section-head">
+            <h3>组合 Skills</h3>
+            <span>structured</span>
+          </div>
+          <p className="subline">
+            这里会同步写入 Skill IDs。仍可在上方 textarea 中手动补充暂未登记的 stable id。
+          </p>
+          <div className="capability-checkbox-list">
+            {skills.map((skill) => {
+              const selected = listFromText(agentDefinitionDraft.skillIds).includes(
+                skill.skillId,
+              )
+              return (
+                <label key={skill.id}>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={(event) => {
+                      const next = new Set(listFromText(agentDefinitionDraft.skillIds))
+                      if (event.target.checked) next.add(skill.skillId)
+                      else next.delete(skill.skillId)
+                      updateDraft({ skillIds: textFromList([...next]) })
+                    }}
+                  />
+                  <span>
+                    <b>{skill.displayName}</b>
+                    <small>{skill.skillId}</small>
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
         <label htmlFor="agent-context-policy-json">Default Context Policy JSON</label>
         <textarea
           id="agent-context-policy-json"
@@ -4610,6 +4713,17 @@ function WorkspaceApp() {
         current ? { ...current, ...patch } : current,
       )
     }
+    const workflowTaskDrafts = workflowTasksFromPlanJson(
+      workflowDefinitionDraft.agentPlanJson,
+    )
+    const updateTaskDrafts = (tasks: WorkflowTaskDraft[]) => {
+      updateDraft({
+        agentPlanJson: agentPlanJsonWithTasks(
+          workflowDefinitionDraft.agentPlanJson,
+          tasks,
+        ),
+      })
+    }
     const statusText =
       workflowDefinitionStatus === 'saving'
         ? '保存中…'
@@ -4656,6 +4770,164 @@ function WorkspaceApp() {
           value={workflowDefinitionDraft.entryAgentIds}
           onChange={(event) => updateDraft({ entryAgentIds: event.target.value })}
         />
+        <div className="structured-editor-card">
+          <div className="asset-section-head">
+            <h3>Workflow Tasks</h3>
+            <span>structured</span>
+          </div>
+          <p className="subline">
+            表格会同步写入 agentPlan.tasks。复杂字段仍可在下方 JSON 里手动编辑。
+          </p>
+          {workflowTaskDrafts === null ? (
+            <div className="err">Agent Task Plan JSON 当前无法解析，先修复 JSON。</div>
+          ) : (
+            <>
+              <div className="workflow-task-editor">
+                {workflowTaskDrafts.map((task, index) => (
+                  <div className="workflow-task-card" key={`${task.taskId}-${index}`}>
+                    <div className="asset-section-head">
+                      <h3>Task {index + 1}</h3>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() =>
+                          updateTaskDrafts(
+                            workflowTaskDrafts.filter((_, itemIndex) => itemIndex !== index),
+                          )
+                        }
+                      >
+                        删除
+                      </button>
+                    </div>
+                    <div className="compact-grid two-col">
+                      <div>
+                        <label htmlFor={`workflow-task-id-${index}`}>Task ID</label>
+                        <input
+                          id={`workflow-task-id-${index}`}
+                          value={task.taskId}
+                          onChange={(event) => {
+                            const next = [...workflowTaskDrafts]
+                            next[index] = { ...task, taskId: event.target.value }
+                            updateTaskDrafts(next)
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor={`workflow-task-agent-${index}`}>Agent</label>
+                        <select
+                          id={`workflow-task-agent-${index}`}
+                          value={task.agentId}
+                          onChange={(event) => {
+                            const next = [...workflowTaskDrafts]
+                            next[index] = { ...task, agentId: event.target.value }
+                            updateTaskDrafts(next)
+                          }}
+                        >
+                          <option value="">未选择</option>
+                          {agents.map((agent) => (
+                            <option key={agent.id} value={agent.agentId}>
+                              {agent.displayName} · {agent.agentId}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <label htmlFor={`workflow-task-skills-${index}`}>
+                      Skill IDs（一行一个）
+                    </label>
+                    <textarea
+                      id={`workflow-task-skills-${index}`}
+                      rows={3}
+                      value={task.skillIds}
+                      onChange={(event) => {
+                        const next = [...workflowTaskDrafts]
+                        next[index] = { ...task, skillIds: event.target.value }
+                        updateTaskDrafts(next)
+                      }}
+                    />
+                    <div className="capability-checkbox-list compact">
+                      {skills.map((skill) => {
+                        const selected = listFromText(task.skillIds).includes(
+                          skill.skillId,
+                        )
+                        return (
+                          <label key={skill.id}>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(event) => {
+                                const nextSkills = new Set(listFromText(task.skillIds))
+                                if (event.target.checked) nextSkills.add(skill.skillId)
+                                else nextSkills.delete(skill.skillId)
+                                const next = [...workflowTaskDrafts]
+                                next[index] = {
+                                  ...task,
+                                  skillIds: textFromList([...nextSkills]),
+                                }
+                                updateTaskDrafts(next)
+                              }}
+                            />
+                            <span>
+                              <b>{skill.displayName}</b>
+                              <small>{skill.skillId}</small>
+                            </span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                    <div className="compact-grid two-col">
+                      <div>
+                        <label htmlFor={`workflow-task-depends-${index}`}>
+                          Depends On（一行一个 taskId）
+                        </label>
+                        <textarea
+                          id={`workflow-task-depends-${index}`}
+                          rows={3}
+                          value={task.dependsOn}
+                          onChange={(event) => {
+                            const next = [...workflowTaskDrafts]
+                            next[index] = { ...task, dependsOn: event.target.value }
+                            updateTaskDrafts(next)
+                          }}
+                        />
+                      </div>
+                      <label className="checkbox-line">
+                        <input
+                          type="checkbox"
+                          checked={task.parallel}
+                          onChange={(event) => {
+                            const next = [...workflowTaskDrafts]
+                            next[index] = { ...task, parallel: event.target.checked }
+                            updateTaskDrafts(next)
+                          }}
+                        />
+                        可并行执行
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() =>
+                  updateTaskDrafts([
+                    ...workflowTaskDrafts,
+                    {
+                      taskId: `task_${workflowTaskDrafts.length + 1}`,
+                      agentId: '',
+                      skillIds: '',
+                      dependsOn: '',
+                      parallel: false,
+                    },
+                  ])
+                }
+              >
+                添加 Task
+              </button>
+            </>
+          )}
+        </div>
         <label htmlFor="workflow-agent-plan-json">Agent Task Plan JSON</label>
         <textarea
           id="workflow-agent-plan-json"

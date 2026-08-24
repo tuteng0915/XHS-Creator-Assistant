@@ -520,7 +520,7 @@ Apply 规则：
 
 待增强：
 
-- 更细的前端表单化校验；当前仍以 JSON editor 为主。
+- 前端已有 Agent skill checklist 和 Workflow task 表格作为辅助编辑；更复杂字段仍以 JSON editor 为主。
 
 ## 7. 关键用户流程
 

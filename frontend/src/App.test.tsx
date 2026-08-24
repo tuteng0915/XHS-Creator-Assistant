@@ -2144,6 +2144,34 @@ describe('workspace UI', () => {
     expect(await screen.findByText('已保存')).toBeInTheDocument()
   })
 
+  it('lets PM compose agent skills from a structured checklist', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Agents/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Account Diagnosis Strategist/ }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 Agent' }))
+
+    expect(await screen.findByText('组合 Skills')).toBeInTheDocument()
+    const creativeBriefCheckbox = screen.getByLabelText(/Generate Creative Brief/)
+    fireEvent.click(creativeBriefCheckbox)
+    fireEvent.click(screen.getByRole('button', { name: '保存 Agent Definition' }))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/agents/agent-account/definition' &&
+          init?.method === 'PATCH',
+      )
+      expect(call).toBeTruthy()
+      const body = JSON.parse(String(call?.[1]?.body)) as { skillIds: string[] }
+      expect(body.skillIds).toContain('topic.refine_to_brief')
+    })
+    expect(await screen.findByText('已保存')).toBeInTheDocument()
+  })
+
   it('runs a direct skill test for supported formatter skills', async () => {
     const fetchMock = installWorkspaceApiMock()
     render(<App />)
@@ -2429,23 +2457,21 @@ describe('workspace UI', () => {
     fireEvent.change(await screen.findByLabelText('Workflow 名称'), {
       target: { value: 'PM Creative Output Workflow' },
     })
-    fireEvent.change(screen.getByLabelText('Agent Task Plan JSON'), {
-      target: {
-        value: JSON.stringify(
-          {
-            tasks: [
-              {
-                taskId: 'generate_brief',
-                agentId: 'topic_draft_editor',
-                skillIds: ['topic.refine_to_brief'],
-                pmNote: '先产出 brief 再产出结构。',
-              },
-            ],
-          },
-          null,
-          2,
-        ),
-      },
+    expect(await screen.findByText('Workflow Tasks')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '添加 Task' }))
+    fireEvent.change(screen.getByLabelText('Task ID', { selector: '#workflow-task-id-2' }), {
+      target: { value: 'pm_review_brief' },
+    })
+    fireEvent.change(screen.getByLabelText('Agent', { selector: '#workflow-task-agent-2' }), {
+      target: { value: 'topic_draft_editor' },
+    })
+    const secondTaskSkillBox = document.querySelector(
+      '#workflow-task-skills-2',
+    ) as HTMLTextAreaElement | null
+    expect(secondTaskSkillBox).toBeTruthy()
+    if (!secondTaskSkillBox) throw new Error('Missing second task skill textarea')
+    fireEvent.change(secondTaskSkillBox, {
+      target: { value: 'draft.generate_structure_from_brief' },
     })
     fireEvent.change(screen.getByLabelText('调用注册'), {
       target: { value: 'trend' },
@@ -2460,11 +2486,27 @@ describe('workspace UI', () => {
             init?.method === 'PATCH',
         ),
       ).toBe(true)
+      const call = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/workflows/workflow-creative-output/definition' &&
+          init?.method === 'PATCH',
+      )
+      const body = JSON.parse(String(call?.[1]?.body)) as {
+        agentPlan: { tasks: Array<{ taskId: string; skillIds: string[] }> }
+      }
+      expect(body.agentPlan.tasks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            taskId: 'pm_review_brief',
+            skillIds: ['draft.generate_structure_from_brief'],
+          }),
+        ]),
+      )
     })
     expect(await screen.findByText('已保存')).toBeInTheDocument()
     expect(screen.getAllByText('PM Creative Output Workflow').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/generated/).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/先产出 brief 再产出结构/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/pm_review_brief/).length).toBeGreaterThan(0)
   })
 
   it('auto-saves account inputs before creating a diagnosis run', async () => {

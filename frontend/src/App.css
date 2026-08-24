@@ -297,6 +297,38 @@ nav a.active, nav button.active { color: var(--blue); background: var(--blue-sof
   max-height: 120px; margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word;
   color: #334155; font-size: 11.5px;
 }
+.structured-editor-card {
+  margin: 12px 0; padding: 12px; border: 1px solid #bfdbfe; border-radius: 12px;
+  background: var(--blue-soft);
+}
+.capability-checkbox-list {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+}
+.capability-checkbox-list.compact { grid-template-columns: 1fr; max-height: 180px; overflow: auto; }
+.capability-checkbox-list label {
+  display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 8px;
+  border: 1px solid #dbeafe; border-radius: 9px; background: #fff;
+}
+.capability-checkbox-list input { margin-top: 3px; width: auto; }
+.capability-checkbox-list span { min-width: 0; }
+.capability-checkbox-list b {
+  display: block; overflow: hidden; text-overflow: ellipsis; color: var(--ink);
+  font-size: 12px; white-space: nowrap;
+}
+.capability-checkbox-list small {
+  display: block; overflow: hidden; text-overflow: ellipsis; color: var(--sub);
+  font-size: 11px; white-space: nowrap;
+}
+.workflow-task-editor { display: grid; gap: 10px; margin-bottom: 10px; }
+.workflow-task-card {
+  padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff;
+}
+.workflow-task-card .asset-section-head { margin-bottom: 8px; }
+.checkbox-line {
+  display: flex !important; gap: 8px; align-items: center; min-height: 54px;
+  margin-top: 18px !important; color: var(--ink) !important; font-size: 13px !important;
+}
+.checkbox-line input { width: auto; }
 .output-empty {
   min-height: 330px; padding: 60px 28px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; text-align: center; color: var(--sub);
