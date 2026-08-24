@@ -248,6 +248,25 @@ export interface AssetProposal {
   appliedAt: string | null
 }
 
+export interface AssetProposalDiffField {
+  field: string
+  current: unknown
+  proposed: unknown
+}
+
+export interface AssetProposalPreview {
+  proposalId: string
+  actionType: string
+  operation: 'create' | 'update' | 'unknown'
+  targetAssetType: string
+  targetAssetId: string | null
+  targetStableId: string | null
+  changedFields: AssetProposalDiffField[]
+  currentSnapshot: Record<string, unknown>
+  proposedSnapshot: Record<string, unknown>
+  validationErrors: string[]
+}
+
 export type WorkflowAssetStatus = 'enabled' | 'disabled'
 export type WorkflowAssetSource = 'builtin' | 'generated'
 

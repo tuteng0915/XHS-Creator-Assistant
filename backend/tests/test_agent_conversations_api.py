@@ -324,6 +324,86 @@ def test_capability_proposal_can_override_existing_builtin_skill_as_generated(
     assert detail["version"] == "v2"
 
 
+def test_asset_proposal_preview_shows_diff_before_apply(app: FastAPI) -> None:
+    class StubProvider:
+        def __init__(self, *, target_skill: dict) -> None:
+            self.target_skill = target_skill
+
+        async def reply(self, *, agent, user_content, context_pack, messages):
+            return AgentConversationReply(
+                reply="建议更新 Skill。",
+                proposed_actions=[
+                    {
+                        "type": "skill.propose_definition",
+                        "status": "requires_confirmation",
+                        "description": "更新现有 Skill 定义。",
+                        "payload": {
+                            "targetAssetId": self.target_skill["id"],
+                            "definition": {
+                                "skillId": self.target_skill["skillId"],
+                                "displayName": "Analyze Account Profile v3",
+                                "category": "analysis",
+                                "purpose": "生成更严格的账号画像。",
+                                "triggerIntents": ["账号画像"],
+                                "requiredInputs": ["positioning_snapshot"],
+                                "optionalInputs": ["historical_posts"],
+                                "contextPolicy": {},
+                                "outputSchema": {"root": "profile"},
+                                "artifactEffect": "AnalysisRun.stageResults.profile",
+                                "sideEffects": ["writes stage result"],
+                                "failureMode": "atomic",
+                                "composableWith": [],
+                                "implementationRefs": ["ModelOperation.PROFILE"],
+                                "version": "v3",
+                            },
+                        },
+                    }
+                ],
+                model_metadata={"provider": "stub", "operation": "agent_chat"},
+            )
+
+    workspace = create_workspace(app)
+    skills = send(app, "GET", f"/api/workspaces/{workspace['id']}/skills").json()
+    target_skill = next(
+        item for item in skills if item["skillId"] == "analysis.profile_from_history"
+    )
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    maker = next(item for item in agents if item["agentId"] == "capability_maker")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": maker["id"]},
+    ).json()
+    app.state.agent_conversation_service.live_provider = StubProvider(
+        target_skill=target_skill
+    )
+
+    send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "修改这个 skill", "mode": "live"},
+    )
+    proposal = send(
+        app,
+        "GET",
+        f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+    ).json()[0]
+    preview = send(app, "GET", f"/api/asset-proposals/{proposal['id']}/preview")
+
+    assert preview.status_code == 200
+    body = preview.json()
+    assert body["operation"] == "update"
+    assert body["targetAssetType"] == "skill"
+    assert body["targetAssetId"] == target_skill["id"]
+    assert body["targetStableId"] == "analysis.profile_from_history"
+    changed_fields = {field["field"]: field for field in body["changedFields"]}
+    assert changed_fields["displayName"]["proposed"] == "Analyze Account Profile v3"
+    assert changed_fields["version"]["proposed"] == "v3"
+    assert body["validationErrors"] == []
+
+
 def test_capability_proposal_validates_agent_skill_references(app: FastAPI) -> None:
     class StubProvider:
         async def reply(self, *, agent, user_content, context_pack, messages):

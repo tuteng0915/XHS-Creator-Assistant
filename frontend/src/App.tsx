@@ -2926,6 +2926,10 @@ function WorkspaceApp() {
     }
   }
 
+  async function previewAssetProposal(proposal: AssetProposal) {
+    return assetProposalApi.preview(proposal.id)
+  }
+
   async function updateAssetProposal(
     proposal: AssetProposal,
     patch: {
@@ -3830,7 +3834,7 @@ function WorkspaceApp() {
         <section className="history-detail">
           {selectedTopic ? (
             <>
-              <div className="detail-head">
+              <div className="detail-head asset-detail-head">
                 <div>
                   <h2>{selectedTopic.title}</h2>
                   <p>
@@ -3848,39 +3852,77 @@ function WorkspaceApp() {
                   <button onClick={() => archiveTopic(selectedTopic)}>归档</button>
                 </div>
               </div>
-              <label htmlFor="topic-title">标题</label>
-              <input
-                id="topic-title"
-                value={topicDraft.title}
-                onChange={(event) =>
-                  setTopicDraft((current) => ({
-                    ...current,
-                    title: event.target.value,
-                  }))
-                }
-              />
-              <label htmlFor="topic-angle">切入角度</label>
-              <textarea
-                id="topic-angle"
-                rows={4}
-                value={topicDraft.angle}
-                onChange={(event) =>
-                  setTopicDraft((current) => ({
-                    ...current,
-                    angle: event.target.value,
-                  }))
-                }
-              />
-              <div className="save-row">
-                <button className="save-button" onClick={updateSelectedTopic}>
-                  保存选题编辑
-                </button>
-                <SaveIndicator state={saveStates.topic} />
+              <div className="asset-detail-card">
+                <div className="asset-section-head">
+                  <h3>可编辑资产字段</h3>
+                  <span>用户编辑区</span>
+                </div>
+                <label htmlFor="topic-title">标题</label>
+                <input
+                  id="topic-title"
+                  value={topicDraft.title}
+                  onChange={(event) =>
+                    setTopicDraft((current) => ({
+                      ...current,
+                      title: event.target.value,
+                    }))
+                  }
+                />
+                <label htmlFor="topic-angle">切入角度</label>
+                <textarea
+                  id="topic-angle"
+                  rows={4}
+                  value={topicDraft.angle}
+                  onChange={(event) =>
+                    setTopicDraft((current) => ({
+                      ...current,
+                      angle: event.target.value,
+                    }))
+                  }
+                />
+                <div className="save-row">
+                  <button className="save-button" onClick={updateSelectedTopic}>
+                    保存选题资产
+                  </button>
+                  <SaveIndicator state={saveStates.topic} />
+                </div>
               </div>
-              <label>关联痛点</label>
-              <div className="readonly-box">{selectedTopic.associatedPainPoint || '无'}</div>
-              <label>为什么适合</label>
-              <div className="readonly-box">{selectedTopic.whyItFits || '无'}</div>
+              <div className="asset-detail-card readonly">
+                <div className="asset-section-head">
+                  <h3>来源与适配理由</h3>
+                  <span>只读</span>
+                </div>
+                <div className="asset-meta-grid">
+                  <div>
+                    <b>来源 workflow</b>
+                    <span>{selectedTopic.sourceWorkflow}</span>
+                  </div>
+                  <div>
+                    <b>来源分析</b>
+                    <span>{selectedTopic.sourceAnalysisRunId || '无'}</span>
+                  </div>
+                  <div>
+                    <b>创建时间</b>
+                    <span>{new Date(selectedTopic.createdAt).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <b>更新时间</b>
+                    <span>{new Date(selectedTopic.updatedAt).toLocaleString()}</span>
+                  </div>
+                </div>
+                <label>关联痛点</label>
+                <div className="readonly-box">
+                  {selectedTopic.associatedPainPoint || '无'}
+                </div>
+                <label>为什么适合</label>
+                <div className="readonly-box">{selectedTopic.whyItFits || '无'}</div>
+                <details className="asset-json-details">
+                  <summary>Generated Snapshot</summary>
+                  <pre className="json-preview">
+                    {JSON.stringify(selectedTopic.generatedSnapshot, null, 2)}
+                  </pre>
+                </details>
+              </div>
             </>
           ) : (
             <div className="empty-card">选择或创建一个选题。</div>
@@ -3919,7 +3961,7 @@ function WorkspaceApp() {
         <section className="history-detail">
           {selectedDraft ? (
             <>
-              <div className="detail-head">
+              <div className="detail-head asset-detail-head">
                 <div>
                   <h2>{draftDisplayTitle(selectedDraft)}</h2>
                   <p>
@@ -3938,28 +3980,86 @@ function WorkspaceApp() {
                   </button>
                 </div>
               </div>
-              <label>生成快照（不可编辑）</label>
-              {renderDraftStructure(selectedDraft.generatedSnapshot)}
-              <label htmlFor="draft-editor">当前可编辑内容 JSON</label>
-              <textarea
-                id="draft-editor"
-                rows={12}
-                value={draftEditor}
-                onChange={(event) => {
-                  setDraftEditor(event.target.value)
-                  setSaveState('draft', idleState)
-                }}
-              />
-              <div className="save-row">
-                <button className="save-button" onClick={saveDraftEdits}>
-                  保存编辑
-                </button>
-                <SaveIndicator state={saveStates.draft} />
+              <div className="asset-detail-card">
+                <div className="asset-section-head">
+                  <h3>可编辑内容</h3>
+                  <span>用户编辑区</span>
+                </div>
+                <label htmlFor="draft-editor">Editable Content JSON</label>
+                <textarea
+                  id="draft-editor"
+                  rows={12}
+                  value={draftEditor}
+                  onChange={(event) => {
+                    setDraftEditor(event.target.value)
+                    setSaveState('draft', idleState)
+                  }}
+                />
+                <div className="save-row">
+                  <button className="save-button" onClick={saveDraftEdits}>
+                    保存创作输出资产
+                  </button>
+                  <SaveIndicator state={saveStates.draft} />
+                </div>
               </div>
-              <label>输入快照</label>
-              <pre className="json-preview">
-                {JSON.stringify(selectedDraft.inputSnapshot, null, 2)}
-              </pre>
+              <div className="asset-detail-card readonly">
+                <div className="asset-section-head">
+                  <h3>生成快照</h3>
+                  <span>只读</span>
+                </div>
+                {renderDraftStructure(selectedDraft.generatedSnapshot)}
+              </div>
+              <div className="asset-detail-card readonly">
+                <div className="asset-section-head">
+                  <h3>来源与执行记录</h3>
+                  <span>只读</span>
+                </div>
+                <div className="asset-meta-grid">
+                  <div>
+                    <b>类型</b>
+                    <span>{draftKindLabel(selectedDraft)}</span>
+                  </div>
+                  <div>
+                    <b>来源 workflow</b>
+                    <span>{selectedDraft.sourceWorkflow}</span>
+                  </div>
+                  <div>
+                    <b>Topic ID</b>
+                    <span>{selectedDraft.topicId}</span>
+                  </div>
+                  <div>
+                    <b>来源分析</b>
+                    <span>{selectedDraft.sourceAnalysisRunId || '无'}</span>
+                  </div>
+                  <div>
+                    <b>创建时间</b>
+                    <span>{new Date(selectedDraft.createdAt).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <b>更新时间</b>
+                    <span>{new Date(selectedDraft.updatedAt).toLocaleString()}</span>
+                  </div>
+                </div>
+                <details className="asset-json-details" open>
+                  <summary>Input Snapshot</summary>
+                  <pre className="json-preview">
+                    {JSON.stringify(selectedDraft.inputSnapshot, null, 2)}
+                  </pre>
+                </details>
+                <details className="asset-json-details">
+                  <summary>Stage Errors / Model Metadata</summary>
+                  <pre className="json-preview">
+                    {JSON.stringify(
+                      {
+                        stageErrors: selectedDraft.stageErrors,
+                        modelMetadata: selectedDraft.modelMetadata,
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
+              </div>
             </>
           ) : (
             <div className="empty-card">
@@ -4811,6 +4911,7 @@ function WorkspaceApp() {
               <AssetProposalsPanel
                 proposals={assetProposals}
                 onUpdate={updateAssetProposal}
+                onPreview={previewAssetProposal}
                 onApply={applyAssetProposal}
                 onReject={rejectAssetProposal}
               />
@@ -5138,6 +5239,7 @@ function WorkspaceApp() {
 	                  <AssetProposalsPanel
 	                    proposals={assetProposals}
 	                    onUpdate={updateAssetProposal}
+	                    onPreview={previewAssetProposal}
 	                    onApply={applyAssetProposal}
 	                    onReject={rejectAssetProposal}
 	                  />

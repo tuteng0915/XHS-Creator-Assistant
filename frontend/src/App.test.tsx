@@ -989,6 +989,36 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
       assetProposals['conversation-1'] = [updated]
       return jsonResponse(updated)
     }
+    if (url === '/api/asset-proposals/proposal-1/preview' && method === 'GET') {
+      const current = assetProposals['conversation-1'][0]
+      const payload = current.proposedAction.payload as {
+        accountPositioning?: string
+      }
+      return jsonResponse({
+        proposalId: 'proposal-1',
+        actionType: current.actionType,
+        operation: 'update',
+        targetAssetType: 'account_profile',
+        targetAssetId: 'workspace-1',
+        targetStableId: 'workspace-1',
+        changedFields: [
+          {
+            field: 'accountPositioning',
+            current: workspaceOne.accountPositioning,
+            proposed: payload.accountPositioning || '',
+          },
+        ],
+        currentSnapshot: {
+          name: workspaceOne.name,
+          accountPositioning: workspaceOne.accountPositioning,
+        },
+        proposedSnapshot: {
+          name: workspaceOne.name,
+          accountPositioning: payload.accountPositioning || '',
+        },
+        validationErrors: [],
+      })
+    }
     if (url === '/api/asset-proposals/proposal-1/apply' && method === 'POST') {
       const current = assetProposals['conversation-1'][0]
       const updated: AssetProposal = {
@@ -2280,6 +2310,13 @@ describe('workspace UI', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '应用提案' }))
 
+    expect(await screen.findByText('accountPositioning')).toBeInTheDocument()
+    expect(screen.getByText('更关注 DIY 申请和预算决策')).toBeInTheDocument()
+    expect(
+      await screen.findByText('已生成 apply 前 diff，请确认后再次点击“确认应用”。'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认应用' }))
+
     await waitFor(() =>
       expect(assetProposals['conversation-1'][0].status).toBe('applied'),
     )
@@ -2916,7 +2953,7 @@ describe('workspace UI', () => {
     fireEvent.click(await screen.findByRole('button', { name: /数字游民/ }))
     const title = await screen.findByLabelText('标题')
     fireEvent.change(title, { target: { value: '非技术人如何开始数字游民' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存选题编辑' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存选题资产' }))
 
     await waitFor(() => {
       expect(screen.getAllByText('已保存').length).toBeGreaterThan(0)
@@ -2936,7 +2973,7 @@ describe('workspace UI', () => {
     expect(await screen.findByText(/创作 Brief · completed/)).toBeInTheDocument()
     expect(screen.getByText('先选可验证路径，再谈长期迁移')).toBeInTheDocument()
     expect(
-      (screen.getByLabelText('当前可编辑内容 JSON') as HTMLTextAreaElement).value,
+      (screen.getByLabelText('Editable Content JSON') as HTMLTextAreaElement).value,
     ).toContain('"corePoint": "先选可验证路径，再谈长期迁移"')
 
     fireEvent.click(screen.getByRole('button', { name: /继续生成内容结构/ }))
@@ -2944,7 +2981,7 @@ describe('workspace UI', () => {
     expect(await screen.findByText(/内容结构 · completed/)).toBeInTheDocument()
     expect(screen.getByText('从 Brief 进入结构')).toBeInTheDocument()
     expect(
-      (screen.getByLabelText('当前可编辑内容 JSON') as HTMLTextAreaElement).value,
+      (screen.getByLabelText('Editable Content JSON') as HTMLTextAreaElement).value,
     ).toContain('"reuse": "Brief 对齐 → 结构拆解 → 行动清单"')
   })
 

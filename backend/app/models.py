@@ -393,6 +393,25 @@ class AssetProposalUpdate(APIModel):
     expected_updated_at: datetime
 
 
+class AssetProposalDiffField(APIModel):
+    field: str
+    current: Any = None
+    proposed: Any = None
+
+
+class AssetProposalPreviewResponse(APIModel):
+    proposal_id: str
+    action_type: str
+    operation: Literal["create", "update", "unknown"]
+    target_asset_type: str
+    target_asset_id: str | None = None
+    target_stable_id: str | None = None
+    changed_fields: list[AssetProposalDiffField] = Field(default_factory=list)
+    current_snapshot: dict[str, Any] = Field(default_factory=dict)
+    proposed_snapshot: dict[str, Any] = Field(default_factory=dict)
+    validation_errors: list[str] = Field(default_factory=list)
+
+
 class WorkflowAssetStatus(StrEnum):
     ENABLED = "enabled"
     DISABLED = "disabled"

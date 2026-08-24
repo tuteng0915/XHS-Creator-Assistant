@@ -68,8 +68,8 @@ workflow 不由 SSE 连接启动。当前执行模型是：前端 POST 创建 ru
 | 图文素材 | 上传、预览、metadata/derived 编辑、Qwen 理解/生成 | 主页截图、封面、视觉参考 |
 | 视频素材 | 上传、预览、抽帧、Qwen 理解/生成 | 视频质量诊断补充材料 |
 | 分析结果 | 历史列表、重新打开、查看 input snapshot / stage results、编辑人工复盘状态和备注 | 持久化 workflow 输出 |
-| 选题库 | 保存、编辑、选择、归档、调用 Brief/结构生成能力、发送到受众模拟 | 复用选题资产 |
-| 创作输出 | 查看和编辑创作 Brief、内容结构；从 Brief 继续生成结构；发送到受众模拟 | 保存创作类能力的产物 |
+| 选题库 | 保存、编辑、选择、归档、查看来源与 generated snapshot、调用 Brief/结构生成能力、发送到受众模拟 | 复用选题资产 |
+| 创作输出 | 查看和编辑创作 Brief、内容结构；区分 editable content、generated snapshot 与 input snapshot；从 Brief 继续生成结构；发送到受众模拟 | 保存创作类能力的产物 |
 | 受众模拟 | 历史列表、重新打开、查看 personas / reactions / synthesis、编辑人工复盘状态和备注 | 复盘受众反馈和内容策略 |
 | 对话记录 | 列表、重新打开、重命名、归档/恢复、查看消息、引用资产、model metadata 和 proposed actions | 复盘 Agent / Maker / formatter 对话生成历史 |
 
@@ -123,7 +123,7 @@ Workflow 是产品拥有的任务计划，可以理解为 multi-agent / multi-ta
 
 Workflow asset 可以通过 `callBinding` 注册到右侧 workflow 调用区。当前允许的绑定只有 `account`、`trend`、`video`，分别对应已有的账号诊断、热点分析和视频博主质量诊断产品执行入口。这个绑定只表示“把某个 workflow asset 作为入口展示，并复用对应产品执行路径”，不表示系统已经能执行任意用户生成的 workflow graph。内置三个主 workflow 默认注册；新生成或手动修改的 workflow 如果设置了 `callBinding`，也会出现在右侧调用区。
 
-Capability Maker 是当前维护能力资产的最小闭环。用户在 Skill / Agent / Workflow 页面描述需求，Maker conversation 会读取 capability catalog 和可选的当前资产详情，生成 AssetProposal。Proposal 在 pending 状态下可编辑 title、description 和 action JSON；apply 后可以创建新的 generated capability asset，也可以用 targetAssetId 或 stable id 命中已有资产并更新为 workspace-level generated override。内置 builtin 定义仍由代码 seed，但被 proposal 覆盖后的 workspace asset 会转为 generated，避免后续 seed 静默覆盖用户确认过的修改。
+Capability Maker 是当前维护能力资产的最小闭环。用户在 Skill / Agent / Workflow 页面描述需求，Maker conversation 会读取 capability catalog 和可选的当前资产详情，生成 AssetProposal。Proposal 在 pending 状态下可编辑 title、description 和 action JSON；apply 前由后端生成 diff preview，显示将创建或更新的目标资产、变更字段和 validation errors；apply 后可以创建新的 generated capability asset，也可以用 targetAssetId 或 stable id 命中已有资产并更新为 workspace-level generated override。内置 builtin 定义仍由代码 seed，但被 proposal 覆盖后的 workspace asset 会转为 generated，避免后续 seed 静默覆盖用户确认过的修改。
 
 ## 6. Context Access Layer
 

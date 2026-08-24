@@ -502,6 +502,7 @@ Capability Maker 产生的变更建议。
 
 - 保存 proposal；
 - pending proposal 可编辑 title、description 和 proposed action JSON；
+- apply 前展示 diff preview，包括 operation、target asset、changed fields 和 validation errors；
 - apply；
 - reject。
 
@@ -519,7 +520,6 @@ Apply 规则：
 
 待增强：
 
-- 更清楚的 diff 预览；
 - 更细的前端表单化校验；当前仍以 JSON editor 为主。
 
 ## 7. 关键用户流程
@@ -969,7 +969,7 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 4. Workflow assets 不是可视化 nodegraph editor。
 5. Conversation 后端执行是 in-process task，不是完整 durable job queue。
 6. SSE 是 observation replay，不是完整 durable event log。
-7. AssetProposal 已支持 pending 状态下编辑后 apply，并对 skill / agent / workflow proposal 做基础字段和引用校验；前端仍是 JSON editor，不是表单化 diff 预览。
+7. AssetProposal 已支持 pending 状态下编辑后 apply，并对 skill / agent / workflow proposal 做基础字段和引用校验；apply 前已有后端 diff preview，但前端仍主要是 JSON editor，不是表单化编辑器。
 8. qwen 结构化输出已有 operation-level 根字段校验，仍需要更多真实响应 fixture 加固。
 9. 批量能力已从当前产品目标移除；后端遗留 batch endpoint 暂时只作为兼容路径。
 

@@ -5,7 +5,12 @@ from typing import Any
 
 from app.db.database import SQLiteDatabase
 from app.errors import ValidationError
-from app.models import AssetProposalResponse, AssetProposalUpdate
+from app.models import (
+    AssetProposalDiffField,
+    AssetProposalPreviewResponse,
+    AssetProposalResponse,
+    AssetProposalUpdate,
+)
 from app.repositories.agents import AgentRepository
 from app.repositories.asset_proposals import AssetProposalRepository
 from app.repositories.skills import SkillRepository
@@ -78,6 +83,21 @@ class AssetProposalService:
                     now=now,
                 )
         return self._to_response(row)
+
+    def preview(self, proposal_id: str) -> AssetProposalPreviewResponse:
+        with self.database.read() as connection:
+            proposal = self.repository.get(connection, proposal_id)
+            action = json.loads(proposal["proposed_action_json"])
+            try:
+                return self._preview_action(connection, proposal, action)
+            except Exception as error:
+                return AssetProposalPreviewResponse(
+                    proposal_id=proposal_id,
+                    action_type=proposal["action_type"],
+                    operation="unknown",
+                    target_asset_type=self._target_asset_type(proposal["action_type"]),
+                    validation_errors=[str(error) or error.__class__.__name__],
+                )
 
     def update(
         self, proposal_id: str, payload: AssetProposalUpdate
@@ -152,6 +172,164 @@ class AssetProposalService:
         }:
             return self._apply_capability_asset(connection, proposal, action_type, payload, now)
         raise ValidationError(f"Unsupported proposal action type: {action_type}")
+
+    def _preview_action(
+        self,
+        connection,
+        proposal: dict,
+        action: dict[str, Any],
+    ) -> AssetProposalPreviewResponse:
+        self._validate_action_payload(action)
+        action_type = proposal["action_type"]
+        payload = action.get("payload")
+        if not isinstance(payload, dict):
+            raise ValidationError("Proposal action requires a structured payload")
+
+        if action_type == "workspace.update_profile":
+            current = self.workspace_repository.get(connection, proposal["workspace_id"])
+            current_snapshot = {
+                "name": current["name"],
+                "accountPositioning": current["account_positioning"],
+            }
+            proposed_snapshot = {
+                **current_snapshot,
+                **{
+                    key: payload[key]
+                    for key in ("name", "accountPositioning")
+                    if isinstance(payload.get(key), str)
+                },
+            }
+            return self._preview_response(
+                proposal=proposal,
+                operation="update",
+                target_asset_type="account_profile",
+                target_asset_id=current["id"],
+                target_stable_id=current["id"],
+                current_snapshot=current_snapshot,
+                proposed_snapshot=proposed_snapshot,
+            )
+
+        if action_type == "topic.create_or_update":
+            return self._preview_topic(connection, proposal, payload)
+
+        if action_type == "skill.propose_definition":
+            definition = self._definition_payload(payload)
+            skill_id = self._required_asset_id(definition, "skillId")
+            target = self._target_skill(connection, proposal["workspace_id"], payload, skill_id)
+            proposed_snapshot = self._skill_definition_snapshot(definition)
+            current_snapshot = self._skill_row_snapshot(target) if target else {}
+            return self._preview_response(
+                proposal=proposal,
+                operation="update" if target else "create",
+                target_asset_type="skill",
+                target_asset_id=target["id"] if target else None,
+                target_stable_id=target["skill_id"] if target else skill_id,
+                current_snapshot=current_snapshot,
+                proposed_snapshot=proposed_snapshot,
+            )
+
+        if action_type == "agent.propose_definition":
+            definition = self._definition_payload(payload)
+            agent_id = self._required_asset_id(definition, "agentId")
+            skill_ids = self._string_list(definition.get("skillIds"))
+            for skill_id in skill_ids:
+                if self.skill_repository.get_by_skill_id(
+                    connection,
+                    workspace_id=proposal["workspace_id"],
+                    skill_id=skill_id,
+                ) is None:
+                    raise ValidationError(f"Agent references unknown skillId: {skill_id}")
+            target = self._target_agent(connection, proposal["workspace_id"], payload, agent_id)
+            proposed_snapshot = self._agent_definition_snapshot(definition)
+            current_snapshot = self._agent_row_snapshot(target) if target else {}
+            return self._preview_response(
+                proposal=proposal,
+                operation="update" if target else "create",
+                target_asset_type="agent",
+                target_asset_id=target["id"] if target else None,
+                target_stable_id=target["agent_id"] if target else agent_id,
+                current_snapshot=current_snapshot,
+                proposed_snapshot=proposed_snapshot,
+            )
+
+        if action_type == "workflow.propose_definition":
+            definition = self._definition_payload(payload)
+            workflow_id = self._required_asset_id(definition, "workflowId")
+            entry_agent_ids = self._string_list(definition.get("entryAgentIds"))
+            agent_plan = self._dict(definition.get("agentPlan"))
+            self._validate_workflow_references(
+                connection,
+                workspace_id=proposal["workspace_id"],
+                entry_agent_ids=entry_agent_ids,
+                agent_plan=agent_plan,
+            )
+            target = self._target_workflow(
+                connection, proposal["workspace_id"], payload, workflow_id
+            )
+            proposed_snapshot = self._workflow_definition_snapshot(definition)
+            current_snapshot = self._workflow_row_snapshot(target) if target else {}
+            return self._preview_response(
+                proposal=proposal,
+                operation="update" if target else "create",
+                target_asset_type="workflow",
+                target_asset_id=target["id"] if target else None,
+                target_stable_id=target["workflow_id"] if target else workflow_id,
+                current_snapshot=current_snapshot,
+                proposed_snapshot=proposed_snapshot,
+            )
+
+        raise ValidationError(f"Unsupported proposal action type: {action_type}")
+
+    def _preview_topic(
+        self,
+        connection,
+        proposal: dict,
+        payload: dict[str, Any],
+    ) -> AssetProposalPreviewResponse:
+        title = payload.get("title")
+        if not isinstance(title, str) or not title.strip():
+            raise ValidationError("Topic proposal requires title")
+        proposed_snapshot = {
+            "title": title.strip(),
+            "angle": payload.get("angle") if isinstance(payload.get("angle"), str) else "",
+            "associatedPainPoint": payload.get("associatedPainPoint")
+            if isinstance(payload.get("associatedPainPoint"), str)
+            else "",
+            "whyItFits": payload.get("whyItFits")
+            if isinstance(payload.get("whyItFits"), str)
+            else "",
+        }
+        topic_id = payload.get("topicId")
+        if isinstance(topic_id, str) and topic_id.strip():
+            current = self.topic_repository.get(connection, topic_id.strip())
+            if current["workspace_id"] != proposal["workspace_id"]:
+                raise ValidationError("Topic belongs to another workspace")
+            current_snapshot = {
+                "title": current["title"],
+                "angle": current["angle"],
+                "associatedPainPoint": current["associated_pain_point"],
+                "whyItFits": current["why_it_fits"],
+                "status": current["status"],
+            }
+            proposed_snapshot = {**current_snapshot, **proposed_snapshot}
+            return self._preview_response(
+                proposal=proposal,
+                operation="update",
+                target_asset_type="topic",
+                target_asset_id=current["id"],
+                target_stable_id=current["id"],
+                current_snapshot=current_snapshot,
+                proposed_snapshot=proposed_snapshot,
+            )
+        return self._preview_response(
+            proposal=proposal,
+            operation="create",
+            target_asset_type="topic",
+            target_asset_id=None,
+            target_stable_id=None,
+            current_snapshot={},
+            proposed_snapshot=proposed_snapshot,
+        )
 
     def _apply_workspace_profile(
         self,
@@ -538,6 +716,150 @@ class AssetProposalService:
                     connection, workspace_id=workspace_id, skill_id=skill_id
                 ) is None:
                     raise ValidationError(f"Workflow task references unknown skillId: {skill_id}")
+
+    def _preview_response(
+        self,
+        *,
+        proposal: dict,
+        operation: str,
+        target_asset_type: str,
+        target_asset_id: str | None,
+        target_stable_id: str | None,
+        current_snapshot: dict[str, Any],
+        proposed_snapshot: dict[str, Any],
+    ) -> AssetProposalPreviewResponse:
+        changed_fields = [
+            AssetProposalDiffField(
+                field=field,
+                current=current_snapshot.get(field),
+                proposed=proposed_snapshot.get(field),
+            )
+            for field in sorted(set(current_snapshot) | set(proposed_snapshot))
+            if self._canonical(current_snapshot.get(field))
+            != self._canonical(proposed_snapshot.get(field))
+        ]
+        return AssetProposalPreviewResponse(
+            proposal_id=proposal["id"],
+            action_type=proposal["action_type"],
+            operation=operation,
+            target_asset_type=target_asset_type,
+            target_asset_id=target_asset_id,
+            target_stable_id=target_stable_id,
+            changed_fields=changed_fields,
+            current_snapshot=current_snapshot,
+            proposed_snapshot=proposed_snapshot,
+            validation_errors=[],
+        )
+
+    @staticmethod
+    def _target_asset_type(action_type: str) -> str:
+        return {
+            "workspace.update_profile": "account_profile",
+            "topic.create_or_update": "topic",
+            "skill.propose_definition": "skill",
+            "agent.propose_definition": "agent",
+            "workflow.propose_definition": "workflow",
+        }.get(action_type, "unknown")
+
+    @staticmethod
+    def _definition_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        definition = payload.get("definition", payload)
+        if not isinstance(definition, dict):
+            raise ValidationError("Capability proposal requires a definition object")
+        return definition
+
+    @staticmethod
+    def _canonical(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+    def _skill_definition_snapshot(self, definition: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "skillId": self._required_asset_id(definition, "skillId"),
+            "displayName": self._required_string(definition, "displayName"),
+            "category": self._required_string_or_default(definition, "category", "custom"),
+            "purpose": str(definition.get("purpose") or ""),
+            "triggerIntents": self._string_list(definition.get("triggerIntents")),
+            "requiredInputs": self._string_list(definition.get("requiredInputs")),
+            "optionalInputs": self._string_list(definition.get("optionalInputs")),
+            "contextPolicy": self._dict(definition.get("contextPolicy")),
+            "outputSchema": self._dict(definition.get("outputSchema")),
+            "artifactEffect": str(definition.get("artifactEffect") or ""),
+            "sideEffects": self._string_list(definition.get("sideEffects")),
+            "failureMode": str(definition.get("failureMode") or "proposal_defined"),
+            "composableWith": self._string_list(definition.get("composableWith")),
+            "implementationRefs": self._string_list(definition.get("implementationRefs")),
+            "version": str(definition.get("version") or "v1"),
+        }
+
+    @staticmethod
+    def _skill_row_snapshot(row: dict) -> dict[str, Any]:
+        return {
+            "skillId": row["skill_id"],
+            "displayName": row["display_name"],
+            "category": row["category"],
+            "purpose": row["purpose"],
+            "triggerIntents": json.loads(row["trigger_intents_json"]),
+            "requiredInputs": json.loads(row["required_inputs_json"]),
+            "optionalInputs": json.loads(row["optional_inputs_json"]),
+            "contextPolicy": json.loads(row["context_policy_json"]),
+            "outputSchema": json.loads(row["output_schema_json"]),
+            "artifactEffect": row["artifact_effect"],
+            "sideEffects": json.loads(row["side_effects_json"]),
+            "failureMode": row["failure_mode"],
+            "composableWith": json.loads(row["composable_with_json"]),
+            "implementationRefs": json.loads(row["implementation_refs_json"]),
+            "version": row["version"],
+        }
+
+    def _agent_definition_snapshot(self, definition: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "agentId": self._required_asset_id(definition, "agentId"),
+            "displayName": self._required_string(definition, "displayName"),
+            "purpose": str(definition.get("purpose") or ""),
+            "systemPrompt": str(definition.get("systemPrompt") or ""),
+            "skillIds": self._string_list(definition.get("skillIds")),
+            "defaultContextPolicy": self._dict(
+                definition.get("defaultContextPolicy")
+            ),
+            "version": str(definition.get("version") or "v1"),
+        }
+
+    @staticmethod
+    def _agent_row_snapshot(row: dict) -> dict[str, Any]:
+        return {
+            "agentId": row["agent_id"],
+            "displayName": row["display_name"],
+            "purpose": row["purpose"],
+            "systemPrompt": row["system_prompt"],
+            "skillIds": json.loads(row["skill_ids_json"]),
+            "defaultContextPolicy": json.loads(row["default_context_policy_json"]),
+            "version": row["version"],
+        }
+
+    def _workflow_definition_snapshot(self, definition: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "workflowId": self._required_asset_id(definition, "workflowId"),
+            "displayName": self._required_string(definition, "displayName"),
+            "purpose": str(definition.get("purpose") or ""),
+            "entryAgentIds": self._string_list(definition.get("entryAgentIds")),
+            "agentPlan": self._dict(definition.get("agentPlan")),
+            "artifactEffect": str(definition.get("artifactEffect") or ""),
+            "callBinding": str(definition.get("callBinding") or ""),
+            "version": str(definition.get("version") or "v1"),
+        }
+
+    @staticmethod
+    def _workflow_row_snapshot(row: dict) -> dict[str, Any]:
+        return {
+            "workflowId": row["workflow_id"],
+            "displayName": row["display_name"],
+            "purpose": row["purpose"],
+            "entryAgentIds": json.loads(row["entry_agent_ids_json"]),
+            "agentPlan": json.loads(row["agent_plan_json"]),
+            "artifactEffect": row["artifact_effect"],
+            "callBinding": row["call_binding"],
+            "version": row["version"],
+        }
 
     @staticmethod
     def _required_asset_id(value: dict[str, Any], key: str) -> str:

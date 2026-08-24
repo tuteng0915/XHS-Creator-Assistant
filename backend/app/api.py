@@ -21,6 +21,7 @@ from app.models import (
     AnalysisRunCreate,
     AnalysisRunResponse,
     AnalysisRunSummary,
+    AssetProposalPreviewResponse,
     AssetProposalResponse,
     AssetProposalUpdate,
     CapabilityDefinitionDiffResponse,
@@ -610,6 +611,13 @@ def create_api_router(
         conversation_id: str,
     ) -> list[AssetProposalResponse]:
         return asset_proposal_service.list(conversation_id=conversation_id)
+
+    @router.get(
+        "/asset-proposals/{proposal_id}/preview",
+        response_model=AssetProposalPreviewResponse,
+    )
+    def preview_asset_proposal(proposal_id: str) -> AssetProposalPreviewResponse:
+        return asset_proposal_service.preview(proposal_id)
 
     @router.post(
         "/asset-proposals/{proposal_id}/apply",

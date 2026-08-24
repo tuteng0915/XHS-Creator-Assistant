@@ -74,6 +74,7 @@ https://your-domain/api/...
 - 小红书创作者主页在后端仍是独立 input asset type，但前端归入“创作者档案”；它可由本地 MediaCrawler fixture 导入，并可直接作为账号诊断输入；
 - 历史分析结果 CSV 导出；
 - 选题可调用创作 Brief 生成能力；Brief 和内容结构作为创作输出复用 Draft 表，通过 `kind` 区分；
+- 选题和创作输出详情已按资产编辑体验拆分：用户可编辑字段独立展示，generated snapshot、input snapshot、来源和 model metadata 保持只读；
 - 已支持从 Brief 继续生成内容结构，并在结构 Draft 的 input snapshot 中记录 sourceBrief；
 - 输入素材整理 agent 草稿入口；
 - 输入素材整理通过后端 `input_asset.format_*` skills 调用，不再是纯前端假整理。
@@ -195,6 +196,7 @@ https://your-domain/api/...
 - Capability Maker 已经可以拿到 capability catalog。
 - Maker conversation 已经可以携带当前正在查看的具体 Skill / Agent / Workflow 作为 context target。
 - Asset proposal 已支持 pending 状态下编辑 title、description 和 proposed action JSON 后再 apply。
+- Asset proposal 已支持 apply 前 diff preview；用户需要先查看将创建/更新的目标资产字段，再确认应用。
 - Apply / reject 会持久化状态、结果和错误；非 pending proposal 不可重复编辑或应用。
 - Skill / Agent / Workflow proposal 已有基础字段校验、stable id 不可变校验和引用存在性校验。
 - Skill 详情页已经支持直接编辑 contract；视频诊断 Skill 已支持 Rubric 表单化编辑。
@@ -202,7 +204,6 @@ https://your-domain/api/...
 
 仍需增强：
 
-- AssetProposal apply 前的 diff 预览；能力资产详情页的 definition diff / revert 已完成第一版；
 - Agent / Workflow 详情页更友好的表单化辅助编辑；当前第一版已经可以编辑并保存 definition，但 task plan 仍主要是 JSON editor；
 - Skill dry-run，用当前 workspace 资产快速测试分析类 Skill 的输入 context、模型输出和 validation；当前最小 Skill Test 只支持已有 direct invoke 的 formatter/media skills；
 - conversation message 显式 idempotency key。

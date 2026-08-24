@@ -5,6 +5,7 @@ import type {
   AgentConversationUpdate,
   AgentDefinitionUpdate,
   AssetProposal,
+  AssetProposalPreview,
   AgentStatus,
   AgentSummary,
   AnalysisRun,
@@ -405,6 +406,9 @@ export const assetProposalApi = {
     request<AssetProposal>(`/api/asset-proposals/${proposalId}/apply`, {
       method: 'POST',
     }),
+
+  preview: (proposalId: string) =>
+    request<AssetProposalPreview>(`/api/asset-proposals/${proposalId}/preview`),
 
   update: (
     proposalId: string,
