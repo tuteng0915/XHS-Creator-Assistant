@@ -144,7 +144,7 @@ nav a.active, nav button.active { color: var(--blue); background: var(--blue-sof
 }
 .inline-save-state, .inline-error { font-size: 11.5px; }
 .inline-save-state { color: var(--ok); }
-.inline-error { color: #b91c1c; }
+.inline-error { color: #b91c1c; white-space: pre-line; }
 .simulation-divider { margin-top: 16px; padding-top: 4px; border-top: 1px dashed var(--line); }
 .mode-switch { margin-top: 14px; }
 .action-row { display: flex; gap: 8px; margin-top: 12px; }

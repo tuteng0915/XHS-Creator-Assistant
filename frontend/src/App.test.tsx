@@ -268,6 +268,21 @@ const skillSummary: SkillSummary = {
   updatedAt: '2026-07-11T12:00:00Z',
 }
 
+const painPointSkill: SkillSummary = {
+  ...skillSummary,
+  id: 'skill-pain-points',
+  skillId: 'analysis.pain_points_from_comments',
+  displayName: 'Analyze Comment Pain Points',
+}
+
+const accountTopicSkill: SkillSummary = {
+  ...skillSummary,
+  id: 'skill-account-topics',
+  skillId: 'topic.generate_from_account_diagnosis',
+  displayName: 'Generate Account Topics',
+  category: 'topic',
+}
+
 const commentsFormatterSkill: SkillSummary = {
   ...skillSummary,
   id: 'skill-format-comments',
@@ -288,6 +303,33 @@ const creativeBriefSkill: SkillSummary = {
   artifactEffect: 'Draft(kind=content_brief)',
 }
 
+const topicSaveSkill: SkillSummary = {
+  ...skillSummary,
+  id: 'skill-topic-save',
+  skillId: 'topic.save_candidate',
+  displayName: 'Save Topic Candidate',
+  category: 'topic',
+  artifactEffect: 'Topic',
+}
+
+const draftStructureSkill: SkillSummary = {
+  ...skillSummary,
+  id: 'skill-draft-structure',
+  skillId: 'draft.generate_structure_from_brief',
+  displayName: 'Generate Content Structure from Brief',
+  category: 'creative_output',
+  artifactEffect: 'Draft(kind=content_structure)',
+}
+
+const draftEditSkill: SkillSummary = {
+  ...skillSummary,
+  id: 'skill-draft-edit',
+  skillId: 'draft.edit',
+  displayName: 'Edit Draft',
+  category: 'creative_output',
+  artifactEffect: 'Draft.editableContent',
+}
+
 const videoQualitySkill: SkillSummary = {
   ...skillSummary,
   id: 'skill-video-quality',
@@ -301,9 +343,14 @@ const videoQualitySkill: SkillSummary = {
 const skills: Record<string, SkillSummary[]> = {
   'workspace-1': [
     skillSummary,
+    painPointSkill,
+    accountTopicSkill,
     videoQualitySkill,
     commentsFormatterSkill,
     creativeBriefSkill,
+    topicSaveSkill,
+    draftStructureSkill,
+    draftEditSkill,
   ],
   'workspace-2': [
     {
@@ -574,6 +621,12 @@ const creativeOutputWorkflowDetail: WorkflowAsset = {
   ...creativeOutputWorkflowSummary,
   agentPlan: {
     tasks: [
+      {
+        taskId: 'select_topic',
+        agentId: 'topic_draft_editor',
+        skillIds: ['topic.save_candidate'],
+        dependsOn: [],
+      },
       {
         taskId: 'generate_brief',
         agentId: 'topic_draft_editor',
@@ -1609,9 +1662,14 @@ beforeEach(() => {
   ]
   skills['workspace-1'] = [
     skillSummary,
+    painPointSkill,
+    accountTopicSkill,
     videoQualitySkill,
     commentsFormatterSkill,
     creativeBriefSkill,
+    topicSaveSkill,
+    draftStructureSkill,
+    draftEditSkill,
   ]
   skills['workspace-2'] = [
     {
@@ -2386,6 +2444,31 @@ describe('workspace UI', () => {
     expect(screen.getAllByText(/evidence boundaries first/).length).toBeGreaterThan(0)
   })
 
+  it('validates agent definition skill references before saving', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Agents/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Account Diagnosis Strategist/ }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 Agent' }))
+
+    fireEvent.change(screen.getByLabelText('Skill IDs（一行一个）'), {
+      target: { value: 'missing.skill' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存 Agent Definition' }))
+
+    expect(await screen.findByText(/未知 Skill：missing\.skill/)).toBeInTheDocument()
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url) === '/api/agents/agent-account/definition' &&
+          init?.method === 'PATCH',
+      ),
+    ).toBe(false)
+  })
+
   it('lets users edit and apply asset proposals from agent conversations', async () => {
     const fetchMock = installWorkspaceApiMock()
     render(<App />)
@@ -2647,14 +2730,14 @@ describe('workspace UI', () => {
     })
     expect(await screen.findByText('Workflow Tasks')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '添加 Task' }))
-    fireEvent.change(screen.getByLabelText('Task ID', { selector: '#workflow-task-id-2' }), {
+    fireEvent.change(screen.getByLabelText('Task ID', { selector: '#workflow-task-id-3' }), {
       target: { value: 'pm_review_brief' },
     })
-    fireEvent.change(screen.getByLabelText('Agent', { selector: '#workflow-task-agent-2' }), {
+    fireEvent.change(screen.getByLabelText('Agent', { selector: '#workflow-task-agent-3' }), {
       target: { value: 'topic_draft_editor' },
     })
     const secondTaskSkillBox = document.querySelector(
-      '#workflow-task-skills-2',
+      '#workflow-task-skills-3',
     ) as HTMLTextAreaElement | null
     expect(secondTaskSkillBox).toBeTruthy()
     if (!secondTaskSkillBox) throw new Error('Missing second task skill textarea')
@@ -2695,6 +2778,36 @@ describe('workspace UI', () => {
     expect(screen.getAllByText('PM Creative Output Workflow').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/generated/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/pm_review_brief/).length).toBeGreaterThan(0)
+  })
+
+  it('validates workflow task plans before saving', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Workflows/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Topic to Creative Output Workflow/ }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 Workflow' }))
+
+    fireEvent.change(
+      screen.getByLabelText('Task ID', { selector: '#workflow-task-id-1' }),
+      {
+        target: { value: 'select_topic' },
+      },
+    )
+    fireEvent.click(screen.getByRole('button', { name: '保存 Workflow Definition' }))
+
+    expect(
+      await screen.findByText(/Task ID 不能重复：select_topic/),
+    ).toBeInTheDocument()
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url) === '/api/workflows/workflow-creative-output/definition' &&
+          init?.method === 'PATCH',
+      ),
+    ).toBe(false)
   })
 
   it('auto-saves account inputs before creating a diagnosis run', async () => {

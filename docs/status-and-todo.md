@@ -206,7 +206,7 @@ https://your-domain/api/...
 
 仍需增强：
 
-- Agent / Workflow 详情页更完整的表单化校验；当前已有结构化辅助编辑，但复杂字段仍保留 JSON editor；
+- Agent / Workflow 详情页已增加保存前表单校验：Agent 会检查 skill 引用；Workflow 会检查 entry agents、task agents、task skills、重复 taskId、dependsOn 引用和依赖循环；复杂字段仍保留 JSON editor；
 - Skill dry-run，用当前 workspace 资产快速测试分析类 Skill 的输入 context、模型输出和 validation；当前最小 Skill Test 只支持已有 direct invoke 的 formatter/media skills；
 - conversation message 显式 idempotency key。
 
