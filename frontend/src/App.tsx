@@ -25,7 +25,9 @@ import {
 import sampleTrendCsv from '../../sample_trend.csv?raw'
 import { HealthPage } from './HealthPage'
 import { AccountProfilePage } from './components/AccountProfilePage'
-import { AssetProposalsPanel } from './components/AssetProposalsPanel'
+import { AgentConversationPanel } from './components/AgentConversationPanel'
+import { AgentsPage } from './components/AgentsPage'
+import { ConversationsPage } from './components/ConversationsPage'
 import { InputAssetsPage } from './components/InputAssetsPage'
 import { MediaAssetsPage } from './components/MediaAssetsPage'
 import {
@@ -57,6 +59,7 @@ import {
   type SaveState,
 } from './components/StageResultViews'
 import { WorkspaceShell, type ActivePage } from './components/WorkspaceShell'
+import { WorkflowsPage } from './components/WorkflowsPage'
 import { WorkflowCallPanel } from './components/WorkflowCallPanel'
 import {
   WorkflowOutputPanel,
@@ -4921,198 +4924,31 @@ function WorkspaceApp() {
   }
 
   function renderConversationsPage() {
-    const selectedConversationAgent = selectedAgentConversation
-      ? agents.find((agent) => agent.id === selectedAgentConversation.agentAssetId)
-      : null
     return (
-      <div className="workspace-page">
-        <section className="history-list">
-          <div className="panel-title">💬 对话记录</div>
-          <p className="subline">
-            Agent 对话、Maker 生成建议和输入素材整理过程会自动保存；这里按内容资产方式复盘。
-          </p>
-          {agentConversations.length === 0 ? (
-            <div className="empty-card compact-empty">
-              暂无对话记录。可以从右侧 Agents 页面开始一次对话。
-            </div>
-          ) : (
-            agentConversations.map((conversation) => {
-              const agent = agents.find(
-                (item) => item.id === conversation.agentAssetId,
-              )
-              return (
-                <button
-                  key={conversation.id}
-                  className={`run-row ${
-                    selectedAgentConversation?.id === conversation.id ? 'active' : ''
-                  }`}
-                  onClick={() => openAgentConversation(conversation.id)}
-                >
-                  <span>{conversation.title}</span>
-                  <b>{conversation.executionStatus || conversation.status}</b>
-                  <small>
-                    {agent?.displayName || 'Unknown Agent'} ·{' '}
-                    {new Date(conversation.updatedAt).toLocaleString()}
-                  </small>
-                </button>
-              )
-            })
-          )}
-        </section>
-        <section className="history-detail">
-          {selectedAgentConversation ? (
-            <>
-              <div className="detail-head">
-                <div>
-                  <h2>{selectedAgentConversation.title}</h2>
-                  <p>
-                    {selectedConversationAgent?.displayName || 'Unknown Agent'} ·{' '}
-                    {selectedAgentConversation.executionStatus ||
-                      selectedAgentConversation.status}{' '}
-                    · {new Date(selectedAgentConversation.updatedAt).toLocaleString()}
-                  </p>
-                </div>
-                <span>{selectedAgentConversation.status}</span>
-              </div>
-              {Object.keys(selectedAgentConversation.contextTarget || {}).length > 0 && (
-                <>
-                  <label>Context Target</label>
-                  <pre className="json-preview">
-                    {JSON.stringify(
-                      selectedAgentConversation.contextTarget,
-                      null,
-                      2,
-                    )}
-                  </pre>
-                </>
-              )}
-              <div className="detail-actions">
-                <button
-                  type="button"
-                  disabled={!selectedConversationAgent}
-                  onClick={() => {
-                    if (!selectedConversationAgent) return
-                    setActivePage('agents')
-                    openAgent(selectedConversationAgent.id)
-                  }}
-                >
-                  打开对应 Agent
-                </button>
-                <button
-                  type="button"
-                  disabled={conversationSaving}
-                  onClick={() =>
-                    updateAgentConversationAsset({
-                      status:
-                        selectedAgentConversation.status === 'archived'
-                          ? 'active'
-                          : 'archived',
-                    })
-                  }
-                >
-                  {selectedAgentConversation.status === 'archived'
-                    ? '恢复对话'
-                    : '归档对话'}
-                </button>
-              </div>
-              <div className="source-editor-card compact">
-                <label htmlFor="conversation-title-editor">对话标题</label>
-                <input
-                  id="conversation-title-editor"
-                  value={conversationTitleDraft}
-                  onChange={(event) => {
-                    setConversationTitleDraft(event.target.value)
-                    setConversationSaveStatus('')
-                  }}
-                />
-                <div className="save-row">
-                  <button
-                    className="save-button"
-                    disabled={
-                      conversationSaving ||
-                      !conversationTitleDraft.trim() ||
-                      conversationTitleDraft === selectedAgentConversation.title
-                    }
-                    onClick={() =>
-                      updateAgentConversationAsset({
-                        title: conversationTitleDraft.trim(),
-                      })
-                    }
-                  >
-                    {conversationSaving ? '保存中…' : '保存对话标题'}
-                  </button>
-                  {conversationSaveStatus && (
-                    <span
-                      className={
-                        conversationSaveStatus.startsWith('error:')
-                          ? 'inline-error'
-                          : 'inline-save-state'
-                      }
-                    >
-                      {conversationSaveStatus === 'saving'
-                        ? '保存中…'
-                        : conversationSaveStatus === 'saved'
-                          ? '已保存'
-                          : conversationSaveStatus.replace('error:', '保存失败：')}
-                    </span>
-                  )}
-                </div>
-              </div>
-              {selectedAgentConversation.messages.length === 0 ? (
-                <div className="empty-card compact-empty">这条对话还没有消息。</div>
-              ) : (
-                <div className="agent-chat conversation-asset-chat">
-                  {selectedAgentConversation.messages.map((message) => (
-                    <div
-                      className={`chat-message ${message.role}`}
-                      key={message.id}
-                    >
-                      <b>
-                        {message.role === 'user'
-                          ? '你'
-                          : selectedConversationAgent?.displayName || 'Assistant'}
-                      </b>
-                      <p>{message.content}</p>
-                      {message.role === 'assistant' && (
-                        <details>
-                          <summary>
-                            引用资产 {message.assetRefs.length} · Proposed Actions{' '}
-                            {message.proposedActions.length}
-                          </summary>
-                          <pre className="json-preview">
-                            {JSON.stringify(
-                              {
-                                assetRefs: message.assetRefs,
-                                proposedActions: message.proposedActions,
-                                modelMetadata: message.modelMetadata,
-                              },
-                              null,
-                              2,
-                            )}
-                          </pre>
-                        </details>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              <AssetProposalsPanel
-                proposals={assetProposals}
-                availableSkills={skills}
-                availableAgents={agents}
-                onUpdate={updateAssetProposal}
-                onPreview={previewAssetProposal}
-                onApply={applyAssetProposal}
-                onReject={rejectAssetProposal}
-              />
-            </>
-          ) : (
-            <div className="empty-card">
-              选择一条对话记录，查看消息、引用资产、model metadata 和 proposed actions。
-            </div>
-          )}
-        </section>
-      </div>
+      <ConversationsPage
+        conversations={agentConversations}
+        selectedConversation={selectedAgentConversation}
+        agents={agents}
+        assetProposals={assetProposals}
+        availableSkills={skills}
+        conversationTitleDraft={conversationTitleDraft}
+        conversationSaving={conversationSaving}
+        conversationSaveStatus={conversationSaveStatus}
+        onOpenConversation={openAgentConversation}
+        onOpenConversationAgent={(agentAssetId) => {
+          setActivePage('agents')
+          openAgent(agentAssetId)
+        }}
+        onConversationTitleDraftChange={(value) => {
+          setConversationTitleDraft(value)
+          setConversationSaveStatus('')
+        }}
+        onUpdateConversation={updateAgentConversationAsset}
+        onUpdateProposal={updateAssetProposal}
+        onPreviewProposal={previewAssetProposal}
+        onApplyProposal={applyAssetProposal}
+        onRejectProposal={rejectAssetProposal}
+      />
     )
   }
 
@@ -5240,371 +5076,103 @@ function WorkspaceApp() {
   }
 
   function renderAgentsPage() {
-    const selectedAgentConversations = selectedAgent
-      ? agentConversations.filter(
-          (conversation) => conversation.agentAssetId === selectedAgent.id,
-        )
-      : []
     return (
-      <div className="workspace-page">
-        <section className="history-list">
-          <div className="panel-title">◉ Agents</div>
-          <p className="subline">
-            Agent 是产品角色资产：system prompt + 多个 Skills +
-            默认上下文边界。用户侧只读展示，不提供通用 agent builder。
-          </p>
-          <div className="asset-maker-call">
-            <span>描述你需要的角色，Capability Maker 会组合 system prompt、skills 和上下文边界。</span>
-            <button
-              className="small-primary"
-              disabled={agentConversationCreating}
-              onClick={() =>
-                startMakerConversation(
-                  MAKER_AGENT_IDS.agent,
-                  '我想设计一个新的 Agent，用来：\n\n它应该具备哪些能力 / skills：\n\n它应该读取哪些资产，不应该读取哪些资产：',
-                  selectedAgent && selectedAgent.agentId !== MAKER_AGENT_IDS.agent
-                    ? { assetType: 'agent', assetId: selectedAgent.id }
-                    : undefined,
-                )
-              }
-            >
-              让 Capability Maker 设计 Agent
-            </button>
-          </div>
-          {runError && <div className="error-banner">⚠ {runError}</div>}
-          {agents.map((agent) => (
-            <button
-              key={agent.id}
-              className={`run-row ${selectedAgent?.id === agent.id ? 'active' : ''}`}
-              onClick={() => openAgent(agent.id)}
-            >
-              <span>{agent.displayName}</span>
-              <b className={capabilityStatusClass(agent.status)}>{agent.status}</b>
-              <small>{agent.agentId}</small>
-            </button>
-          ))}
-          {selectedAgent && (
-            <>
-              <div className="panel-title secondary-title">Conversations</div>
-              <button
-                className="small-primary"
-                disabled={agentConversationCreating}
-                onClick={() => startAgentConversation(selectedAgent)}
-              >
-                {agentConversationCreating ? '创建中…' : '＋ 开始对话'}
-              </button>
-              {selectedAgentConversations.length === 0 ? (
-                <div className="empty-card compact-empty">暂无 agent 对话。</div>
-              ) : (
-                selectedAgentConversations.map((conversation) => (
-                  <button
-                    key={conversation.id}
-                    className={`run-row ${
-                      selectedAgentConversation?.id === conversation.id ? 'active' : ''
-                    }`}
-                    onClick={() => openAgentConversation(conversation.id)}
-                  >
-	                    <span>{conversation.title}</span>
-	                    <b>{conversation.executionStatus || conversation.status}</b>
-	                    <small>{new Date(conversation.updatedAt).toLocaleString()}</small>
-                  </button>
-                ))
-              )}
-            </>
-          )}
-        </section>
-        <section className="history-detail">
-          {selectedAgent ? (
-            <>
-              <div className="detail-head">
-                <div>
-                  <h2>{selectedAgent.displayName}</h2>
-                  <p>
-                    {selectedAgent.agentId} · {selectedAgent.source} ·{' '}
-                    {selectedAgent.version}
-                  </p>
-                </div>
-                <span
-                  className={capabilityStatusClass(selectedAgent.status)}
-                >
-                  {selectedAgent.status}
-                </span>
-              </div>
-              <div className="detail-actions">
-                <button
-                  type="button"
-                  onClick={() => startAgentDefinitionEdit(selectedAgent)}
-                >
-                  编辑 Agent
-                </button>
-                <button
-                  type="button"
-                  disabled={agentConversationCreating}
-                  onClick={() =>
-                    startMakerConversation(
-                      MAKER_AGENT_IDS.agent,
-                      `我想调优这个 Agent：${selectedAgent.displayName}\n\n需要修改的 system prompt / skills / context policy：`,
-                      { assetType: 'agent', assetId: selectedAgent.id },
-                    )
-                  }
-                >
-                  让 Capability Maker 调优
-                </button>
-              </div>
-              {renderCapabilityDefinitionDiffPanel('agent')}
-              {renderAgentDefinitionEditor()}
-              <p>{selectedAgent.purpose}</p>
-              <label>System Prompt</label>
-              <div className="why">{selectedAgent.systemPrompt}</div>
-              <label>Skills</label>
-              <ListBlock title="组合能力" items={selectedAgent.skillIds} />
-              <label>Default Context Policy</label>
-              <pre className="json-preview">
-                {JSON.stringify(selectedAgent.defaultContextPolicy, null, 2)}
-              </pre>
-              {selectedAgent.userNotes && (
-                <>
-                  <label>Workspace Notes</label>
-                  <div className="why">{selectedAgent.userNotes}</div>
-                </>
-              )}
-              <label>Agent Conversation</label>
-              {selectedAgentConversation ? (
-                <>
-                  <div className="agent-chat">
-                    <p className="microcopy">
-                      当前对话模式：{mode === 'demo' ? '演示模式' : '实时生成'}
-                    </p>
-                    <div className="mode-switch">
-                      <button
-                        type="button"
-                        className={mode === 'demo' ? 'active' : ''}
-                        onClick={() => setMode('demo')}
-                      >
-                        演示模式
-                      </button>
-                      <button
-                        type="button"
-                        className={mode === 'live' ? 'active' : ''}
-                        onClick={() => setMode('live')}
-                      >
-                        实时生成
-                      </button>
-                    </div>
-                    {selectedAgentConversation.messages.length === 0 ? (
-                      <div className="empty-card compact-empty">
-                        发送第一条消息，Agent 会读取当前 workspace broad context。
-                      </div>
-                    ) : (
-                      selectedAgentConversation.messages.map((message) => (
-                        <div
-                          className={`chat-message ${message.role}`}
-                          key={message.id}
-                        >
-                          <b>{message.role === 'user' ? '你' : selectedAgent.displayName}</b>
-                          <p>{message.content}</p>
-                          {message.role === 'assistant' && (
-                            <details>
-                              <summary>
-                                引用资产 {message.assetRefs.length} · Proposed Actions{' '}
-                                {message.proposedActions.length}
-                              </summary>
-                              <pre className="json-preview">
-                                {JSON.stringify(
-                                  {
-                                    assetRefs: message.assetRefs,
-                                    proposedActions: message.proposedActions,
-                                    modelMetadata: message.modelMetadata,
-                                  },
-                                  null,
-                                  2,
-                                )}
-                              </pre>
-                            </details>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-	                  <AssetProposalsPanel
-	                    proposals={assetProposals}
-	                    availableSkills={skills}
-	                    availableAgents={agents}
-	                    onUpdate={updateAssetProposal}
-	                    onPreview={previewAssetProposal}
-	                    onApply={applyAssetProposal}
-	                    onReject={rejectAssetProposal}
-	                  />
-                  <form className="agent-chat-form" onSubmit={sendAgentMessage}>
-                    <textarea
-                      ref={agentChatComposerRef}
-                      rows={3}
-                      value={agentMessageDraft}
-                      onChange={(event) =>
-                        updateAgentMessageDraft(event.target.value)
-                      }
-                      placeholder="直接和这个 Agent 对话。第一版会引用 workspace 资产并提出建议，不会自动修改资产。"
-                    />
-                    <button
-                      className="primary"
-                      disabled={agentSending || !agentMessageDraft.trim()}
-                    >
-                      {agentSending ? '发送中…' : '发送给 Agent'}
-                    </button>
-                  </form>
-                </>
-              ) : (
-                <div className="empty-card">
-                  点击“开始对话”，直接调用这个 Agent。第一版只读 workspace
-                  context，并把潜在修改保存为 proposed actions。
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="empty-card">
-              选择一个 Agent 查看 system prompt、skills 和上下文边界。
-            </div>
-          )}
-        </section>
-      </div>
+      <AgentsPage
+        agents={agents}
+        skills={skills}
+        selectedAgent={selectedAgent}
+        conversations={agentConversations}
+        selectedConversation={selectedAgentConversation}
+        agentConversationCreating={agentConversationCreating}
+        runError={runError}
+        definitionDiffPanel={renderCapabilityDefinitionDiffPanel('agent')}
+        definitionEditor={renderAgentDefinitionEditor()}
+        conversationPanel={
+          <AgentConversationPanel
+            conversation={selectedAgentConversation}
+            agent={selectedAgent}
+            proposals={assetProposals}
+            availableSkills={skills}
+            availableAgents={agents}
+            mode={mode}
+            draft={agentMessageDraft}
+            sending={agentSending}
+            composerRef={agentChatComposerRef}
+            onModeChange={setMode}
+            onDraftChange={updateAgentMessageDraft}
+            onSend={sendAgentMessage}
+            onUpdateProposal={updateAssetProposal}
+            onPreviewProposal={previewAssetProposal}
+            onApplyProposal={applyAssetProposal}
+            onRejectProposal={rejectAssetProposal}
+          />
+        }
+        onOpenAgent={openAgent}
+        onEditAgent={startAgentDefinitionEdit}
+        onDesignAgent={() =>
+          startMakerConversation(
+            MAKER_AGENT_IDS.agent,
+            '我想设计一个新的 Agent，用来：\n\n它应该具备哪些能力 / skills：\n\n它应该读取哪些资产，不应该读取哪些资产：',
+            selectedAgent && selectedAgent.agentId !== MAKER_AGENT_IDS.agent
+              ? { assetType: 'agent', assetId: selectedAgent.id }
+              : undefined,
+          )
+        }
+        onTuneAgent={(agent) =>
+          startMakerConversation(
+            MAKER_AGENT_IDS.agent,
+            `我想调优这个 Agent：${agent.displayName}\n\n需要修改的 system prompt / skills / context policy：`,
+            { assetType: 'agent', assetId: agent.id },
+          )
+        }
+        onStartConversation={startAgentConversation}
+        onOpenConversation={openAgentConversation}
+        onOpenSkill={(skillAssetId) => {
+          setActivePage('skills')
+          openSkill(skillAssetId)
+        }}
+      />
     )
   }
 
   function renderWorkflowAssetsPage() {
     return (
-      <div className="workspace-page">
-        <section className="history-list">
-          <div className="panel-title">⌘ Workflows</div>
-          <p className="subline">
-            Workflow 是多 agent、多级 task 的产品工作流资产；用户侧只读展示计划结构，
-            不提供通用流程编辑器。
-          </p>
-          <div className="asset-maker-call">
-            <span>描述你想新增的创作者链路，Capability Maker 会生成多 Agent task plan 提案。</span>
-            <button
-              className="small-primary"
-              disabled={agentConversationCreating}
-              onClick={() =>
-                startMakerConversation(
-                  MAKER_AGENT_IDS.workflow,
-                  '我想设计一个新的 Workflow，用来：\n\n输入资产包括：\n\n输出资产应该是：\n\n需要哪些 agent / skill 协作：',
-                  selectedWorkflowAsset
-                    ? { assetType: 'workflow', assetId: selectedWorkflowAsset.id }
-                    : undefined,
-                )
-              }
-            >
-              让 Capability Maker 设计 Workflow
-            </button>
-          </div>
-          {workflowAssets.map((workflowAsset) => (
-            <button
-              key={workflowAsset.id}
-              className={`run-row ${
-                selectedWorkflowAsset?.id === workflowAsset.id ? 'active' : ''
-              }`}
-              onClick={() => openWorkflowAsset(workflowAsset.id)}
-            >
-              <span>{workflowAsset.displayName}</span>
-              <b className={capabilityStatusClass(workflowAsset.status)}>
-                {workflowAsset.status}
-              </b>
-              <small>
-                {workflowAsset.workflowId}
-                {workflowAsset.callBinding ? ` · 调用:${workflowAsset.callBinding}` : ''}
-              </small>
-            </button>
-          ))}
-        </section>
-        <section className="history-detail">
-          {selectedWorkflowAsset ? (
-            <>
-              <div className="detail-head">
-                <div>
-                  <h2>{selectedWorkflowAsset.displayName}</h2>
-                  <p>
-                    {selectedWorkflowAsset.workflowId} ·{' '}
-                    {selectedWorkflowAsset.source} ·{' '}
-                    {selectedWorkflowAsset.version}
-                  </p>
-                </div>
-                <span
-                  className={capabilityStatusClass(selectedWorkflowAsset.status)}
-                >
-                  {selectedWorkflowAsset.status}
-                </span>
-              </div>
-              <div className="detail-actions">
-                <button
-                  type="button"
-                  onClick={() => startWorkflowDefinitionEdit(selectedWorkflowAsset)}
-                >
-                  编辑 Workflow
-                </button>
-                <button
-                  type="button"
-                  disabled={agentConversationCreating}
-                  onClick={() =>
-                    startMakerConversation(
-                      MAKER_AGENT_IDS.workflow,
-                      `我想调优这个 Workflow：${selectedWorkflowAsset.displayName}\n\n需要修改的 task plan / agent / skill / 调用注册：`,
-                      { assetType: 'workflow', assetId: selectedWorkflowAsset.id },
-                    )
-                  }
-                >
-                  让 Capability Maker 调优
-                </button>
-              </div>
-              {renderCapabilityDefinitionDiffPanel('workflow')}
-              {renderWorkflowDefinitionEditor()}
-              <p>{selectedWorkflowAsset.purpose}</p>
-              <label>Workflow 调用注册</label>
-              <div className="source-editor-card compact">
-                <p className="subline">
-                  注册后会出现在右侧 workflow 调用区。这里绑定的是已有产品执行入口，
-                  不会把 workflow asset 当成任意图执行器。
-                </p>
-                <select
-                  aria-label="Workflow 调用注册"
-                  value={selectedWorkflowAsset.callBinding}
-                  onChange={(event) =>
-                    updateWorkflowCallBinding(
-                      selectedWorkflowAsset,
-                      event.target.value as WorkflowAsset['callBinding'],
-                    )
-                  }
-                >
-                  <option value="">不注册为调用入口</option>
-                  <option value="account">账号诊断执行入口</option>
-                  <option value="trend">热点分析执行入口</option>
-                  <option value="video">视频博主质量诊断执行入口</option>
-                </select>
-              </div>
-              <label>Artifact Effect</label>
-              <div className="why">{selectedWorkflowAsset.artifactEffect}</div>
-              <label>Entry Agents</label>
-              <ListBlock
-                title="入口角色"
-                items={selectedWorkflowAsset.entryAgentIds}
-              />
-              <label>Agent Task Plan</label>
-              <pre className="json-preview">
-                {JSON.stringify(selectedWorkflowAsset.agentPlan, null, 2)}
-              </pre>
-              {selectedWorkflowAsset.userNotes && (
-                <>
-                  <label>Workspace Notes</label>
-                  <div className="why">{selectedWorkflowAsset.userNotes}</div>
-                </>
-              )}
-            </>
-          ) : (
-            <div className="empty-card">
-              选择一个 Workflow 查看 entry agents、task 层级和产物影响。
-            </div>
-          )}
-        </section>
-      </div>
+      <WorkflowsPage
+        workflowAssets={workflowAssets}
+        agents={agents}
+        skills={skills}
+        selectedWorkflowAsset={selectedWorkflowAsset}
+        agentConversationCreating={agentConversationCreating}
+        definitionDiffPanel={renderCapabilityDefinitionDiffPanel('workflow')}
+        definitionEditor={renderWorkflowDefinitionEditor()}
+        onOpenWorkflow={openWorkflowAsset}
+        onEditWorkflow={startWorkflowDefinitionEdit}
+        onDesignWorkflow={() =>
+          startMakerConversation(
+            MAKER_AGENT_IDS.workflow,
+            '我想设计一个新的 Workflow，用来：\n\n输入资产包括：\n\n输出资产应该是：\n\n需要哪些 agent / skill 协作：',
+            selectedWorkflowAsset
+              ? { assetType: 'workflow', assetId: selectedWorkflowAsset.id }
+              : undefined,
+          )
+        }
+        onTuneWorkflow={(workflowAsset) =>
+          startMakerConversation(
+            MAKER_AGENT_IDS.workflow,
+            `我想调优这个 Workflow：${workflowAsset.displayName}\n\n需要修改的 task plan / agent / skill / 调用注册：`,
+            { assetType: 'workflow', assetId: workflowAsset.id },
+          )
+        }
+        onUpdateCallBinding={updateWorkflowCallBinding}
+        onOpenAgent={(agentAssetId) => {
+          setActivePage('agents')
+          openAgent(agentAssetId)
+        }}
+        onOpenSkill={(skillAssetId) => {
+          setActivePage('skills')
+          openSkill(skillAssetId)
+        }}
+      />
     )
   }
 

@@ -2679,7 +2679,7 @@ describe('workspace UI', () => {
     )
 
     expect(await screen.findByText('AnalysisRun + Topic candidates')).toBeInTheDocument()
-    expect(screen.getByText(/diagnose_account/)).toBeInTheDocument()
+    expect(screen.getAllByText(/diagnose_account/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/account_diagnosis_strategist/).length).toBeGreaterThan(0)
 
     fireEvent.click(
@@ -2691,8 +2691,10 @@ describe('workspace UI', () => {
         'Topic + Draft(kind=content_brief) + Draft(kind=content_structure)',
       ),
     ).toBeInTheDocument()
-    expect(screen.getByText(/generate_brief/)).toBeInTheDocument()
-    expect(screen.getByText(/draft.generate_structure_from_brief/)).toBeInTheDocument()
+    expect(screen.getAllByText(/generate_brief/).length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(/draft.generate_structure_from_brief/).length,
+    ).toBeGreaterThan(0)
 
     fireEvent.change(screen.getByLabelText('Workflow 调用注册'), {
       target: { value: 'trend' },

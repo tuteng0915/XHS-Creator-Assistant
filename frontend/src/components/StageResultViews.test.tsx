@@ -39,7 +39,7 @@ describe('video stage result evidence boundary rendering', () => {
       />,
     )
 
-    expect(screen.getByText('证据边界')).toBeInTheDocument()
+    expect(screen.getByText('证据不足，需要保守判断')).toBeInTheDocument()
     expect(screen.getByText(/证据置信度/)).toBeInTheDocument()
     expect(screen.getByText(/未提供已确认的视频理解结果/)).toBeInTheDocument()
   })
@@ -58,8 +58,9 @@ describe('video stage result evidence boundary rendering', () => {
       />,
     )
 
-    expect(screen.getByText('无法可靠评估：')).toBeInTheDocument()
-    expect(screen.getByText(/镜头调度/)).toBeInTheDocument()
+    expect(screen.getByText(/当前不可可靠评估/)).toBeInTheDocument()
+    expect(screen.getAllByText(/镜头调度/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/建议补充：/)).toBeInTheDocument()
     expect(screen.getByText(/建议补充证据/)).toBeInTheDocument()
   })
 
@@ -77,6 +78,7 @@ describe('video stage result evidence boundary rendering', () => {
     )
 
     expect(screen.getByText(/激励适配：conditional_fit/)).toBeInTheDocument()
+    expect(screen.getByText('72')).toBeInTheDocument()
     expect(screen.getByText(/有视频理解/)).toBeInTheDocument()
     expect(screen.getByText(/false/)).toBeInTheDocument()
   })

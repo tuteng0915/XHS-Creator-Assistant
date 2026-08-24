@@ -229,6 +229,8 @@ Recent update:
 - sending a message now creates the user message and an assistant placeholder;
 - the placeholder records `queued`, `running`, `completed`, or `failed` in
   message metadata;
+- the placeholder also records `queuedAt`, `startedAt`, and `completedAt` where
+  applicable;
 - backend in-process tasks generate the assistant reply after the request
   returns;
 - startup recovery attempts to resume assistant messages left in `queued` or
@@ -236,7 +238,9 @@ Recent update:
 - frontend observes pending replies by polling the conversation.
 
 Remaining gap: this is still an in-process task model, not a durable
-conversation job table with persisted leases or idempotency keys.
+conversation job table with persisted leases. Message-level client idempotency
+keys are implemented for ordinary frontend retries, but they are not a durable
+job queue.
 
 ### Improved — input asset formatter is now a backend skill invocation
 
@@ -371,6 +375,10 @@ Implemented:
 - Qwen requests include `response_format: {"type": "json_object"}`;
 - parser handles fenced JSON;
 - parser extracts the first JSON object from responses with surrounding prose;
+- parser unwraps conservative `data`, `result`, or `output` wrapper objects when
+  the nested object contains the required operation root field;
+- parser can read OpenAI-compatible `function_call.arguments` or
+  `tool_calls[].function.arguments` when message content is blank;
 - parsed output is validated against operation-level required root fields and
   basic container types;
 - agent chat can still gracefully treat plain text as a reply, but malformed
@@ -410,14 +418,15 @@ Recommended fix:
 The file is still large. Several pure or semi-contained pieces have been
 extracted, including workspace shell, media assets page, input assets page,
 account profile page, workflow output panel, stage/result presentation
-components, and pending conversation polling. The main workspace state machine
-and several page renderers still live in `App.tsx`.
+components, asset proposals panel, agent conversation panel, agent/workflow/
+conversation pages, and pending conversation polling. The main workspace state
+machine and several page renderers still live in `App.tsx`.
 
 Recommended split:
 
-- `WorkflowCallPanel`
 - `TopicLibraryPage`
-- `AgentConversationPanel`
+- `DraftsPage`
+- `AnalysisHistoryPage`
 - shared hooks:
   - `useWorkspaceData`
   - `useAnalysisRunObserver`

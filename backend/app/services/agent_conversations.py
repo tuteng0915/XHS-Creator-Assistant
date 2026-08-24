@@ -448,6 +448,7 @@ class AgentConversationService:
                         "operation": ModelOperation.AGENT_CHAT.value,
                         "mode": payload.mode,
                         "status": "queued",
+                        "queuedAt": now,
                     },
                     ensure_ascii=False,
                 ),
@@ -549,7 +550,12 @@ class AgentConversationService:
                 asset_refs_json=current["asset_refs_json"],
                 proposed_actions_json=current["proposed_actions_json"],
                 model_metadata_json=json.dumps(
-                    {**metadata, "status": "running"}, ensure_ascii=False
+                    {
+                        **metadata,
+                        "status": "running",
+                        "startedAt": metadata.get("startedAt") or now,
+                    },
+                    ensure_ascii=False,
                 ),
                 now=now,
             )
@@ -614,7 +620,11 @@ class AgentConversationService:
                 context_pack=context_pack,
                 messages=messages,
             )
-            reply_metadata = {**reply.model_metadata, "status": "completed"}
+            reply_metadata = {
+                **reply.model_metadata,
+                "status": "completed",
+                "completedAt": utc_now(),
+            }
         except Exception as error:
             reply = AgentConversationReply(
                 reply=(
@@ -627,6 +637,7 @@ class AgentConversationService:
                     "operation": ModelOperation.AGENT_CHAT.value,
                     "status": "failed",
                     "error": str(error) or error.__class__.__name__,
+                    "completedAt": utc_now(),
                 },
             )
             reply_metadata = reply.model_metadata

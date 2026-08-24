@@ -193,6 +193,27 @@ nav a.active, nav button.active { color: var(--blue); background: var(--blue-sof
   margin-top: 8px; padding: 9px 10px; border-radius: 9px; background: #f8fafc;
   color: #374151; font-size: 12.5px;
 }
+.evidence-boundary, .video-verdict, .incentive-verdict {
+  border-left: 4px solid #93c5fd;
+}
+.evidence-boundary.weak, .video-verdict.weak, .incentive-verdict.mid {
+  border-color: #f59e0b; background: #fffbeb;
+}
+.evidence-boundary.ok, .video-verdict.ok, .incentive-verdict.high {
+  border-color: var(--ok); background: #f0fdf4;
+}
+.incentive-verdict.low {
+  border-color: #64748b; background: #f8fafc;
+}
+.evidence-boundary-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 6px;
+}
+.evidence-boundary-head h4 { margin: 0; }
+.evidence-boundary-head span {
+  flex: 0 0 auto; padding: 3px 8px; border-radius: 999px;
+  color: #075985; background: #e0f2fe; font-size: 11.5px; font-weight: 800;
+}
 .outline { display: flex; flex-direction: column; gap: 7px; }
 .ol { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 8px; align-items: start; }
 .sec {
@@ -319,9 +340,43 @@ nav a.active, nav button.active { color: var(--blue); background: var(--blue-sof
   display: block; overflow: hidden; text-overflow: ellipsis; color: var(--sub);
   font-size: 11px; white-space: nowrap;
 }
+.capability-ref-list {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 14px;
+}
+.capability-ref-list.inline { margin: 0; }
+.capability-ref-chip {
+  min-width: 160px; max-width: 100%; padding: 8px 10px; display: grid; gap: 2px;
+  border: 1px solid #bfdbfe; border-radius: 10px; background: #eff6ff; text-align: left;
+}
+.capability-ref-chip.compact { min-width: 132px; padding: 7px 9px; }
+.capability-ref-chip:hover:not(:disabled) {
+  border-color: var(--blue); background: #dbeafe;
+}
+.capability-ref-chip:disabled {
+  opacity: 0.72; cursor: not-allowed;
+}
+.capability-ref-chip b {
+  overflow: hidden; text-overflow: ellipsis; color: var(--ink);
+  font-size: 12px; white-space: nowrap;
+}
+.capability-ref-chip small {
+  overflow: hidden; text-overflow: ellipsis; color: var(--sub);
+  font-size: 11px; white-space: nowrap;
+}
 .workflow-task-editor { display: grid; gap: 10px; margin-bottom: 10px; }
 .workflow-task-card {
   padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff;
+}
+.workflow-task-summary-list { display: grid; gap: 10px; margin: 8px 0 14px; }
+.workflow-task-summary-card {
+  display: grid; gap: 9px; padding: 11px; border: 1px solid var(--line);
+  border-radius: 12px; background: #fff;
+}
+.workflow-task-summary-card > div:first-child b {
+  display: block; margin-bottom: 3px; color: var(--ink); font-size: 13px;
+}
+.workflow-task-summary-card p {
+  margin: 0; color: var(--sub); font-size: 12px; line-height: 1.45;
 }
 .workflow-task-card .asset-section-head { margin-bottom: 8px; }
 .checkbox-line {

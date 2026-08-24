@@ -185,6 +185,82 @@ def test_qwen_provider_repairs_json_wrapped_in_prose(monkeypatch) -> None:
     assert response.output["painPoints"][0]["theme"] == "选校焦虑"
 
 
+def test_qwen_provider_unwraps_structured_result_wrapper(monkeypatch) -> None:
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.response_status_code = 200
+    FakeAsyncClient.response_body = {
+        "model": "qwen-plus",
+        "choices": [
+            {
+                "message": {
+                    "content": (
+                        '{"result":{"painPoints":[{"theme":"时间焦虑",'
+                        '"intensity":"中","count":1,"evidence":["来不及"]}]}}'
+                    )
+                }
+            }
+        ],
+        "usage": {"total_tokens": 18},
+    }
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    service = ModelCallService(
+        settings(
+            model_provider="qwen",
+            qwen_api_key="placeholder-key",
+            qwen_model="qwen-plus",
+        )
+    )
+
+    response = asyncio.run(
+        service.call_operation(ModelOperation.PAIN_POINTS, {"sourceText": "来不及"})
+    )
+
+    assert response.output["painPoints"][0]["theme"] == "时间焦虑"
+
+
+def test_qwen_provider_reads_tool_call_arguments_when_content_is_blank(
+    monkeypatch,
+) -> None:
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.response_status_code = 200
+    FakeAsyncClient.response_body = {
+        "model": "qwen-plus",
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "structured_response",
+                                "arguments": '{"painPoints":[]}',
+                            },
+                        }
+                    ],
+                }
+            }
+        ],
+        "usage": {"total_tokens": 14},
+    }
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    service = ModelCallService(
+        settings(
+            model_provider="qwen",
+            qwen_api_key="placeholder-key",
+            qwen_model="qwen-plus",
+        )
+    )
+
+    response = asyncio.run(
+        service.call_operation(ModelOperation.PAIN_POINTS, {"sourceText": "中文评论"})
+    )
+
+    assert response.output == {"painPoints": []}
+
+
 def test_qwen_provider_rejects_wrong_structured_root(monkeypatch) -> None:
     FakeAsyncClient.requests = []
     FakeAsyncClient.response_status_code = 200

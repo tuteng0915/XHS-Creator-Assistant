@@ -469,6 +469,8 @@ Workflow = 多 agent、多 task 的产品任务计划。
 
 `callBinding` 的含义是：把该 workflow asset 显示到右侧 workflow 调用区，并绑定到已有产品执行入口。它不代表前端可以编辑任意 nodegraph，也不代表后端会按任意 generated workflow plan 自动执行。
 
+能力资产详情需要支持组合关系跳转：Agent 详情里的 skill 引用可以打开对应 Skill；Workflow 详情里的 entry agent、task agent 和 task skill 引用可以打开对应 Agent / Skill。这是 PM 调优路径的一部分，不是通用图编辑器。
+
 当前内置 workflow：
 
 - Account Diagnosis Workflow；
@@ -493,6 +495,8 @@ Agent conversation 用于直接和某个 agent 对话。
 - conversation 会作为内容资产出现在左侧“对话记录”入口，支持按 workspace 复盘消息、引用资产、model metadata 和 proposed actions；
 - 重新打开 conversation 只读取已保存记录，不重新执行模型。
 - conversation title 和 status 可编辑，用于重命名、归档和恢复；message content、context pack、model metadata 和 proposed actions 原始记录保持只读。
+- 发送消息携带 `clientMessageKey`，同一 conversation 下相同 key 的重试不会重复创建 user / assistant message；
+- assistant 占位消息的 model metadata 记录 `queuedAt / startedAt / completedAt`，用于刷新后观察和复盘执行生命周期。
 
 #### AssetProposal
 
@@ -857,6 +861,8 @@ xhs_import_package/
 - 尽量使用 JSON response format；
 - 支持 fenced JSON；
 - 支持响应前后带说明文字时提取 JSON object；
+- 支持 `data/result/output` 外层包裹解包；
+- 支持 OpenAI-compatible `function_call/tool_calls.arguments` 作为结构化输出来源；
 - 对缺字段做 validation；
 - 失败时生成 stage error 或 assistant failure message。
 
@@ -1011,8 +1017,8 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 
 - qwen live workflow smoke test；
 - 更多真实模型响应 fixture；
-- AssetProposal diff 预览和更细前端校验；
-- conversation message 显式 idempotency key；
+- AssetProposal 更细 nested diff 和更多 action-type schema；
+- conversation durable job / SQLite lease 是否值得加入；
 - workflow 输入区更清晰地展示 XHS 创作者主页摘要和派生输入关系。
 
 ### P2：下一阶段产品能力

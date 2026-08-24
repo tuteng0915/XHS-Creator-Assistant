@@ -595,6 +595,9 @@ def test_live_agent_conversation_post_returns_queued_message_without_waiting(
     assert messages[1]["role"] == "assistant"
     assert messages[1]["content"] == "Agent 正在生成回复…"
     assert messages[1]["modelMetadata"]["status"] in {"queued", "running"}
+    assert messages[1]["modelMetadata"]["queuedAt"]
+    if messages[1]["modelMetadata"]["status"] == "running":
+        assert messages[1]["modelMetadata"]["startedAt"]
     listed = send(
         app,
         "GET",
@@ -871,6 +874,7 @@ def test_live_agent_conversation_failure_is_saved_as_assistant_message(
     assert messages[1]["role"] == "assistant"
     assert "模型调用失败" in messages[1]["content"]
     assert messages[1]["modelMetadata"]["status"] == "failed"
+    assert messages[1]["modelMetadata"]["completedAt"]
 
 
 def test_asset_proposal_apply_creates_generated_skill(app: FastAPI) -> None:

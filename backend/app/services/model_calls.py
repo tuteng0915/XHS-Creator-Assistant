@@ -478,6 +478,7 @@ class ModelCallService:
             ModelOperation.VIDEO_QUALITY_ANALYSIS: {"videoQuality": dict},
             ModelOperation.INCENTIVE_FIT_ANALYSIS: {"incentiveFit": dict},
         }
+        value = cls._unwrap_structured_output(operation, value, requirements)
         for key, expected_type in requirements.get(operation, {}).items():
             if key not in value:
                 raise ValidationError(
@@ -490,6 +491,22 @@ class ModelCallService:
                 )
         if operation == ModelOperation.AGENT_CHAT and not value["reply"].strip():
             raise ValidationError("Model response field reply must not be blank")
+        return value
+
+    @classmethod
+    def _unwrap_structured_output(
+        cls,
+        operation: ModelOperation,
+        value: dict[str, Any],
+        requirements: dict[ModelOperation, dict[str, type | tuple[type, ...]]],
+    ) -> dict[str, Any]:
+        expected_keys = set(requirements.get(operation, {}))
+        if not expected_keys or expected_keys.intersection(value):
+            return value
+        for wrapper_key in ("data", "result", "output"):
+            nested = value.get(wrapper_key)
+            if isinstance(nested, dict) and expected_keys.intersection(nested):
+                return nested
         return value
 
     @staticmethod
@@ -573,11 +590,40 @@ class ModelCallService:
             raise ValidationError("Model response missing message")
         content = message.get("content", "")
         if isinstance(content, str):
+            if not content.strip():
+                arguments = ModelCallService._extract_openai_compatible_arguments(message)
+                if arguments:
+                    return arguments
             return content
         if isinstance(content, list):
-            return "".join(
+            text = "".join(
                 block.get("text", "")
                 for block in content
                 if isinstance(block, dict) and block.get("type") in {"text", "output_text"}
             )
+            if not text.strip():
+                arguments = ModelCallService._extract_openai_compatible_arguments(message)
+                if arguments:
+                    return arguments
+            return text
         raise ValidationError("Model response message content must be text")
+
+    @staticmethod
+    def _extract_openai_compatible_arguments(message: dict[str, Any]) -> str | None:
+        function_call = message.get("function_call")
+        if isinstance(function_call, dict):
+            arguments = function_call.get("arguments")
+            if isinstance(arguments, str) and arguments.strip():
+                return arguments
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                function = tool_call.get("function")
+                if not isinstance(function, dict):
+                    continue
+                arguments = function.get("arguments")
+                if isinstance(arguments, str) and arguments.strip():
+                    return arguments
+        return None

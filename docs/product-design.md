@@ -121,7 +121,7 @@ Agent 是 system prompt、多个 skills 和默认 context policy 的组合。当
 
 Workflow 是产品拥有的任务计划，可以理解为 multi-agent / multi-task 的产品流程，但当前不是用户可编辑 nodegraph。代码层可以用 LangGraph 实现 workflow 执行；前端只看到产品级 run、stage 和结果，不暴露 LangGraph thread、checkpoint、node 等术语。
 
-PM 调优界面允许对 Agent 和 Workflow 做有限的结构化辅助编辑：Agent 可以通过 checklist 组合已有 Skills，同时保留手动 stable id 文本输入；Workflow 可以用 task 表格编辑 `agentPlan.tasks` 的 taskId、agentId、skillIds、dependsOn 和 parallel 标记，同时保留 JSON editor 作为高级入口。这个能力是为了调产品内置资产，不是通用 nodegraph builder。
+PM 调优界面允许对 Agent 和 Workflow 做有限的结构化辅助编辑：Agent 可以通过 checklist 组合已有 Skills，同时保留手动 stable id 文本输入；Workflow 可以用 task 表格编辑 `agentPlan.tasks` 的 taskId、agentId、skillIds、dependsOn 和 parallel 标记，同时保留 JSON editor 作为高级入口。Agent 详情里的 skill 引用、Workflow 详情里的 entry agent、task agent 和 task skill 引用可以点击跳转到对应能力资产，便于检查组合关系。这个能力是为了调产品内置资产，不是通用 nodegraph builder。
 
 Workflow asset 可以通过 `callBinding` 注册到右侧 workflow 调用区。当前允许的绑定只有 `account`、`trend`、`video`，分别对应已有的账号诊断、热点分析和视频博主质量诊断产品执行入口。这个绑定只表示“把某个 workflow asset 作为入口展示，并复用对应产品执行路径”，不表示系统已经能执行任意用户生成的 workflow graph。内置三个主 workflow 默认注册；新生成或手动修改的 workflow 如果设置了 `callBinding`，也会出现在右侧调用区。
 
@@ -139,13 +139,13 @@ Context Access Layer 的职责是把 workspace 中的资产整理成模型可读
 
 Demo 用于无 API key 的本地演示和自动化测试。它不调用外部模型，但仍使用集成 persistence path，避免形成一条完全独立的假路径。Demo output 应该明显是 demo，不能污染真实 live 逻辑。
 
-Live 通过后端模型 provider 调用，不在浏览器持有 API key。当前支持 Anthropic-compatible path、Qwen OpenAI-compatible path，以及 Qwen / DashScope media APIs。
+Live 通过后端模型 provider 调用，不在浏览器持有 API key。当前支持 Anthropic-compatible path、Qwen OpenAI-compatible path，以及 Qwen / DashScope media APIs。Qwen 文本模型会请求 JSON response format，并能从 fenced JSON、解释文字包裹 JSON、`data/result/output` 包裹和 OpenAI-compatible tool/function arguments 中提取结构化结果；随后仍按 operation 做必要根字段校验。
 
 ## 8. 当前可靠性设计
 
-当前已经完成 POST 创建 AnalysisRun / SimulationRun、后端 worker 执行、SSE / polling 观察、idempotency key 防重复创建、stage result / error 持久化、startup resume unfinished runs、conversation assistant placeholder 状态记录，以及 provider failure 留下 assistant failure message。
+当前已经完成 POST 创建 AnalysisRun / SimulationRun、后端 worker 执行、SSE / polling 观察、idempotency key 防重复创建、stage result / error 持久化、startup resume unfinished runs、conversation assistant placeholder 状态记录、conversation message client key 去重，以及 provider failure 留下 assistant failure message。Conversation assistant message metadata 会记录 queuedAt、startedAt 和 completedAt，方便刷新后复盘单条回复的执行生命周期。
 
-仍需增强的是 workflow worker SQLite claim / lease、conversation durable job、per-message idempotency key。是否需要 durable event log 可以后续根据调试和审计需求再判断。
+仍需增强的是 workflow worker SQLite claim / lease 和 conversation durable job。是否需要 durable event log 可以后续根据调试和审计需求再判断。
 
 ## 9. 非目标
 

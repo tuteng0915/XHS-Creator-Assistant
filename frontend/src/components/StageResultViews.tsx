@@ -28,9 +28,24 @@ export function ListBlock({ title, items }: { title: string; items: unknown }) {
   )
 }
 
+function listValues(items: unknown): string[] {
+  return Array.isArray(items) ? items.map((item) => String(item)) : []
+}
+
+function evidenceIsWeak(data: Record<string, unknown>): boolean {
+  const confidence = String(data.evidenceConfidence || '').toLowerCase()
+  return (
+    confidence.includes('低') ||
+    confidence.includes('low') ||
+    listValues(data.cannotAssess).length > 0 ||
+    listValues(data.recommendedNextEvidence).length > 0
+  )
+}
+
 function EvidenceBoundaryPanel({ data }: { data: Record<string, unknown> }) {
   const confidence = String(data.evidenceConfidence || '')
   const scope = (data.evidenceScope || {}) as Record<string, unknown>
+  const weak = evidenceIsWeak(data)
   const scopeEntries = [
     ['来源', scope.sourceType],
     ['有视频笔记', scope.hasVideoNotes],
@@ -51,8 +66,11 @@ function EvidenceBoundaryPanel({ data }: { data: Record<string, unknown> }) {
   }
 
   return (
-    <div className="structure-card">
-      <h4>证据边界</h4>
+    <div className={`structure-card evidence-boundary ${weak ? 'weak' : 'ok'}`}>
+      <div className="evidence-boundary-head">
+        <h4>{weak ? '证据不足，需要保守判断' : '证据边界'}</h4>
+        {confidence && <span>{confidence}</span>}
+      </div>
       {confidence && (
         <p>
           <b>证据置信度：</b> {confidence}
@@ -430,12 +448,24 @@ export function VideoQualityView({ data }: { data: Record<string, unknown> }) {
   const dimensions = Array.isArray(data.dimensionScores)
     ? data.dimensionScores
     : []
+  const cannotAssess = listValues(data.cannotAssess)
+  const recommendedNextEvidence = listValues(data.recommendedNextEvidence)
   return (
     <div className="stage-block">
-      <div className="structure-card">
+      <div className={`structure-card video-verdict ${evidenceIsWeak(data) ? 'weak' : 'ok'}`}>
         <h4>
           质量评级：{String(data.level || '')} · {String(data.overallScore || '')}
         </h4>
+        {cannotAssess.length > 0 && (
+          <p>
+            当前不可可靠评估：{cannotAssess.slice(0, 3).join('；')}
+          </p>
+        )}
+        {recommendedNextEvidence.length > 0 && (
+          <p>
+            建议补充：{recommendedNextEvidence.slice(0, 3).join('；')}
+          </p>
+        )}
       </div>
       <div className="outline">
         {dimensions.map((item) => {
@@ -464,13 +494,20 @@ export function VideoQualityView({ data }: { data: Record<string, unknown> }) {
 
 export function IncentiveFitView({ data }: { data: Record<string, unknown> }) {
   const programMatch = (data.programMatch || {}) as Record<string, unknown>
+  const recommendation = String(data.recommendation || '')
+  const fitLevel =
+    recommendation.includes('不') || recommendation.includes('低')
+      ? 'low'
+      : recommendation.includes('适合') || recommendation.includes('高')
+        ? 'high'
+        : 'mid'
   return (
     <div className="stage-block">
-      <div className="structure-card">
-        <h4>
-          激励适配：{String(data.recommendation || '')} ·{' '}
-          {String(data.fitScore || '')}
-        </h4>
+      <div className={`structure-card incentive-verdict ${fitLevel}`}>
+        <div className="evidence-boundary-head">
+          <h4>激励适配：{recommendation || '待判断'}</h4>
+          <span>{String(data.fitScore || '')}</span>
+        </div>
         <p>{String(data.rationale || '')}</p>
         <div className="why">
           <b>适合计划：</b> {String(programMatch.bestProgramType || '')}
