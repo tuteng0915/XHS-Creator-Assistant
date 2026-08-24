@@ -900,12 +900,14 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
       const body = JSON.parse(String(init?.body)) as {
         content: string
         mode: 'demo' | 'live'
+        clientMessageKey?: string
       }
       const conversation = agentConversations['workspace-1'][0]
       const messages: AgentConversation['messages'] = [
         {
           id: 'message-user',
           conversationId: 'conversation-1',
+          clientMessageKey: body.clientMessageKey || null,
           role: 'user',
           content: body.content,
           contextPack: {},
@@ -2385,7 +2387,7 @@ describe('workspace UI', () => {
   })
 
   it('lets users edit and apply asset proposals from agent conversations', async () => {
-    installWorkspaceApiMock()
+    const fetchMock = installWorkspaceApiMock()
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: /Agents/ }))
@@ -2401,6 +2403,18 @@ describe('workspace UI', () => {
     fireEvent.click(screen.getByRole('button', { name: /发送给 Agent/ }))
 
     expect(await screen.findByText('Asset Proposals')).toBeInTheDocument()
+    await waitFor(() => {
+      const sendCall = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/agent-conversations/conversation-1/messages' &&
+          init?.method === 'POST',
+      )
+      expect(sendCall).toBeTruthy()
+      const payload = JSON.parse(String(sendCall?.[1]?.body)) as {
+        clientMessageKey?: string
+      }
+      expect(payload.clientMessageKey).toMatch(/^agent-message-/)
+    })
     expect(await screen.findByText('更新 Account Profile')).toBeInTheDocument()
     const actionEditor = screen.getByDisplayValue(
       /把账号定位改成更关注 DIY 申请/,

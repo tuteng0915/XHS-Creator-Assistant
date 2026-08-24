@@ -104,6 +104,52 @@ def test_agent_conversation_uses_broad_workspace_context(app: FastAPI) -> None:
     assert len(loaded.json()["messages"]) == 2
 
 
+def test_agent_message_client_key_prevents_duplicate_user_messages(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    agent = next(item for item in agents if item["agentId"] == "creator_material_curator")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": agent["id"], "title": "整理账号定位"},
+    ).json()
+    payload = {
+        "content": "帮我看看账号定位要不要修改",
+        "clientMessageKey": "agent-message-test-key",
+    }
+
+    first = send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json=payload,
+    )
+    second = send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json=payload,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    messages = second.json()["messages"]
+    assert len(messages) == 2
+    assert messages[0]["role"] == "user"
+    assert messages[0]["clientMessageKey"] == "agent-message-test-key"
+    assert messages[1]["role"] == "assistant"
+
+    proposals = send(
+        app,
+        "GET",
+        f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+    ).json()
+    assert len(proposals) == 1
+
+
 def test_agent_conversation_title_and_status_are_editable_assets(
     app: FastAPI,
 ) -> None:

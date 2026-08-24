@@ -216,6 +216,7 @@ export interface AgentConversationSummary {
 export interface AgentMessage {
   id: string
   conversationId: string
+  clientMessageKey?: string | null
   role: 'user' | 'assistant'
   content: string
   contextPack: Record<string, unknown>

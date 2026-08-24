@@ -385,13 +385,14 @@ export const agentConversationApi = {
     conversationId: string,
     content: string,
     mode: 'demo' | 'live',
+    clientMessageKey: string,
   ) =>
     request<AgentConversation>(
       `/api/agent-conversations/${conversationId}/messages`,
       {
         method: 'POST',
         headers: jsonHeaders,
-        body: JSON.stringify({ content, mode }),
+        body: JSON.stringify({ content, mode, clientMessageKey }),
       },
     ),
 }

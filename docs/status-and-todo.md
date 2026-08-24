@@ -234,13 +234,14 @@ agent conversation 现在已经不是同步等待模型完成：
 - 前端轮询观察 queued/running/completed/failed 状态；
 - conversation summary 已包含派生 `executionStatus`；
 - 同一 conversation 存在 queued/running assistant message 时，重复发送不会创建新的 user message 或重复执行；
+- 每条前端发送的用户消息已携带 `clientMessageKey`；同一 conversation 下同一个 key 的重试会返回已有对话，不会重复创建 user/assistant message；
 - provider 失败会留下 assistant failure message。
 
 剩余问题：
 
 - 这仍是进程内任务，不是 SQLite durable job；
 - 进程崩溃时只能按 queued/running message 尝试恢复；
-- 没有显式 conversation message 级 idempotency key。
+- 还没有 SQLite claim/lease 表，所以 conversation 仍不适合承担长时间任务队列职责。
 
 ### P1：qwen 结构化输出继续加固
 

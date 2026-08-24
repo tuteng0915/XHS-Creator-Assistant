@@ -101,6 +101,7 @@ class AgentConversationRepository:
         connection: sqlite3.Connection,
         *,
         conversation_id: str,
+        client_message_key: str | None = None,
         role: str,
         content: str,
         context_pack_json: str,
@@ -113,14 +114,15 @@ class AgentConversationRepository:
         connection.execute(
             """
             INSERT INTO agent_messages(
-                id, conversation_id, role, content, context_pack_json,
+                id, conversation_id, client_message_key, role, content, context_pack_json,
                 asset_refs_json, proposed_actions_json, model_metadata_json,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 message_id,
                 conversation_id,
+                client_message_key,
                 role,
                 content,
                 context_pack_json,
@@ -132,6 +134,24 @@ class AgentConversationRepository:
         )
         self.touch(connection, conversation_id=conversation_id, now=now)
         return self.get_message(connection, message_id)
+
+    def get_user_message_by_client_key(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        conversation_id: str,
+        client_message_key: str,
+    ) -> dict | None:
+        row = connection.execute(
+            """
+            SELECT * FROM agent_messages
+            WHERE conversation_id = ?
+              AND role = 'user'
+              AND client_message_key = ?
+            """,
+            (conversation_id, client_message_key),
+        ).fetchone()
+        return dict(row) if row is not None else None
 
     def update_message(
         self,

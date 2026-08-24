@@ -401,18 +401,32 @@ class AgentConversationService:
         self, conversation_id: str, payload: AgentMessageCreate
     ) -> AgentConversationResponse:
         now = utc_now()
+        client_message_key = (
+            payload.client_message_key.strip()
+            if payload.client_message_key is not None
+            else None
+        )
         with self.database.transaction() as connection:
             conversation = self.repository.get(connection, conversation_id)
             existing_messages = self.repository.list_messages(connection, conversation_id)
             pending_assistant = self._pending_assistant_message(existing_messages)
             if pending_assistant is not None:
                 return self._to_response(conversation, existing_messages)
+            if client_message_key:
+                existing_user_message = self.repository.get_user_message_by_client_key(
+                    connection,
+                    conversation_id=conversation_id,
+                    client_message_key=client_message_key,
+                )
+                if existing_user_message is not None:
+                    return self._to_response(conversation, existing_messages)
             agent = self.agent_repository.get(connection, conversation["agent_asset_id"])
             if agent["status"] != "enabled":
                 raise ValidationError("Agent is disabled")
             self.repository.create_message(
                 connection,
                 conversation_id=conversation_id,
+                client_message_key=client_message_key,
                 role="user",
                 content=payload.content,
                 context_pack_json="{}",

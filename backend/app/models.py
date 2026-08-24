@@ -332,11 +332,13 @@ class AgentConversationUpdate(APIModel):
 class AgentMessageCreate(APIModel):
     content: str = Field(min_length=1, max_length=20_000)
     mode: Literal["demo", "live"] = "demo"
+    client_message_key: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class AgentMessageResponse(APIModel):
     id: str
     conversation_id: str
+    client_message_key: str | None = None
     role: Literal["user", "assistant"]
     content: str
     context_pack: dict[str, Any]

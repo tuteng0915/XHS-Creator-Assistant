@@ -770,6 +770,9 @@ function WorkspaceApp() {
   const [assetProposals, setAssetProposals] = useState<AssetProposal[]>([])
   const [conversationTitleDraft, setConversationTitleDraft] = useState('')
   const [agentMessageDraft, setAgentMessageDraft] = useState('')
+  const [agentMessageClientKey, setAgentMessageClientKey] = useState(() =>
+    newClientRequestKey('agent-message'),
+  )
   const [agentSending, setAgentSending] = useState(false)
   const [conversationSaving, setConversationSaving] = useState(false)
   const [conversationSaveStatus, setConversationSaveStatus] = useState('')
@@ -1032,6 +1035,11 @@ function WorkspaceApp() {
     }, 0)
   }, [activePage, selectedAgentConversationId])
 
+  function updateAgentMessageDraft(value: string) {
+    setAgentMessageDraft(value)
+    setAgentMessageClientKey(newClientRequestKey('agent-message'))
+  }
+
   usePendingAgentConversationPolling({
     selectedAgentConversation,
     selectedAgentConversationId,
@@ -1181,6 +1189,7 @@ function WorkspaceApp() {
         setSelectedAgentConversation(null)
         setAssetProposals([])
         setAgentMessageDraft('')
+        setAgentMessageClientKey(newClientRequestKey('agent-message'))
         setSelectedWorkflowAsset(null)
         setSelectedDraft(null)
         setDraftEditor('')
@@ -1260,6 +1269,7 @@ function WorkspaceApp() {
     setSelectedAgentConversation(null)
     setAssetProposals([])
     setAgentMessageDraft('')
+    setAgentMessageClientKey(newClientRequestKey('agent-message'))
     setAgentConversationCreating(false)
     setSelectedWorkflowAsset(null)
     setSelectedDraft(null)
@@ -2661,6 +2671,7 @@ function WorkspaceApp() {
       current?.agentAssetId === agent.id ? current : null,
     )
     setAgentMessageDraft('')
+    setAgentMessageClientKey(newClientRequestKey('agent-message'))
   }
 
   function startAgentDefinitionEdit(agent: Agent) {
@@ -2728,6 +2739,7 @@ function WorkspaceApp() {
       setConversationTitleDraft(conversation.title)
       setConversationSaveStatus('')
       setAgentMessageDraft(initialDraft)
+      setAgentMessageClientKey(newClientRequestKey('agent-message'))
       await refreshWorkspaceSummary()
     } catch (error) {
       setRunError(errorMessage(error))
@@ -2774,6 +2786,7 @@ function WorkspaceApp() {
     setConversationTitleDraft(conversation.title)
     setConversationSaveStatus('')
     setAgentMessageDraft('')
+    setAgentMessageClientKey(newClientRequestKey('agent-message'))
     const agent = agents.find((item) => item.id === conversation.agentAssetId)
     if (agent) {
       await openAgent(agent.id)
@@ -2790,6 +2803,7 @@ function WorkspaceApp() {
         selectedAgentConversation.id,
         agentMessageDraft.trim(),
         mode,
+        agentMessageClientKey,
       )
       setSelectedAgentConversation(conversation)
       setConversationTitleDraft(conversation.title)
@@ -2797,6 +2811,7 @@ function WorkspaceApp() {
         await assetProposalApi.listForConversation(selectedAgentConversation.id),
       )
       setAgentMessageDraft('')
+      setAgentMessageClientKey(newClientRequestKey('agent-message'))
       await refreshWorkspaceSummary()
     } catch (error) {
       setRunError(errorMessage(error))
@@ -5524,7 +5539,9 @@ function WorkspaceApp() {
                       ref={agentChatComposerRef}
                       rows={3}
                       value={agentMessageDraft}
-                      onChange={(event) => setAgentMessageDraft(event.target.value)}
+                      onChange={(event) =>
+                        updateAgentMessageDraft(event.target.value)
+                      }
                       placeholder="直接和这个 Agent 对话。第一版会引用 workspace 资产并提出建议，不会自动修改资产。"
                     />
                     <button

@@ -327,9 +327,11 @@ Remaining risks:
 
 - in-process task loss on process crash;
 - no SQLite claim/lease table for conversation replies;
-- no per-message idempotency key;
-- explicit duplicate sends are guarded while a queued/running assistant message
-  exists, but there is still no client-provided idempotency key.
+- per-message client idempotency keys now prevent duplicate user/assistant
+  message creation on ordinary frontend retry, but they do not replace a durable
+  job queue;
+- explicit duplicate sends are still guarded while a queued/running assistant
+  message exists.
 
 Recommended fix:
 
