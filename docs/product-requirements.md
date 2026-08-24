@@ -137,6 +137,12 @@ workflow 执行不应依赖前端连接。
 - SSE / polling 只负责观察，不负责启动执行；
 - run、stage result、stage error、input snapshot 必须持久化。
 
+### 4.6 Live 能力必须可单独验证
+
+真实模型调用不应该只能通过前端手工点击验证。当前要求是：文本模型、agent conversation schema、media skills 都必须有独立 smoke script，可以在不打开浏览器的情况下验证后端配置是否可用。
+
+这件事的产品意义是降低 PM 调优时的不确定性：如果 smoke test 通过，前端问题更可能是 UI、输入绑定或 workflow 组装问题；如果 smoke test 失败，应优先修复 provider 配置，而不是修改产品逻辑。
+
 ## 5. 信息架构
 
 当前 UI 采用三列结构。
@@ -435,6 +441,8 @@ Content Brief 字段包括：
 
 创作输出类 skill 不需要先开放成通用 invoke API。当前更重要的是保持 Topic / Draft 的产品语义：用户从选题触发 Brief 或结构生成，后端创建持久 Draft，generated snapshot 和 editable content 分离。
 
+当前可直接 smoke test 的 skill 主要是 formatter/media 这类有受控实现的 skill。分析类 skill 仍主要通过 workflow 执行，后续如果要让 PM 更细地调 prompt，需要补 workflow 外的 dry-run 能力。
+
 #### Agent
 
 Agent = system prompt + 多个 skills + 默认 context policy。
@@ -449,6 +457,7 @@ Agent = system prompt + 多个 skills + 默认 context policy。
 - Audience Simulation Researcher；
 - Capability Maker；
 - Creator Dossier Formatter。
+- Media Generation Operator。
 
 #### Workflow
 
@@ -491,7 +500,7 @@ Agent conversation 用于直接和某个 agent 对话。
 - 支持 demo/live；
 - 支持 queued/running/completed/failed 状态；
 - 可携带当前选中的 Skill / Agent / Workflow 作为 context target；
-- 可产生 AssetProposal。
+- 可产生 AssetProposal；
 - conversation 会作为内容资产出现在左侧“对话记录”入口，支持按 workspace 复盘消息、引用资产、model metadata 和 proposed actions；
 - 重新打开 conversation 只读取已保存记录，不重新执行模型。
 - conversation title 和 status 可编辑，用于重命名、归档和恢复；message content、context pack、model metadata 和 proposed actions 原始记录保持只读。
@@ -854,6 +863,14 @@ xhs_import_package/
 
 自动化测试默认使用 fake provider。
 
+配置边界：
+
+- 文本模型可以通过 `MODEL_PROVIDER=anthropic` + `ANTHROPIC_*` 接入 Qwen 的 Anthropic-compatible endpoint；
+- 文本模型也可以通过 `MODEL_PROVIDER=qwen` + `QWEN_*` 接入 OpenAI-compatible endpoint；
+- 图文/视频理解与生成属于 Qwen / DashScope media skills，不读取 `ANTHROPIC_*`，必须配置 `QWEN_API_KEY` 或 `DASHSCOPE_API_KEY`；
+- 如果同一把 key 同时用于文本和 media，也需要在本地 env 中同时写入 `ANTHROPIC_API_KEY` 和 `QWEN_API_KEY`，或显式配置对应 alias；
+- `QWEN_BASE_URL` 用于 OpenAI-compatible chat completions；`QWEN_DASHSCOPE_BASE_URL` 用于 DashScope async media task。
+
 ### 9.2 结构化输出
 
 要求：
@@ -866,7 +883,25 @@ xhs_import_package/
 - 对缺字段做 validation；
 - 失败时生成 stage error 或 assistant failure message。
 
-### 9.3 Context 控制
+当前结构化输出校验是 operation-level root schema，不是完整 JSON Schema。它能防止最常见的错根字段和错容器类型，但还不能保证每个 nested field 都完整正确。下一步如果真实响应出现更多边缘形态，应优先补脱敏 fixture，再决定是否引入字段级 repair。
+
+### 9.3 Smoke test 要求
+
+当前必须保留以下 smoke test：
+
+- `scripts/smoke_model_api.py --operation pain_points`：验证文本结构化模型调用；
+- `scripts/smoke_model_api.py --operation agent_chat`：验证 agent conversation 的 live schema；
+- `scripts/smoke_qwen_media.py image-understand`：验证 media skill 的 Qwen vision path。
+
+最近一次真实 smoke 结果：
+
+- `pain_points` 通过；
+- `agent_chat` 通过；
+- `image-understand` 在临时映射 `QWEN_API_KEY=$ANTHROPIC_API_KEY` 且配置自定义 Qwen base URL 后通过。
+
+这些 smoke test 不进入常规自动化测试，因为会消耗真实模型额度，也依赖网络环境。
+
+### 9.4 Context 控制
 
 虽然 Context Access Layer 倾向 broad context，但 workflow node 仍应避免把完整 workspace 无脑传给每个模型调用。
 
@@ -979,6 +1014,7 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 7. AssetProposal 已支持 pending 状态下编辑后 apply，并对 skill / agent / workflow proposal 做基础字段和引用校验；apply 前已有后端 diff preview，但前端仍主要是 JSON editor，不是表单化编辑器。
 8. qwen 结构化输出已有 operation-level 根字段校验，仍需要更多真实响应 fixture 加固。
 9. 批量能力已从当前产品目标移除；后端遗留 batch endpoint 暂时只作为兼容路径。
+10. 如果本地只配置 `ANTHROPIC_*`，文本模型 live 可用，但 Qwen media skills 不可用；media skills 需要单独的 `QWEN_*` / `DASHSCOPE_*` 配置。
 
 ## 15. 成功指标
 
@@ -1015,7 +1051,7 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 
 ### P1：真正接入 API 后的稳定化
 
-- qwen live workflow smoke test；
+- qwen live workflow smoke test：账号诊断、视频博主质量诊断各跑一次完整 live workflow；
 - 更多真实模型响应 fixture；
 - AssetProposal 更细 nested diff 和更多 action-type schema；
 - conversation durable job / SQLite lease 是否值得加入；
