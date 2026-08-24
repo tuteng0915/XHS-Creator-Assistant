@@ -191,6 +191,13 @@ https://your-domain/api/...
 - 自动化测试仍默认使用 fake provider，避免 CI 或本地测试消耗模型额度；
 - 完整 workflow live smoke test 可以按需手动执行，不作为常规测试前置条件。
 
+最近一次真实 smoke 结果：
+
+- `scripts/smoke_model_api.py --operation pain_points` 通过；
+- `scripts/smoke_model_api.py --operation agent_chat` 通过；
+- `scripts/smoke_qwen_media.py image-understand` 在临时映射 `QWEN_API_KEY=$ANTHROPIC_API_KEY` 且配置自定义 Qwen base URL 后通过；
+- 当前 `backend/.env.local` 如果只填 `ANTHROPIC_*`，文本模型可用，但 media skills 会提示缺少 `QWEN_API_KEY` 或 `DASHSCOPE_API_KEY`。
+
 ## 当前 TODO
 
 ### P1：资产 proposal 编辑与校验

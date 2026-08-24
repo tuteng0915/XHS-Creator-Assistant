@@ -167,6 +167,21 @@ export ANTHROPIC_MESSAGES_URL=https://your-qwen-host/apps/anthropic/v1/messages
 
 对于 Qwen 的 `/apps/anthropic` endpoint，如果没有设置 `ANTHROPIC_MESSAGES_URL`，后端会自动推导 `/apps/anthropic/v1/messages`。
 
+注意：`ANTHROPIC_*` 只供文本模型的 Anthropic-compatible path 使用。图文/视频理解与生成走 Qwen / DashScope media skills，需要额外提供 Qwen 变量。即使使用同一个 API key，也要显式配置：
+
+```bash
+export QWEN_API_KEY=...
+export QWEN_BASE_URL=https://your-qwen-host/compatible-mode/v1
+export QWEN_DASHSCOPE_BASE_URL=https://your-qwen-host/api/v1
+```
+
+media smoke test：
+
+```bash
+backend/.venv/bin/python scripts/smoke_qwen_media.py image-understand \
+  --image-url https://dashscope.oss-cn-beijing.aliyuncs.com/images/dog_and_girl.jpeg
+```
+
 ## 当前功能范围
 
 迁移后的应用目前包含：
