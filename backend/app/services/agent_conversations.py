@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from app.models import (
     AgentConversationCreate,
     AgentConversationResponse,
     AgentConversationSummary,
+    AgentConversationUpdate,
     AgentMessageCreate,
     AgentMessageResponse,
     ModelOperation,
@@ -20,7 +22,7 @@ from app.repositories.agent_conversations import AgentConversationRepository
 from app.repositories.agents import AgentRepository
 from app.repositories.asset_proposals import AssetProposalRepository
 from app.repositories.workspaces import WorkspaceRepository
-from app.services.common import utc_now
+from app.services.common import as_iso, utc_now
 from app.services.context_access import ContextAccessService
 from app.services.model_calls import ModelCallService
 
@@ -116,6 +118,9 @@ class FakeAgentConversationModelProvider:
                     "description": (
                         "用户可能希望新增或修改 Skill；当前版本只生成定义提案，不自动写入。"
                     ),
+                    "payload": {
+                        "definition": self._demo_skill_definition(content),
+                    },
                 }
             )
         if any(keyword in normalized for keyword in ["agent", "智能体", "角色"]):
@@ -126,6 +131,9 @@ class FakeAgentConversationModelProvider:
                     "description": (
                         "用户可能希望新增或修改 Agent；当前版本只生成定义提案，不自动写入。"
                     ),
+                    "payload": {
+                        "definition": self._demo_agent_definition(content),
+                    },
                 }
             )
         if any(keyword in normalized for keyword in ["workflow", "工作流", "流程"]):
@@ -137,9 +145,81 @@ class FakeAgentConversationModelProvider:
                         "用户可能希望新增或修改 Workflow；当前版本只生成定义提案，"
                         "不自动写入。"
                     ),
+                    "payload": {
+                        "definition": self._demo_workflow_definition(content),
+                    },
                 }
             )
         return actions
+
+    @staticmethod
+    def _demo_suffix(content: str) -> str:
+        digest = hashlib.sha1(content.encode("utf-8")).hexdigest()[:8]
+        return digest
+
+    def _demo_skill_definition(self, content: str) -> dict[str, Any]:
+        suffix = self._demo_suffix(content)
+        return {
+            "skillId": f"generated.creator_skill.{suffix}",
+            "displayName": "Generated Creator Skill",
+            "category": "custom",
+            "purpose": content,
+            "triggerIntents": [content[:120]],
+            "requiredInputs": ["user_requirement"],
+            "optionalInputs": ["workspace_context_pack"],
+            "contextPolicy": {
+                "allowed_fields": ["workspace profile", "relevant content assets"],
+                "disallowed_fields": ["secrets", "arbitrary filesystem paths"],
+                "scope": "product_specific",
+            },
+            "outputSchema": {"root": "proposal"},
+            "artifactEffect": "Proposed product artifact",
+            "sideEffects": ["requires confirmation before writing"],
+            "failureMode": "proposal_defined",
+            "composableWith": ["meta.design_agent_asset", "meta.design_workflow_asset"],
+            "implementationRefs": ["AgentConversationService"],
+            "version": "v1",
+        }
+
+    def _demo_agent_definition(self, content: str) -> dict[str, Any]:
+        suffix = self._demo_suffix(content)
+        return {
+            "agentId": f"generated.creator_agent.{suffix}",
+            "displayName": "Generated Creator Agent",
+            "purpose": content,
+            "systemPrompt": (
+                "You are a product-specific creator workspace agent. "
+                "Use approved workspace context and produce proposals for confirmation."
+            ),
+            "skillIds": ["meta.design_skill_asset"],
+            "defaultContextPolicy": {
+                "may_read": ["workspace profile", "capability catalog"],
+                "must_not_read": ["secrets", "arbitrary filesystem paths"],
+                "write_policy": "proposal_only",
+            },
+            "version": "v1",
+        }
+
+    def _demo_workflow_definition(self, content: str) -> dict[str, Any]:
+        suffix = self._demo_suffix(content)
+        return {
+            "workflowId": f"generated.creator_workflow.{suffix}",
+            "displayName": "Generated Creator Workflow",
+            "purpose": content,
+            "entryAgentIds": ["capability_maker"],
+            "agentPlan": {
+                "tasks": [
+                    {
+                        "taskId": "design_capability",
+                        "agentId": "capability_maker",
+                        "skillIds": ["meta.design_workflow_asset"],
+                        "dependsOn": [],
+                    }
+                ]
+            },
+            "artifactEffect": "Proposed workflow artifact",
+            "version": "v1",
+        }
 
 
 class RealAgentConversationModelProvider:
@@ -294,6 +374,26 @@ class AgentConversationService:
     def get(self, conversation_id: str) -> AgentConversationResponse:
         with self.database.read() as connection:
             row = self.repository.get(connection, conversation_id)
+            messages = self.repository.list_messages(connection, conversation_id)
+        return self._to_response(row, messages)
+
+    def update(
+        self, conversation_id: str, payload: AgentConversationUpdate
+    ) -> AgentConversationResponse:
+        if payload.title is None and payload.status is None:
+            raise ValidationError("At least one editable field is required")
+        title = payload.title.strip() if payload.title is not None else None
+        if title == "":
+            raise ValidationError("Conversation title cannot be blank")
+        with self.database.transaction() as connection:
+            row = self.repository.update(
+                connection,
+                conversation_id=conversation_id,
+                title=title,
+                status=payload.status.value if payload.status else None,
+                expected_updated_at=as_iso(payload.expected_updated_at),
+                now=utc_now(),
+            )
             messages = self.repository.list_messages(connection, conversation_id)
         return self._to_response(row, messages)
 

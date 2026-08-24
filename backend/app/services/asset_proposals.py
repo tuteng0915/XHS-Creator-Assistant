@@ -5,8 +5,7 @@ from typing import Any
 
 from app.db.database import SQLiteDatabase
 from app.errors import ValidationError
-from app.models import AssetProposalResponse
-from app.models import AssetProposalUpdate
+from app.models import AssetProposalResponse, AssetProposalUpdate
 from app.repositories.agents import AgentRepository
 from app.repositories.asset_proposals import AssetProposalRepository
 from app.repositories.skills import SkillRepository
@@ -240,82 +239,312 @@ class AssetProposalService:
         if not isinstance(definition, dict):
             raise ValidationError("Capability proposal requires a definition object")
         if action_type == "skill.propose_definition":
-            row = self.skill_repository.create(
-                connection,
-                workspace_id=proposal["workspace_id"],
-                skill_id=self._required_string(definition, "skillId"),
-                display_name=self._required_string(definition, "displayName"),
-                category=str(definition.get("category") or "custom"),
-                purpose=str(definition.get("purpose") or ""),
-                trigger_intents_json=json.dumps(
-                    self._list(definition.get("triggerIntents")), ensure_ascii=False
-                ),
-                required_inputs_json=json.dumps(
-                    self._list(definition.get("requiredInputs")), ensure_ascii=False
-                ),
-                optional_inputs_json=json.dumps(
-                    self._list(definition.get("optionalInputs")), ensure_ascii=False
-                ),
-                context_policy_json=json.dumps(
-                    self._dict(definition.get("contextPolicy")), ensure_ascii=False
-                ),
-                output_schema_json=json.dumps(
-                    self._dict(definition.get("outputSchema")), ensure_ascii=False
-                ),
-                artifact_effect=str(definition.get("artifactEffect") or ""),
-                side_effects_json=json.dumps(
-                    self._list(definition.get("sideEffects")), ensure_ascii=False
-                ),
-                failure_mode=str(definition.get("failureMode") or "proposal_defined"),
-                composable_with_json=json.dumps(
-                    self._list(definition.get("composableWith")), ensure_ascii=False
-                ),
-                implementation_refs_json=json.dumps(
-                    self._list(definition.get("implementationRefs")), ensure_ascii=False
-                ),
-                version=str(definition.get("version") or "v1"),
-                now=now,
-                source="generated",
-            )
-            return {"assetType": "skill", "assetId": row["id"], "operation": "create"}
+            return self._apply_skill_definition(connection, proposal, payload, definition, now)
         if action_type == "agent.propose_definition":
-            row = self.agent_repository.create(
+            return self._apply_agent_definition(connection, proposal, payload, definition, now)
+        return self._apply_workflow_definition(connection, proposal, payload, definition, now)
+
+    def _apply_skill_definition(
+        self,
+        connection,
+        proposal: dict,
+        payload: dict[str, Any],
+        definition: dict[str, Any],
+        now: str,
+    ) -> dict[str, Any]:
+        skill_id = self._required_asset_id(definition, "skillId")
+        fields = {
+            "display_name": self._required_string(definition, "displayName"),
+            "category": self._required_string_or_default(definition, "category", "custom"),
+            "purpose": str(definition.get("purpose") or ""),
+            "trigger_intents_json": json.dumps(
+                self._string_list(definition.get("triggerIntents")), ensure_ascii=False
+            ),
+            "required_inputs_json": json.dumps(
+                self._string_list(definition.get("requiredInputs")), ensure_ascii=False
+            ),
+            "optional_inputs_json": json.dumps(
+                self._string_list(definition.get("optionalInputs")), ensure_ascii=False
+            ),
+            "context_policy_json": json.dumps(
+                self._dict(definition.get("contextPolicy")), ensure_ascii=False
+            ),
+            "output_schema_json": json.dumps(
+                self._dict(definition.get("outputSchema")), ensure_ascii=False
+            ),
+            "artifact_effect": str(definition.get("artifactEffect") or ""),
+            "side_effects_json": json.dumps(
+                self._string_list(definition.get("sideEffects")), ensure_ascii=False
+            ),
+            "failure_mode": str(definition.get("failureMode") or "proposal_defined"),
+            "composable_with_json": json.dumps(
+                self._string_list(definition.get("composableWith")), ensure_ascii=False
+            ),
+            "implementation_refs_json": json.dumps(
+                self._string_list(definition.get("implementationRefs")), ensure_ascii=False
+            ),
+            "version": str(definition.get("version") or "v1"),
+        }
+        target = self._target_skill(connection, proposal["workspace_id"], payload, skill_id)
+        if target is not None:
+            if target["skill_id"] != skill_id:
+                raise ValidationError("Skill stable id cannot be changed by proposal")
+            row = self.skill_repository.replace_definition(
+                connection,
+                skill_asset_id=target["id"],
+                now=now,
+                **fields,
+            )
+            return {
+                "assetType": "skill",
+                "assetId": row["id"],
+                "assetStableId": row["skill_id"],
+                "operation": "update",
+                "source": row["source"],
+            }
+        row = self.skill_repository.create(
+            connection,
+            workspace_id=proposal["workspace_id"],
+            skill_id=skill_id,
+            now=now,
+            source="generated",
+            **fields,
+        )
+        return {
+            "assetType": "skill",
+            "assetId": row["id"],
+            "assetStableId": row["skill_id"],
+            "operation": "create",
+            "source": row["source"],
+        }
+
+    def _apply_agent_definition(
+        self,
+        connection,
+        proposal: dict,
+        payload: dict[str, Any],
+        definition: dict[str, Any],
+        now: str,
+    ) -> dict[str, Any]:
+        agent_id = self._required_asset_id(definition, "agentId")
+        skill_ids = self._string_list(definition.get("skillIds"))
+        for skill_id in skill_ids:
+            if self.skill_repository.get_by_skill_id(
                 connection,
                 workspace_id=proposal["workspace_id"],
-                agent_id=self._required_string(definition, "agentId"),
-                display_name=self._required_string(definition, "displayName"),
-                purpose=str(definition.get("purpose") or ""),
-                system_prompt=str(definition.get("systemPrompt") or ""),
-                skill_ids_json=json.dumps(
-                    self._list(definition.get("skillIds")), ensure_ascii=False
-                ),
-                default_context_policy_json=json.dumps(
-                    self._dict(definition.get("defaultContextPolicy")),
-                    ensure_ascii=False,
-                ),
-                version=str(definition.get("version") or "v1"),
+                skill_id=skill_id,
+            ) is None:
+                raise ValidationError(f"Agent references unknown skillId: {skill_id}")
+        fields = {
+            "display_name": self._required_string(definition, "displayName"),
+            "purpose": str(definition.get("purpose") or ""),
+            "system_prompt": str(definition.get("systemPrompt") or ""),
+            "skill_ids_json": json.dumps(skill_ids, ensure_ascii=False),
+            "default_context_policy_json": json.dumps(
+                self._dict(definition.get("defaultContextPolicy")),
+                ensure_ascii=False,
+            ),
+            "version": str(definition.get("version") or "v1"),
+        }
+        target = self._target_agent(connection, proposal["workspace_id"], payload, agent_id)
+        if target is not None:
+            if target["agent_id"] != agent_id:
+                raise ValidationError("Agent stable id cannot be changed by proposal")
+            row = self.agent_repository.replace_definition(
+                connection,
+                agent_asset_id=target["id"],
                 now=now,
-                source="generated",
+                **fields,
             )
-            return {"assetType": "agent", "assetId": row["id"], "operation": "create"}
+            return {
+                "assetType": "agent",
+                "assetId": row["id"],
+                "assetStableId": row["agent_id"],
+                "operation": "update",
+                "source": row["source"],
+            }
+        row = self.agent_repository.create(
+            connection,
+            workspace_id=proposal["workspace_id"],
+            agent_id=agent_id,
+            now=now,
+            source="generated",
+            **fields,
+        )
+        return {
+            "assetType": "agent",
+            "assetId": row["id"],
+            "assetStableId": row["agent_id"],
+            "operation": "create",
+            "source": row["source"],
+        }
+
+    def _apply_workflow_definition(
+        self,
+        connection,
+        proposal: dict,
+        payload: dict[str, Any],
+        definition: dict[str, Any],
+        now: str,
+    ) -> dict[str, Any]:
+        workflow_id = self._required_asset_id(definition, "workflowId")
+        entry_agent_ids = self._string_list(definition.get("entryAgentIds"))
+        agent_plan = self._dict(definition.get("agentPlan"))
+        self._validate_workflow_references(
+            connection,
+            workspace_id=proposal["workspace_id"],
+            entry_agent_ids=entry_agent_ids,
+            agent_plan=agent_plan,
+        )
+        fields = {
+            "display_name": self._required_string(definition, "displayName"),
+            "purpose": str(definition.get("purpose") or ""),
+            "entry_agent_ids_json": json.dumps(entry_agent_ids, ensure_ascii=False),
+            "agent_plan_json": json.dumps(agent_plan, ensure_ascii=False),
+            "artifact_effect": str(definition.get("artifactEffect") or ""),
+            "version": str(definition.get("version") or "v1"),
+        }
+        call_binding = str(definition.get("callBinding") or "")
+        if call_binding not in {"", "account", "trend", "video"}:
+            raise ValidationError("Workflow callBinding is unsupported")
+        target = self._target_workflow(
+            connection, proposal["workspace_id"], payload, workflow_id
+        )
+        if target is not None:
+            if target["workflow_id"] != workflow_id:
+                raise ValidationError("Workflow stable id cannot be changed by proposal")
+            row = self.workflow_repository.replace_definition(
+                connection,
+                workflow_asset_id=target["id"],
+                now=now,
+                **fields,
+            )
+            if call_binding != (row.get("call_binding") or ""):
+                row = self.workflow_repository.update_call_binding(
+                    connection,
+                    workflow_asset_id=row["id"],
+                    call_binding=call_binding,
+                    expected_updated_at=row["updated_at"],
+                    now=now,
+                )
+            return {
+                "assetType": "workflow",
+                "assetId": row["id"],
+                "assetStableId": row["workflow_id"],
+                "operation": "update",
+                "source": row["source"],
+            }
         row = self.workflow_repository.create(
             connection,
             workspace_id=proposal["workspace_id"],
-            workflow_id=self._required_string(definition, "workflowId"),
-            display_name=self._required_string(definition, "displayName"),
-            purpose=str(definition.get("purpose") or ""),
-            entry_agent_ids_json=json.dumps(
-                self._list(definition.get("entryAgentIds")), ensure_ascii=False
-            ),
-            agent_plan_json=json.dumps(
-                self._dict(definition.get("agentPlan")), ensure_ascii=False
-            ),
-            artifact_effect=str(definition.get("artifactEffect") or ""),
-            version=str(definition.get("version") or "v1"),
+            workflow_id=workflow_id,
             now=now,
             source="generated",
+            call_binding=call_binding,
+            **fields,
         )
-        return {"assetType": "workflow", "assetId": row["id"], "operation": "create"}
+        return {
+            "assetType": "workflow",
+            "assetId": row["id"],
+            "assetStableId": row["workflow_id"],
+            "operation": "create",
+            "source": row["source"],
+        }
+
+    def _target_skill(
+        self,
+        connection,
+        workspace_id: str,
+        payload: dict[str, Any],
+        skill_id: str,
+    ) -> dict | None:
+        target_id = payload.get("targetAssetId")
+        if isinstance(target_id, str) and target_id.strip():
+            row = self.skill_repository.get(connection, target_id.strip())
+            if row["workspace_id"] != workspace_id:
+                raise ValidationError("Target skill belongs to another workspace")
+            return row
+        return self.skill_repository.get_by_skill_id(
+            connection, workspace_id=workspace_id, skill_id=skill_id
+        )
+
+    def _target_agent(
+        self,
+        connection,
+        workspace_id: str,
+        payload: dict[str, Any],
+        agent_id: str,
+    ) -> dict | None:
+        target_id = payload.get("targetAssetId")
+        if isinstance(target_id, str) and target_id.strip():
+            row = self.agent_repository.get(connection, target_id.strip())
+            if row["workspace_id"] != workspace_id:
+                raise ValidationError("Target agent belongs to another workspace")
+            return row
+        return self.agent_repository.get_by_agent_id(
+            connection, workspace_id=workspace_id, agent_id=agent_id
+        )
+
+    def _target_workflow(
+        self,
+        connection,
+        workspace_id: str,
+        payload: dict[str, Any],
+        workflow_id: str,
+    ) -> dict | None:
+        target_id = payload.get("targetAssetId")
+        if isinstance(target_id, str) and target_id.strip():
+            row = self.workflow_repository.get(connection, target_id.strip())
+            if row["workspace_id"] != workspace_id:
+                raise ValidationError("Target workflow belongs to another workspace")
+            return row
+        return self.workflow_repository.get_by_workflow_id(
+            connection, workspace_id=workspace_id, workflow_id=workflow_id
+        )
+
+    def _validate_workflow_references(
+        self,
+        connection,
+        *,
+        workspace_id: str,
+        entry_agent_ids: list[str],
+        agent_plan: dict[str, Any],
+    ) -> None:
+        for agent_id in entry_agent_ids:
+            if self.agent_repository.get_by_agent_id(
+                connection, workspace_id=workspace_id, agent_id=agent_id
+            ) is None:
+                raise ValidationError(f"Workflow references unknown entryAgentId: {agent_id}")
+        tasks = agent_plan.get("tasks")
+        if tasks is None:
+            return
+        if not isinstance(tasks, list):
+            raise ValidationError("Workflow agentPlan.tasks must be a list")
+        for task in tasks:
+            if not isinstance(task, dict):
+                raise ValidationError("Workflow agentPlan.tasks entries must be objects")
+            agent_id = task.get("agentId")
+            if (
+                isinstance(agent_id, str)
+                and agent_id
+                and self.agent_repository.get_by_agent_id(
+                    connection, workspace_id=workspace_id, agent_id=agent_id
+                )
+                is None
+            ):
+                raise ValidationError(f"Workflow task references unknown agentId: {agent_id}")
+            for skill_id in self._string_list(task.get("skillIds")):
+                if self.skill_repository.get_by_skill_id(
+                    connection, workspace_id=workspace_id, skill_id=skill_id
+                ) is None:
+                    raise ValidationError(f"Workflow task references unknown skillId: {skill_id}")
+
+    @staticmethod
+    def _required_asset_id(value: dict[str, Any], key: str) -> str:
+        result = AssetProposalService._required_string(value, key)
+        if any(character.isspace() for character in result):
+            raise ValidationError(f"Capability definition {key} must not contain whitespace")
+        return result
 
     @staticmethod
     def _required_string(value: dict[str, Any], key: str) -> str:
@@ -325,8 +554,28 @@ class AssetProposalService:
         return result.strip()
 
     @staticmethod
-    def _list(value: Any) -> list[Any]:
-        return value if isinstance(value, list) else []
+    def _required_string_or_default(value: dict[str, Any], key: str, default: str) -> str:
+        result = value.get(key)
+        if result is None:
+            return default
+        if not isinstance(result, str) or not result.strip():
+            raise ValidationError(f"Capability definition {key} must be a string")
+        return result.strip()
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValidationError("Capability definition list field must be a list")
+        result: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValidationError("Capability definition list entries must be strings")
+            stripped = item.strip()
+            if stripped:
+                result.append(stripped)
+        return result
 
     @staticmethod
     def _dict(value: Any) -> dict[str, Any]:

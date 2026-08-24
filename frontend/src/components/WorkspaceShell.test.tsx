@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { WorkspaceShell, type ActivePage } from './WorkspaceShell'
 import type { InputAssetPanel } from '../inputAssets'
-import type { Workspace } from '../types'
+import type { WorkflowAssetSummary, Workspace } from '../types'
 import type { WorkflowTab } from '../workflows'
 
 const workspace: Workspace = {
@@ -16,6 +16,37 @@ const workspace: Workspace = {
   updatedAt: '2026-07-11T10:00:00Z',
 }
 
+const workflowAssets: WorkflowAssetSummary[] = [
+  {
+    id: 'workflow-account',
+    workspaceId: 'workspace-1',
+    workflowId: 'account_diagnosis',
+    displayName: '账号诊断',
+    purpose: '诊断账号',
+    entryAgentIds: [],
+    artifactEffect: 'AnalysisRun',
+    source: 'builtin',
+    status: 'enabled',
+    version: 'v1',
+    callBinding: 'account',
+    updatedAt: '2026-07-11T10:00:00Z',
+  },
+  {
+    id: 'workflow-trend',
+    workspaceId: 'workspace-1',
+    workflowId: 'trend_analysis',
+    displayName: '热点分析',
+    purpose: '分析趋势',
+    entryAgentIds: [],
+    artifactEffect: 'AnalysisRun',
+    source: 'builtin',
+    status: 'enabled',
+    version: 'v1',
+    callBinding: 'trend',
+    updatedAt: '2026-07-11T10:00:00Z',
+  },
+]
+
 function renderShell(overrides: Partial<Parameters<typeof WorkspaceShell>[0]> = {}) {
   const props = {
     workspace,
@@ -27,6 +58,7 @@ function renderShell(overrides: Partial<Parameters<typeof WorkspaceShell>[0]> = 
       description: '这里是帮助内容',
       bullets: ['第一条帮助'],
     },
+    workflowAssets,
     children: <div>页面内容</div>,
     onOpenInputAsset: vi.fn(),
     onSetActivePage: vi.fn(),
@@ -72,6 +104,9 @@ describe('WorkspaceShell', () => {
 
     fireEvent.click(within(contentNav).getByRole('button', { name: /视频素材/ }))
     expect(props.onSetActivePage).toHaveBeenCalledWith('video-assets')
+
+    fireEvent.click(within(contentNav).getByRole('button', { name: /对话记录/ }))
+    expect(props.onSetActivePage).toHaveBeenCalledWith('conversations')
   })
 
   it('toggles and displays help content when requested', () => {

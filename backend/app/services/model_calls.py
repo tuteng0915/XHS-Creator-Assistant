@@ -55,6 +55,16 @@ PROMPT_TOPICS_B = """你是内容选题策略师。基于账号定位、热点�
 只输出 JSON，不要解释。schema:
 {"topics":[{"title":"","angle":"","pain":"","whyFit":"","whyTrending":""}],"titles":[{"topic":"","variants":[]}]}"""
 
+PROMPT_CONTENT_BRIEF = """你是创作者内容策划。用户已经从选题库中选择了一个选题。请把这个选题转成可执行的创作 brief，而不是直接写正文。
+要求：
+- 明确这个内容服务谁、为什么会点开、看完获得什么
+- 判断它和账号定位是否一致
+- 给出适合的内容形态和表达风险
+- 输出要具体、可执行，避免泛泛而谈
+- 不要润色成完整正文
+只输出 JSON，不要解释。schema:
+{"brief":{"topicTitle":"","refinedAngle":"","targetReader":"","readerPain":"","contentPromise":"","corePoint":"","formatRecommendation":"","openingHook":"","argumentPath":[],"materialNeeds":[],"titleDirections":[],"cta":"","risks":[],"revisionSuggestions":[]}}"""
+
 PROMPT_SIMULATION_PERSONAS = """你是创作者内容策略中的受众研究员。基于账号定位和选题，推导 4 个产品内置的目标受众角色。
 每个 persona 必须具体、有不同决策视角，不要把它们写成可配置 agent。
 只输出 JSON，不要解释。schema:
@@ -91,6 +101,12 @@ PROMPT_AGENT_CHAT = """你是创作者 workspace 中的产品内 Agent。
   - workspace.update_profile payload: {"name":"","accountPositioning":""}
   - topic.create_or_update payload: {"title":"","angle":"","associatedPainPoint":"","whyItFits":""}
   - skill.propose_definition / agent.propose_definition / workflow.propose_definition payload: {"definition":{...}}
+- 能力资产 proposal 必须给出可应用的完整 definition，不要只给空 payload。
+- 如果是在修改当前选中的能力资产，可以在 payload 放入 targetAssetId；否则使用 definition 中的 skillId / agentId / workflowId 创建新资产，或命中同 stable id 时更新。
+- skill definition 字段：skillId, displayName, category, purpose, triggerIntents, requiredInputs, optionalInputs, contextPolicy, outputSchema, artifactEffect, sideEffects, failureMode, composableWith, implementationRefs, version。
+- agent definition 字段：agentId, displayName, purpose, systemPrompt, skillIds, defaultContextPolicy, version。skillIds 必须来自已有 capability catalog。
+- workflow definition 字段：workflowId, displayName, purpose, entryAgentIds, agentPlan, artifactEffect, version，可选 callBinding。entryAgentIds、task.agentId、task.skillIds 必须来自已有 capability catalog。
+- workflow callBinding 只能是 ""、"account"、"trend"、"video"。它表示把 workflow asset 注册到已有产品执行入口，不代表任意 workflow 图都能自动执行。
 - 回复要直接、具体、中文优先。
 - 不要输出 markdown 代码块。
 
@@ -160,6 +176,7 @@ MAX_TOKENS = {
     ModelOperation.PROFILE: 1800,
     ModelOperation.PAIN_POINTS: 1000,
     ModelOperation.TOPICS: 2000,
+    ModelOperation.CONTENT_BRIEF: 1800,
     ModelOperation.STRUCTURE: 1500,
     ModelOperation.TREND_ANALYSIS: 2000,
     ModelOperation.TREND_TOPICS: 2000,
@@ -329,6 +346,15 @@ class ModelCallService:
                 "读者痛点：\n"
                 f"{json.dumps(context.get('painPoints'), ensure_ascii=False)}",
             )
+        if operation == ModelOperation.CONTENT_BRIEF:
+            return (
+                PROMPT_CONTENT_BRIEF,
+                "账号定位："
+                f"{positioning}\n\n选题：\n"
+                f"{json.dumps(context.get('topic'), ensure_ascii=False)}\n\n"
+                "分析背景：\n"
+                f"{context.get('background', '')}",
+            )
         if operation == ModelOperation.SIMULATION_PERSONAS:
             return (
                 PROMPT_SIMULATION_PERSONAS,
@@ -383,6 +409,8 @@ class ModelCallService:
                 PROMPT_VIDEO_CREATOR_PROFILE,
                 f"激励计划/运营目标：\n{positioning}\n\n视频创作者证据包：\n"
                 f"{json.dumps(context.get('videoCreatorEvidencePack', {}), ensure_ascii=False)}\n\n"
+                "PM 可调 Rubric：\n"
+                f"{json.dumps(context.get('pmRubric', {}), ensure_ascii=False)}\n\n"
                 "兼容文本样本：\n"
                 f"{context.get('videoCreatorSamples', '')}\n\n"
                 "已确认的图片/视频媒体理解结果（compact snapshot）：\n"
@@ -396,6 +424,8 @@ class ModelCallService:
                 f"{json.dumps(context.get('creatorProfile'), ensure_ascii=False)}\n\n"
                 "视频创作者证据包：\n"
                 f"{json.dumps(context.get('videoCreatorEvidencePack', {}), ensure_ascii=False)}\n\n"
+                "PM 可调 Rubric：\n"
+                f"{json.dumps(context.get('pmRubric', {}), ensure_ascii=False)}\n\n"
                 "兼容文本样本：\n"
                 f"{context.get('videoCreatorSamples', '')}\n\n"
                 "已确认的图片/视频媒体理解结果（compact snapshot）：\n"
@@ -408,7 +438,9 @@ class ModelCallService:
                 f"{positioning}\n\n创作者画像：\n"
                 f"{json.dumps(context.get('creatorProfile'), ensure_ascii=False)}\n\n"
                 "视频质量诊断：\n"
-                f"{json.dumps(context.get('videoQuality'), ensure_ascii=False)}",
+                f"{json.dumps(context.get('videoQuality'), ensure_ascii=False)}\n\n"
+                "PM 可调 Rubric：\n"
+                f"{json.dumps(context.get('pmRubric', {}), ensure_ascii=False)}",
             )
         raise ValidationError("Unsupported model operation")
 
@@ -433,6 +465,7 @@ class ModelCallService:
             ModelOperation.PROFILE: {"profile": dict},
             ModelOperation.PAIN_POINTS: {"painPoints": list},
             ModelOperation.TOPICS: {"topics": list},
+            ModelOperation.CONTENT_BRIEF: {"brief": dict},
             ModelOperation.STRUCTURE: {"structure": dict},
             ModelOperation.TREND_ANALYSIS: {"trendAnalysis": dict},
             ModelOperation.TREND_TOPICS: {"topics": list},

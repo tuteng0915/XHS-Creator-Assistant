@@ -211,6 +211,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         analysis_service=analysis_service,
         fake_provider=FakeVideoCreatorQualityModelProvider(),
         live_provider=RealVideoCreatorQualityModelProvider(model_call_service),
+        skill_service=skill_service,
     )
     simulation_workflow_service = AudienceSimulationWorkflowService(
         database=database,

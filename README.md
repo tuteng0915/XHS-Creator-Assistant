@@ -101,8 +101,8 @@ http://localhost:8000/docs
 后端检查命令：
 
 ```bash
-ruff check .
-python -m pytest
+.venv/bin/python -m ruff check app tests
+.venv/bin/python -m pytest
 ```
 
 ## 模型配置
@@ -175,7 +175,7 @@ export ANTHROPIC_MESSAGES_URL=https://your-qwen-host/apps/anthropic/v1/messages
 - workspace persistence；
 - workflow execution；
 - LangGraph-backed workflows；
-- 分析结果、选题库、草稿和受众模拟历史；
+- 分析结果、选题库、创作输出和受众模拟历史；
 - Qwen / Anthropic 后端模型 provider；
 - Qwen 图片/视频理解与生成；
 - 本地视频 ffmpeg 抽帧后再进入视频理解。

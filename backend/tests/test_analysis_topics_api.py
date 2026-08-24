@@ -120,6 +120,56 @@ def test_account_analysis_run_lifecycle_preserves_input_snapshot(
         )
 
 
+def test_analysis_run_review_metadata_is_editable_without_mutating_execution_history(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    historical = create_text_material(app, workspace["id"], "historical_posts", "爆款")
+    comments = create_text_material(app, workspace["id"], "comments", "痛点")
+
+    run = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+        json={
+            "workflowType": "account_diagnosis",
+            "historicalPostsMaterialId": historical["id"],
+            "commentsMaterialId": comments["id"],
+            "mode": "demo",
+        },
+    ).json()
+    assert run["userNotes"] == ""
+    assert run["reviewStatus"] == "unreviewed"
+
+    updated = send(
+        app,
+        "PATCH",
+        f"/api/analysis-runs/{run['id']}/review",
+        json={
+            "userNotes": "适合复用，但痛点需要更尖锐。",
+            "reviewStatus": "useful",
+            "expectedUpdatedAt": run["updatedAt"],
+        },
+    )
+    assert updated.status_code == 200
+    updated_json = updated.json()
+    assert updated_json["userNotes"] == "适合复用，但痛点需要更尖锐。"
+    assert updated_json["reviewStatus"] == "useful"
+    assert updated_json["inputSnapshot"] == run["inputSnapshot"]
+    assert updated_json["stageResults"] == run["stageResults"]
+
+    stale = send(
+        app,
+        "PATCH",
+        f"/api/analysis-runs/{run['id']}/review",
+        json={
+            "userNotes": "旧页面不应覆盖新备注。",
+            "expectedUpdatedAt": run["updatedAt"],
+        },
+    )
+    assert stale.status_code == 409
+
+
 def test_internal_execution_mutation_and_model_call_routes_are_not_public(
     app: FastAPI,
 ) -> None:

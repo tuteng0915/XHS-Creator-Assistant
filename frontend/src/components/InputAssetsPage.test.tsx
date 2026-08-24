@@ -39,6 +39,7 @@ describe('InputAssetsPage', () => {
     render(
       <InputAssetsPage
         inputAssetPanel="xhs_creator_profiles"
+        inputAssetDetailOpen={true}
         accountProfileMaterials={[]}
         historicalMaterials={[]}
         commentsMaterials={[]}

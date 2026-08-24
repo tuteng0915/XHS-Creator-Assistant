@@ -12,10 +12,12 @@ import App from './App'
 import type {
   Agent,
   AgentConversation,
+  AgentConversationStatus,
   AgentConversationSummary,
   AgentSummary,
   AnalysisRunSummary,
   AssetProposal,
+  Draft,
   DraftSummary,
   SimulationRunSummary,
   Skill,
@@ -154,6 +156,8 @@ const analysisRuns: Record<string, AnalysisRunSummary[]> = {
       workspaceId: 'workspace-1',
       workflowType: 'account_diagnosis',
       status: 'completed',
+      userNotes: '',
+      reviewStatus: 'unreviewed',
       createdAt: '2026-07-11T12:00:00Z',
       startedAt: '2026-07-11T12:00:01Z',
       completedAt: '2026-07-11T12:00:03Z',
@@ -202,6 +206,8 @@ const simulationRuns: Record<string, SimulationRunSummary[]> = {
       topicId: 'topic-2',
       draftId: 'draft-2',
       status: 'completed',
+      userNotes: '',
+      reviewStatus: 'unreviewed',
       createdAt: '2026-07-11T13:00:00Z',
       startedAt: '2026-07-11T13:00:01Z',
       completedAt: '2026-07-11T13:00:04Z',
@@ -217,6 +223,7 @@ const drafts: Record<string, DraftSummary[]> = {
       id: 'draft-2',
       workspaceId: 'workspace-2',
       topicId: 'topic-2',
+      kind: 'content_structure',
       sourceAnalysisRunId: null,
       sourceWorkflow: 'manual',
       status: 'completed',
@@ -271,8 +278,33 @@ const commentsFormatterSkill: SkillSummary = {
   artifactEffect: 'Draft InputAsset.comments',
 }
 
+const creativeBriefSkill: SkillSummary = {
+  ...skillSummary,
+  id: 'skill-creative-brief',
+  skillId: 'topic.refine_to_brief',
+  displayName: 'Generate Creative Brief',
+  category: 'creative_output',
+  purpose: 'Turn a selected Topic into a persistent creative brief.',
+  artifactEffect: 'Draft(kind=content_brief)',
+}
+
+const videoQualitySkill: SkillSummary = {
+  ...skillSummary,
+  id: 'skill-video-quality',
+  skillId: 'analysis.video_quality',
+  displayName: 'Analyze AIGC Video Quality',
+  category: 'analysis',
+  purpose: 'Score AIGC video quality with PM rubric.',
+  artifactEffect: 'AnalysisRun.stageResults.video_quality',
+}
+
 const skills: Record<string, SkillSummary[]> = {
-  'workspace-1': [skillSummary, commentsFormatterSkill],
+  'workspace-1': [
+    skillSummary,
+    videoQualitySkill,
+    commentsFormatterSkill,
+    creativeBriefSkill,
+  ],
   'workspace-2': [
     {
       ...skillSummary,
@@ -298,6 +330,87 @@ const skillDetail: Skill = {
   userNotes: '',
 }
 
+const creativeBriefSkillDetail: Skill = {
+  ...skillDetail,
+  ...creativeBriefSkill,
+  triggerIntents: ['TOPIC_REFINEMENT'],
+  requiredInputs: ['topic_id', 'positioning_snapshot'],
+  optionalInputs: ['compact_analysis_context'],
+  contextPolicy: { allowed_fields: ['positioning', 'topic', 'background'] },
+  outputSchema: { root: 'brief' },
+  sideEffects: ['creates creative brief artifact'],
+  failureMode: 'atomic',
+  composableWith: ['draft.generate_structure_from_brief'],
+  implementationRefs: ['ModelOperation.CONTENT_BRIEF'],
+}
+
+const commentsFormatterSkillDetail: Skill = {
+  ...skillDetail,
+  ...commentsFormatterSkill,
+  triggerIntents: ['FORMAT_INPUT_ASSET'],
+  requiredInputs: ['rawText', 'targetAssetType'],
+  optionalInputs: [],
+  contextPolicy: { allowed_fields: ['rawText'] },
+  outputSchema: { root: 'FormattedInputAssetDraft' },
+  sideEffects: ['returns draft only'],
+  failureMode: 'draft_only',
+  composableWith: ['source.save_comments'],
+  implementationRefs: ['InputAssetFormatterAgent'],
+}
+
+const videoQualitySkillDetail: Skill = {
+  ...skillDetail,
+  ...videoQualitySkill,
+  triggerIntents: ['VIDEO_CREATOR_QUALITY'],
+  requiredInputs: [
+    'positioning_snapshot',
+    'video_creator_evidence_pack',
+    'creatorProfile',
+  ],
+  optionalInputs: ['media_asset_ids'],
+  contextPolicy: {
+    allowed_fields: ['positioning', 'videoCreatorEvidencePack', 'creatorProfile'],
+    pmRubric: {
+      creatorTypes: [
+        {
+          type: '剧本驱动型',
+          fitForIncentive: '高',
+          rule: '连续剧情内容，评论催更。',
+        },
+      ],
+      qualityDimensions: [
+        {
+          dimension: '叙事完整度',
+          high: '冲突明确，有结尾钩子。',
+          medium: '有主题但结构松散。',
+          low: '只有概念展示。',
+          evidenceRequired: '标题、正文、评论或视频理解。',
+        },
+      ],
+      evidenceRules: ['没有视频理解时不得声称看过镜头。'],
+      incentiveRules: [
+        {
+          signal: '剧本驱动 + 系列化潜力高',
+          interpretation: '适合连续更新激励。',
+          operatorAction: '给 4 周连续更新任务。',
+        },
+      ],
+    },
+  },
+  outputSchema: { root: 'videoQuality' },
+  sideEffects: ['writes stage result'],
+  failureMode: 'partial_allowed',
+  composableWith: ['analysis.incentive_fit'],
+  implementationRefs: ['ModelOperation.VIDEO_QUALITY_ANALYSIS'],
+}
+
+const skillDetails: Record<string, Skill> = {
+  'skill-profile': skillDetail,
+  'skill-creative-brief': creativeBriefSkillDetail,
+  'skill-format-comments': commentsFormatterSkillDetail,
+  'skill-video-quality': videoQualitySkillDetail,
+}
+
 const agentSummary: AgentSummary = {
   id: 'agent-account',
   workspaceId: 'workspace-1',
@@ -315,8 +428,21 @@ const agentSummary: AgentSummary = {
   updatedAt: '2026-07-11T12:00:00Z',
 }
 
+const creativeOutputAgentSummary: AgentSummary = {
+  ...agentSummary,
+  id: 'agent-creative-output',
+  agentId: 'topic_draft_editor',
+  displayName: 'Topic and Creative Output Editor',
+  purpose: 'Turns selected topics into creative briefs and content structures.',
+  skillIds: [
+    'topic.refine_to_brief',
+    'draft.generate_structure_from_brief',
+    'draft.edit',
+  ],
+}
+
 const agents: Record<string, AgentSummary[]> = {
-  'workspace-1': [agentSummary],
+  'workspace-1': [agentSummary, creativeOutputAgentSummary],
   'workspace-2': [
     {
       ...agentSummary,
@@ -353,6 +479,17 @@ const agentDetail: Agent = {
   userNotes: '',
 }
 
+const creativeOutputAgentDetail: Agent = {
+  ...agentDetail,
+  ...creativeOutputAgentSummary,
+  systemPrompt:
+    'You are a creator content editor. Use creative briefs before structure generation.',
+  defaultContextPolicy: {
+    may_read: ['selected topic', 'selected creative brief'],
+    must_not_read: ['raw input assets unless explicitly provided'],
+  },
+}
+
 const workflowSummary: WorkflowAssetSummary = {
   id: 'workflow-account',
   workspaceId: 'workspace-1',
@@ -364,19 +501,52 @@ const workflowSummary: WorkflowAssetSummary = {
   source: 'builtin',
   status: 'enabled',
   version: 'v1',
+  callBinding: 'account',
   updatedAt: '2026-07-11T12:00:00Z',
 }
 
+const creativeOutputWorkflowSummary: WorkflowAssetSummary = {
+  ...workflowSummary,
+  id: 'workflow-creative-output',
+  workflowId: 'topic_to_draft',
+  displayName: 'Topic to Creative Output Workflow',
+  purpose: 'Generate a creative brief, then generate a content structure.',
+  entryAgentIds: ['topic_draft_editor'],
+  artifactEffect: 'Topic + Draft(kind=content_brief) + Draft(kind=content_structure)',
+  callBinding: '',
+}
+
+const trendWorkflowSummary: WorkflowAssetSummary = {
+  ...workflowSummary,
+  id: 'workflow-trend',
+  workflowId: 'trend_analysis',
+  displayName: 'Trend Analysis Workflow',
+  purpose: 'Analyze uploaded trend data.',
+  entryAgentIds: ['creator_material_curator', 'trend_opportunity_strategist'],
+  callBinding: 'trend',
+}
+
+const videoWorkflowSummary: WorkflowAssetSummary = {
+  ...workflowSummary,
+  id: 'workflow-video',
+  workflowId: 'video_creator_quality',
+  displayName: 'Video Creator Quality Workflow',
+  purpose: 'Diagnose AIGC video creator quality.',
+  entryAgentIds: ['creator_material_curator', 'video_creator_quality_analyst'],
+  callBinding: 'video',
+}
+
 const workflowAssets: Record<string, WorkflowAssetSummary[]> = {
-  'workspace-1': [workflowSummary],
+  'workspace-1': [
+    workflowSummary,
+    trendWorkflowSummary,
+    videoWorkflowSummary,
+    creativeOutputWorkflowSummary,
+  ],
   'workspace-2': [
     {
-      ...workflowSummary,
-      id: 'workflow-trend',
+      ...trendWorkflowSummary,
       workspaceId: 'workspace-2',
-      workflowId: 'trend_analysis',
-      displayName: 'Trend Analysis Workflow',
-      entryAgentIds: ['creator_material_curator', 'trend_opportunity_strategist'],
     },
   ],
 }
@@ -397,6 +567,27 @@ const workflowDetail: WorkflowAsset = {
     ],
   },
   userNotes: '',
+}
+
+const creativeOutputWorkflowDetail: WorkflowAsset = {
+  ...workflowDetail,
+  ...creativeOutputWorkflowSummary,
+  agentPlan: {
+    tasks: [
+      {
+        taskId: 'generate_brief',
+        agentId: 'topic_draft_editor',
+        skillIds: ['topic.refine_to_brief'],
+        dependsOn: ['select_topic'],
+      },
+      {
+        taskId: 'generate_structure',
+        agentId: 'topic_draft_editor',
+        skillIds: ['draft.generate_structure_from_brief'],
+        dependsOn: ['generate_brief'],
+      },
+    ],
+  },
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -513,7 +704,117 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
       return jsonResponse(skills[skillsMatch[1]])
     }
     if (url === '/api/skills/skill-profile' && method === 'GET') {
-      return jsonResponse(skillDetail)
+      return jsonResponse(skillDetails['skill-profile'])
+    }
+    if (url === '/api/skills/skill-creative-brief' && method === 'GET') {
+      return jsonResponse(skillDetails['skill-creative-brief'])
+    }
+    if (url === '/api/skills/skill-format-comments' && method === 'GET') {
+      return jsonResponse(skillDetails['skill-format-comments'])
+    }
+    if (url === '/api/skills/skill-video-quality' && method === 'GET') {
+      return jsonResponse(skillDetails['skill-video-quality'])
+    }
+    const skillDefinitionMatch = url.match(/^\/api\/skills\/([^/]+)\/definition$/)
+    if (skillDefinitionMatch && method === 'PATCH') {
+      const skillAssetId = skillDefinitionMatch[1]
+      const body = JSON.parse(String(init?.body)) as {
+        displayName: string
+        category: string
+        purpose: string
+        artifactEffect: string
+        failureMode: string
+        version: string
+        triggerIntents: string[]
+        requiredInputs: string[]
+        optionalInputs: string[]
+        contextPolicy: Record<string, unknown>
+        outputSchema: Record<string, unknown>
+        sideEffects: string[]
+        composableWith: string[]
+        implementationRefs: string[]
+        userNotes: string
+        expectedUpdatedAt: string
+      }
+      const current = skillDetails[skillAssetId]
+      if (body.expectedUpdatedAt !== current.updatedAt) {
+        return jsonResponse({ detail: 'Skill changed since it was loaded' }, 409)
+      }
+      const updated: Skill = {
+        ...current,
+        displayName: body.displayName,
+        category: body.category,
+        purpose: body.purpose,
+        artifactEffect: body.artifactEffect,
+        failureMode: body.failureMode,
+        version: body.version,
+        triggerIntents: body.triggerIntents,
+        requiredInputs: body.requiredInputs,
+        optionalInputs: body.optionalInputs,
+        contextPolicy: body.contextPolicy,
+        outputSchema: body.outputSchema,
+        sideEffects: body.sideEffects,
+        composableWith: body.composableWith,
+        implementationRefs: body.implementationRefs,
+        userNotes: body.userNotes,
+        source: 'generated',
+        updatedAt: '2026-07-11T14:40:00Z',
+      }
+      skillDetails[skillAssetId] = updated
+      skills['workspace-1'] = skills['workspace-1'].map((item) =>
+        item.id === updated.id ? updated : item,
+      )
+      return jsonResponse(updated)
+    }
+    const skillDiffMatch = url.match(/^\/api\/skills\/([^/]+)\/definition-diff$/)
+    if (skillDiffMatch && method === 'GET') {
+      const skillAssetId = skillDiffMatch[1]
+      const current = skillDetails[skillAssetId]
+      const builtin = skillAssetId === 'skill-profile' ? skillDetail : current
+      return jsonResponse({
+        assetId: skillAssetId,
+        assetType: 'skill',
+        stableId: current.skillId,
+        source: current.source,
+        canRevert: current.source === 'generated',
+        changedFields: ['displayName', 'version'].filter((field) => {
+          if (field === 'displayName') return current.displayName !== builtin.displayName
+          if (field === 'version') return current.version !== builtin.version
+          return false
+        }),
+        currentDefinition: {
+          displayName: current.displayName,
+          purpose: current.purpose,
+          version: current.version,
+        },
+        builtinDefinition: {
+          displayName: builtin.displayName,
+          purpose: builtin.purpose,
+          version: builtin.version,
+        },
+      })
+    }
+    const skillRevertMatch = url.match(/^\/api\/skills\/([^/]+)\/revert-definition$/)
+    if (skillRevertMatch && method === 'POST') {
+      const skillAssetId = skillRevertMatch[1]
+      const current = skillDetails[skillAssetId]
+      const body = JSON.parse(String(init?.body)) as { expectedUpdatedAt: string }
+      if (body.expectedUpdatedAt !== current.updatedAt) {
+        return jsonResponse({ detail: 'Skill changed since it was loaded' }, 409)
+      }
+      const builtin = skillAssetId === 'skill-profile' ? skillDetail : current
+      const updated: Skill = {
+        ...current,
+        ...builtin,
+        source: 'builtin',
+        userNotes: current.userNotes,
+        updatedAt: '2026-07-11T14:55:00Z',
+      }
+      skillDetails[skillAssetId] = updated
+      skills['workspace-1'] = skills['workspace-1'].map((item) =>
+        item.id === updated.id ? updated : item,
+      )
+      return jsonResponse(updated)
     }
     if (url === '/api/skills/skill-format-comments/invoke' && method === 'POST') {
       return jsonResponse({
@@ -564,7 +865,33 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
     }
     if (url === '/api/agent-conversations/conversation-1' && method === 'GET') {
       const conversation = agentConversations['workspace-1'][0]
-      return jsonResponse({ ...conversation, messages: [] })
+      return jsonResponse({
+        ...conversation,
+        messages: 'messages' in conversation ? conversation.messages : [],
+      })
+    }
+    if (url === '/api/agent-conversations/conversation-1' && method === 'PATCH') {
+      const body = JSON.parse(String(init?.body)) as {
+        title?: string
+        status?: AgentConversationStatus
+        expectedUpdatedAt: string
+      }
+      const current = agentConversations['workspace-1'][0]
+      if (body.expectedUpdatedAt !== current.updatedAt) {
+        return jsonResponse(
+          { detail: 'Agent conversation changed since it was loaded' },
+          409,
+        )
+      }
+      const updated: AgentConversation = {
+        ...current,
+        title: body.title || current.title,
+        status: body.status || current.status,
+        updatedAt: '2026-07-11T14:08:00Z',
+        messages: 'messages' in current ? current.messages : [],
+      } as AgentConversation
+      agentConversations['workspace-1'] = [updated]
+      return jsonResponse(updated)
     }
     if (
       url === '/api/agent-conversations/conversation-1/messages' &&
@@ -575,6 +902,39 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
         mode: 'demo' | 'live'
       }
       const conversation = agentConversations['workspace-1'][0]
+      const messages: AgentConversation['messages'] = [
+        {
+          id: 'message-user',
+          conversationId: 'conversation-1',
+          role: 'user',
+          content: body.content,
+          contextPack: {},
+          assetRefs: [],
+          proposedActions: [],
+          modelMetadata: {},
+          createdAt: '2026-07-11T14:00:01Z',
+        },
+        {
+          id: 'message-agent',
+          conversationId: 'conversation-1',
+          role: 'assistant',
+          content:
+            '我是 Account Diagnosis Strategist。我已读取当前 workspace 的 broad context pack。',
+          contextPack: { mode: 'workspace_pack', scope: 'broad' },
+          assetRefs: [{ assetType: 'account_profile', assetId: 'workspace-1' }],
+          proposedActions: [
+            {
+              type: 'workspace.update_profile',
+              status: 'requires_confirmation',
+            },
+          ],
+          modelMetadata: {
+            provider: body.mode === 'live' ? 'anthropic' : 'fake',
+            operation: 'agent_chat',
+          },
+          createdAt: '2026-07-11T14:00:02Z',
+        },
+      ]
       assetProposals['conversation-1'] = [
         {
           id: 'proposal-1',
@@ -598,42 +958,12 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
           appliedAt: null,
         },
       ]
-      return jsonResponse({
+      const updatedConversation: AgentConversation = {
         ...conversation,
-        messages: [
-          {
-            id: 'message-user',
-            conversationId: 'conversation-1',
-            role: 'user',
-            content: body.content,
-            contextPack: {},
-            assetRefs: [],
-            proposedActions: [],
-            modelMetadata: {},
-            createdAt: '2026-07-11T14:00:01Z',
-          },
-          {
-            id: 'message-agent',
-            conversationId: 'conversation-1',
-            role: 'assistant',
-            content:
-              '我是 Account Diagnosis Strategist。我已读取当前 workspace 的 broad context pack。',
-            contextPack: { mode: 'workspace_pack', scope: 'broad' },
-            assetRefs: [{ assetType: 'account_profile', assetId: 'workspace-1' }],
-            proposedActions: [
-              {
-                type: 'workspace.update_profile',
-                status: 'requires_confirmation',
-              },
-            ],
-            modelMetadata: {
-              provider: body.mode === 'live' ? 'anthropic' : 'fake',
-              operation: 'agent_chat',
-            },
-            createdAt: '2026-07-11T14:00:02Z',
-          },
-        ],
-      })
+        messages,
+      }
+      agentConversations['workspace-1'] = [updatedConversation]
+      return jsonResponse(updatedConversation)
     }
     if (
       url === '/api/agent-conversations/conversation-1/asset-proposals' &&
@@ -684,6 +1014,46 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
     if (url === '/api/agents/agent-account' && method === 'GET') {
       return jsonResponse(agentDetail)
     }
+    if (url === '/api/agents/agent-creative-output' && method === 'GET') {
+      return jsonResponse(creativeOutputAgentDetail)
+    }
+    const agentDefinitionMatch = url.match(/^\/api\/agents\/([^/]+)\/definition$/)
+    if (agentDefinitionMatch && method === 'PATCH') {
+      const agentAssetId = agentDefinitionMatch[1]
+      const current =
+        agentAssetId === 'agent-creative-output'
+          ? creativeOutputAgentDetail
+          : agentDetail
+      const body = JSON.parse(String(init?.body)) as {
+        displayName: string
+        purpose: string
+        systemPrompt: string
+        skillIds: string[]
+        defaultContextPolicy: Record<string, unknown>
+        version: string
+        userNotes: string
+        expectedUpdatedAt: string
+      }
+      if (body.expectedUpdatedAt !== current.updatedAt) {
+        return jsonResponse({ detail: 'Agent changed since it was loaded' }, 409)
+      }
+      const updated: Agent = {
+        ...current,
+        displayName: body.displayName,
+        purpose: body.purpose,
+        systemPrompt: body.systemPrompt,
+        skillIds: body.skillIds,
+        defaultContextPolicy: body.defaultContextPolicy,
+        version: body.version,
+        userNotes: body.userNotes,
+        source: 'generated',
+        updatedAt: '2026-07-11T14:45:00Z',
+      }
+      agents['workspace-1'] = agents['workspace-1'].map((item) =>
+        item.id === updated.id ? updated : item,
+      )
+      return jsonResponse(updated)
+    }
     const workflowsMatch = url.match(
       /^\/api\/workspaces\/(workspace-[12])\/workflows$/,
     )
@@ -692,6 +1062,81 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
     }
     if (url === '/api/workflows/workflow-account' && method === 'GET') {
       return jsonResponse(workflowDetail)
+    }
+    if (url === '/api/workflows/workflow-creative-output' && method === 'GET') {
+      const currentSummary =
+        workflowAssets['workspace-1'].find((item) => item.id === 'workflow-creative-output') ||
+        creativeOutputWorkflowSummary
+      return jsonResponse({
+        ...creativeOutputWorkflowDetail,
+        ...currentSummary,
+      })
+    }
+    const workflowDefinitionMatch = url.match(/^\/api\/workflows\/([^/]+)\/definition$/)
+    if (workflowDefinitionMatch && method === 'PATCH') {
+      const workflowAssetId = workflowDefinitionMatch[1]
+      const current =
+        workflowAssetId === 'workflow-creative-output'
+          ? creativeOutputWorkflowDetail
+          : workflowDetail
+      const body = JSON.parse(String(init?.body)) as {
+        displayName: string
+        purpose: string
+        entryAgentIds: string[]
+        agentPlan: Record<string, unknown>
+        artifactEffect: string
+        callBinding: WorkflowAsset['callBinding']
+        version: string
+        userNotes: string
+        expectedUpdatedAt: string
+      }
+      if (body.expectedUpdatedAt !== current.updatedAt) {
+        return jsonResponse({ detail: 'Workflow changed since it was loaded' }, 409)
+      }
+      const updated: WorkflowAsset = {
+        ...current,
+        displayName: body.displayName,
+        purpose: body.purpose,
+        entryAgentIds: body.entryAgentIds,
+        agentPlan: body.agentPlan,
+        artifactEffect: body.artifactEffect,
+        callBinding: body.callBinding,
+        version: body.version,
+        userNotes: body.userNotes,
+        source: 'generated',
+        updatedAt: '2026-07-11T14:50:00Z',
+      }
+      workflowAssets['workspace-1'] = workflowAssets['workspace-1'].map((item) =>
+        item.id === updated.id ? updated : item,
+      )
+      return jsonResponse(updated)
+    }
+    if (
+      url === '/api/workflows/workflow-creative-output/call-binding' &&
+      method === 'PATCH'
+    ) {
+      const body = JSON.parse(String(init?.body)) as {
+        callBinding: WorkflowAsset['callBinding']
+        expectedUpdatedAt: string
+      }
+      const current =
+        workflowAssets['workspace-1'].find((item) => item.id === 'workflow-creative-output') ||
+        creativeOutputWorkflowSummary
+      if (body.expectedUpdatedAt !== current.updatedAt) {
+        return jsonResponse({ detail: 'Workflow changed since it was loaded' }, 409)
+      }
+      const updated: WorkflowAssetSummary = {
+        ...current,
+        callBinding: body.callBinding,
+        updatedAt: '2026-07-11T14:30:00Z',
+      }
+      workflowAssets['workspace-1'] = workflowAssets['workspace-1'].map((item) =>
+        item.id === updated.id ? updated : item,
+      )
+      return jsonResponse({
+        ...creativeOutputWorkflowDetail,
+        ...updated,
+      })
     }
     const draftsMatch = url.match(/^\/api\/workspaces\/(workspace-[12])\/drafts$/)
     if (draftsMatch && method === 'GET') {
@@ -717,9 +1162,95 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
         modelMetadata: { mode: 'demo' },
       })
     }
+    if (url === '/api/analysis-runs/run-1/review' && method === 'PATCH') {
+      const body = JSON.parse(String(init?.body)) as {
+        userNotes: string
+        reviewStatus: 'unreviewed' | 'useful' | 'rejected'
+        expectedUpdatedAt: string
+      }
+      expect(body.expectedUpdatedAt).toBe(analysisRuns['workspace-1'][0].updatedAt)
+      const updated = {
+        ...analysisRuns['workspace-1'][0],
+        userNotes: body.userNotes,
+        reviewStatus: body.reviewStatus,
+        updatedAt: '2026-07-11T12:30:00Z',
+      }
+      analysisRuns['workspace-1'] = [updated]
+      return jsonResponse({
+        ...updated,
+        inputSnapshot: { accountPositioning: '帮助文科生做留学决策。' },
+        stageResults: {
+          topics: {
+            topics: [
+              {
+                title: '中介费到底该花在哪三步',
+                angle: '按环节配置预算',
+                pain: 'DIY vs 中介',
+                whyFit: '延续避坑拆解风格',
+              },
+            ],
+          },
+        },
+        stageErrors: {},
+        modelMetadata: { mode: 'demo' },
+      })
+    }
     if (url === '/api/simulation-runs/simulation-2' && method === 'GET') {
       return jsonResponse({
         ...simulationRuns['workspace-2'][0],
+        inputSnapshot: {
+          accountPositioning: '记录真实的数字游民转型路径。',
+          topic: {
+            title: '文科生如何开始数字游民',
+            angle: '拆成可执行的六条路径',
+          },
+        },
+        personaDefinitions: [
+          {
+            id: 'p1',
+            name: '谨慎执行派',
+            profile: '想开始但怕踩坑',
+            coreConcern: '能不能复制',
+            contentPreference: '清单和反例',
+          },
+        ],
+        reactionResults: [
+          {
+            personaId: 'p1',
+            stance: '喜欢',
+            quote: '需要更具体的证据',
+            concerns: ['能不能复制'],
+            opportunities: ['清单'],
+          },
+        ],
+        debateResults: [],
+        synthesis: {
+          verdict: '值得做',
+          mainResistance: '担心幸存者偏差',
+          strongestAngle: '真实前提 + 分阶段路径',
+          contentAdjustments: ['先讲限制'],
+          riskWarnings: ['不要承诺收入'],
+        },
+        stageErrors: {},
+        modelMetadata: { mode: 'demo' },
+      })
+    }
+    if (url === '/api/simulation-runs/simulation-2/review' && method === 'PATCH') {
+      const body = JSON.parse(String(init?.body)) as {
+        userNotes: string
+        reviewStatus: 'unreviewed' | 'useful' | 'rejected'
+        expectedUpdatedAt: string
+      }
+      expect(body.expectedUpdatedAt).toBe(simulationRuns['workspace-2'][0].updatedAt)
+      const updated = {
+        ...simulationRuns['workspace-2'][0],
+        userNotes: body.userNotes,
+        reviewStatus: body.reviewStatus,
+        updatedAt: '2026-07-11T13:30:00Z',
+      }
+      simulationRuns['workspace-2'] = [updated]
+      return jsonResponse({
+        ...updated,
         inputSnapshot: {
           accountPositioning: '记录真实的数字游民转型路径。',
           topic: {
@@ -813,6 +1344,107 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
     if (topicsMatch && method === 'GET') {
       return jsonResponse(topics[topicsMatch[1]])
     }
+    if (url === '/api/topics/topic-2/briefs/generate' && method === 'POST') {
+      const brief: Draft = {
+        id: 'brief-2',
+        workspaceId: 'workspace-2',
+        topicId: 'topic-2',
+        kind: 'content_brief',
+        sourceAnalysisRunId: null,
+        sourceWorkflow: 'manual',
+        status: 'completed',
+        createdAt: '2026-07-11T13:10:00Z',
+        completedAt: '2026-07-11T13:10:01Z',
+        updatedAt: '2026-07-11T13:10:01Z',
+        generatedSnapshot: {
+          brief: {
+            topicTitle: '文科生如何开始数字游民',
+            refinedAngle: '拆成可执行的六条路径',
+            targetReader: '想转型但不知道从哪里开始的文科生',
+            readerPain: '担心自己没有技术能力',
+            contentPromise: '给出低门槛路径和判断标准',
+            corePoint: '先选可验证路径，再谈长期迁移',
+            formatRecommendation: '清单型图文',
+            openingHook: '文科生不是不能做数字游民，而是起点要选对。',
+            argumentPath: ['先破除误区', '再拆路径', '最后给行动清单'],
+            materialNeeds: ['真实转型案例'],
+            titleDirections: ['文科生做数字游民，先别学代码'],
+            cta: '留言你的专业背景',
+            risks: ['不要承诺收入'],
+            revisionSuggestions: ['补一个失败反例'],
+          },
+        },
+        editableContent: {
+          brief: {
+            topicTitle: '文科生如何开始数字游民',
+            refinedAngle: '拆成可执行的六条路径',
+            targetReader: '想转型但不知道从哪里开始的文科生',
+            readerPain: '担心自己没有技术能力',
+            contentPromise: '给出低门槛路径和判断标准',
+            corePoint: '先选可验证路径，再谈长期迁移',
+            formatRecommendation: '清单型图文',
+            openingHook: '文科生不是不能做数字游民，而是起点要选对。',
+            argumentPath: ['先破除误区', '再拆路径', '最后给行动清单'],
+            materialNeeds: ['真实转型案例'],
+            titleDirections: ['文科生做数字游民，先别学代码'],
+            cta: '留言你的专业背景',
+            risks: ['不要承诺收入'],
+            revisionSuggestions: ['补一个失败反例'],
+          },
+        },
+        inputSnapshot: {
+          topic: {
+            title: '文科生如何开始数字游民',
+            angle: '拆成可执行的六条路径',
+          },
+        },
+        stageErrors: {},
+        modelMetadata: { mode: 'demo', kind: 'content_brief' },
+      }
+      drafts['workspace-2'] = [brief, ...drafts['workspace-2']]
+      return jsonResponse(brief, 201)
+    }
+    if (url === '/api/drafts/brief-2/structure/generate' && method === 'POST') {
+      const structure: Draft = {
+        id: 'structure-from-brief-2',
+        workspaceId: 'workspace-2',
+        topicId: 'topic-2',
+        kind: 'content_structure',
+        sourceAnalysisRunId: null,
+        sourceWorkflow: 'manual',
+        status: 'completed',
+        createdAt: '2026-07-11T13:20:00Z',
+        completedAt: '2026-07-11T13:20:01Z',
+        updatedAt: '2026-07-11T13:20:01Z',
+        generatedSnapshot: {
+          structure: {
+            topicChosen: '文科生如何开始数字游民',
+            outline: [{ sec: '从 Brief 进入结构', ct: '沿用 Brief 的核心观点展开' }],
+            reuse: 'Brief 对齐 → 结构拆解 → 行动清单',
+          },
+        },
+        editableContent: {
+          structure: {
+            topicChosen: '文科生如何开始数字游民',
+            outline: [{ sec: '从 Brief 进入结构', ct: '沿用 Brief 的核心观点展开' }],
+            reuse: 'Brief 对齐 → 结构拆解 → 行动清单',
+          },
+        },
+        inputSnapshot: {
+          topic: {
+            title: '文科生如何开始数字游民',
+            angle: '拆成可执行的六条路径',
+          },
+          sourceBrief: {
+            draftId: 'brief-2',
+          },
+        },
+        stageErrors: {},
+        modelMetadata: { mode: 'demo', kind: 'content_structure' },
+      }
+      drafts['workspace-2'] = [structure, ...drafts['workspace-2']]
+      return jsonResponse(structure, 201)
+    }
     if (url === '/api/topics/topic-2' && method === 'PATCH') {
       const body = JSON.parse(String(init?.body)) as {
         title: string
@@ -836,6 +1468,52 @@ beforeEach(() => {
   agentConversations['workspace-1'] = []
   agentConversations['workspace-2'] = []
   assetProposals['conversation-1'] = []
+  agents['workspace-1'] = [agentSummary, creativeOutputAgentSummary]
+  agents['workspace-2'] = [
+    {
+      ...agentSummary,
+      id: 'agent-trend',
+      workspaceId: 'workspace-2',
+      agentId: 'trend_opportunity_strategist',
+      displayName: 'Trend Opportunity Strategist',
+      skillIds: [
+        'analysis.trend_patterns',
+        'analysis.pain_points_from_trend_posts',
+        'topic.generate_from_trend_analysis',
+      ],
+    },
+  ]
+  skills['workspace-1'] = [
+    skillSummary,
+    videoQualitySkill,
+    commentsFormatterSkill,
+    creativeBriefSkill,
+  ]
+  skills['workspace-2'] = [
+    {
+      ...skillSummary,
+      id: 'skill-trend',
+      workspaceId: 'workspace-2',
+      skillId: 'analysis.trend_patterns',
+      displayName: 'Analyze Trend Patterns',
+    },
+  ]
+  skillDetails['skill-profile'] = skillDetail
+  skillDetails['skill-creative-brief'] = creativeBriefSkillDetail
+  skillDetails['skill-format-comments'] = commentsFormatterSkillDetail
+  skillDetails['skill-video-quality'] = videoQualitySkillDetail
+  workflowAssets['workspace-1'] = [
+    workflowSummary,
+    trendWorkflowSummary,
+    videoWorkflowSummary,
+    creativeOutputWorkflowSummary,
+  ]
+  workflowAssets['workspace-2'] = [
+    {
+      ...trendWorkflowSummary,
+      workspaceId: 'workspace-2',
+    },
+  ]
 })
 
 afterEach(() => {
@@ -929,12 +1607,15 @@ describe('workspace UI', () => {
     expect(screen.queryByRole('button', { name: /新建工作区/ })).not.toBeInTheDocument()
     await openCreatorAssetTab(/账号概况/)
     expect(await screen.findByText('创作者档案概览')).toBeInTheDocument()
-    expect(screen.getByText(/底层仍保留独立 input asset/)).toBeInTheDocument()
-    expect(
-      await screen.findByDisplayValue('帮助文科生做留学决策。'),
-    ).toBeInTheDocument()
+    expect(screen.getByText(/请先从左侧选择一个实例/)).toBeInTheDocument()
+    expect(screen.getByText(/请选择左侧的\s*账号概况\s*实例/)).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('帮助文科生做留学决策。')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /新建账号概况/ }))
+    expect(await screen.findByLabelText('账号概况名称')).toHaveValue('')
     expect(screen.queryByRole('button', { name: /载入/ })).not.toBeInTheDocument()
     await openCreatorAssetTab(/历史笔记/)
+    expect(screen.getByText(/请选择左侧的\s*历史笔记\s*实例/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /留学帖子数据合集/ }))
     expect(await screen.findByLabelText('历史笔记名称')).toHaveValue(
       '留学帖子数据合集',
     )
@@ -942,6 +1623,7 @@ describe('workspace UI', () => {
       await screen.findByDisplayValue('留学中介到底值不值｜赞1.1k｜爆'),
     ).toBeInTheDocument()
     await openCreatorAssetTab(/评论样本/)
+    fireEvent.click(screen.getByRole('button', { name: /留学评论区合集/ }))
     expect(await screen.findByLabelText('评论样本名称')).toHaveValue(
       '留学评论区合集',
     )
@@ -1148,6 +1830,7 @@ describe('workspace UI', () => {
 
       await screen.findByText('账号诊断待运行')
       await openCreatorAssetTab(/历史笔记/)
+      fireEvent.click(screen.getByRole('button', { name: /留学帖子数据合集/ }))
 
       expect(
         await screen.findByDisplayValue('留学中介到底值不值｜赞1.1k｜爆'),
@@ -1174,6 +1857,7 @@ describe('workspace UI', () => {
     render(<App />)
 
     await openCreatorAssetTab(/历史笔记/)
+    fireEvent.click(screen.getByRole('button', { name: /留学帖子数据合集/ }))
     const historicalEditor = await screen.findByLabelText(
       '主页 / 历史笔记 + 数据（格式：标题 ｜ 数据 ｜ 爆/平/差）',
     )
@@ -1274,6 +1958,7 @@ describe('workspace UI', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Skills/ }))
     expect(await screen.findByText('Analyze Account Profile')).toBeInTheDocument()
+    expect(screen.getByText('Generate Creative Brief')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /Analyze Account Profile/ }))
 
@@ -1281,6 +1966,194 @@ describe('workspace UI', () => {
     expect(screen.getByText('AnalysisRun.stageResults.profile')).toBeInTheDocument()
     expect(screen.getByText('partial_allowed')).toBeInTheDocument()
     expect(screen.getByText('ModelOperation.PROFILE')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /Generate Creative Brief/ }))
+
+    expect(await screen.findByText('topic.refine_to_brief')).toBeInTheDocument()
+    expect(screen.getByText('Draft(kind=content_brief)')).toBeInTheDocument()
+    expect(screen.getByText('ModelOperation.CONTENT_BRIEF')).toBeInTheDocument()
+  })
+
+  it('lets PM edit and save a skill contract as a generated override', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Skills/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Analyze Account Profile/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 contract' }))
+
+    fireEvent.change(await screen.findByLabelText('用途 / 调优说明'), {
+      target: { value: 'PM 调整：更重视视频质量证据限制。' },
+    })
+    fireEvent.change(screen.getByLabelText('Output Schema JSON'), {
+      target: {
+        value: JSON.stringify(
+          {
+            root: 'profile',
+            rubricVersion: 'pm-v1',
+          },
+          null,
+          2,
+        ),
+      },
+    })
+    fireEvent.change(screen.getByLabelText('Workspace Notes'), {
+      target: { value: '施琦姗前端调优。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存 Skill Contract' }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/skills/skill-profile/definition' &&
+            init?.method === 'PATCH',
+        ),
+      ).toBe(true)
+    })
+    expect(await screen.findByText('已保存')).toBeInTheDocument()
+    expect(screen.getAllByText('PM 调整：更重视视频质量证据限制。').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/generated/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/rubricVersion/).length).toBeGreaterThan(0)
+  })
+
+  it('shows skill definition diff and reverts a generated override', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Skills/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Analyze Account Profile/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 contract' }))
+
+    fireEvent.change(await screen.findByLabelText('Skill 名称'), {
+      target: { value: 'PM Profile Skill' },
+    })
+    fireEvent.change(screen.getByLabelText('版本'), {
+      target: { value: 'pm-v1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存 Skill Contract' }))
+
+    expect(await screen.findByText('已保存')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '查看与内置差异' }))
+
+    expect(await screen.findByText('displayName / version')).toBeInTheDocument()
+    expect(screen.getAllByText(/PM Profile Skill/).length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复内置版本' }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/skills/skill-profile/revert-definition' &&
+            init?.method === 'POST',
+        ),
+      ).toBe(true)
+    })
+    expect(await screen.findByText('已恢复内置版本')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Analyze Account Profile' }),
+    ).toBeInTheDocument()
+    expect(screen.getAllByText(/builtin/).length).toBeGreaterThan(0)
+  })
+
+  it('lets PM edit video diagnosis rubric without editing raw JSON directly', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Skills/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Analyze AIGC Video Quality/ }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 contract' }))
+
+    expect(await screen.findByText('视频诊断 Rubric')).toBeInTheDocument()
+    fireEvent.change(
+      screen.getByLabelText('创作者类型规则：类型 | 激励适配度 | 判定规则'),
+      {
+        target: {
+          value:
+            '剧本驱动型 | 高 | 连续剧情内容，评论催更，适合连续更新激励。\n商单驱动型 | 低 | 商单占比高，非商单内容弱。',
+        },
+      },
+    )
+    fireEvent.change(screen.getByLabelText('证据限制规则（一行一个）'), {
+      target: {
+        value:
+          '没有视频理解时不得声称看过镜头。\n证据弱时必须降低 evidenceConfidence。',
+      },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存 Skill Contract' }))
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([url, init]) =>
+          String(url) === '/api/skills/skill-video-quality/definition' &&
+          init?.method === 'PATCH',
+      )
+      expect(call).toBeTruthy()
+      const body = JSON.parse(String(call?.[1]?.body)) as {
+        contextPolicy: { pmRubric?: { creatorTypes?: unknown[]; evidenceRules?: string[] } }
+      }
+      expect(body.contextPolicy.pmRubric?.creatorTypes).toEqual([
+        {
+          type: '剧本驱动型',
+          fitForIncentive: '高',
+          rule: '连续剧情内容，评论催更，适合连续更新激励。',
+        },
+        {
+          type: '商单驱动型',
+          fitForIncentive: '低',
+          rule: '商单占比高，非商单内容弱。',
+        },
+      ])
+      expect(body.contextPolicy.pmRubric?.evidenceRules).toContain(
+        '证据弱时必须降低 evidenceConfidence。',
+      )
+    })
+    expect(await screen.findByText('已保存')).toBeInTheDocument()
+  })
+
+  it('runs a direct skill test for supported formatter skills', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Skills/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Format Comment Samples/ }))
+
+    expect(await screen.findByText('Skill Test')).toBeInTheDocument()
+    expect(screen.getByText('invoke-ready')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Input JSON'), {
+      target: { value: JSON.stringify({ rawText: '太焦虑了\n求时间线' }, null, 2) },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '运行 Skill Test' }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/skills/skill-format-comments/invoke' &&
+            init?.method === 'POST',
+        ),
+      ).toBe(true)
+    })
+    expect(await screen.findByText('测试完成')).toBeInTheDocument()
+    expect(screen.getByText(/整理后的评论样本合集/)).toBeInTheDocument()
+    expect(screen.getByText(/skill.invoke/)).toBeInTheDocument()
+  })
+
+  it('explains that workflow analysis skills are not directly invokable yet', async () => {
+    installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Skills/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Analyze Account Profile/ }))
+
+    expect(await screen.findByText('workflow-only')).toBeInTheDocument()
+    expect(screen.getByText(/这个 Skill 当前不能单独 invoke/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '运行 Skill Test' }),
+    ).not.toBeInTheDocument()
   })
 
   it('shows workspace agents as composed product roles', async () => {
@@ -1291,6 +2164,7 @@ describe('workspace UI', () => {
     expect(
       await screen.findByText('Account Diagnosis Strategist'),
     ).toBeInTheDocument()
+    expect(screen.getByText('Topic and Creative Output Editor')).toBeInTheDocument()
 
     fireEvent.click(
       screen.getByRole('button', { name: /Account Diagnosis Strategist/ }),
@@ -1302,6 +2176,14 @@ describe('workspace UI', () => {
     expect(screen.getByText('analysis.profile_from_history')).toBeInTheDocument()
     expect(screen.getByText(/selected historical posts/)).toBeInTheDocument()
 
+    fireEvent.click(
+      screen.getByRole('button', { name: /Topic and Creative Output Editor/ }),
+    )
+
+    expect(await screen.findByText('topic.refine_to_brief')).toBeInTheDocument()
+    expect(screen.getByText('draft.generate_structure_from_brief')).toBeInTheDocument()
+    expect(screen.getByText(/selected creative brief/)).toBeInTheDocument()
+
     fireEvent.click(screen.getByRole('button', { name: /开始对话/ }))
 
     expect(
@@ -1309,6 +2191,47 @@ describe('workspace UI', () => {
     ).toBeInTheDocument()
     const composer = screen.getByPlaceholderText(/直接和这个 Agent 对话/)
     await waitFor(() => expect(composer).toHaveFocus())
+  })
+
+  it('lets PM edit and save an agent definition as a generated override', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Agents/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Account Diagnosis Strategist/ }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 Agent' }))
+
+    fireEvent.change(await screen.findByLabelText('Agent 名称'), {
+      target: { value: 'PM Account Diagnosis Agent' },
+    })
+    fireEvent.change(screen.getByLabelText('System Prompt'), {
+      target: {
+        value:
+          'You are a creator account strategist. Always explain evidence boundaries first.',
+      },
+    })
+    fireEvent.change(screen.getByLabelText('Skill IDs（一行一个）'), {
+      target: {
+        value: 'analysis.profile_from_history\nanalysis.pain_points_from_comments',
+      },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存 Agent Definition' }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/agents/agent-account/definition' &&
+            init?.method === 'PATCH',
+        ),
+      ).toBe(true)
+    })
+    expect(await screen.findByText('已保存')).toBeInTheDocument()
+    expect(screen.getAllByText('PM Account Diagnosis Agent').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/generated/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/evidence boundaries first/).length).toBeGreaterThan(0)
   })
 
   it('lets users edit and apply asset proposals from agent conversations', async () => {
@@ -1355,7 +2278,7 @@ describe('workspace UI', () => {
         payload: { accountPositioning: '更关注 DIY 申请和预算决策' },
       }),
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    fireEvent.click(screen.getByRole('button', { name: '应用提案' }))
 
     await waitFor(() =>
       expect(assetProposals['conversation-1'][0].status).toBe('applied'),
@@ -1363,12 +2286,57 @@ describe('workspace UI', () => {
     expect(await screen.findByText('applied')).toBeInTheDocument()
   })
 
-  it('shows workspace workflows as multi-agent task plans', async () => {
+  it('surfaces saved agent conversations in the content asset sidebar', async () => {
     installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Agents/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Account Diagnosis Strategist/ }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /开始对话/ }))
+
+    const composer = await screen.findByPlaceholderText(/直接和这个 Agent 对话/)
+    fireEvent.change(composer, {
+      target: { value: '帮我生成一个新的选题能力提案' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /发送给 Agent/ }))
+
+    expect(await screen.findByText(/broad context pack/)).toBeInTheDocument()
+
+    const contentNav = screen.getByRole('navigation', { name: '内容资产导航' })
+    fireEvent.click(within(contentNav).getByRole('button', { name: /对话记录/ }))
+
+    expect(await screen.findByText('💬 对话记录')).toBeInTheDocument()
+    expect(screen.getAllByText(/与 Account Diagnosis Strategist 对话/).length).toBeGreaterThan(0)
+    expect(screen.getByText('帮我生成一个新的选题能力提案')).toBeInTheDocument()
+    expect(screen.getByText(/broad context pack/)).toBeInTheDocument()
+    expect(screen.getByText('Asset Proposals')).toBeInTheDocument()
+    expect(screen.getByText('更新 Account Profile')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('对话标题'), {
+      target: { value: '已整理的能力讨论' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存对话标题' }))
+
+    expect(await screen.findByText('已保存')).toBeInTheDocument()
+    expect(screen.getAllByText(/已整理的能力讨论/).length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: '归档对话' }))
+
+    await waitFor(() =>
+      expect(screen.getAllByText('archived').length).toBeGreaterThan(0),
+    )
+    expect(screen.getByRole('button', { name: '恢复对话' })).toBeInTheDocument()
+  })
+
+  it('shows workspace workflows as multi-agent task plans', async () => {
+    const fetchMock = installWorkspaceApiMock()
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: /Workflows/ }))
     expect(await screen.findByText('Account Diagnosis Workflow')).toBeInTheDocument()
+    expect(screen.getByText('Topic to Creative Output Workflow')).toBeInTheDocument()
 
     fireEvent.click(
       screen.getByRole('button', { name: /Account Diagnosis Workflow/ }),
@@ -1377,6 +2345,89 @@ describe('workspace UI', () => {
     expect(await screen.findByText('AnalysisRun + Topic candidates')).toBeInTheDocument()
     expect(screen.getByText(/diagnose_account/)).toBeInTheDocument()
     expect(screen.getAllByText(/account_diagnosis_strategist/).length).toBeGreaterThan(0)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Topic to Creative Output Workflow/ }),
+    )
+
+    expect(
+      await screen.findByText(
+        'Topic + Draft(kind=content_brief) + Draft(kind=content_structure)',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/generate_brief/)).toBeInTheDocument()
+    expect(screen.getByText(/draft.generate_structure_from_brief/)).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Workflow 调用注册'), {
+      target: { value: 'trend' },
+    })
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/workflows/workflow-creative-output/call-binding' &&
+            init?.method === 'PATCH',
+        ),
+      ).toBe(true)
+    })
+    const capabilityNav = screen.getByRole('navigation', { name: '能力资产导航' })
+    expect(
+      within(capabilityNav).getByRole('button', {
+        name: /Topic to Creative Output Workflow/,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('lets PM edit and save a workflow definition as a generated override', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Workflows/ }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Topic to Creative Output Workflow/ }),
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 Workflow' }))
+
+    fireEvent.change(await screen.findByLabelText('Workflow 名称'), {
+      target: { value: 'PM Creative Output Workflow' },
+    })
+    fireEvent.change(screen.getByLabelText('Agent Task Plan JSON'), {
+      target: {
+        value: JSON.stringify(
+          {
+            tasks: [
+              {
+                taskId: 'generate_brief',
+                agentId: 'topic_draft_editor',
+                skillIds: ['topic.refine_to_brief'],
+                pmNote: '先产出 brief 再产出结构。',
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+      },
+    })
+    fireEvent.change(screen.getByLabelText('调用注册'), {
+      target: { value: 'trend' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存 Workflow Definition' }))
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/workflows/workflow-creative-output/definition' &&
+            init?.method === 'PATCH',
+        ),
+      ).toBe(true)
+    })
+    expect(await screen.findByText('已保存')).toBeInTheDocument()
+    expect(screen.getAllByText('PM Creative Output Workflow').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/generated/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/先产出 brief 再产出结构/).length).toBeGreaterThan(0)
   })
 
   it('auto-saves account inputs before creating a diagnosis run', async () => {
@@ -1554,6 +2605,7 @@ describe('workspace UI', () => {
 
     render(<App />)
     await openCreatorAssetTab(/历史笔记/)
+    fireEvent.click(screen.getByRole('button', { name: /新建历史笔记/ }))
     const historicalEditor = await screen.findByLabelText(
       '主页 / 历史笔记 + 数据（格式：标题 ｜ 数据 ｜ 爆/平/差）',
     )
@@ -1561,6 +2613,7 @@ describe('workspace UI', () => {
       target: { value: '留学中介到底值不值｜赞1.1k｜爆' },
     })
     await openCreatorAssetTab(/评论样本/)
+    fireEvent.click(screen.getByRole('button', { name: /新建评论样本/ }))
     const commentsEditor = await screen.findByLabelText('评论区原文（一行一条）')
     fireEvent.change(commentsEditor, { target: { value: '这是一条新评论' } })
 
@@ -1778,6 +2831,7 @@ describe('workspace UI', () => {
 
     render(<App />)
     await openCreatorAssetTab(/视频创作样本/)
+    fireEvent.click(screen.getByRole('button', { name: /新建视频创作样本/ }))
     fireEvent.change(
       await screen.findByLabelText(
         '视频创作样本（创作者背景、视频样本、互动数据、运营备注）',
@@ -1820,13 +2874,46 @@ describe('workspace UI', () => {
     expect(screen.getByText('中介费到底该花在哪三步')).toBeInTheDocument()
   })
 
+  it('saves review metadata for a saved analysis run', async () => {
+    const fetchMock = installWorkspaceApiMock()
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /分析结果/ }))
+    const historyList = await screen.findByText('◷ 分析结果')
+    fireEvent.click(
+      within(historyList.closest('section') as HTMLElement).getByRole('button', {
+        name: /账号诊断/,
+      }),
+    )
+
+    fireEvent.change(await screen.findByLabelText('复盘状态'), {
+      target: { value: 'useful' },
+    })
+    fireEvent.change(screen.getByLabelText('复盘备注'), {
+      target: { value: '这个诊断可以作为示例结果复用。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存复盘' }))
+
+    await screen.findByDisplayValue('这个诊断可以作为示例结果复用。')
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/analysis-runs/run-1/review' &&
+            init?.method === 'PATCH',
+        ),
+      ).toBe(true)
+    })
+    expect(screen.getAllByText('已保存').length).toBeGreaterThan(0)
+  })
+
   it('opens and edits a topic from the library', async () => {
     installWorkspaceApiMock('workspace-2')
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: /选题库/ }))
 
-    fireEvent.click(await screen.findByRole('button', { name: /文科生如何开始数字游民/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /数字游民/ }))
     const title = await screen.findByLabelText('标题')
     fireEvent.change(title, { target: { value: '非技术人如何开始数字游民' } })
     fireEvent.click(screen.getByRole('button', { name: '保存选题编辑' }))
@@ -1835,6 +2922,30 @@ describe('workspace UI', () => {
       expect(screen.getAllByText('已保存').length).toBeGreaterThan(0)
     })
     expect(screen.getByDisplayValue('非技术人如何开始数字游民')).toBeInTheDocument()
+  })
+
+  it('generates a content brief from a selected topic', async () => {
+    installWorkspaceApiMock('workspace-2')
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /选题库/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /数字游民/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /生成创作 Brief/ }))
+
+    expect(await screen.findByText('▱ 创作输出')).toBeInTheDocument()
+    expect(await screen.findByText(/创作 Brief · completed/)).toBeInTheDocument()
+    expect(screen.getByText('先选可验证路径，再谈长期迁移')).toBeInTheDocument()
+    expect(
+      (screen.getByLabelText('当前可编辑内容 JSON') as HTMLTextAreaElement).value,
+    ).toContain('"corePoint": "先选可验证路径，再谈长期迁移"')
+
+    fireEvent.click(screen.getByRole('button', { name: /继续生成内容结构/ }))
+
+    expect(await screen.findByText(/内容结构 · completed/)).toBeInTheDocument()
+    expect(screen.getByText('从 Brief 进入结构')).toBeInTheDocument()
+    expect(
+      (screen.getByLabelText('当前可编辑内容 JSON') as HTMLTextAreaElement).value,
+    ).toContain('"reuse": "Brief 对齐 → 结构拆解 → 行动清单"')
   })
 
   it('separates context assets from capability assets and hides content drafts navigation', async () => {
@@ -1850,6 +2961,7 @@ describe('workspace UI', () => {
     expect(screen.getByRole('button', { name: /Skills/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Agents/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Workflows/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /创作输出/ })).toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: /Content Drafts/ }),
     ).not.toBeInTheDocument()
@@ -1892,5 +3004,38 @@ describe('workspace UI', () => {
     expect(await screen.findByText('模拟结果')).toBeInTheDocument()
     expect(screen.getByText('谨慎执行派')).toBeInTheDocument()
     expect(screen.getByText('真实前提 + 分阶段路径')).toBeInTheDocument()
+  })
+
+  it('saves review metadata for a saved audience simulation', async () => {
+    const fetchMock = installWorkspaceApiMock('workspace-2')
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /受众模拟/ }))
+    const simulationList = await screen.findByText('👥 受众模拟')
+    fireEvent.click(
+      within(simulationList.closest('section') as HTMLElement).getByRole('button', {
+        name: /受众模拟/,
+      }),
+    )
+
+    fireEvent.change(await screen.findByLabelText('复盘状态'), {
+      target: { value: 'rejected' },
+    })
+    fireEvent.change(screen.getByLabelText('复盘备注'), {
+      target: { value: '角色反应不够尖锐，暂时弃用。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存复盘' }))
+
+    await screen.findByDisplayValue('角色反应不够尖锐，暂时弃用。')
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/simulation-runs/simulation-2/review' &&
+            init?.method === 'PATCH',
+        ),
+      ).toBe(true)
+    })
+    expect(screen.getAllByText('已保存').length).toBeGreaterThan(0)
   })
 })

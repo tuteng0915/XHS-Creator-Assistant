@@ -22,6 +22,7 @@ import {
   workspaceApi,
   workflowAssetApi,
 } from './api'
+import sampleTrendCsv from '../../sample_trend.csv?raw'
 import { HealthPage } from './HealthPage'
 import { AccountProfilePage } from './components/AccountProfilePage'
 import { AssetProposalsPanel } from './components/AssetProposalsPanel'
@@ -60,25 +61,32 @@ import type {
   Agent,
   AgentConversation,
   AgentConversationSummary,
+  AgentConversationStatus,
+  AgentDefinitionUpdate,
   AgentSummary,
   AnalysisRun,
   AnalysisRunSummary,
   ActivityEvent,
   AssetProposal,
+  CapabilityDefinitionDiff,
   Draft,
   DraftSummary,
   SimulationRun,
   SimulationRunSummary,
   Skill,
+  SkillDefinitionUpdate,
+  SkillInvokeResponse,
   SkillSummary,
   InputAsset,
   MediaAsset,
+  ReviewStatus,
   TextInputAsset,
   Topic,
   TopicSourceWorkflow,
   TrendCsvInputAsset,
   Workspace,
   WorkflowAsset,
+  WorkflowAssetDefinitionUpdate,
   WorkflowAssetSummary,
   WorkflowType,
 } from './types'
@@ -115,6 +123,17 @@ type SaveKey =
   | 'manualTopic'
   | 'topic'
   | 'draft'
+  | 'analysisReview'
+  | 'simulationReview'
+
+type CapabilityAssetType = 'skill' | 'agent' | 'workflow'
+type DefinitionDiffStatus =
+  | 'idle'
+  | 'loading'
+  | 'loaded'
+  | 'reverting'
+  | 'reverted'
+  | 'error'
 type TextInputAssetPanel = Exclude<InputAssetPanel, 'trend_csv'>
 type XhsImportPanel = Extract<
   TextInputAssetPanel,
@@ -124,11 +143,111 @@ type ConversationContextTarget = {
   assetType: 'skill' | 'agent' | 'workflow'
   assetId: string
 }
+type SkillDefinitionDraft = {
+  displayName: string
+  category: string
+  purpose: string
+  artifactEffect: string
+  failureMode: string
+  version: string
+  userNotes: string
+  triggerIntents: string
+  requiredInputs: string
+  optionalInputs: string
+  sideEffects: string
+  composableWith: string
+  implementationRefs: string
+  contextPolicyJson: string
+  outputSchemaJson: string
+}
+type AgentDefinitionDraft = {
+  displayName: string
+  purpose: string
+  systemPrompt: string
+  skillIds: string
+  defaultContextPolicyJson: string
+  version: string
+  userNotes: string
+}
+type WorkflowDefinitionDraft = {
+  displayName: string
+  purpose: string
+  entryAgentIds: string
+  agentPlanJson: string
+  artifactEffect: string
+  callBinding: WorkflowAsset['callBinding']
+  version: string
+  userNotes: string
+}
+type VideoRubricTextDraft = {
+  creatorTypes: string
+  qualityDimensions: string
+  evidenceRules: string
+  incentiveRules: string
+}
+type SkillTestStatus = 'idle' | 'running' | 'completed' | 'error'
 const MAKER_AGENT_IDS = {
   skill: 'capability_maker',
   agent: 'capability_maker',
   workflow: 'capability_maker',
 } as const
+const VIDEO_RUBRIC_SKILL_IDS = new Set([
+  'analysis.video_creator_profile',
+  'analysis.video_quality',
+  'analysis.incentive_fit',
+])
+const DEFAULT_VIDEO_PM_RUBRIC = {
+  creatorTypes: [
+    {
+      type: '剧本驱动型',
+      fitForIncentive: '高',
+      rule: '连续发布剧情/角色/世界观内容，评论区出现催更、追剧情、讨论人物关系等信号。',
+    },
+    {
+      type: '商单驱动型',
+      fitForIncentive: '低',
+      rule: '内容以品牌植入、商品转化或短期商业任务为主，非商单内容弱或不稳定。',
+    },
+    {
+      type: '技术探索驱动型',
+      fitForIncentive: '中',
+      rule: '主要展示工具链、模型实验或制作流程，需要结合更新稳定性和受众反馈判断。',
+    },
+  ],
+  qualityDimensions: [
+    {
+      dimension: '叙事完整度',
+      high: '有清晰冲突、转折和结尾钩子，适合系列化。',
+      medium: '有主题但结构松散，缺少强钩子或连续性。',
+      low: '只有概念展示，缺少故事推进或观看理由。',
+      evidenceRequired: '标题、正文、评论反馈、视频理解或封面线索。',
+    },
+    {
+      dimension: '画面完成度',
+      high: '风格统一、主体清晰、构图稳定，封面/画面能支撑内容承诺。',
+      medium: '整体可用但存在风格跳变、信息密度不足或封面弱。',
+      low: '画面粗糙、主体混乱或明显影响可信度。',
+      evidenceRequired: '封面、截图、视频理解或用户手动样本观察。',
+    },
+  ],
+  evidenceRules: [
+    '必须引用标题、正文、互动、评论、封面或已保存媒体理解中的具体证据。',
+    '没有真实视频理解时，不得声称看过镜头、剪辑、口型、配音或完整视频。',
+    '证据弱时必须降低 evidenceConfidence，并填写 cannotAssess 或 recommendedNextEvidence。',
+  ],
+  incentiveRules: [
+    {
+      signal: '剧本驱动 + 系列化潜力高',
+      interpretation: '适合用连续更新任务、流量扶持和阶段奖励放大。',
+      operatorAction: '设计 4 周连续更新激励，要求保留同一世界观或栏目。',
+    },
+    {
+      signal: '商单占比高 + 非商单互动弱',
+      interpretation: '激励计划较难改变其内容行为。',
+      operatorAction: '谨慎纳入，优先谈商业合作或限定非商单内容任务。',
+    },
+  ],
+}
 const NEW_INPUT_ASSET_ID = '__new_input_asset__'
 const DEFAULT_WORKSPACE_NAME = '默认创作者工作区'
 
@@ -217,17 +336,7 @@ const SAMPLE_TREND_INPUT = {
   simulationTopic:
     '文科生/非技术背景，靠什么开始数字游民？6条真实路径\n切入角度：把「没有可以远程的技能」这个最大卡点，拆成6个具体可行的技能转换方向',
 }
-const SAMPLE_TREND_CSV = `title,likes,collects,comments,tags,content_snippet,date
-一天三份工，还能躺平？巴厘岛游民生活大公开,1790,526,77,#旅居巴厘岛 #数字游民 #巴厘岛,巴厘岛数字游民 一天三份收入的一天 是怎么样度过的,2026-01-02
-分享一家全员远程办公的公司(19),883,657,426,#远程办公 #远程工作 #数字游民,从22年11月开始分享全员远程工作公司以来，这个系列终于轮到我自己的公司了,2026-01-03
-普通小孩儿不要轻易尝试数字游民,953,402,87,#数字游民 #裸辞 #旅居,白人Privilege：挣发达国家的钱 去第三世界花 并不建议脑子一热就去做数字游民,2026-01-04
-不会英语泰语，如何在泰国躺平式搞钱？,286,221,47,#泰国 #曼谷 #数字游民 #跨境电商,普通人低成本旅居和远程赚钱的真实路径,2026-01-05
-VLOG｜一份主业多份副业，我靠什么技能赚钱,197,115,10,#数字游民 #远程工作 #副业,主业副业组合与现金流拆解,2026-01-06
-30岁沪漂女高管裸辞炒股：不上班月入10w+,115,77,83,#裸辞 #投资理财 #数字游民,从魔都996到小城自由职业 我终于逃离内卷的沪漂,2026-01-07
-VLOG｜成为数字游民前，我都做了哪些准备,120,50,4,#数字游民 #远程工作 #副业,成为数字游民之前的技能和存款准备,2026-01-08
-26岁年薪7位数 如何用AI拿到远程工作offer,61,106,0,#数字游民 #远程工作 #AI人工智能,4步利用AI工具帮你找到远程工作,2026-01-09
-自由职业｜线上中文老师的一天,75,50,15,#自由职业 #数字游民 #线上中文教师,从高校岗位转向线上中文教师的一天,2026-01-10
-普通人也能成为数字游民（内附找工作渠道）,45,57,3,#数字游民 #远程工作 #远程办公,远程工作可能没那么玄乎，它和普通人的距离可能只是一个获取招聘信息的渠道,2026-01-11`
+const SAMPLE_TREND_CSV = sampleTrendCsv
 
 const SAMPLE_VIDEO_INPUT = {
   positioning: `业务场景：AIGC 视频创作者激励计划
@@ -315,8 +424,230 @@ function workflowLabel(type: WorkflowType): string {
   return '热点分析'
 }
 
+function reviewStatusLabel(status: ReviewStatus): string {
+  const labels: Record<ReviewStatus, string> = {
+    unreviewed: '未复盘',
+    useful: '有用',
+    rejected: '弃用',
+  }
+  return labels[status]
+}
+
 function capabilityStatusClass(status: 'enabled' | 'disabled'): string {
   return `capability-status ${status}`
+}
+
+function textFromList(items: string[]): string {
+  return items.join('\n')
+}
+
+function listFromText(value: string): string[] {
+  return value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function skillToDefinitionDraft(skill: Skill): SkillDefinitionDraft {
+  return {
+    displayName: skill.displayName,
+    category: skill.category,
+    purpose: skill.purpose,
+    artifactEffect: skill.artifactEffect,
+    failureMode: skill.failureMode,
+    version: skill.version,
+    userNotes: skill.userNotes,
+    triggerIntents: textFromList(skill.triggerIntents),
+    requiredInputs: textFromList(skill.requiredInputs),
+    optionalInputs: textFromList(skill.optionalInputs),
+    sideEffects: textFromList(skill.sideEffects),
+    composableWith: textFromList(skill.composableWith),
+    implementationRefs: textFromList(skill.implementationRefs),
+    contextPolicyJson: JSON.stringify(skill.contextPolicy, null, 2),
+    outputSchemaJson: JSON.stringify(skill.outputSchema, null, 2),
+  }
+}
+
+function agentToDefinitionDraft(agent: Agent): AgentDefinitionDraft {
+  return {
+    displayName: agent.displayName,
+    purpose: agent.purpose,
+    systemPrompt: agent.systemPrompt,
+    skillIds: textFromList(agent.skillIds),
+    defaultContextPolicyJson: JSON.stringify(agent.defaultContextPolicy, null, 2),
+    version: agent.version,
+    userNotes: agent.userNotes,
+  }
+}
+
+function workflowToDefinitionDraft(
+  workflowAsset: WorkflowAsset,
+): WorkflowDefinitionDraft {
+  return {
+    displayName: workflowAsset.displayName,
+    purpose: workflowAsset.purpose,
+    entryAgentIds: textFromList(workflowAsset.entryAgentIds),
+    agentPlanJson: JSON.stringify(workflowAsset.agentPlan, null, 2),
+    artifactEffect: workflowAsset.artifactEffect,
+    callBinding: workflowAsset.callBinding,
+    version: workflowAsset.version,
+    userNotes: workflowAsset.userNotes,
+  }
+}
+
+function isVideoRubricSkill(skillId: string): boolean {
+  return VIDEO_RUBRIC_SKILL_IDS.has(skillId)
+}
+
+function isDirectlyInvokableSkill(skillId: string): boolean {
+  return skillId.startsWith('input_asset.format_') || skillId.startsWith('media.')
+}
+
+function defaultSkillTestInput(skill: Skill): string {
+  if (skill.skillId.startsWith('input_asset.format_')) {
+    return JSON.stringify(
+      {
+        rawText: '这里粘贴一段待整理素材。\n例如：评论1：太焦虑了，不知道怎么选校。',
+      },
+      null,
+      2,
+    )
+  }
+  if (skill.skillId === 'media.understand_image') {
+    return JSON.stringify(
+      {
+        prompt: '请理解这张图文素材，提取画面摘要、文字、创作者信号和不确定性。',
+        imageUrl: 'https://example.com/image.png',
+      },
+      null,
+      2,
+    )
+  }
+  if (skill.skillId === 'media.understand_video') {
+    return JSON.stringify(
+      {
+        prompt: '请基于视频预览帧理解这个视频素材，提取内容质量信号和不确定性。',
+        videoUrl: 'https://example.com/video.mp4',
+      },
+      null,
+      2,
+    )
+  }
+  if (skill.skillId === 'media.generate_image') {
+    return JSON.stringify(
+      {
+        prompt: '生成一张适合小红书封面的 AIGC 创作者视觉参考图。',
+      },
+      null,
+      2,
+    )
+  }
+  if (skill.skillId === 'media.generate_video') {
+    return JSON.stringify(
+      {
+        prompt: '生成一段 3 秒 AIGC 视频概念片，用于测试视觉方向。',
+      },
+      null,
+      2,
+    )
+  }
+  return JSON.stringify({}, null, 2)
+}
+
+function objectArrayToPipeText(
+  items: unknown,
+  fields: string[],
+  fallbackItems: Record<string, string>[],
+): string {
+  const rows = Array.isArray(items) && items.length > 0 ? items : fallbackItems
+  return rows
+    .map((item) => {
+      const row = item && typeof item === 'object' ? (item as Record<string, unknown>) : {}
+      return fields.map((field) => String(row[field] || '')).join(' | ')
+    })
+    .join('\n')
+}
+
+function pipeTextToObjectArray(value: string, fields: string[]): Record<string, string>[] {
+  return value
+    .split('\n')
+    .map((row) => row.trim())
+    .filter(Boolean)
+    .map((row) => {
+      const cells = row.split('|').map((cell) => cell.trim())
+      return fields.reduce<Record<string, string>>((acc, field, index) => {
+        acc[field] = cells[index] || ''
+        return acc
+      }, {})
+    })
+}
+
+function videoRubricDraftFromContextPolicyJson(value: string): VideoRubricTextDraft | null {
+  try {
+    const contextPolicy = JSON.parse(value) as Record<string, unknown>
+    const rubric =
+      contextPolicy.pmRubric && typeof contextPolicy.pmRubric === 'object'
+        ? (contextPolicy.pmRubric as Record<string, unknown>)
+        : DEFAULT_VIDEO_PM_RUBRIC
+    return {
+      creatorTypes: objectArrayToPipeText(
+        rubric.creatorTypes,
+        ['type', 'fitForIncentive', 'rule'],
+        DEFAULT_VIDEO_PM_RUBRIC.creatorTypes,
+      ),
+      qualityDimensions: objectArrayToPipeText(
+        rubric.qualityDimensions,
+        ['dimension', 'high', 'medium', 'low', 'evidenceRequired'],
+        DEFAULT_VIDEO_PM_RUBRIC.qualityDimensions,
+      ),
+      evidenceRules: textFromList(
+        Array.isArray(rubric.evidenceRules)
+          ? rubric.evidenceRules.map((item) => String(item))
+          : DEFAULT_VIDEO_PM_RUBRIC.evidenceRules,
+      ),
+      incentiveRules: objectArrayToPipeText(
+        rubric.incentiveRules,
+        ['signal', 'interpretation', 'operatorAction'],
+        DEFAULT_VIDEO_PM_RUBRIC.incentiveRules,
+      ),
+    }
+  } catch {
+    return null
+  }
+}
+
+function contextPolicyJsonWithVideoRubric(
+  value: string,
+  rubricDraft: VideoRubricTextDraft,
+): string {
+  const contextPolicy = JSON.parse(value) as Record<string, unknown>
+  return JSON.stringify(
+    {
+      ...contextPolicy,
+      pmRubric: {
+        creatorTypes: pipeTextToObjectArray(rubricDraft.creatorTypes, [
+          'type',
+          'fitForIncentive',
+          'rule',
+        ]),
+        qualityDimensions: pipeTextToObjectArray(rubricDraft.qualityDimensions, [
+          'dimension',
+          'high',
+          'medium',
+          'low',
+          'evidenceRequired',
+        ]),
+        evidenceRules: listFromText(rubricDraft.evidenceRules),
+        incentiveRules: pipeTextToObjectArray(rubricDraft.incentiveRules, [
+          'signal',
+          'interpretation',
+          'operatorAction',
+        ]),
+      },
+    },
+    null,
+    2,
+  )
 }
 
 function newClientRequestKey(prefix: string): string {
@@ -345,20 +676,47 @@ function WorkspaceApp() {
     useState<SimulationRun | null>(null)
   const [skills, setSkills] = useState<SkillSummary[]>([])
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null)
+  const [skillDefinitionDraft, setSkillDefinitionDraft] =
+    useState<SkillDefinitionDraft | null>(null)
+  const [skillDefinitionSaving, setSkillDefinitionSaving] = useState(false)
+  const [skillDefinitionStatus, setSkillDefinitionStatus] = useState('')
+  const [skillTestInput, setSkillTestInput] = useState('')
+  const [skillTestMode, setSkillTestMode] = useState<GenerationMode>('demo')
+  const [skillTestStatus, setSkillTestStatus] = useState<SkillTestStatus>('idle')
+  const [skillTestResult, setSkillTestResult] = useState<SkillInvokeResponse | null>(
+    null,
+  )
+  const [skillTestError, setSkillTestError] = useState('')
   const [agents, setAgents] = useState<AgentSummary[]>([])
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
+  const [agentDefinitionDraft, setAgentDefinitionDraft] =
+    useState<AgentDefinitionDraft | null>(null)
+  const [agentDefinitionSaving, setAgentDefinitionSaving] = useState(false)
+  const [agentDefinitionStatus, setAgentDefinitionStatus] = useState('')
   const [agentConversations, setAgentConversations] = useState<
     AgentConversationSummary[]
   >([])
   const [selectedAgentConversation, setSelectedAgentConversation] =
     useState<AgentConversation | null>(null)
   const [assetProposals, setAssetProposals] = useState<AssetProposal[]>([])
+  const [conversationTitleDraft, setConversationTitleDraft] = useState('')
   const [agentMessageDraft, setAgentMessageDraft] = useState('')
   const [agentSending, setAgentSending] = useState(false)
+  const [conversationSaving, setConversationSaving] = useState(false)
+  const [conversationSaveStatus, setConversationSaveStatus] = useState('')
   const [agentConversationCreating, setAgentConversationCreating] = useState(false)
   const [workflowAssets, setWorkflowAssets] = useState<WorkflowAssetSummary[]>([])
   const [selectedWorkflowAsset, setSelectedWorkflowAsset] =
     useState<WorkflowAsset | null>(null)
+  const [workflowDefinitionDraft, setWorkflowDefinitionDraft] =
+    useState<WorkflowDefinitionDraft | null>(null)
+  const [workflowDefinitionSaving, setWorkflowDefinitionSaving] = useState(false)
+  const [workflowDefinitionStatus, setWorkflowDefinitionStatus] = useState('')
+  const [definitionDiff, setDefinitionDiff] =
+    useState<CapabilityDefinitionDiff | null>(null)
+  const [definitionDiffStatus, setDefinitionDiffStatus] =
+    useState<DefinitionDiffStatus>('idle')
+  const [definitionDiffError, setDefinitionDiffError] = useState('')
   const [drafts, setDrafts] = useState<DraftSummary[]>([])
   const [selectedDraft, setSelectedDraft] = useState<Draft | null>(null)
   const [draftEditor, setDraftEditor] = useState('')
@@ -399,6 +757,7 @@ function WorkspaceApp() {
   const [xhsImportWarnings, setXhsImportWarnings] = useState<string[]>([])
   const [inputAssetPanel, setInputAssetPanel] =
     useState<InputAssetPanel>('historical_posts')
+  const [inputAssetDetailOpen, setInputAssetDetailOpen] = useState(false)
   const [selectedHistoricalInputAssetId, setSelectedHistoricalInputAssetId] =
     useState('')
   const [selectedCommentsInputAssetId, setSelectedCommentsInputAssetId] = useState('')
@@ -439,7 +798,17 @@ function WorkspaceApp() {
     manualTopic: idleState,
     topic: idleState,
     draft: idleState,
+    analysisReview: idleState,
+    simulationReview: idleState,
   })
+  const [analysisReviewDraft, setAnalysisReviewDraft] = useState<{
+    userNotes: string
+    reviewStatus: ReviewStatus
+  }>({ userNotes: '', reviewStatus: 'unreviewed' })
+  const [simulationReviewDraft, setSimulationReviewDraft] = useState<{
+    userNotes: string
+    reviewStatus: ReviewStatus
+  }>({ userNotes: '', reviewStatus: 'unreviewed' })
 
   const accountProfileMaterials = useMemo(
     () =>
@@ -760,6 +1129,8 @@ function WorkspaceApp() {
           manualTopic: idleState,
           topic: idleState,
           draft: idleState,
+          analysisReview: idleState,
+          simulationReview: idleState,
         })
         setLoading(false)
       },
@@ -838,6 +1209,8 @@ function WorkspaceApp() {
       manualTopic: idleState,
       topic: idleState,
       draft: idleState,
+      analysisReview: idleState,
+      simulationReview: idleState,
     })
   }
 
@@ -854,9 +1227,20 @@ function WorkspaceApp() {
 
   function openInputAsset(panel: InputAssetPanel) {
     setInputAssetPanel(panel)
+    setInputAssetDetailOpen(false)
     setInputAssetFormatterDraft('')
     setInputAssetFormatterStatus('')
     setActivePage('source-materials')
+  }
+
+  function chooseTextMaterialFromInputAssetPage(material: TextInputAsset) {
+    setInputAssetDetailOpen(true)
+    chooseTextMaterial(material)
+  }
+
+  function chooseTrendMaterialFromInputAssetPage(material: TrendCsvInputAsset) {
+    setInputAssetDetailOpen(true)
+    chooseTrendMaterial(material)
   }
 
   function chooseTextMaterial(material: TextInputAsset) {
@@ -907,6 +1291,7 @@ function WorkspaceApp() {
   }
 
   function startNewInputAsset(panel: InputAssetPanel) {
+    setInputAssetDetailOpen(true)
     if (panel === 'account_profiles') {
       setSelectedProfileInputAssetId(NEW_INPUT_ASSET_ID)
       setPositioning('')
@@ -977,6 +1362,7 @@ function WorkspaceApp() {
       const content = typeof output.content === 'string' ? output.content : ''
       const keyword = typeof output.keyword === 'string' ? output.keyword : ''
       const notes = typeof output.notes === 'string' ? output.notes : '已整理为草稿，请确认后保存。'
+      setInputAssetDetailOpen(true)
       if (inputAssetPanel === 'account_profiles') {
         setSelectedProfileInputAssetId(NEW_INPUT_ASSET_ID)
         setAccountProfileDraftName(name || '整理后的账号概况')
@@ -1944,9 +2330,47 @@ function WorkspaceApp() {
       setSelectedDraft(draft)
       setDraftEditor(JSON.stringify(draft.editableContent, null, 2))
       await refreshWorkspaceSummary()
-      setActivePage('topics')
+      setActivePage('drafts')
       setSaveState('draft', { phase: 'saved' })
       return draft
+    } catch (error) {
+      const message = errorMessage(error)
+      setRunError(message)
+      setSaveState('draft', { phase: 'error', message })
+      throw error
+    }
+  }
+
+  async function generateBriefForTopic(topic: Topic) {
+    setRunError('')
+    setSaveState('draft', { phase: 'saving' })
+    try {
+      const draft = await draftApi.generateBriefFromTopic(topic.id, mode)
+      setSelectedDraft(draft)
+      setDraftEditor(JSON.stringify(draft.editableContent, null, 2))
+      await refreshWorkspaceSummary()
+      setActivePage('drafts')
+      setSaveState('draft', { phase: 'saved' })
+      return draft
+    } catch (error) {
+      const message = errorMessage(error)
+      setRunError(message)
+      setSaveState('draft', { phase: 'error', message })
+      throw error
+    }
+  }
+
+  async function generateStructureFromBrief(draft: Draft) {
+    setRunError('')
+    setSaveState('draft', { phase: 'saving' })
+    try {
+      const structureDraft = await draftApi.generateStructureFromBrief(draft.id, mode)
+      setSelectedDraft(structureDraft)
+      setDraftEditor(JSON.stringify(structureDraft.editableContent, null, 2))
+      await refreshWorkspaceSummary()
+      setActivePage('drafts')
+      setSaveState('draft', { phase: 'saved' })
+      return structureDraft
     } catch (error) {
       const message = errorMessage(error)
       setRunError(message)
@@ -1983,6 +2407,11 @@ function WorkspaceApp() {
   async function openRun(runId: string, inOutput = false) {
     const run = await analysisRunApi.get(runId)
     setSelectedRun(run)
+    setAnalysisReviewDraft({
+      userNotes: run.userNotes,
+      reviewStatus: run.reviewStatus,
+    })
+    setSaveState('analysisReview', idleState)
     if (inOutput) {
       const targetTab = workflowTabFromSource(run.workflowType)
       setCurrentRun(run)
@@ -1996,6 +2425,11 @@ function WorkspaceApp() {
   async function openSimulationRun(simulationId: string, inOutput = false) {
     const run = await simulationRunApi.get(simulationId)
     setSelectedSimulationRun(run)
+    setSimulationReviewDraft({
+      userNotes: run.userNotes,
+      reviewStatus: run.reviewStatus,
+    })
+    setSaveState('simulationReview', idleState)
     if (inOutput) {
       const targetTab = workflowTabFromSimulation(run)
       setCurrentRun(null)
@@ -2012,18 +2446,191 @@ function WorkspaceApp() {
     }
   }
 
+  async function saveAnalysisRunReview() {
+    if (!selectedRun) return
+    setSaveState('analysisReview', { phase: 'saving' })
+    try {
+      const updated = await analysisRunApi.updateReview(selectedRun.id, {
+        userNotes: analysisReviewDraft.userNotes,
+        reviewStatus: analysisReviewDraft.reviewStatus,
+        expectedUpdatedAt: selectedRun.updatedAt,
+      })
+      setSelectedRun(updated)
+      setAnalysisReviewDraft({
+        userNotes: updated.userNotes,
+        reviewStatus: updated.reviewStatus,
+      })
+      setAnalysisRuns((current) =>
+        current.map((run) => (run.id === updated.id ? updated : run)),
+      )
+      if (currentRun?.id === updated.id) setCurrentRun(updated)
+      setSaveState('analysisReview', { phase: 'saved' })
+    } catch (error) {
+      setSaveState('analysisReview', {
+        phase: 'error',
+        message: errorMessage(error),
+      })
+    }
+  }
+
+  async function saveSimulationRunReview() {
+    if (!selectedSimulationRun) return
+    setSaveState('simulationReview', { phase: 'saving' })
+    try {
+      const updated = await simulationRunApi.updateReview(selectedSimulationRun.id, {
+        userNotes: simulationReviewDraft.userNotes,
+        reviewStatus: simulationReviewDraft.reviewStatus,
+        expectedUpdatedAt: selectedSimulationRun.updatedAt,
+      })
+      setSelectedSimulationRun(updated)
+      setSimulationReviewDraft({
+        userNotes: updated.userNotes,
+        reviewStatus: updated.reviewStatus,
+      })
+      setSimulationRuns((current) =>
+        current.map((run) => (run.id === updated.id ? updated : run)),
+      )
+      setSaveState('simulationReview', { phase: 'saved' })
+    } catch (error) {
+      setSaveState('simulationReview', {
+        phase: 'error',
+        message: errorMessage(error),
+      })
+    }
+  }
+
   async function openSkill(skillAssetId: string) {
     const skill = await skillApi.get(skillAssetId)
     setSelectedSkill(skill)
+    setSkillDefinitionDraft(null)
+    setSkillDefinitionStatus('')
+    resetDefinitionDiff()
+    setSkillTestInput(defaultSkillTestInput(skill))
+    setSkillTestStatus('idle')
+    setSkillTestResult(null)
+    setSkillTestError('')
+  }
+
+  function startSkillDefinitionEdit(skill: Skill) {
+    setSkillDefinitionDraft(skillToDefinitionDraft(skill))
+    setSkillDefinitionStatus('')
+  }
+
+  async function saveSkillDefinition() {
+    if (!selectedSkill || !skillDefinitionDraft) return
+    setSkillDefinitionSaving(true)
+    setSkillDefinitionStatus('saving')
+    try {
+      const contextPolicy = JSON.parse(skillDefinitionDraft.contextPolicyJson) as Record<
+        string,
+        unknown
+      >
+      const outputSchema = JSON.parse(skillDefinitionDraft.outputSchemaJson) as Record<
+        string,
+        unknown
+      >
+      const payload: SkillDefinitionUpdate = {
+        displayName: skillDefinitionDraft.displayName,
+        category: skillDefinitionDraft.category,
+        purpose: skillDefinitionDraft.purpose,
+        artifactEffect: skillDefinitionDraft.artifactEffect,
+        failureMode: skillDefinitionDraft.failureMode,
+        version: skillDefinitionDraft.version,
+        userNotes: skillDefinitionDraft.userNotes,
+        triggerIntents: listFromText(skillDefinitionDraft.triggerIntents),
+        requiredInputs: listFromText(skillDefinitionDraft.requiredInputs),
+        optionalInputs: listFromText(skillDefinitionDraft.optionalInputs),
+        sideEffects: listFromText(skillDefinitionDraft.sideEffects),
+        composableWith: listFromText(skillDefinitionDraft.composableWith),
+        implementationRefs: listFromText(skillDefinitionDraft.implementationRefs),
+        contextPolicy,
+        outputSchema,
+        expectedUpdatedAt: selectedSkill.updatedAt,
+      }
+      const updated = await skillApi.updateDefinition(selectedSkill.id, payload)
+      setSelectedSkill(updated)
+      setSkills((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      )
+      setSkillDefinitionDraft(skillToDefinitionDraft(updated))
+      setSkillDefinitionStatus('saved')
+      resetDefinitionDiff()
+      await refreshWorkspaceSummary()
+    } catch (error) {
+      setSkillDefinitionStatus(`error:${errorMessage(error)}`)
+    } finally {
+      setSkillDefinitionSaving(false)
+    }
+  }
+
+  async function runSkillTest() {
+    if (!selectedSkill) return
+    setSkillTestStatus('running')
+    setSkillTestError('')
+    setSkillTestResult(null)
+    try {
+      const input = JSON.parse(skillTestInput) as Record<string, unknown>
+      const result = await skillApi.invoke(selectedSkill.id, {
+        input,
+        mode: skillTestMode,
+      })
+      setSkillTestResult(result)
+      setSkillTestStatus('completed')
+    } catch (error) {
+      setSkillTestError(errorMessage(error))
+      setSkillTestStatus('error')
+    }
   }
 
   async function openAgent(agentAssetId: string) {
     const agent = await agentApi.get(agentAssetId)
     setSelectedAgent(agent)
+    setAgentDefinitionDraft(null)
+    setAgentDefinitionStatus('')
+    resetDefinitionDiff()
     setSelectedAgentConversation((current) =>
       current?.agentAssetId === agent.id ? current : null,
     )
     setAgentMessageDraft('')
+  }
+
+  function startAgentDefinitionEdit(agent: Agent) {
+    setAgentDefinitionDraft(agentToDefinitionDraft(agent))
+    setAgentDefinitionStatus('')
+  }
+
+  async function saveAgentDefinition() {
+    if (!selectedAgent || !agentDefinitionDraft) return
+    setAgentDefinitionSaving(true)
+    setAgentDefinitionStatus('saving')
+    try {
+      const defaultContextPolicy = JSON.parse(
+        agentDefinitionDraft.defaultContextPolicyJson,
+      ) as Record<string, unknown>
+      const payload: AgentDefinitionUpdate = {
+        displayName: agentDefinitionDraft.displayName,
+        purpose: agentDefinitionDraft.purpose,
+        systemPrompt: agentDefinitionDraft.systemPrompt,
+        skillIds: listFromText(agentDefinitionDraft.skillIds),
+        defaultContextPolicy,
+        version: agentDefinitionDraft.version,
+        userNotes: agentDefinitionDraft.userNotes,
+        expectedUpdatedAt: selectedAgent.updatedAt,
+      }
+      const updated = await agentApi.updateDefinition(selectedAgent.id, payload)
+      setSelectedAgent(updated)
+      setAgents((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      )
+      setAgentDefinitionDraft(agentToDefinitionDraft(updated))
+      setAgentDefinitionStatus('saved')
+      resetDefinitionDiff()
+      await refreshWorkspaceSummary()
+    } catch (error) {
+      setAgentDefinitionStatus(`error:${errorMessage(error)}`)
+    } finally {
+      setAgentDefinitionSaving(false)
+    }
   }
 
   async function startAgentConversation(
@@ -2049,6 +2656,8 @@ function WorkspaceApp() {
       ])
       setSelectedAgentConversation(conversation)
       setAssetProposals([])
+      setConversationTitleDraft(conversation.title)
+      setConversationSaveStatus('')
       setAgentMessageDraft(initialDraft)
       await refreshWorkspaceSummary()
     } catch (error) {
@@ -2093,6 +2702,8 @@ function WorkspaceApp() {
     ])
     setSelectedAgentConversation(conversation)
     setAssetProposals(proposals)
+    setConversationTitleDraft(conversation.title)
+    setConversationSaveStatus('')
     setAgentMessageDraft('')
     const agent = agents.find((item) => item.id === conversation.agentAssetId)
     if (agent) {
@@ -2112,6 +2723,7 @@ function WorkspaceApp() {
         mode,
       )
       setSelectedAgentConversation(conversation)
+      setConversationTitleDraft(conversation.title)
       setAssetProposals(
         await assetProposalApi.listForConversation(selectedAgentConversation.id),
       )
@@ -2124,9 +2736,181 @@ function WorkspaceApp() {
     }
   }
 
+  async function updateAgentConversationAsset(
+    patch: { title?: string; status?: AgentConversationStatus },
+  ) {
+    if (!selectedAgentConversation) return
+    setConversationSaving(true)
+    setConversationSaveStatus('saving')
+    setRunError('')
+    try {
+      const updated = await agentConversationApi.update(selectedAgentConversation.id, {
+        ...patch,
+        expectedUpdatedAt: selectedAgentConversation.updatedAt,
+      })
+      setSelectedAgentConversation(updated)
+      setConversationTitleDraft(updated.title)
+      setAgentConversations((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      )
+      setConversationSaveStatus('saved')
+      await refreshWorkspaceSummary()
+    } catch (error) {
+      const message = errorMessage(error)
+      setConversationSaveStatus(`error:${message}`)
+      setRunError(message)
+    } finally {
+      setConversationSaving(false)
+    }
+  }
+
   async function openWorkflowAsset(workflowAssetId: string) {
     const workflowAsset = await workflowAssetApi.get(workflowAssetId)
     setSelectedWorkflowAsset(workflowAsset)
+    setWorkflowDefinitionDraft(null)
+    setWorkflowDefinitionStatus('')
+    resetDefinitionDiff()
+  }
+
+  function startWorkflowDefinitionEdit(workflowAsset: WorkflowAsset) {
+    setWorkflowDefinitionDraft(workflowToDefinitionDraft(workflowAsset))
+    setWorkflowDefinitionStatus('')
+  }
+
+  async function saveWorkflowDefinition() {
+    if (!selectedWorkflowAsset || !workflowDefinitionDraft) return
+    setWorkflowDefinitionSaving(true)
+    setWorkflowDefinitionStatus('saving')
+    try {
+      const agentPlan = JSON.parse(workflowDefinitionDraft.agentPlanJson) as Record<
+        string,
+        unknown
+      >
+      const payload: WorkflowAssetDefinitionUpdate = {
+        displayName: workflowDefinitionDraft.displayName,
+        purpose: workflowDefinitionDraft.purpose,
+        entryAgentIds: listFromText(workflowDefinitionDraft.entryAgentIds),
+        agentPlan,
+        artifactEffect: workflowDefinitionDraft.artifactEffect,
+        callBinding: workflowDefinitionDraft.callBinding,
+        version: workflowDefinitionDraft.version,
+        userNotes: workflowDefinitionDraft.userNotes,
+        expectedUpdatedAt: selectedWorkflowAsset.updatedAt,
+      }
+      const updated = await workflowAssetApi.updateDefinition(
+        selectedWorkflowAsset.id,
+        payload,
+      )
+      setSelectedWorkflowAsset(updated)
+      setWorkflowAssets((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      )
+      setWorkflowDefinitionDraft(workflowToDefinitionDraft(updated))
+      setWorkflowDefinitionStatus('saved')
+      resetDefinitionDiff()
+      await refreshWorkspaceSummary()
+    } catch (error) {
+      setWorkflowDefinitionStatus(`error:${errorMessage(error)}`)
+    } finally {
+      setWorkflowDefinitionSaving(false)
+    }
+  }
+
+  function resetDefinitionDiff() {
+    setDefinitionDiff(null)
+    setDefinitionDiffStatus('idle')
+    setDefinitionDiffError('')
+  }
+
+  async function loadCapabilityDefinitionDiff(assetType: CapabilityAssetType) {
+    setDefinitionDiffStatus('loading')
+    setDefinitionDiffError('')
+    try {
+      const diff =
+        assetType === 'skill' && selectedSkill
+          ? await skillApi.definitionDiff(selectedSkill.id)
+          : assetType === 'agent' && selectedAgent
+            ? await agentApi.definitionDiff(selectedAgent.id)
+            : assetType === 'workflow' && selectedWorkflowAsset
+              ? await workflowAssetApi.definitionDiff(selectedWorkflowAsset.id)
+              : null
+      if (!diff) return
+      setDefinitionDiff(diff)
+      setDefinitionDiffStatus('loaded')
+    } catch (error) {
+      setDefinitionDiffError(errorMessage(error))
+      setDefinitionDiffStatus('error')
+    }
+  }
+
+  async function revertCapabilityDefinition(assetType: CapabilityAssetType) {
+    setDefinitionDiffStatus('reverting')
+    setDefinitionDiffError('')
+    try {
+      if (assetType === 'skill' && selectedSkill) {
+        const updated = await skillApi.revertDefinition(
+          selectedSkill.id,
+          selectedSkill.updatedAt,
+        )
+        setSelectedSkill(updated)
+        setSkills((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        )
+        setSkillDefinitionDraft((current) =>
+          current ? skillToDefinitionDraft(updated) : current,
+        )
+      } else if (assetType === 'agent' && selectedAgent) {
+        const updated = await agentApi.revertDefinition(
+          selectedAgent.id,
+          selectedAgent.updatedAt,
+        )
+        setSelectedAgent(updated)
+        setAgents((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        )
+        setAgentDefinitionDraft((current) =>
+          current ? agentToDefinitionDraft(updated) : current,
+        )
+      } else if (assetType === 'workflow' && selectedWorkflowAsset) {
+        const updated = await workflowAssetApi.revertDefinition(
+          selectedWorkflowAsset.id,
+          selectedWorkflowAsset.updatedAt,
+        )
+        setSelectedWorkflowAsset(updated)
+        setWorkflowAssets((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        )
+        setWorkflowDefinitionDraft((current) =>
+          current ? workflowToDefinitionDraft(updated) : current,
+        )
+      }
+      setDefinitionDiffStatus('reverted')
+      setDefinitionDiff(null)
+      await refreshWorkspaceSummary()
+    } catch (error) {
+      setDefinitionDiffError(errorMessage(error))
+      setDefinitionDiffStatus('error')
+    }
+  }
+
+  async function updateWorkflowCallBinding(
+    workflowAsset: WorkflowAsset,
+    callBinding: WorkflowAsset['callBinding'],
+  ) {
+    setRunError('')
+    try {
+      const updated = await workflowAssetApi.updateCallBinding(workflowAsset.id, {
+        callBinding,
+        expectedUpdatedAt: workflowAsset.updatedAt,
+      })
+      setSelectedWorkflowAsset(updated)
+      setWorkflowAssets((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      )
+      await refreshWorkspaceSummary()
+    } catch (error) {
+      setRunError(errorMessage(error))
+    }
   }
 
   async function applyAssetProposal(proposal: AssetProposal) {
@@ -2158,6 +2942,7 @@ function WorkspaceApp() {
     setAssetProposals((current) =>
       current.map((item) => (item.id === updated.id ? updated : item)),
     )
+    return updated
   }
 
   async function rejectAssetProposal(proposal: AssetProposal) {
@@ -2229,13 +3014,90 @@ function WorkspaceApp() {
 
   function draftDisplayTitle(draft: Draft) {
     const inputTopic = draft.inputSnapshot.topic as { title?: string } | undefined
+    const brief = (draft.editableContent.brief || {}) as {
+      topicTitle?: string
+      refinedAngle?: string
+    }
+    if (draft.kind === 'content_brief') {
+      return brief.topicTitle || inputTopic?.title || '创作 Brief'
+    }
     const structure = (draft.editableContent.structure || {}) as {
       topicChosen?: string
     }
     return structure.topicChosen || inputTopic?.title || '内容结构'
   }
 
+  function draftKindLabel(draft: Draft | DraftSummary) {
+    return draft.kind === 'content_brief' ? '创作 Brief' : '内容结构'
+  }
+
+  function renderContentBrief(value: Record<string, unknown>) {
+    const brief = (value.brief || null) as Record<string, unknown> | null
+    if (!brief) return <pre className="json-preview">{JSON.stringify(value, null, 2)}</pre>
+    const list = (key: string) => (Array.isArray(brief[key]) ? (brief[key] as unknown[]) : [])
+    return (
+      <div className="stage-card">
+        <h3>{String(brief.topicTitle || '创作 Brief')}</h3>
+        <p>
+          <b>精炼角度：</b>
+          {String(brief.refinedAngle || '未填写')}
+        </p>
+        <p>
+          <b>目标读者：</b>
+          {String(brief.targetReader || '未填写')}
+        </p>
+        <p>
+          <b>内容承诺：</b>
+          {String(brief.contentPromise || '未填写')}
+        </p>
+        <p>
+          <b>核心观点：</b>
+          {String(brief.corePoint || '未填写')}
+        </p>
+        <p>
+          <b>开头钩子：</b>
+          {String(brief.openingHook || '未填写')}
+        </p>
+        <div className="mini-grid">
+          <div>
+            <b>论证路径</b>
+            <ul>
+              {list('argumentPath').map((item, index) => (
+                <li key={`${index}-${String(item)}`}>{String(item)}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <b>素材需求</b>
+            <ul>
+              {list('materialNeeds').map((item, index) => (
+                <li key={`${index}-${String(item)}`}>{String(item)}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <b>标题方向</b>
+            <ul>
+              {list('titleDirections').map((item, index) => (
+                <li key={`${index}-${String(item)}`}>{String(item)}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <b>风险</b>
+            <ul>
+              {list('risks').map((item, index) => (
+                <li key={`${index}-${String(item)}`}>{String(item)}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   function renderDraftStructure(value: Record<string, unknown>) {
+    if (value.brief) return renderContentBrief(value)
     const structure = (value.structure || null) as Record<string, unknown> | null
     if (structure) return <StructureView data={structure} />
     return <pre className="json-preview">{JSON.stringify(value, null, 2)}</pre>
@@ -2274,6 +3136,14 @@ function WorkspaceApp() {
             }}
           >
             发送到受众模拟
+          </button>
+          <button
+            onClick={async () => {
+              const saved = await ensureSavedAndSelect()
+              await generateBriefForTopic(saved)
+            }}
+          >
+            生成创作 Brief
           </button>
           <button
             onClick={async () => {
@@ -2337,6 +3207,7 @@ function WorkspaceApp() {
           assets={mediaAssets}
           skills={skills}
           mode={mode}
+          onModeChange={setMode}
           onAssetsChange={setMediaAssets}
         />
       )}
@@ -2347,6 +3218,7 @@ function WorkspaceApp() {
           assets={mediaAssets}
           skills={skills}
           mode={mode}
+          onModeChange={setMode}
           onAssetsChange={setMediaAssets}
         />
       )}
@@ -2370,6 +3242,10 @@ function WorkspaceApp() {
         workspace &&
         activePage === 'simulations' &&
         renderSimulationsPage()}
+      {!loading &&
+        workspace &&
+        activePage === 'conversations' &&
+        renderConversationsPage()}
       {!loading && workspace && activePage === 'skills' && renderSkillsPage()}
       {!loading && workspace && activePage === 'agents' && renderAgentsPage()}
       {!loading &&
@@ -2386,6 +3262,7 @@ function WorkspaceApp() {
       inputAssetPanel={inputAssetPanel}
       showHelp={showHelp}
       helpContent={helpContent}
+      workflowAssets={workflowAssets}
       onOpenInputAsset={openInputAsset}
       onSetActivePage={setActivePage}
       onSetWorkflowTab={setWorkflowTab}
@@ -2576,6 +3453,7 @@ function WorkspaceApp() {
     return (
       <InputAssetsPage
         inputAssetPanel={inputAssetPanel}
+        inputAssetDetailOpen={inputAssetDetailOpen}
         accountProfileMaterials={accountProfileMaterials}
         historicalMaterials={historicalMaterials}
         commentsMaterials={commentsMaterials}
@@ -2612,8 +3490,8 @@ function WorkspaceApp() {
         xhsSaveState={saveStates.xhs}
         onStartNewInputAsset={startNewInputAsset}
         onOpenInputAsset={openInputAsset}
-        onChooseTextMaterial={chooseTextMaterial}
-        onChooseTrendMaterial={chooseTrendMaterial}
+        onChooseTextMaterial={chooseTextMaterialFromInputAssetPage}
+        onChooseTrendMaterial={chooseTrendMaterialFromInputAssetPage}
         onFormatterDraftChange={(value) => {
           setInputAssetFormatterDraft(value)
           setInputAssetFormatterStatus('')
@@ -2782,6 +3660,7 @@ function WorkspaceApp() {
               >
                 <span>{workflowLabel(run.workflowType)}</span>
                 <b>{run.status}</b>
+                <small>{reviewStatusLabel(run.reviewStatus)}</small>
                 <small>{new Date(run.createdAt).toLocaleString()}</small>
               </button>
             ))
@@ -2802,6 +3681,14 @@ function WorkspaceApp() {
                   在输出区打开
                 </button>
               </div>
+              {renderRunReviewEditor({
+                idPrefix: 'analysis-run-review',
+                draft: analysisReviewDraft,
+                onDraftChange: setAnalysisReviewDraft,
+                onSave: saveAnalysisRunReview,
+                saveState: saveStates.analysisReview,
+                hint: '执行输入、阶段结果和模型元数据是不可变历史；这里仅保存人工复盘判断。',
+              })}
               <label>原始输入快照</label>
               <pre className="json-preview">
                 {JSON.stringify(selectedRun.inputSnapshot, null, 2)}
@@ -2823,6 +3710,65 @@ function WorkspaceApp() {
           )}
         </section>
       </div>
+    )
+  }
+
+  function renderRunReviewEditor({
+    idPrefix,
+    draft,
+    onDraftChange,
+    onSave,
+    saveState,
+    hint,
+  }: {
+    idPrefix: string
+    draft: { userNotes: string; reviewStatus: ReviewStatus }
+    onDraftChange: (draft: { userNotes: string; reviewStatus: ReviewStatus }) => void
+    onSave: () => void
+    saveState: SaveState
+    hint: string
+  }) {
+    return (
+      <section className="review-card">
+        <div className="detail-head">
+          <div>
+            <h3>人工复盘</h3>
+            <p>{hint}</p>
+          </div>
+          <SaveIndicator state={saveState} />
+        </div>
+        <label htmlFor={`${idPrefix}-status`}>复盘状态</label>
+        <select
+          id={`${idPrefix}-status`}
+          value={draft.reviewStatus}
+          onChange={(event) =>
+            onDraftChange({
+              ...draft,
+              reviewStatus: event.target.value as ReviewStatus,
+            })
+          }
+        >
+          <option value="unreviewed">未复盘</option>
+          <option value="useful">有用</option>
+          <option value="rejected">弃用</option>
+        </select>
+        <label htmlFor={`${idPrefix}-notes`}>复盘备注</label>
+        <textarea
+          id={`${idPrefix}-notes`}
+          rows={4}
+          placeholder="记录这次结果是否可复用、哪里需要调整、后续如何改 prompt 或资产。"
+          value={draft.userNotes}
+          onChange={(event) =>
+            onDraftChange({ ...draft, userNotes: event.target.value })
+          }
+        />
+        <div className="save-row">
+          <button type="button" onClick={onSave}>
+            保存复盘
+          </button>
+          <SaveIndicator state={saveState} />
+        </div>
+      </section>
     )
   }
 
@@ -2893,6 +3839,12 @@ function WorkspaceApp() {
                 </div>
                 <div className="detail-actions">
                   <button onClick={() => selectTopic(selectedTopic)}>设为当前</button>
+                  <button onClick={() => generateBriefForTopic(selectedTopic)}>
+                    生成创作 Brief
+                  </button>
+                  <button onClick={() => generateDraftForTopic(selectedTopic)}>
+                    生成内容结构
+                  </button>
                   <button onClick={() => archiveTopic(selectedTopic)}>归档</button>
                 </div>
               </div>
@@ -2942,9 +3894,11 @@ function WorkspaceApp() {
     return (
       <div className="workspace-page">
         <section className="history-list">
-          <div className="panel-title">▱ 内容结构</div>
+          <div className="panel-title">▱ 创作输出</div>
           {drafts.length === 0 ? (
-            <div className="empty-card">暂无内容结构或草稿。请先从选题卡生成内容结构。</div>
+            <div className="empty-card">
+              暂无创作 Brief 或内容结构。请先从选题生成 Brief，再继续生成结构。
+            </div>
           ) : (
             drafts.map((draft) => (
               <button
@@ -2952,7 +3906,10 @@ function WorkspaceApp() {
                 className={`run-row ${selectedDraft?.id === draft.id ? 'active' : ''}`}
                 onClick={() => openDraft(draft.id)}
               >
-                <span>{draft.sourceWorkflow === 'trend_analysis' ? '热点结构' : '账号结构'}</span>
+                <span>
+                  {draft.sourceWorkflow === 'trend_analysis' ? '热点' : '账号'} ·{' '}
+                  {draftKindLabel(draft)}
+                </span>
                 <b>{draft.status}</b>
                 <small>{new Date(draft.createdAt).toLocaleString()}</small>
               </button>
@@ -2966,10 +3923,16 @@ function WorkspaceApp() {
                 <div>
                   <h2>{draftDisplayTitle(selectedDraft)}</h2>
                   <p>
-                    {selectedDraft.status} · {new Date(selectedDraft.createdAt).toLocaleString()}
+                    {draftKindLabel(selectedDraft)} · {selectedDraft.status} ·{' '}
+                    {new Date(selectedDraft.createdAt).toLocaleString()}
                   </p>
                 </div>
                 <div className="detail-actions">
+                  {selectedDraft.kind === 'content_brief' && (
+                    <button onClick={() => generateStructureFromBrief(selectedDraft)}>
+                      继续生成内容结构
+                    </button>
+                  )}
                   <button onClick={() => runAudienceSimulation(selectedDraft)}>
                     发送到受众模拟
                   </button>
@@ -2977,7 +3940,7 @@ function WorkspaceApp() {
               </div>
               <label>生成快照（不可编辑）</label>
               {renderDraftStructure(selectedDraft.generatedSnapshot)}
-              <label htmlFor="draft-editor">当前可编辑草稿 JSON</label>
+              <label htmlFor="draft-editor">当前可编辑内容 JSON</label>
               <textarea
                 id="draft-editor"
                 rows={12}
@@ -2989,7 +3952,7 @@ function WorkspaceApp() {
               />
               <div className="save-row">
                 <button className="save-button" onClick={saveDraftEdits}>
-                  保存草稿编辑
+                  保存编辑
                 </button>
                 <SaveIndicator state={saveStates.draft} />
               </div>
@@ -2999,7 +3962,863 @@ function WorkspaceApp() {
               </pre>
             </>
           ) : (
-            <div className="empty-card">选择一个 Draft 查看生成快照和当前编辑内容。</div>
+            <div className="empty-card">
+              选择一个创作 Brief 或内容结构，查看生成快照和当前编辑内容。
+            </div>
+          )}
+        </section>
+      </div>
+    )
+  }
+
+  function renderCapabilityDefinitionDiffPanel(assetType: CapabilityAssetType) {
+    const isCurrentDiff = definitionDiff?.assetType === assetType
+    const statusText =
+      definitionDiffStatus === 'loading'
+        ? '加载中…'
+        : definitionDiffStatus === 'reverting'
+          ? '恢复中…'
+          : definitionDiffStatus === 'reverted'
+            ? '已恢复内置版本'
+            : definitionDiffStatus === 'error'
+              ? `失败：${definitionDiffError}`
+              : ''
+    return (
+      <div className="source-editor-card capability-diff-card">
+        <div className="detail-head compact">
+          <div>
+            <h3>Definition Diff</h3>
+            <p>对比当前 workspace override 和代码内置版本；只影响能力资产定义。</p>
+          </div>
+          <span>{isCurrentDiff ? definitionDiff.source : 'not loaded'}</span>
+        </div>
+        <div className="save-row">
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={
+              definitionDiffStatus === 'loading' ||
+              definitionDiffStatus === 'reverting'
+            }
+            onClick={() => loadCapabilityDefinitionDiff(assetType)}
+          >
+            查看与内置差异
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={
+              !isCurrentDiff ||
+              !definitionDiff.canRevert ||
+              definitionDiffStatus === 'reverting'
+            }
+            onClick={() => revertCapabilityDefinition(assetType)}
+          >
+            恢复内置版本
+          </button>
+          {statusText && (
+            <span
+              className={
+                definitionDiffStatus === 'error' ? 'inline-error' : 'inline-save-state'
+              }
+            >
+              {statusText}
+            </span>
+          )}
+        </div>
+        {isCurrentDiff && (
+          <>
+            <label>Changed Fields</label>
+            <div className="why">
+              {definitionDiff.changedFields.length > 0
+                ? definitionDiff.changedFields.join(' / ')
+                : '没有定义字段差异'}
+            </div>
+            <div className="compact-grid two-col">
+              <div>
+                <label>Current Definition</label>
+                <pre className="json-preview">
+                  {JSON.stringify(definitionDiff.currentDefinition, null, 2)}
+                </pre>
+              </div>
+              <div>
+                <label>Builtin Definition</label>
+                <pre className="json-preview">
+                  {JSON.stringify(definitionDiff.builtinDefinition, null, 2)}
+                </pre>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  function renderSkillDefinitionEditor() {
+    if (!skillDefinitionDraft) return null
+    const updateDraft = (patch: Partial<SkillDefinitionDraft>) => {
+      setSkillDefinitionDraft((current) => (current ? { ...current, ...patch } : current))
+    }
+    const statusText =
+      skillDefinitionStatus === 'saving'
+        ? '保存中…'
+        : skillDefinitionStatus === 'saved'
+          ? '已保存'
+          : skillDefinitionStatus.startsWith('error:')
+            ? skillDefinitionStatus.replace('error:', '保存失败：')
+            : ''
+    return (
+      <div className="source-editor-card capability-editor-card">
+        <p className="subline">
+          PM 调优模式：保存后会把当前 skill 变成 workspace-level generated override，
+          不会直接修改 builtin seed。
+        </p>
+        <div className="compact-grid two-col">
+          <div>
+            <label htmlFor="skill-display-name">Skill 名称</label>
+            <input
+              id="skill-display-name"
+              value={skillDefinitionDraft.displayName}
+              onChange={(event) => updateDraft({ displayName: event.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="skill-category">分类</label>
+            <input
+              id="skill-category"
+              value={skillDefinitionDraft.category}
+              onChange={(event) => updateDraft({ category: event.target.value })}
+            />
+          </div>
+        </div>
+        <label htmlFor="skill-purpose">用途 / 调优说明</label>
+        <textarea
+          id="skill-purpose"
+          rows={3}
+          value={skillDefinitionDraft.purpose}
+          onChange={(event) => updateDraft({ purpose: event.target.value })}
+        />
+        <div className="compact-grid two-col">
+          <div>
+            <label htmlFor="skill-artifact-effect">Artifact Effect</label>
+            <input
+              id="skill-artifact-effect"
+              value={skillDefinitionDraft.artifactEffect}
+              onChange={(event) => updateDraft({ artifactEffect: event.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="skill-version">版本</label>
+            <input
+              id="skill-version"
+              value={skillDefinitionDraft.version}
+              onChange={(event) => updateDraft({ version: event.target.value })}
+            />
+          </div>
+        </div>
+        <label htmlFor="skill-failure-mode">Failure Mode</label>
+        <textarea
+          id="skill-failure-mode"
+          rows={2}
+          value={skillDefinitionDraft.failureMode}
+          onChange={(event) => updateDraft({ failureMode: event.target.value })}
+        />
+        {selectedSkill &&
+          isVideoRubricSkill(selectedSkill.skillId) &&
+          renderVideoRubricEditor(skillDefinitionDraft, updateDraft)}
+        <div className="compact-grid two-col">
+          <div>
+            <label htmlFor="skill-required-inputs">Required Inputs（一行一个）</label>
+            <textarea
+              id="skill-required-inputs"
+              rows={5}
+              value={skillDefinitionDraft.requiredInputs}
+              onChange={(event) => updateDraft({ requiredInputs: event.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="skill-optional-inputs">Optional Inputs（一行一个）</label>
+            <textarea
+              id="skill-optional-inputs"
+              rows={5}
+              value={skillDefinitionDraft.optionalInputs}
+              onChange={(event) => updateDraft({ optionalInputs: event.target.value })}
+            />
+          </div>
+        </div>
+        <div className="compact-grid two-col">
+          <div>
+            <label htmlFor="skill-trigger-intents">Trigger Intents（一行一个）</label>
+            <textarea
+              id="skill-trigger-intents"
+              rows={4}
+              value={skillDefinitionDraft.triggerIntents}
+              onChange={(event) => updateDraft({ triggerIntents: event.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="skill-composable-with">Composable With（一行一个）</label>
+            <textarea
+              id="skill-composable-with"
+              rows={4}
+              value={skillDefinitionDraft.composableWith}
+              onChange={(event) => updateDraft({ composableWith: event.target.value })}
+            />
+          </div>
+        </div>
+        <div className="compact-grid two-col">
+          <div>
+            <label htmlFor="skill-side-effects">Side Effects（一行一个）</label>
+            <textarea
+              id="skill-side-effects"
+              rows={4}
+              value={skillDefinitionDraft.sideEffects}
+              onChange={(event) => updateDraft({ sideEffects: event.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="skill-implementation-refs">Implementation Refs（一行一个）</label>
+            <textarea
+              id="skill-implementation-refs"
+              rows={4}
+              value={skillDefinitionDraft.implementationRefs}
+              onChange={(event) => updateDraft({ implementationRefs: event.target.value })}
+            />
+          </div>
+        </div>
+        <label htmlFor="skill-context-policy-json">Context Policy JSON</label>
+        <textarea
+          id="skill-context-policy-json"
+          rows={8}
+          value={skillDefinitionDraft.contextPolicyJson}
+          onChange={(event) => updateDraft({ contextPolicyJson: event.target.value })}
+        />
+        <label htmlFor="skill-output-schema-json">Output Schema JSON</label>
+        <textarea
+          id="skill-output-schema-json"
+          rows={8}
+          value={skillDefinitionDraft.outputSchemaJson}
+          onChange={(event) => updateDraft({ outputSchemaJson: event.target.value })}
+        />
+        <label htmlFor="skill-user-notes">Workspace Notes</label>
+        <textarea
+          id="skill-user-notes"
+          rows={3}
+          value={skillDefinitionDraft.userNotes}
+          onChange={(event) => updateDraft({ userNotes: event.target.value })}
+        />
+        <div className="save-row">
+          <button
+            className="save-button"
+            disabled={skillDefinitionSaving}
+            onClick={saveSkillDefinition}
+          >
+            {skillDefinitionSaving ? '保存中…' : '保存 Skill Contract'}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={skillDefinitionSaving}
+            onClick={() => {
+              setSkillDefinitionDraft(null)
+              setSkillDefinitionStatus('')
+            }}
+          >
+            取消编辑
+          </button>
+          {statusText && (
+            <span
+              className={
+                skillDefinitionStatus.startsWith('error:')
+                  ? 'inline-error'
+                  : 'inline-save-state'
+              }
+            >
+              {statusText}
+            </span>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  function renderVideoRubricEditor(
+    draft: SkillDefinitionDraft,
+    updateDraft: (patch: Partial<SkillDefinitionDraft>) => void,
+  ) {
+    const rubricDraft = videoRubricDraftFromContextPolicyJson(draft.contextPolicyJson)
+    if (!rubricDraft) {
+      return (
+        <div className="rubric-editor-card error">
+          <b>视频诊断 Rubric</b>
+          <p>Context Policy JSON 当前无法解析。先修复 JSON 后，才能使用结构化 rubric 编辑器。</p>
+        </div>
+      )
+    }
+    const updateRubric = (patch: Partial<VideoRubricTextDraft>) => {
+      updateDraft({
+        contextPolicyJson: contextPolicyJsonWithVideoRubric(draft.contextPolicyJson, {
+          ...rubricDraft,
+          ...patch,
+        }),
+      })
+    }
+    return (
+      <div className="rubric-editor-card">
+        <div className="rubric-editor-head">
+          <div>
+            <b>视频诊断 Rubric</b>
+            <p>
+              这里会写入 <code>contextPolicy.pmRubric</code>。每行是一条规则，
+              用竖线分隔字段。
+            </p>
+          </div>
+          <span>structured</span>
+        </div>
+        <label htmlFor="video-rubric-creator-types">
+          创作者类型规则：类型 | 激励适配度 | 判定规则
+        </label>
+        <textarea
+          id="video-rubric-creator-types"
+          rows={5}
+          value={rubricDraft.creatorTypes}
+          onChange={(event) => updateRubric({ creatorTypes: event.target.value })}
+        />
+        <label htmlFor="video-rubric-quality-dimensions">
+          质量评价维度：维度 | 高分标准 | 中分标准 | 低分标准 | 必要证据
+        </label>
+        <textarea
+          id="video-rubric-quality-dimensions"
+          rows={6}
+          value={rubricDraft.qualityDimensions}
+          onChange={(event) => updateRubric({ qualityDimensions: event.target.value })}
+        />
+        <label htmlFor="video-rubric-evidence-rules">证据限制规则（一行一个）</label>
+        <textarea
+          id="video-rubric-evidence-rules"
+          rows={4}
+          value={rubricDraft.evidenceRules}
+          onChange={(event) => updateRubric({ evidenceRules: event.target.value })}
+        />
+        <label htmlFor="video-rubric-incentive-rules">
+          激励适配规则：信号 | 解读 | 运营动作
+        </label>
+        <textarea
+          id="video-rubric-incentive-rules"
+          rows={5}
+          value={rubricDraft.incentiveRules}
+          onChange={(event) => updateRubric({ incentiveRules: event.target.value })}
+        />
+      </div>
+    )
+  }
+
+  function renderSkillTestPanel(skill: Skill) {
+    const canInvoke = isDirectlyInvokableSkill(skill.skillId)
+    return (
+      <div className="source-editor-card skill-test-card">
+        <div className="detail-head compact">
+          <div>
+            <h3>Skill Test</h3>
+            <p>用当前 Skill 的受控 invoke API 做一次最小测试。</p>
+          </div>
+          {canInvoke ? <span>invoke-ready</span> : <span>workflow-only</span>}
+        </div>
+        {!canInvoke ? (
+          <div className="empty-card">
+            这个 Skill 当前不能单独 invoke。它会通过绑定的产品 workflow 执行；后续需要补
+            dry-run 才能直接测试分析类 Skill。
+          </div>
+        ) : (
+          <>
+            <div className="compact-grid two-col">
+              <div>
+                <label htmlFor="skill-test-mode">模式</label>
+                <select
+                  id="skill-test-mode"
+                  value={skillTestMode}
+                  onChange={(event) =>
+                    setSkillTestMode(event.target.value as GenerationMode)
+                  }
+                >
+                  <option value="demo">demo</option>
+                  <option value="live">live</option>
+                </select>
+              </div>
+              <div className="skill-test-hint">
+                demo 不消耗模型；live 会使用后端已配置的模型 provider。
+              </div>
+            </div>
+            <label htmlFor="skill-test-input">Input JSON</label>
+            <textarea
+              id="skill-test-input"
+              rows={7}
+              value={skillTestInput}
+              onChange={(event) => {
+                setSkillTestInput(event.target.value)
+                setSkillTestStatus('idle')
+                setSkillTestResult(null)
+                setSkillTestError('')
+              }}
+            />
+            <div className="save-row">
+              <button
+                className="save-button"
+                disabled={skillTestStatus === 'running'}
+                onClick={runSkillTest}
+              >
+                {skillTestStatus === 'running' ? '测试中…' : '运行 Skill Test'}
+              </button>
+              {skillTestStatus === 'completed' && (
+                <span className="inline-save-state">测试完成</span>
+              )}
+              {skillTestStatus === 'error' && (
+                <span className="inline-error">测试失败：{skillTestError}</span>
+              )}
+            </div>
+            {skillTestResult && (
+              <>
+                <label>Output</label>
+                <pre className="json-preview">
+                  {JSON.stringify(skillTestResult.output, null, 2)}
+                </pre>
+                <label>Model Metadata</label>
+                <pre className="json-preview">
+                  {JSON.stringify(skillTestResult.modelMetadata, null, 2)}
+                </pre>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    )
+  }
+
+  function renderAgentDefinitionEditor() {
+    if (!agentDefinitionDraft) return null
+    const updateDraft = (patch: Partial<AgentDefinitionDraft>) => {
+      setAgentDefinitionDraft((current) => (current ? { ...current, ...patch } : current))
+    }
+    const statusText =
+      agentDefinitionStatus === 'saving'
+        ? '保存中…'
+        : agentDefinitionStatus === 'saved'
+          ? '已保存'
+          : agentDefinitionStatus.startsWith('error:')
+            ? agentDefinitionStatus.replace('error:', '保存失败：')
+            : ''
+    return (
+      <div className="source-editor-card capability-editor-card">
+        <p className="subline">
+          PM 调优模式：保存后会把当前 agent 变成 workspace-level generated override。
+          skillIds 必须引用当前 workspace 已存在的 Skills。
+        </p>
+        <div className="compact-grid two-col">
+          <div>
+            <label htmlFor="agent-display-name">Agent 名称</label>
+            <input
+              id="agent-display-name"
+              value={agentDefinitionDraft.displayName}
+              onChange={(event) => updateDraft({ displayName: event.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="agent-version">版本</label>
+            <input
+              id="agent-version"
+              value={agentDefinitionDraft.version}
+              onChange={(event) => updateDraft({ version: event.target.value })}
+            />
+          </div>
+        </div>
+        <label htmlFor="agent-purpose">用途 / 调优说明</label>
+        <textarea
+          id="agent-purpose"
+          rows={3}
+          value={agentDefinitionDraft.purpose}
+          onChange={(event) => updateDraft({ purpose: event.target.value })}
+        />
+        <label htmlFor="agent-system-prompt">System Prompt</label>
+        <textarea
+          id="agent-system-prompt"
+          rows={8}
+          value={agentDefinitionDraft.systemPrompt}
+          onChange={(event) => updateDraft({ systemPrompt: event.target.value })}
+        />
+        <label htmlFor="agent-skill-ids">Skill IDs（一行一个）</label>
+        <textarea
+          id="agent-skill-ids"
+          rows={6}
+          value={agentDefinitionDraft.skillIds}
+          onChange={(event) => updateDraft({ skillIds: event.target.value })}
+        />
+        <label htmlFor="agent-context-policy-json">Default Context Policy JSON</label>
+        <textarea
+          id="agent-context-policy-json"
+          rows={8}
+          value={agentDefinitionDraft.defaultContextPolicyJson}
+          onChange={(event) =>
+            updateDraft({ defaultContextPolicyJson: event.target.value })
+          }
+        />
+        <label htmlFor="agent-user-notes">Workspace Notes</label>
+        <textarea
+          id="agent-user-notes"
+          rows={3}
+          value={agentDefinitionDraft.userNotes}
+          onChange={(event) => updateDraft({ userNotes: event.target.value })}
+        />
+        <div className="save-row">
+          <button
+            className="save-button"
+            disabled={agentDefinitionSaving}
+            onClick={saveAgentDefinition}
+          >
+            {agentDefinitionSaving ? '保存中…' : '保存 Agent Definition'}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={agentDefinitionSaving}
+            onClick={() => {
+              setAgentDefinitionDraft(null)
+              setAgentDefinitionStatus('')
+            }}
+          >
+            取消编辑
+          </button>
+          {statusText && (
+            <span
+              className={
+                agentDefinitionStatus.startsWith('error:')
+                  ? 'inline-error'
+                  : 'inline-save-state'
+              }
+            >
+              {statusText}
+            </span>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  function renderWorkflowDefinitionEditor() {
+    if (!workflowDefinitionDraft) return null
+    const updateDraft = (patch: Partial<WorkflowDefinitionDraft>) => {
+      setWorkflowDefinitionDraft((current) =>
+        current ? { ...current, ...patch } : current,
+      )
+    }
+    const statusText =
+      workflowDefinitionStatus === 'saving'
+        ? '保存中…'
+        : workflowDefinitionStatus === 'saved'
+          ? '已保存'
+          : workflowDefinitionStatus.startsWith('error:')
+            ? workflowDefinitionStatus.replace('error:', '保存失败：')
+            : ''
+    return (
+      <div className="source-editor-card capability-editor-card">
+        <p className="subline">
+          PM 调优模式：保存后会把当前 workflow 变成 workspace-level generated override。
+          这里编辑的是产品 task plan，不是任意图执行器。
+        </p>
+        <div className="compact-grid two-col">
+          <div>
+            <label htmlFor="workflow-display-name">Workflow 名称</label>
+            <input
+              id="workflow-display-name"
+              value={workflowDefinitionDraft.displayName}
+              onChange={(event) => updateDraft({ displayName: event.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="workflow-version">版本</label>
+            <input
+              id="workflow-version"
+              value={workflowDefinitionDraft.version}
+              onChange={(event) => updateDraft({ version: event.target.value })}
+            />
+          </div>
+        </div>
+        <label htmlFor="workflow-purpose">用途 / 调优说明</label>
+        <textarea
+          id="workflow-purpose"
+          rows={3}
+          value={workflowDefinitionDraft.purpose}
+          onChange={(event) => updateDraft({ purpose: event.target.value })}
+        />
+        <label htmlFor="workflow-entry-agent-ids">Entry Agent IDs（一行一个）</label>
+        <textarea
+          id="workflow-entry-agent-ids"
+          rows={4}
+          value={workflowDefinitionDraft.entryAgentIds}
+          onChange={(event) => updateDraft({ entryAgentIds: event.target.value })}
+        />
+        <label htmlFor="workflow-agent-plan-json">Agent Task Plan JSON</label>
+        <textarea
+          id="workflow-agent-plan-json"
+          rows={12}
+          value={workflowDefinitionDraft.agentPlanJson}
+          onChange={(event) => updateDraft({ agentPlanJson: event.target.value })}
+        />
+        <div className="compact-grid two-col">
+          <div>
+            <label htmlFor="workflow-artifact-effect">Artifact Effect</label>
+            <input
+              id="workflow-artifact-effect"
+              value={workflowDefinitionDraft.artifactEffect}
+              onChange={(event) => updateDraft({ artifactEffect: event.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="workflow-call-binding-edit">调用注册</label>
+            <select
+              id="workflow-call-binding-edit"
+              value={workflowDefinitionDraft.callBinding}
+              onChange={(event) =>
+                updateDraft({
+                  callBinding: event.target.value as WorkflowAsset['callBinding'],
+                })
+              }
+            >
+              <option value="">不注册为调用入口</option>
+              <option value="account">账号诊断执行入口</option>
+              <option value="trend">热点分析执行入口</option>
+              <option value="video">视频博主质量诊断执行入口</option>
+            </select>
+          </div>
+        </div>
+        <label htmlFor="workflow-user-notes">Workspace Notes</label>
+        <textarea
+          id="workflow-user-notes"
+          rows={3}
+          value={workflowDefinitionDraft.userNotes}
+          onChange={(event) => updateDraft({ userNotes: event.target.value })}
+        />
+        <div className="save-row">
+          <button
+            className="save-button"
+            disabled={workflowDefinitionSaving}
+            onClick={saveWorkflowDefinition}
+          >
+            {workflowDefinitionSaving ? '保存中…' : '保存 Workflow Definition'}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={workflowDefinitionSaving}
+            onClick={() => {
+              setWorkflowDefinitionDraft(null)
+              setWorkflowDefinitionStatus('')
+            }}
+          >
+            取消编辑
+          </button>
+          {statusText && (
+            <span
+              className={
+                workflowDefinitionStatus.startsWith('error:')
+                  ? 'inline-error'
+                  : 'inline-save-state'
+              }
+            >
+              {statusText}
+            </span>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  function renderConversationsPage() {
+    const selectedConversationAgent = selectedAgentConversation
+      ? agents.find((agent) => agent.id === selectedAgentConversation.agentAssetId)
+      : null
+    return (
+      <div className="workspace-page">
+        <section className="history-list">
+          <div className="panel-title">💬 对话记录</div>
+          <p className="subline">
+            Agent 对话、Maker 生成建议和输入素材整理过程会自动保存；这里按内容资产方式复盘。
+          </p>
+          {agentConversations.length === 0 ? (
+            <div className="empty-card compact-empty">
+              暂无对话记录。可以从右侧 Agents 页面开始一次对话。
+            </div>
+          ) : (
+            agentConversations.map((conversation) => {
+              const agent = agents.find(
+                (item) => item.id === conversation.agentAssetId,
+              )
+              return (
+                <button
+                  key={conversation.id}
+                  className={`run-row ${
+                    selectedAgentConversation?.id === conversation.id ? 'active' : ''
+                  }`}
+                  onClick={() => openAgentConversation(conversation.id)}
+                >
+                  <span>{conversation.title}</span>
+                  <b>{conversation.executionStatus || conversation.status}</b>
+                  <small>
+                    {agent?.displayName || 'Unknown Agent'} ·{' '}
+                    {new Date(conversation.updatedAt).toLocaleString()}
+                  </small>
+                </button>
+              )
+            })
+          )}
+        </section>
+        <section className="history-detail">
+          {selectedAgentConversation ? (
+            <>
+              <div className="detail-head">
+                <div>
+                  <h2>{selectedAgentConversation.title}</h2>
+                  <p>
+                    {selectedConversationAgent?.displayName || 'Unknown Agent'} ·{' '}
+                    {selectedAgentConversation.executionStatus ||
+                      selectedAgentConversation.status}{' '}
+                    · {new Date(selectedAgentConversation.updatedAt).toLocaleString()}
+                  </p>
+                </div>
+                <span>{selectedAgentConversation.status}</span>
+              </div>
+              {Object.keys(selectedAgentConversation.contextTarget || {}).length > 0 && (
+                <>
+                  <label>Context Target</label>
+                  <pre className="json-preview">
+                    {JSON.stringify(
+                      selectedAgentConversation.contextTarget,
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </>
+              )}
+              <div className="detail-actions">
+                <button
+                  type="button"
+                  disabled={!selectedConversationAgent}
+                  onClick={() => {
+                    if (!selectedConversationAgent) return
+                    setActivePage('agents')
+                    openAgent(selectedConversationAgent.id)
+                  }}
+                >
+                  打开对应 Agent
+                </button>
+                <button
+                  type="button"
+                  disabled={conversationSaving}
+                  onClick={() =>
+                    updateAgentConversationAsset({
+                      status:
+                        selectedAgentConversation.status === 'archived'
+                          ? 'active'
+                          : 'archived',
+                    })
+                  }
+                >
+                  {selectedAgentConversation.status === 'archived'
+                    ? '恢复对话'
+                    : '归档对话'}
+                </button>
+              </div>
+              <div className="source-editor-card compact">
+                <label htmlFor="conversation-title-editor">对话标题</label>
+                <input
+                  id="conversation-title-editor"
+                  value={conversationTitleDraft}
+                  onChange={(event) => {
+                    setConversationTitleDraft(event.target.value)
+                    setConversationSaveStatus('')
+                  }}
+                />
+                <div className="save-row">
+                  <button
+                    className="save-button"
+                    disabled={
+                      conversationSaving ||
+                      !conversationTitleDraft.trim() ||
+                      conversationTitleDraft === selectedAgentConversation.title
+                    }
+                    onClick={() =>
+                      updateAgentConversationAsset({
+                        title: conversationTitleDraft.trim(),
+                      })
+                    }
+                  >
+                    {conversationSaving ? '保存中…' : '保存对话标题'}
+                  </button>
+                  {conversationSaveStatus && (
+                    <span
+                      className={
+                        conversationSaveStatus.startsWith('error:')
+                          ? 'inline-error'
+                          : 'inline-save-state'
+                      }
+                    >
+                      {conversationSaveStatus === 'saving'
+                        ? '保存中…'
+                        : conversationSaveStatus === 'saved'
+                          ? '已保存'
+                          : conversationSaveStatus.replace('error:', '保存失败：')}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {selectedAgentConversation.messages.length === 0 ? (
+                <div className="empty-card compact-empty">这条对话还没有消息。</div>
+              ) : (
+                <div className="agent-chat conversation-asset-chat">
+                  {selectedAgentConversation.messages.map((message) => (
+                    <div
+                      className={`chat-message ${message.role}`}
+                      key={message.id}
+                    >
+                      <b>
+                        {message.role === 'user'
+                          ? '你'
+                          : selectedConversationAgent?.displayName || 'Assistant'}
+                      </b>
+                      <p>{message.content}</p>
+                      {message.role === 'assistant' && (
+                        <details>
+                          <summary>
+                            引用资产 {message.assetRefs.length} · Proposed Actions{' '}
+                            {message.proposedActions.length}
+                          </summary>
+                          <pre className="json-preview">
+                            {JSON.stringify(
+                              {
+                                assetRefs: message.assetRefs,
+                                proposedActions: message.proposedActions,
+                                modelMetadata: message.modelMetadata,
+                              },
+                              null,
+                              2,
+                            )}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <AssetProposalsPanel
+                proposals={assetProposals}
+                onUpdate={updateAssetProposal}
+                onApply={applyAssetProposal}
+                onReject={rejectAssetProposal}
+              />
+            </>
+          ) : (
+            <div className="empty-card">
+              选择一条对话记录，查看消息、引用资产、model metadata 和 proposed actions。
+            </div>
           )}
         </section>
       </div>
@@ -3062,13 +4881,37 @@ function WorkspaceApp() {
                   <h2>{selectedSkill.displayName}</h2>
                   <p>
                     {selectedSkill.skillId} · {selectedSkill.category} ·{' '}
-                    {selectedSkill.version}
+                    {selectedSkill.source} · {selectedSkill.version}
                   </p>
                 </div>
                 <span className={capabilityStatusClass(selectedSkill.status)}>
                   {selectedSkill.status}
                 </span>
               </div>
+              <div className="detail-actions">
+                <button
+                  type="button"
+                  onClick={() => startSkillDefinitionEdit(selectedSkill)}
+                >
+                  编辑 contract
+                </button>
+                <button
+                  type="button"
+                  disabled={agentConversationCreating}
+                  onClick={() =>
+                    startMakerConversation(
+                      MAKER_AGENT_IDS.skill,
+                      `我想调优这个 Skill：${selectedSkill.displayName}\n\n需要修改的 rubric / prompt / 输出结构：`,
+                      { assetType: 'skill', assetId: selectedSkill.id },
+                    )
+                  }
+                >
+                  让 Capability Maker 调优
+                </button>
+              </div>
+              {renderCapabilityDefinitionDiffPanel('skill')}
+              {renderSkillDefinitionEditor()}
+              {renderSkillTestPanel(selectedSkill)}
               <p>{selectedSkill.purpose}</p>
               <label>Artifact Effect</label>
               <div className="why">{selectedSkill.artifactEffect}</div>
@@ -3196,6 +5039,29 @@ function WorkspaceApp() {
                   {selectedAgent.status}
                 </span>
               </div>
+              <div className="detail-actions">
+                <button
+                  type="button"
+                  onClick={() => startAgentDefinitionEdit(selectedAgent)}
+                >
+                  编辑 Agent
+                </button>
+                <button
+                  type="button"
+                  disabled={agentConversationCreating}
+                  onClick={() =>
+                    startMakerConversation(
+                      MAKER_AGENT_IDS.agent,
+                      `我想调优这个 Agent：${selectedAgent.displayName}\n\n需要修改的 system prompt / skills / context policy：`,
+                      { assetType: 'agent', assetId: selectedAgent.id },
+                    )
+                  }
+                >
+                  让 Capability Maker 调优
+                </button>
+              </div>
+              {renderCapabilityDefinitionDiffPanel('agent')}
+              {renderAgentDefinitionEditor()}
               <p>{selectedAgent.purpose}</p>
               <label>System Prompt</label>
               <div className="why">{selectedAgent.systemPrompt}</div>
@@ -3347,7 +5213,10 @@ function WorkspaceApp() {
               <b className={capabilityStatusClass(workflowAsset.status)}>
                 {workflowAsset.status}
               </b>
-              <small>{workflowAsset.workflowId}</small>
+              <small>
+                {workflowAsset.workflowId}
+                {workflowAsset.callBinding ? ` · 调用:${workflowAsset.callBinding}` : ''}
+              </small>
             </button>
           ))}
         </section>
@@ -3369,7 +5238,52 @@ function WorkspaceApp() {
                   {selectedWorkflowAsset.status}
                 </span>
               </div>
+              <div className="detail-actions">
+                <button
+                  type="button"
+                  onClick={() => startWorkflowDefinitionEdit(selectedWorkflowAsset)}
+                >
+                  编辑 Workflow
+                </button>
+                <button
+                  type="button"
+                  disabled={agentConversationCreating}
+                  onClick={() =>
+                    startMakerConversation(
+                      MAKER_AGENT_IDS.workflow,
+                      `我想调优这个 Workflow：${selectedWorkflowAsset.displayName}\n\n需要修改的 task plan / agent / skill / 调用注册：`,
+                      { assetType: 'workflow', assetId: selectedWorkflowAsset.id },
+                    )
+                  }
+                >
+                  让 Capability Maker 调优
+                </button>
+              </div>
+              {renderCapabilityDefinitionDiffPanel('workflow')}
+              {renderWorkflowDefinitionEditor()}
               <p>{selectedWorkflowAsset.purpose}</p>
+              <label>Workflow 调用注册</label>
+              <div className="source-editor-card compact">
+                <p className="subline">
+                  注册后会出现在右侧 workflow 调用区。这里绑定的是已有产品执行入口，
+                  不会把 workflow asset 当成任意图执行器。
+                </p>
+                <select
+                  aria-label="Workflow 调用注册"
+                  value={selectedWorkflowAsset.callBinding}
+                  onChange={(event) =>
+                    updateWorkflowCallBinding(
+                      selectedWorkflowAsset,
+                      event.target.value as WorkflowAsset['callBinding'],
+                    )
+                  }
+                >
+                  <option value="">不注册为调用入口</option>
+                  <option value="account">账号诊断执行入口</option>
+                  <option value="trend">热点分析执行入口</option>
+                  <option value="video">视频博主质量诊断执行入口</option>
+                </select>
+              </div>
               <label>Artifact Effect</label>
               <div className="why">{selectedWorkflowAsset.artifactEffect}</div>
               <label>Entry Agents</label>
@@ -3416,6 +5330,7 @@ function WorkspaceApp() {
               >
                 <span>受众模拟</span>
                 <b>{run.status}</b>
+                <small>{reviewStatusLabel(run.reviewStatus)}</small>
                 <small>{new Date(run.createdAt).toLocaleString()}</small>
               </button>
             ))
@@ -3436,6 +5351,14 @@ function WorkspaceApp() {
                   在输出区打开
                 </button>
               </div>
+              {renderRunReviewEditor({
+                idPrefix: 'simulation-run-review',
+                draft: simulationReviewDraft,
+                onDraftChange: setSimulationReviewDraft,
+                onSave: saveSimulationRunReview,
+                saveState: saveStates.simulationReview,
+                hint: '受众角色、反应、辩论和综合结论是不可变历史；这里仅保存人工复盘判断。',
+              })}
               <label>原始输入快照</label>
               <pre className="json-preview">
                 {JSON.stringify(selectedSimulationRun.inputSnapshot, null, 2)}

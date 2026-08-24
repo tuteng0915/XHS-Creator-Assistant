@@ -104,6 +104,48 @@ def test_agent_conversation_uses_broad_workspace_context(app: FastAPI) -> None:
     assert len(loaded.json()["messages"]) == 2
 
 
+def test_agent_conversation_title_and_status_are_editable_assets(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    agent = next(item for item in agents if item["agentId"] == "creator_material_curator")
+    created = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": agent["id"], "title": "原始对话标题"},
+    ).json()
+
+    updated = send(
+        app,
+        "PATCH",
+        f"/api/agent-conversations/{created['id']}",
+        json={
+            "title": "整理后的对话标题",
+            "status": "archived",
+            "expectedUpdatedAt": created["updatedAt"],
+        },
+    )
+
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["title"] == "整理后的对话标题"
+    assert body["status"] == "archived"
+    assert body["messages"] == []
+
+    stale = send(
+        app,
+        "PATCH",
+        f"/api/agent-conversations/{created['id']}",
+        json={
+            "title": "stale",
+            "expectedUpdatedAt": created["updatedAt"],
+        },
+    )
+    assert stale.status_code == 409
+
+
 def test_maker_conversation_includes_selected_capability_asset_context(
     app: FastAPI,
 ) -> None:
@@ -152,6 +194,190 @@ def test_maker_conversation_includes_selected_capability_asset_context(
     assert selected_item["assetRef"]["assetType"] == "skill"
     assert selected_item["assetRef"]["assetId"] == selected_skill["id"]
     assert selected_item["data"]["skillId"] == "analysis.profile_from_history"
+
+
+def test_demo_capability_maker_creates_applicable_skill_proposal(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    maker = next(item for item in agents if item["agentId"] == "capability_maker")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": maker["id"], "title": "设计能力"},
+    ).json()
+
+    replied = send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "新增一个 skill：根据受众模拟反馈修订 Brief"},
+    )
+
+    assert replied.status_code == 200
+    proposals = send(
+        app,
+        "GET",
+        f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+    ).json()
+    proposal = next(
+        item for item in proposals if item["actionType"] == "skill.propose_definition"
+    )
+    definition = proposal["proposedAction"]["payload"]["definition"]
+    assert definition["skillId"].startswith("generated.creator_skill.")
+    assert definition["displayName"] == "Generated Creator Skill"
+
+    applied = send(app, "POST", f"/api/asset-proposals/{proposal['id']}/apply")
+
+    assert applied.status_code == 200
+    applied_body = applied.json()
+    assert applied_body["status"] == "applied"
+    assert applied_body["result"]["assetType"] == "skill"
+    assert applied_body["result"]["operation"] == "create"
+    skills = send(app, "GET", f"/api/workspaces/{workspace['id']}/skills").json()
+    created = next(item for item in skills if item["skillId"] == definition["skillId"])
+    assert created["source"] == "generated"
+
+
+def test_capability_proposal_can_override_existing_builtin_skill_as_generated(
+    app: FastAPI,
+) -> None:
+    class StubProvider:
+        def __init__(self, *, target_skill: dict) -> None:
+            self.target_skill = target_skill
+
+        async def reply(self, *, agent, user_content, context_pack, messages):
+            return AgentConversationReply(
+                reply="建议把这个 Skill 改成更明确的 contract。",
+                proposed_actions=[
+                    {
+                        "type": "skill.propose_definition",
+                        "status": "requires_confirmation",
+                        "description": "更新现有 Skill 定义。",
+                        "payload": {
+                            "targetAssetId": self.target_skill["id"],
+                            "definition": {
+                                "skillId": self.target_skill["skillId"],
+                                "displayName": "Analyze Account Profile v2",
+                                "category": "analysis",
+                                "purpose": "用历史笔记生成更可审计的账号画像。",
+                                "triggerIntents": ["更新账号画像分析"],
+                                "requiredInputs": ["positioning_snapshot"],
+                                "optionalInputs": ["historical_posts"],
+                                "contextPolicy": {
+                                    "allowed_fields": ["positioning", "historicalPosts"]
+                                },
+                                "outputSchema": {"root": "profile"},
+                                "artifactEffect": "AnalysisRun.stageResults.profile",
+                                "sideEffects": ["writes stage result"],
+                                "failureMode": "atomic",
+                                "composableWith": ["topic.generate_from_account_diagnosis"],
+                                "implementationRefs": ["ModelOperation.PROFILE"],
+                                "version": "v2",
+                            },
+                        },
+                    }
+                ],
+                model_metadata={"provider": "stub", "operation": "agent_chat"},
+            )
+
+    workspace = create_workspace(app)
+    skills = send(app, "GET", f"/api/workspaces/{workspace['id']}/skills").json()
+    target_skill = next(
+        item for item in skills if item["skillId"] == "analysis.profile_from_history"
+    )
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    maker = next(item for item in agents if item["agentId"] == "capability_maker")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={
+            "agentAssetId": maker["id"],
+            "contextTarget": {"assetType": "skill", "assetId": target_skill["id"]},
+        },
+    ).json()
+    app.state.agent_conversation_service.live_provider = StubProvider(
+        target_skill=target_skill
+    )
+
+    send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "修改这个 skill", "mode": "live"},
+    )
+    proposal = send(
+        app,
+        "GET",
+        f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+    ).json()[0]
+    applied = send(app, "POST", f"/api/asset-proposals/{proposal['id']}/apply")
+
+    assert applied.status_code == 200
+    assert applied.json()["result"]["operation"] == "update"
+    detail = send(app, "GET", f"/api/skills/{target_skill['id']}").json()
+    assert detail["displayName"] == "Analyze Account Profile v2"
+    assert detail["source"] == "generated"
+    assert detail["version"] == "v2"
+
+
+def test_capability_proposal_validates_agent_skill_references(app: FastAPI) -> None:
+    class StubProvider:
+        async def reply(self, *, agent, user_content, context_pack, messages):
+            return AgentConversationReply(
+                reply="建议新增 Agent。",
+                proposed_actions=[
+                    {
+                        "type": "agent.propose_definition",
+                        "status": "requires_confirmation",
+                        "description": "新增引用缺失 skill 的 Agent。",
+                        "payload": {
+                            "definition": {
+                                "agentId": "generated.bad_agent",
+                                "displayName": "Bad Agent",
+                                "purpose": "用于测试引用校验。",
+                                "systemPrompt": "Use selected skills.",
+                                "skillIds": ["missing.skill"],
+                                "defaultContextPolicy": {},
+                                "version": "v1",
+                            }
+                        },
+                    }
+                ],
+                model_metadata={"provider": "stub", "operation": "agent_chat"},
+            )
+
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    maker = next(item for item in agents if item["agentId"] == "capability_maker")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": maker["id"]},
+    ).json()
+    app.state.agent_conversation_service.live_provider = StubProvider()
+
+    send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "新增 agent", "mode": "live"},
+    )
+    proposal = send(
+        app,
+        "GET",
+        f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+    ).json()[0]
+    applied = send(app, "POST", f"/api/asset-proposals/{proposal['id']}/apply")
+
+    assert applied.status_code == 200
+    body = applied.json()
+    assert body["status"] == "failed"
+    assert "unknown skillId" in body["error"]
 
 
 def test_live_agent_conversation_uses_injected_model_provider(app: FastAPI) -> None:

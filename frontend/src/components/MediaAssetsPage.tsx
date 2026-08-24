@@ -10,6 +10,7 @@ type MediaAssetsPageProps = {
   assets: MediaAsset[]
   skills?: SkillSummary[]
   mode?: 'demo' | 'live'
+  onModeChange?: (mode: 'demo' | 'live') => void
   onAssetsChange: (assets: MediaAsset[]) => void
 }
 
@@ -164,6 +165,7 @@ export function MediaAssetsPage({
   assets,
   skills = [],
   mode = 'demo',
+  onModeChange,
   onAssetsChange,
 }: MediaAssetsPageProps) {
   const definition = MEDIA_LABEL[mediaType]
@@ -220,6 +222,9 @@ export function MediaAssetsPage({
   const [generationState, setGenerationState] = useState<SaveState>({
     phase: 'idle',
   })
+  const [activeActionPanel, setActiveActionPanel] = useState<
+    'upload' | 'generate' | null
+  >(null)
   const previewFrames = useMemo(() => {
     if (!selectedAsset || selectedAsset.type !== 'video') return []
     const videoPreview = selectedAsset.derived.videoPreview
@@ -260,6 +265,7 @@ export function MediaAssetsPage({
     setGenerationName('')
     setGenerationPurpose('')
     setVideoReferenceUrls('')
+    setActiveActionPanel(null)
     setUnderstandPrompt(
       mediaType === 'image'
         ? '请描述这张图片，并提取对创作者账号/内容判断有用的视觉线索。'
@@ -490,6 +496,56 @@ export function MediaAssetsPage({
         <div className="panel-title">
           {definition.icon} {definition.label}
         </div>
+        <p className="microcopy">
+          当前模式：{mode === 'demo' ? '演示模式' : '实时生成'}。
+          {mode === 'demo'
+            ? '理解和生成会返回 demo 结果，不会调用 Qwen。'
+            : '理解和生成会调用已配置的 Qwen API。'}
+        </p>
+        {onModeChange && (
+          <div className="mode-switch">
+            <button
+              className={mode === 'demo' ? 'active' : ''}
+              type="button"
+              onClick={() => onModeChange('demo')}
+            >
+              演示模式
+            </button>
+            <button
+              className={mode === 'live' ? 'active' : ''}
+              type="button"
+              onClick={() => onModeChange('live')}
+            >
+              实时生成
+            </button>
+          </div>
+        )}
+        <button
+          className={`run-row ${activeActionPanel === 'upload' ? 'active' : ''}`}
+          type="button"
+          onClick={() => {
+            setActiveActionPanel(activeActionPanel === 'upload' ? null : 'upload')
+            setSelectedAssetId('')
+          }}
+        >
+          <span>{definition.upload}</span>
+          <b>new</b>
+          <small>上传本地图文/视频文件，保存为媒体资产。</small>
+        </button>
+        <button
+          className={`run-row ${activeActionPanel === 'generate' ? 'active' : ''}`}
+          type="button"
+          onClick={() => {
+            setActiveActionPanel(
+              activeActionPanel === 'generate' ? null : 'generate',
+            )
+            setSelectedAssetId('')
+          }}
+        >
+          <span>{mediaType === 'image' ? '生成图文素材' : '生成视频素材'}</span>
+          <b>qwen</b>
+          <small>通过 Qwen 生成素材，结果会保存为新的媒体资产。</small>
+        </button>
         {filteredAssets.length === 0 ? (
           <div className="empty-card">{definition.empty}</div>
         ) : (
@@ -498,7 +554,10 @@ export function MediaAssetsPage({
               className={`run-row ${selectedAsset?.id === asset.id ? 'active' : ''}`}
               key={asset.id}
               type="button"
-              onClick={() => setSelectedAssetId(asset.id)}
+              onClick={() => {
+                setSelectedAssetId(asset.id)
+                setActiveActionPanel(null)
+              }}
             >
               <span>{asset.name}</span>
               <b>{asset.sourceType}</b>
@@ -516,126 +575,126 @@ export function MediaAssetsPage({
       </section>
 
       <section className="history-detail source-editor-stack">
-        <div className="source-editor-card">
-          <div className="detail-head">
-            <div>
-              <h2>{definition.upload}</h2>
-              <p>保存文件、metadata、派生文本和备注；Qwen 理解结果需确认后写回。</p>
+        {activeActionPanel === 'upload' ? (
+          <div className="source-editor-card">
+            <div className="detail-head">
+              <div>
+                <h2>{definition.upload}</h2>
+                <p>保存文件、metadata、派生文本和备注；Qwen 理解结果需确认后写回。</p>
+              </div>
+            </div>
+            <label htmlFor={`${mediaType}-upload-name`}>{definition.singular}名称</label>
+            <input
+              id={`${mediaType}-upload-name`}
+              value={uploadName}
+              onChange={(event) => setUploadName(event.target.value)}
+              placeholder={`例：${mediaType === 'image' ? '主页截图' : 'AI短剧样本'}`}
+            />
+            <label htmlFor={`${mediaType}-upload-purpose`}>用途</label>
+            <input
+              id={`${mediaType}-upload-purpose`}
+              value={uploadPurpose}
+              onChange={(event) => setUploadPurpose(event.target.value)}
+              placeholder="例：视频质量诊断样本、封面参考、评论区截图"
+            />
+            <label htmlFor={`${mediaType}-upload-file`}>文件</label>
+            <input
+              id={`${mediaType}-upload-file`}
+              type="file"
+              accept={definition.accept}
+              onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
+            />
+            <div className="save-row">
+              <button className="save-button" type="button" onClick={uploadAsset}>
+                {definition.upload}
+              </button>
+              <SaveIndicator state={uploadState} />
             </div>
           </div>
-          <label htmlFor={`${mediaType}-upload-name`}>{definition.singular}名称</label>
-          <input
-            id={`${mediaType}-upload-name`}
-            value={uploadName}
-            onChange={(event) => setUploadName(event.target.value)}
-            placeholder={`例：${mediaType === 'image' ? '主页截图' : 'AI短剧样本'}`}
-          />
-          <label htmlFor={`${mediaType}-upload-purpose`}>用途</label>
-          <input
-            id={`${mediaType}-upload-purpose`}
-            value={uploadPurpose}
-            onChange={(event) => setUploadPurpose(event.target.value)}
-            placeholder="例：视频质量诊断样本、封面参考、评论区截图"
-          />
-          <label htmlFor={`${mediaType}-upload-file`}>文件</label>
-          <input
-            id={`${mediaType}-upload-file`}
-            type="file"
-            accept={definition.accept}
-            onChange={(event) => setUploadFile(event.target.files?.[0] || null)}
-          />
-          <div className="save-row">
-            <button className="save-button" type="button" onClick={uploadAsset}>
-              {definition.upload}
-            </button>
-            <SaveIndicator state={uploadState} />
-          </div>
-        </div>
-
-        <div className="source-editor-card">
-          <div className="detail-head">
-            <div>
-              <h2>{mediaType === 'image' ? '生成图文素材' : '生成视频素材'}</h2>
-              <p>
-                当前模式：{mode}。live 会调用 Qwen / DashScope，并把生成结果保存为媒体资产。
-              </p>
+        ) : activeActionPanel === 'generate' ? (
+          <div className="source-editor-card">
+            <div className="detail-head">
+              <div>
+                <h2>{mediaType === 'image' ? '生成图文素材' : '生成视频素材'}</h2>
+                <p>
+                  当前模式：{mode}。live 会调用 Qwen / DashScope，并把生成结果保存为媒体资产。
+                </p>
+              </div>
+            </div>
+            <label htmlFor={`${mediaType}-generation-prompt`}>生成 prompt</label>
+            <textarea
+              id={`${mediaType}-generation-prompt`}
+              rows={4}
+              value={generationPrompt}
+              onChange={(event) => {
+                setGenerationPrompt(event.target.value)
+                setGenerationState({ phase: 'idle' })
+              }}
+              placeholder={
+                mediaType === 'image'
+                  ? '例：生成一张留学账号主页视觉参考图，清爽、可信、适合小红书。'
+                  : '例：生成一个 AIGC 短剧开场镜头，竖屏，强冲突，电影感。'
+              }
+            />
+            <label htmlFor={`${mediaType}-generation-name`}>生成资产名称</label>
+            <input
+              id={`${mediaType}-generation-name`}
+              value={generationName}
+              onChange={(event) => setGenerationName(event.target.value)}
+              placeholder={mediaType === 'image' ? 'Qwen 生成图片' : 'Qwen 生成视频'}
+            />
+            <label htmlFor={`${mediaType}-generation-purpose`}>用途</label>
+            <input
+              id={`${mediaType}-generation-purpose`}
+              value={generationPurpose}
+              onChange={(event) => setGenerationPurpose(event.target.value)}
+              placeholder="例：封面参考、视频脚本视觉测试、账号主页视觉探索"
+            />
+            {mediaType === 'image' ? (
+              <>
+                <label htmlFor="image-generation-size">图片尺寸</label>
+                <input
+                  id="image-generation-size"
+                  value={imageSize}
+                  onChange={(event) => setImageSize(event.target.value)}
+                />
+              </>
+            ) : (
+              <div className="compact-grid">
+                <label htmlFor="video-generation-resolution">
+                  分辨率
+                  <input
+                    id="video-generation-resolution"
+                    value={videoResolution}
+                    onChange={(event) => setVideoResolution(event.target.value)}
+                  />
+                </label>
+                <label htmlFor="video-generation-ratio">
+                  画幅比例
+                  <input
+                    id="video-generation-ratio"
+                    value={videoRatio}
+                    onChange={(event) => setVideoRatio(event.target.value)}
+                  />
+                </label>
+                <label htmlFor="video-generation-duration">
+                  时长秒数
+                  <input
+                    id="video-generation-duration"
+                    value={videoDuration}
+                    onChange={(event) => setVideoDuration(event.target.value)}
+                  />
+                </label>
+              </div>
+            )}
+            <div className="save-row">
+              <button className="save-button" type="button" onClick={generateMedia}>
+                {mediaType === 'image' ? '生成图文素材' : '生成视频'}
+              </button>
+              <SaveIndicator state={generationState} />
             </div>
           </div>
-          <label htmlFor={`${mediaType}-generation-prompt`}>生成 prompt</label>
-          <textarea
-            id={`${mediaType}-generation-prompt`}
-            rows={4}
-            value={generationPrompt}
-            onChange={(event) => {
-              setGenerationPrompt(event.target.value)
-              setGenerationState({ phase: 'idle' })
-            }}
-            placeholder={
-              mediaType === 'image'
-                ? '例：生成一张留学账号主页视觉参考图，清爽、可信、适合小红书。'
-                : '例：生成一个 AIGC 短剧开场镜头，竖屏，强冲突，电影感。'
-            }
-          />
-          <label htmlFor={`${mediaType}-generation-name`}>生成资产名称</label>
-          <input
-            id={`${mediaType}-generation-name`}
-            value={generationName}
-            onChange={(event) => setGenerationName(event.target.value)}
-            placeholder={mediaType === 'image' ? 'Qwen 生成图片' : 'Qwen 生成视频'}
-          />
-          <label htmlFor={`${mediaType}-generation-purpose`}>用途</label>
-          <input
-            id={`${mediaType}-generation-purpose`}
-            value={generationPurpose}
-            onChange={(event) => setGenerationPurpose(event.target.value)}
-            placeholder="例：封面参考、视频脚本视觉测试、账号主页视觉探索"
-          />
-          {mediaType === 'image' ? (
-            <>
-              <label htmlFor="image-generation-size">图片尺寸</label>
-              <input
-                id="image-generation-size"
-                value={imageSize}
-                onChange={(event) => setImageSize(event.target.value)}
-              />
-            </>
-          ) : (
-            <div className="compact-grid">
-              <label htmlFor="video-generation-resolution">
-                分辨率
-                <input
-                  id="video-generation-resolution"
-                  value={videoResolution}
-                  onChange={(event) => setVideoResolution(event.target.value)}
-                />
-              </label>
-              <label htmlFor="video-generation-ratio">
-                画幅比例
-                <input
-                  id="video-generation-ratio"
-                  value={videoRatio}
-                  onChange={(event) => setVideoRatio(event.target.value)}
-                />
-              </label>
-              <label htmlFor="video-generation-duration">
-                时长秒数
-                <input
-                  id="video-generation-duration"
-                  value={videoDuration}
-                  onChange={(event) => setVideoDuration(event.target.value)}
-                />
-              </label>
-            </div>
-          )}
-          <div className="save-row">
-            <button className="save-button" type="button" onClick={generateMedia}>
-              {mediaType === 'image' ? '生成图片' : '生成视频'}
-            </button>
-            <SaveIndicator state={generationState} />
-          </div>
-        </div>
-
-        {selectedAsset ? (
+        ) : selectedAsset ? (
           <div className="source-editor-card">
             <div className="detail-head">
               <div>

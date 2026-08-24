@@ -78,6 +78,7 @@ def test_generate_draft_from_topic_persists_snapshots(app: FastAPI) -> None:
     draft = response.json()
     assert draft["workspaceId"] == workspace["id"]
     assert draft["topicId"] == topic["id"]
+    assert draft["kind"] == "content_structure"
     assert draft["sourceAnalysisRunId"] == topic["sourceAnalysisRunId"]
     assert draft["status"] == "completed"
     assert draft["generatedSnapshot"]["structure"]["topicChosen"] == topic["title"]
@@ -90,6 +91,86 @@ def test_generate_draft_from_topic_persists_snapshots(app: FastAPI) -> None:
     history = send(app, "GET", f"/api/workspaces/{workspace['id']}/drafts")
     assert history.status_code == 200
     assert history.json()[0]["id"] == draft["id"]
+
+
+def test_generate_content_brief_from_topic_persists_as_draft_kind(
+    app: FastAPI,
+) -> None:
+    workspace, topic = create_completed_topic_from_account_run(app)
+
+    response = send(
+        app,
+        "POST",
+        f"/api/topics/{topic['id']}/briefs/generate",
+        json={"mode": "demo"},
+    )
+
+    assert response.status_code == 201
+    brief = response.json()
+    assert brief["workspaceId"] == workspace["id"]
+    assert brief["topicId"] == topic["id"]
+    assert brief["kind"] == "content_brief"
+    assert brief["status"] == "completed"
+    assert brief["generatedSnapshot"]["brief"]["topicTitle"] == topic["title"]
+    assert brief["editableContent"] == brief["generatedSnapshot"]
+    assert brief["modelMetadata"]["kind"] == "content_brief"
+
+    edited_content = {
+        **brief["editableContent"],
+        "brief": {
+            **brief["editableContent"]["brief"],
+            "corePoint": "用户确认后的核心观点",
+        },
+    }
+    updated = send(
+        app,
+        "PATCH",
+        f"/api/drafts/{brief['id']}",
+        json={
+            "editableContent": edited_content,
+            "expectedUpdatedAt": brief["updatedAt"],
+        },
+    )
+
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["editableContent"]["brief"]["corePoint"] == "用户确认后的核心观点"
+    assert body["generatedSnapshot"]["brief"]["corePoint"] == brief["generatedSnapshot"][
+        "brief"
+    ]["corePoint"]
+
+    history = send(app, "GET", f"/api/workspaces/{workspace['id']}/drafts")
+    assert {item["kind"] for item in history.json()} == {"content_brief"}
+
+
+def test_generate_structure_from_content_brief_uses_brief_snapshot(
+    app: FastAPI,
+) -> None:
+    _workspace, topic = create_completed_topic_from_account_run(app)
+    brief = send(
+        app,
+        "POST",
+        f"/api/topics/{topic['id']}/briefs/generate",
+        json={"mode": "demo"},
+    ).json()
+
+    response = send(
+        app,
+        "POST",
+        f"/api/drafts/{brief['id']}/structure/generate",
+        json={"mode": "demo"},
+    )
+
+    assert response.status_code == 201
+    structure = response.json()
+    assert structure["kind"] == "content_structure"
+    assert structure["topicId"] == topic["id"]
+    assert structure["inputSnapshot"]["sourceBrief"]["draftId"] == brief["id"]
+    assert structure["inputSnapshot"]["sourceBrief"]["editableContent"]["brief"][
+        "topicTitle"
+    ] == topic["title"]
+    assert structure["modelMetadata"]["sourceBriefDraftId"] == brief["id"]
+    assert structure["generatedSnapshot"]["structure"]["topicChosen"] == topic["title"]
 
 
 def test_update_draft_edits_current_content_not_generated_snapshot(

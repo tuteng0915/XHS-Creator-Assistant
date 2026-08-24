@@ -23,6 +23,7 @@ type XhsImportPanel = Extract<
 
 type InputAssetsPageProps = {
   inputAssetPanel: InputAssetPanel
+  inputAssetDetailOpen: boolean
   accountProfileMaterials: TextInputAsset[]
   historicalMaterials: TextInputAsset[]
   commentsMaterials: TextInputAsset[]
@@ -109,6 +110,7 @@ const SAVE_STATE_BY_XHS_IMPORT_PANEL = {
 export function InputAssetsPage(props: InputAssetsPageProps) {
   const {
     inputAssetPanel,
+    inputAssetDetailOpen,
     accountProfileMaterials,
     historicalMaterials,
     commentsMaterials,
@@ -148,6 +150,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
             : inputAssetPanel === 'xhs_creator_profiles'
               ? xhsCreatorProfileMaterial || null
             : videoCreatorSamplesMaterial || null
+  const openedPanelAsset = inputAssetDetailOpen ? selectedPanelAsset : null
 
   const selectInputAsset = (asset: InputAsset) => {
     if (isTrendCsvInputAsset(asset)) {
@@ -203,6 +206,19 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
 
   const renderCreatorDossierOverview = () => {
     if (!isCreatorPanel) return null
+    if (!inputAssetDetailOpen) {
+      return (
+        <div className="creator-dossier-card">
+          <div className="creator-dossier-head">
+            <div>
+              <b>创作者档案概览</b>
+              <span>请先从左侧选择一个实例，或创建新的创作者档案资产。</span>
+            </div>
+            <em>unselected</em>
+          </div>
+        </div>
+      )
+    }
     const xhsSummary = xhsCreatorProfileSummaryFromAsset(xhsCreatorProfileMaterial)
     return (
       <div className="creator-dossier-card">
@@ -398,6 +414,15 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
   }
 
   const renderInputAssetDetail = () => {
+    if (!inputAssetDetailOpen) {
+      return (
+        <div className="empty-card">
+          请选择左侧的 {definition.singularLabel} 实例，或点击“{definition.newLabel}”
+          创建新实例。
+        </div>
+      )
+    }
+
     if (inputAssetPanel === 'xhs_creator_profiles') {
       const xhsSummary = xhsCreatorProfileSummaryFromAsset(xhsCreatorProfileMaterial)
       return (
@@ -733,7 +758,9 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
         {renderCreatorDossierOverview()}
         {renderCreatorProfileTabs()}
         <button
-          className={`run-row ${selectedPanelAsset ? '' : 'active'}`}
+          className={`run-row ${
+            inputAssetDetailOpen && !openedPanelAsset ? 'active' : ''
+          }`}
           type="button"
           onClick={() => props.onStartNewInputAsset(inputAssetPanel)}
         >
@@ -748,7 +775,7 @@ export function InputAssetsPage(props: InputAssetsPageProps) {
             <button
               key={material.id}
               className={`run-row ${
-                selectedPanelAsset?.id === material.id ? 'active' : ''
+                openedPanelAsset?.id === material.id ? 'active' : ''
               }`}
               type="button"
               onClick={() => selectInputAsset(material)}

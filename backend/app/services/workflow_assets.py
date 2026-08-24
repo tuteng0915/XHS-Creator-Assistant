@@ -6,8 +6,16 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from app.db.database import SQLiteDatabase
-from app.errors import ValidationError
-from app.models import WorkflowAssetResponse, WorkflowAssetSummary, WorkflowAssetUpdate
+from app.errors import ConflictError, ValidationError
+from app.models import (
+    CapabilityDefinitionDiffResponse,
+    CapabilityDefinitionRevert,
+    WorkflowAssetDefinitionUpdate,
+    WorkflowAssetResponse,
+    WorkflowAssetSummary,
+    WorkflowAssetUpdate,
+    WorkflowCallBindingUpdate,
+)
 from app.repositories.workflow_assets import WorkflowAssetRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.agents import AgentService
@@ -23,6 +31,7 @@ class BuiltinWorkflowAssetDefinition:
     agent_plan: dict[str, Any]
     artifact_effect: str
     version: str = "v1"
+    call_binding: str = ""
 
 
 BUILTIN_WORKFLOW_ASSETS = [
@@ -32,6 +41,7 @@ BUILTIN_WORKFLOW_ASSETS = [
         purpose="Diagnose account profile and comment pain points, then generate topic candidates.",
         entry_agent_ids=["creator_material_curator", "account_diagnosis_strategist"],
         artifact_effect="AnalysisRun + Topic candidates",
+        call_binding="account",
         agent_plan={
             "tasks": [
                 {
@@ -69,6 +79,7 @@ BUILTIN_WORKFLOW_ASSETS = [
         purpose="Analyze uploaded trend data and generate creator-fit topic candidates.",
         entry_agent_ids=["creator_material_curator", "trend_opportunity_strategist"],
         artifact_effect="AnalysisRun + Topic candidates",
+        call_binding="trend",
         agent_plan={
             "tasks": [
                 {
@@ -109,6 +120,7 @@ BUILTIN_WORKFLOW_ASSETS = [
         ),
         entry_agent_ids=["creator_material_curator", "video_creator_quality_analyst"],
         artifact_effect="AnalysisRun.video_creator_quality",
+        call_binding="video",
         agent_plan={
             "tasks": [
                 {
@@ -140,10 +152,13 @@ BUILTIN_WORKFLOW_ASSETS = [
     ),
     BuiltinWorkflowAssetDefinition(
         workflow_id="topic_to_draft",
-        display_name="Topic to Draft Workflow",
-        purpose="Save/select a topic and generate a persistent content structure draft.",
+        display_name="Topic to Creative Output Workflow",
+        purpose=(
+            "Save/select a topic, generate a persistent creative brief, then generate "
+            "a persistent content structure."
+        ),
         entry_agent_ids=["topic_draft_editor"],
-        artifact_effect="Topic + Draft",
+        artifact_effect="Topic + Draft(kind=content_brief) + Draft(kind=content_structure)",
         agent_plan={
             "tasks": [
                 {
@@ -153,10 +168,19 @@ BUILTIN_WORKFLOW_ASSETS = [
                     "dependsOn": [],
                 },
                 {
-                    "taskId": "generate_draft",
+                    "taskId": "generate_brief",
                     "agentId": "topic_draft_editor",
-                    "skillIds": ["draft.generate_structure"],
+                    "skillIds": ["topic.refine_to_brief"],
                     "dependsOn": ["select_topic"],
+                },
+                {
+                    "taskId": "generate_structure",
+                    "agentId": "topic_draft_editor",
+                    "skillIds": [
+                        "draft.generate_structure_from_brief",
+                        "draft.generate_structure",
+                    ],
+                    "dependsOn": ["generate_brief"],
                 },
             ]
         },
@@ -248,6 +272,267 @@ class WorkflowAssetService:
             )
         return self._to_response(row)
 
+    def update_definition(
+        self,
+        workflow_asset_id: str,
+        payload: WorkflowAssetDefinitionUpdate,
+    ) -> WorkflowAssetResponse:
+        self._validate_definition_payload(payload)
+        with self.database.read() as connection:
+            current = self.repository.get(connection, workflow_asset_id)
+        workspace_id = current["workspace_id"]
+        agent_ids = {agent.agent_id for agent in self.agent_service.list(workspace_id)}
+        skill_ids = {
+            skill.skill_id for skill in self.agent_service.skill_service.list(workspace_id)
+        }
+        missing_entry_agents = [
+            agent_id
+            for agent_id in payload.entry_agent_ids
+            if agent_id not in agent_ids
+        ]
+        if missing_entry_agents:
+            raise ValidationError(
+                "Workflow references unknown entry agents: "
+                f"{', '.join(missing_entry_agents)}"
+            )
+        missing_task_agents = sorted(
+            agent_id
+            for agent_id in self._agent_ids_from_plan(payload.agent_plan)
+            if agent_id not in agent_ids
+        )
+        if missing_task_agents:
+            raise ValidationError(
+                "Workflow task plan references unknown agents: "
+                f"{', '.join(missing_task_agents)}"
+            )
+        missing_task_skills = sorted(
+            skill_id
+            for skill_id in self._skill_ids_from_plan(payload.agent_plan)
+            if skill_id not in skill_ids
+        )
+        if missing_task_skills:
+            raise ValidationError(
+                "Workflow task plan references unknown skills: "
+                f"{', '.join(missing_task_skills)}"
+            )
+        with self.database.transaction() as connection:
+            current = self.repository.get(connection, workflow_asset_id)
+            if current["updated_at"] != as_iso(payload.expected_updated_at):
+                raise ConflictError("Workflow changed since it was loaded")
+            if current["status"] != "enabled" and payload.call_binding:
+                raise ValidationError("Only enabled workflows can be registered for calls")
+            row = self.repository.replace_definition(
+                connection,
+                workflow_asset_id=workflow_asset_id,
+                display_name=payload.display_name,
+                purpose=payload.purpose,
+                entry_agent_ids_json=json.dumps(
+                    payload.entry_agent_ids, ensure_ascii=False
+                ),
+                agent_plan_json=json.dumps(payload.agent_plan, ensure_ascii=False),
+                artifact_effect=payload.artifact_effect,
+                version=payload.version,
+                now=utc_now(),
+            )
+            row = self.repository.update(
+                connection,
+                workflow_asset_id=workflow_asset_id,
+                status=None,
+                user_notes=payload.user_notes,
+                expected_updated_at=row["updated_at"],
+                now=utc_now(),
+            )
+            row = self.repository.update_call_binding(
+                connection,
+                workflow_asset_id=workflow_asset_id,
+                call_binding=payload.call_binding,
+                expected_updated_at=row["updated_at"],
+                now=utc_now(),
+            )
+        return self._to_response(row)
+
+    def definition_diff(
+        self, workflow_asset_id: str
+    ) -> CapabilityDefinitionDiffResponse:
+        with self.database.read() as connection:
+            row = self.repository.get(connection, workflow_asset_id)
+        current_definition = self._definition_dict_from_row(row)
+        builtin = self._builtin_definition_by_workflow_id(row["workflow_id"])
+        builtin_definition = (
+            self._definition_dict_from_builtin(builtin) if builtin is not None else None
+        )
+        return CapabilityDefinitionDiffResponse(
+            asset_id=row["id"],
+            asset_type="workflow",
+            stable_id=row["workflow_id"],
+            source=row["source"],
+            can_revert=row["source"] == "generated" and builtin_definition is not None,
+            changed_fields=self._changed_definition_fields(
+                current_definition, builtin_definition
+            ),
+            current_definition=current_definition,
+            builtin_definition=builtin_definition,
+        )
+
+    def revert_definition(
+        self,
+        workflow_asset_id: str,
+        payload: CapabilityDefinitionRevert,
+    ) -> WorkflowAssetResponse:
+        with self.database.read() as connection:
+            current = self.repository.get(connection, workflow_asset_id)
+        builtin = self._builtin_definition_by_workflow_id(current["workflow_id"])
+        if builtin is None:
+            raise ValidationError("No builtin definition is available for this workflow")
+        workspace_id = current["workspace_id"]
+        agent_ids = {agent.agent_id for agent in self.agent_service.list(workspace_id)}
+        skill_ids = {
+            skill.skill_id for skill in self.agent_service.skill_service.list(workspace_id)
+        }
+        referenced_agent_ids = set(builtin.entry_agent_ids) | self._agent_ids_from_plan(
+            builtin.agent_plan
+        )
+        missing_agents = sorted(referenced_agent_ids - agent_ids)
+        if missing_agents:
+            raise ValidationError(
+                f"Builtin workflow references missing agents: {', '.join(missing_agents)}"
+            )
+        missing_skills = sorted(self._skill_ids_from_plan(builtin.agent_plan) - skill_ids)
+        if missing_skills:
+            raise ValidationError(
+                f"Builtin workflow references missing skills: {', '.join(missing_skills)}"
+            )
+        with self.database.transaction() as connection:
+            row = self.repository.revert_definition_to_builtin(
+                connection,
+                workflow_asset_id=workflow_asset_id,
+                display_name=builtin.display_name,
+                purpose=builtin.purpose,
+                entry_agent_ids_json=json.dumps(
+                    builtin.entry_agent_ids, ensure_ascii=False
+                ),
+                agent_plan_json=json.dumps(builtin.agent_plan, ensure_ascii=False),
+                artifact_effect=builtin.artifact_effect,
+                call_binding=builtin.call_binding,
+                version=builtin.version,
+                definition_hash=self._definition_hash(builtin),
+                expected_updated_at=as_iso(payload.expected_updated_at),
+                now=utc_now(),
+            )
+        return self._to_response(row)
+
+    @staticmethod
+    def _validate_definition_payload(payload: WorkflowAssetDefinitionUpdate) -> None:
+        if not payload.artifact_effect.strip():
+            raise ValidationError("Workflow artifactEffect is required")
+        for agent_id in payload.entry_agent_ids:
+            if not agent_id.strip():
+                raise ValidationError("Workflow entryAgentIds cannot contain blank items")
+        if not isinstance(payload.agent_plan, dict):
+            raise ValidationError("Workflow agentPlan must be an object")
+
+    @staticmethod
+    def _builtin_definition_by_workflow_id(
+        workflow_id: str,
+    ) -> BuiltinWorkflowAssetDefinition | None:
+        return next(
+            (
+                definition
+                for definition in BUILTIN_WORKFLOW_ASSETS
+                if definition.workflow_id == workflow_id
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _definition_dict_from_builtin(
+        definition: BuiltinWorkflowAssetDefinition,
+    ) -> dict[str, Any]:
+        return {
+            "displayName": definition.display_name,
+            "purpose": definition.purpose,
+            "entryAgentIds": definition.entry_agent_ids,
+            "agentPlan": definition.agent_plan,
+            "artifactEffect": definition.artifact_effect,
+            "callBinding": definition.call_binding,
+            "version": definition.version,
+        }
+
+    @staticmethod
+    def _definition_dict_from_row(row: dict) -> dict[str, Any]:
+        return {
+            "displayName": row["display_name"],
+            "purpose": row["purpose"],
+            "entryAgentIds": json.loads(row["entry_agent_ids_json"]),
+            "agentPlan": json.loads(row["agent_plan_json"]),
+            "artifactEffect": row["artifact_effect"],
+            "callBinding": row.get("call_binding") or "",
+            "version": row["version"],
+        }
+
+    @staticmethod
+    def _changed_definition_fields(
+        current_definition: dict[str, Any],
+        builtin_definition: dict[str, Any] | None,
+    ) -> list[str]:
+        if builtin_definition is None:
+            return sorted(current_definition.keys())
+        return sorted(
+            field
+            for field, value in current_definition.items()
+            if builtin_definition.get(field) != value
+        )
+
+    @staticmethod
+    def _agent_ids_from_plan(agent_plan: dict[str, Any]) -> set[str]:
+        tasks = agent_plan.get("tasks")
+        if not isinstance(tasks, list):
+            return set()
+        return {
+            str(task.get("agentId"))
+            for task in tasks
+            if isinstance(task, dict) and task.get("agentId")
+        }
+
+    @staticmethod
+    def _skill_ids_from_plan(agent_plan: dict[str, Any]) -> set[str]:
+        tasks = agent_plan.get("tasks")
+        if not isinstance(tasks, list):
+            return set()
+        skill_ids: set[str] = set()
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            raw_skill_ids = task.get("skillIds")
+            if not isinstance(raw_skill_ids, list):
+                continue
+            skill_ids.update(str(skill_id) for skill_id in raw_skill_ids if skill_id)
+        return skill_ids
+
+    def update_call_binding(
+        self, workflow_asset_id: str, payload: WorkflowCallBindingUpdate
+    ) -> WorkflowAssetResponse:
+        with self.database.transaction() as connection:
+            current = self.repository.get(connection, workflow_asset_id)
+            if current["status"] != "enabled" and payload.call_binding:
+                raise ValidationError("Only enabled workflows can be registered for calls")
+            self._validate_call_binding(current, payload.call_binding)
+            row = self.repository.update_call_binding(
+                connection,
+                workflow_asset_id=workflow_asset_id,
+                call_binding=payload.call_binding,
+                expected_updated_at=as_iso(payload.expected_updated_at),
+                now=utc_now(),
+            )
+        return self._to_response(row)
+
+    @staticmethod
+    def _validate_call_binding(row: dict, call_binding: str) -> None:
+        if not call_binding:
+            return
+        if row["agent_plan_json"] == "{}":
+            raise ValidationError("Workflow requires an agent plan before registration")
+
     def _sync_builtin_workflows(self, workspace_id: str) -> None:
         now = utc_now()
         with self.database.transaction() as connection:
@@ -272,6 +557,7 @@ class WorkflowAssetService:
                     ),
                     "artifact_effect": definition.artifact_effect,
                     "version": definition.version,
+                    "call_binding": definition.call_binding,
                     "definition_hash": definition_hash,
                 }
                 if existing:
@@ -300,15 +586,21 @@ class WorkflowAssetService:
 
     @staticmethod
     def _definition_hash(definition: BuiltinWorkflowAssetDefinition) -> str:
-        encoded = json.dumps(
-            asdict(definition), ensure_ascii=False, sort_keys=True
-        ).encode("utf-8")
+        definition_data = asdict(definition)
+        definition_data.pop("call_binding", None)
+        encoded = json.dumps(definition_data, ensure_ascii=False, sort_keys=True).encode(
+            "utf-8"
+        )
         return hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
     def _to_summary(row: dict) -> WorkflowAssetSummary:
         return WorkflowAssetSummary.model_validate(
-            {**row, "entry_agent_ids": json.loads(row["entry_agent_ids_json"])}
+            {
+                **row,
+                "entry_agent_ids": json.loads(row["entry_agent_ids_json"]),
+                "call_binding": row.get("call_binding") or "",
+            }
         )
 
     @staticmethod
@@ -316,6 +608,7 @@ class WorkflowAssetService:
         return WorkflowAssetResponse.model_validate(
             {
                 **row,
+                "call_binding": row.get("call_binding") or "",
                 "entry_agent_ids": json.loads(row["entry_agent_ids_json"]),
                 "agent_plan": json.loads(row["agent_plan_json"]),
             }

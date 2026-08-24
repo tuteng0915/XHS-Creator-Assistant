@@ -17,6 +17,7 @@ from app.models import (
     AnalysisRunSummary,
     AnalysisRunTransition,
     AnalysisStageUpdate,
+    RunReviewUpdate,
     SourceMaterialType,
     WorkflowType,
 )
@@ -25,7 +26,7 @@ from app.repositories.media_assets import MediaAssetRepository
 from app.repositories.source_materials import SourceMaterialRepository
 from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
-from app.services.common import utc_now
+from app.services.common import as_iso, utc_now
 from app.services.context_access import ContextAccessService
 
 STAGE_KEYS = {
@@ -227,6 +228,31 @@ class AnalysisRunService:
     def get(self, run_id: str) -> AnalysisRunResponse:
         with self.database.read() as connection:
             row = self.repository.get(connection, run_id)
+        return self._to_response(row)
+
+    def update_review(
+        self, run_id: str, payload: RunReviewUpdate
+    ) -> AnalysisRunResponse:
+        current = self.get(run_id)
+        user_notes = (
+            payload.user_notes if payload.user_notes is not None else current.user_notes
+        )
+        review_status = (
+            payload.review_status.value
+            if payload.review_status is not None
+            else current.review_status.value
+        )
+        if payload.user_notes is None and payload.review_status is None:
+            raise ValidationError("No review changes provided")
+        with self.database.transaction() as connection:
+            row = self.repository.update_review(
+                connection,
+                run_id=run_id,
+                user_notes=user_notes,
+                review_status=review_status,
+                expected_updated_at=as_iso(payload.expected_updated_at),
+                now=utc_now(),
+            )
         return self._to_response(row)
 
     def transition(

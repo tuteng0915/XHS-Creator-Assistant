@@ -11,6 +11,8 @@ from app.models import (
     AgentConversationCreate,
     AgentConversationResponse,
     AgentConversationSummary,
+    AgentConversationUpdate,
+    AgentDefinitionUpdate,
     AgentMessageCreate,
     AgentResponse,
     AgentSummary,
@@ -21,6 +23,8 @@ from app.models import (
     AnalysisRunSummary,
     AssetProposalResponse,
     AssetProposalUpdate,
+    CapabilityDefinitionDiffResponse,
+    CapabilityDefinitionRevert,
     DraftGenerateRequest,
     DraftResponse,
     DraftSummary,
@@ -31,9 +35,11 @@ from app.models import (
     MediaAssetResponse,
     MediaAssetType,
     MediaAssetUpdate,
+    RunReviewUpdate,
     SimulationRunCreate,
     SimulationRunResponse,
     SimulationRunSummary,
+    SkillDefinitionUpdate,
     SkillInvokeRequest,
     SkillInvokeResponse,
     SkillResponse,
@@ -52,9 +58,11 @@ from app.models import (
     TopicUpdate,
     VideoPreviewDeriveRequest,
     VideoPreviewDeriveResponse,
+    WorkflowAssetDefinitionUpdate,
     WorkflowAssetResponse,
     WorkflowAssetSummary,
     WorkflowAssetUpdate,
+    WorkflowCallBindingUpdate,
     WorkflowType,
     WorkspaceCreate,
     WorkspaceResponse,
@@ -461,6 +469,33 @@ def create_api_router(
     ) -> SkillResponse:
         return skill_service.update(skill_asset_id, payload)
 
+    @router.patch(
+        "/skills/{skill_asset_id}/definition",
+        response_model=SkillResponse,
+    )
+    def update_skill_definition(
+        skill_asset_id: str, payload: SkillDefinitionUpdate
+    ) -> SkillResponse:
+        return skill_service.update_definition(skill_asset_id, payload)
+
+    @router.get(
+        "/skills/{skill_asset_id}/definition-diff",
+        response_model=CapabilityDefinitionDiffResponse,
+    )
+    def get_skill_definition_diff(
+        skill_asset_id: str,
+    ) -> CapabilityDefinitionDiffResponse:
+        return skill_service.definition_diff(skill_asset_id)
+
+    @router.post(
+        "/skills/{skill_asset_id}/revert-definition",
+        response_model=SkillResponse,
+    )
+    def revert_skill_definition(
+        skill_asset_id: str, payload: CapabilityDefinitionRevert
+    ) -> SkillResponse:
+        return skill_service.revert_definition(skill_asset_id, payload)
+
     @router.post(
         "/skills/{skill_asset_id}/invoke",
         response_model=SkillInvokeResponse,
@@ -487,6 +522,33 @@ def create_api_router(
     ) -> AgentResponse:
         return agent_service.update(agent_asset_id, payload)
 
+    @router.patch(
+        "/agents/{agent_asset_id}/definition",
+        response_model=AgentResponse,
+    )
+    def update_agent_definition(
+        agent_asset_id: str, payload: AgentDefinitionUpdate
+    ) -> AgentResponse:
+        return agent_service.update_definition(agent_asset_id, payload)
+
+    @router.get(
+        "/agents/{agent_asset_id}/definition-diff",
+        response_model=CapabilityDefinitionDiffResponse,
+    )
+    def get_agent_definition_diff(
+        agent_asset_id: str,
+    ) -> CapabilityDefinitionDiffResponse:
+        return agent_service.definition_diff(agent_asset_id)
+
+    @router.post(
+        "/agents/{agent_asset_id}/revert-definition",
+        response_model=AgentResponse,
+    )
+    def revert_agent_definition(
+        agent_asset_id: str, payload: CapabilityDefinitionRevert
+    ) -> AgentResponse:
+        return agent_service.revert_definition(agent_asset_id, payload)
+
     @router.post(
         "/workspaces/{workspace_id}/agent-conversations",
         response_model=AgentConversationResponse,
@@ -512,6 +574,15 @@ def create_api_router(
     )
     def get_agent_conversation(conversation_id: str) -> AgentConversationResponse:
         return agent_conversation_service.get(conversation_id)
+
+    @router.patch(
+        "/agent-conversations/{conversation_id}",
+        response_model=AgentConversationResponse,
+    )
+    def update_agent_conversation(
+        conversation_id: str, payload: AgentConversationUpdate
+    ) -> AgentConversationResponse:
+        return agent_conversation_service.update(conversation_id, payload)
 
     @router.post(
         "/agent-conversations/{conversation_id}/messages",
@@ -584,6 +655,42 @@ def create_api_router(
     ) -> WorkflowAssetResponse:
         return workflow_asset_service.update(workflow_asset_id, payload)
 
+    @router.patch(
+        "/workflows/{workflow_asset_id}/definition",
+        response_model=WorkflowAssetResponse,
+    )
+    def update_workflow_asset_definition(
+        workflow_asset_id: str, payload: WorkflowAssetDefinitionUpdate
+    ) -> WorkflowAssetResponse:
+        return workflow_asset_service.update_definition(workflow_asset_id, payload)
+
+    @router.get(
+        "/workflows/{workflow_asset_id}/definition-diff",
+        response_model=CapabilityDefinitionDiffResponse,
+    )
+    def get_workflow_asset_definition_diff(
+        workflow_asset_id: str,
+    ) -> CapabilityDefinitionDiffResponse:
+        return workflow_asset_service.definition_diff(workflow_asset_id)
+
+    @router.post(
+        "/workflows/{workflow_asset_id}/revert-definition",
+        response_model=WorkflowAssetResponse,
+    )
+    def revert_workflow_asset_definition(
+        workflow_asset_id: str, payload: CapabilityDefinitionRevert
+    ) -> WorkflowAssetResponse:
+        return workflow_asset_service.revert_definition(workflow_asset_id, payload)
+
+    @router.patch(
+        "/workflows/{workflow_asset_id}/call-binding",
+        response_model=WorkflowAssetResponse,
+    )
+    def update_workflow_call_binding(
+        workflow_asset_id: str, payload: WorkflowCallBindingUpdate
+    ) -> WorkflowAssetResponse:
+        return workflow_asset_service.update_call_binding(workflow_asset_id, payload)
+
     @router.post(
         "/workspaces/{workspace_id}/analysis-runs",
         response_model=AnalysisRunResponse,
@@ -641,6 +748,12 @@ def create_api_router(
     @router.get("/analysis-runs/{run_id}", response_model=AnalysisRunResponse)
     def get_analysis_run(run_id: str) -> AnalysisRunResponse:
         return analysis_service.get(run_id)
+
+    @router.patch("/analysis-runs/{run_id}/review", response_model=AnalysisRunResponse)
+    def update_analysis_run_review(
+        run_id: str, payload: RunReviewUpdate
+    ) -> AnalysisRunResponse:
+        return analysis_service.update_review(run_id, payload)
 
     @router.get("/analysis-runs/{run_id}/events")
     async def stream_analysis_run_events(
@@ -778,6 +891,15 @@ def create_api_router(
     @router.get("/simulation-runs/{simulation_id}", response_model=SimulationRunResponse)
     def get_simulation_run(simulation_id: str) -> SimulationRunResponse:
         return simulation_service.get(simulation_id)
+
+    @router.patch(
+        "/simulation-runs/{simulation_id}/review",
+        response_model=SimulationRunResponse,
+    )
+    def update_simulation_run_review(
+        simulation_id: str, payload: RunReviewUpdate
+    ) -> SimulationRunResponse:
+        return simulation_service.update_review(simulation_id, payload)
 
     @router.get("/simulation-runs/{simulation_id}/events")
     async def stream_simulation_run_events(
@@ -966,6 +1088,16 @@ def create_api_router(
         return topic_service.archive(topic_id)
 
     @router.post(
+        "/topics/{topic_id}/briefs/generate",
+        response_model=DraftResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def generate_content_brief(
+        topic_id: str, payload: DraftGenerateRequest
+    ) -> DraftResponse:
+        return await draft_generation_service.generate_brief_from_topic(topic_id, payload)
+
+    @router.post(
         "/topics/{topic_id}/drafts/generate",
         response_model=DraftResponse,
         status_code=status.HTTP_201_CREATED,
@@ -974,5 +1106,17 @@ def create_api_router(
         topic_id: str, payload: DraftGenerateRequest
     ) -> DraftResponse:
         return await draft_generation_service.generate_from_topic(topic_id, payload)
+
+    @router.post(
+        "/drafts/{draft_id}/structure/generate",
+        response_model=DraftResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def generate_structure_from_brief(
+        draft_id: str, payload: DraftGenerateRequest
+    ) -> DraftResponse:
+        return await draft_generation_service.generate_structure_from_brief(
+            draft_id, payload
+        )
 
     return router

@@ -11,6 +11,7 @@ class DraftRepository:
         *,
         workspace_id: str,
         topic_id: str,
+        kind: str,
         source_analysis_run_id: str | None,
         source_workflow: str,
         status: str,
@@ -26,16 +27,17 @@ class DraftRepository:
         connection.execute(
             """
             INSERT INTO drafts(
-                id, workspace_id, topic_id, source_analysis_run_id, source_workflow,
+                id, workspace_id, topic_id, kind, source_analysis_run_id, source_workflow,
                 status, generated_snapshot_json, editable_content_json,
                 input_snapshot_json, stage_errors_json, model_metadata_json,
                 created_at, completed_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 draft_id,
                 workspace_id,
                 topic_id,
+                kind,
                 source_analysis_run_id,
                 source_workflow,
                 status,

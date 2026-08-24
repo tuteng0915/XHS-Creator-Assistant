@@ -6,8 +6,11 @@ from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from app.db.database import SQLiteDatabase
-from app.errors import ValidationError
+from app.errors import ConflictError, ValidationError
 from app.models import (
+    CapabilityDefinitionDiffResponse,
+    CapabilityDefinitionRevert,
+    SkillDefinitionUpdate,
     SkillInvokeRequest,
     SkillInvokeResponse,
     SkillResponse,
@@ -482,6 +485,38 @@ BUILTIN_SKILLS = [
                 "mediaAssets",
             ],
             "disallowed_fields": ["full_workspace", "unrelated input assets"],
+            "pmRubric": {
+                "creatorTypes": [
+                    {
+                        "type": "剧本驱动型",
+                        "fitForIncentive": "高",
+                        "rule": (
+                            "连续发布剧情/角色/世界观内容，评论区出现催更、追剧情、"
+                            "讨论人物关系等信号。"
+                        ),
+                    },
+                    {
+                        "type": "商单驱动型",
+                        "fitForIncentive": "低",
+                        "rule": (
+                            "内容以品牌植入、商品转化或短期商业任务为主，"
+                            "非商单内容弱或不稳定。"
+                        ),
+                    },
+                    {
+                        "type": "技术探索驱动型",
+                        "fitForIncentive": "中",
+                        "rule": (
+                            "主要展示工具链、模型实验或制作流程，需要结合更新稳定性"
+                            "和受众反馈判断。"
+                        ),
+                    },
+                ],
+                "evidenceRules": [
+                    "必须引用标题、正文、互动、评论、封面或已保存媒体理解中的具体证据。",
+                    "没有真实视频理解时，不得声称看过镜头、剪辑、口型、配音或完整视频。",
+                ],
+            },
         },
         output_schema={"root": "creatorProfile"},
         artifact_effect="AnalysisRun.stageResults.creator_profile",
@@ -523,6 +558,42 @@ BUILTIN_SKILLS = [
                 "creatorProfile",
             ],
             "disallowed_fields": ["full_workspace", "unrelated input assets"],
+            "pmRubric": {
+                "qualityDimensions": [
+                    {
+                        "dimension": "叙事完整度",
+                        "high": "有清晰冲突、转折和结尾钩子，适合系列化。",
+                        "medium": "有主题但结构松散，缺少强钩子或连续性。",
+                        "low": "只有概念展示，缺少故事推进或观看理由。",
+                        "evidenceRequired": "标题、正文、评论反馈、视频理解或封面线索。",
+                    },
+                    {
+                        "dimension": "画面完成度",
+                        "high": "风格统一、主体清晰、构图稳定，封面/画面能支撑内容承诺。",
+                        "medium": "整体可用但存在风格跳变、信息密度不足或封面弱。",
+                        "low": "画面粗糙、主体混乱或明显影响可信度。",
+                        "evidenceRequired": "封面、截图、视频理解或用户手动样本观察。",
+                    },
+                    {
+                        "dimension": "AIGC 技术使用水平",
+                        "high": "技术服务叙事或表达，瑕疵不干扰观看。",
+                        "medium": "有技术亮点但稳定性一般。",
+                        "low": "技术瑕疵成为主要观感问题。",
+                        "evidenceRequired": "视频理解、样本观察或评论中关于技术效果的反馈。",
+                    },
+                    {
+                        "dimension": "系列化潜力",
+                        "high": "有可复用人物、世界观、栏目或任务模板。",
+                        "medium": "主题可延展但尚未形成稳定栏目。",
+                        "low": "主要依赖单点热点或一次性概念。",
+                        "evidenceRequired": "近期发布结构、重复栏目、评论催更或收藏转发。",
+                    },
+                ],
+                "evidenceRules": [
+                    "score 必须和 evidenceConfidence 匹配；证据弱时不得给出过高确定性。",
+                    "cannotAssess 必须列出因为缺少真实视频/图片理解而无法可靠判断的维度。",
+                ],
+            },
         },
         output_schema={"root": "videoQuality"},
         artifact_effect="AnalysisRun.stageResults.video_quality",
@@ -546,6 +617,29 @@ BUILTIN_SKILLS = [
         context_policy={
             "allowed_fields": ["positioning", "creatorProfile", "videoQuality"],
             "disallowed_fields": ["raw video samples when structured diagnosis exists"],
+            "pmRubric": {
+                "incentiveRules": [
+                    {
+                        "signal": "剧本驱动 + 系列化潜力高",
+                        "interpretation": "适合用连续更新任务、流量扶持和阶段奖励放大。",
+                        "operatorAction": "设计 4 周连续更新激励，要求保留同一世界观或栏目。",
+                    },
+                    {
+                        "signal": "商单占比高 + 非商单互动弱",
+                        "interpretation": "激励计划较难改变其内容行为。",
+                        "operatorAction": "谨慎纳入，优先谈商业合作或限定非商单内容任务。",
+                    },
+                    {
+                        "signal": "技术探索强 + 更新不稳定",
+                        "interpretation": "需要先判断其是否愿意产品化持续创作。",
+                        "operatorAction": "给工具资源、样例任务和轻量试运行，不直接给高额激励。",
+                    },
+                ],
+                "evidenceRules": [
+                    "recommendation 必须区分适合、谨慎、暂不适合，并说明条件。",
+                    "risks 必须包含证据不足、更新稳定性和商业动机相关风险。",
+                ],
+            },
         },
         output_schema={"root": "incentiveFit"},
         artifact_effect="AnalysisRun.stageResults.incentive_fit",
@@ -607,7 +701,11 @@ BUILTIN_SKILLS = [
         artifact_effect="Topic",
         side_effects=["creates topic artifact"],
         failure_mode="atomic",
-        composable_with=["topic.select", "draft.generate_structure"],
+        composable_with=[
+            "topic.select",
+            "topic.refine_to_brief",
+            "draft.generate_structure",
+        ],
         implementation_refs=["TopicService.create"],
     ),
     BuiltinSkillDefinition(
@@ -620,14 +718,49 @@ BUILTIN_SKILLS = [
         artifact_effect="Topic.status + Workspace.currentTopicId",
         side_effects=["updates selected topic status"],
         failure_mode="atomic",
-        composable_with=["draft.generate_structure", "simulation.normalize_target"],
+        composable_with=[
+            "topic.refine_to_brief",
+            "draft.generate_structure",
+            "simulation.normalize_target",
+        ],
         implementation_refs=["TopicService.select"],
     ),
     BuiltinSkillDefinition(
+        skill_id="topic.refine_to_brief",
+        display_name="Generate Creative Brief",
+        category="creative_output",
+        purpose=(
+            "Turn a selected Topic into a persistent creative brief before writing "
+            "or structure generation."
+        ),
+        required_inputs=["topic_id", "positioning_snapshot"],
+        optional_inputs=["compact_analysis_context"],
+        context_policy={
+            "allowed_fields": ["positioning", "topic", "background"],
+            "disallowed_fields": ["raw_input_assets", "full_workspace"],
+        },
+        output_schema={"root": "brief"},
+        artifact_effect="Draft(kind=content_brief)",
+        side_effects=[
+            "creates creative brief artifact",
+            "stores generated snapshot and editable content",
+        ],
+        failure_mode="atomic",
+        composable_with=[
+            "draft.generate_structure_from_brief",
+            "draft.edit",
+            "simulation.normalize_target",
+        ],
+        implementation_refs=[
+            "DraftGenerationService.generate_brief_from_topic",
+            "ModelOperation.CONTENT_BRIEF",
+        ],
+    ),
+    BuiltinSkillDefinition(
         skill_id="draft.generate_structure",
-        display_name="Generate Draft Structure",
-        category="draft",
-        purpose="Generate a persistent content structure from a selected topic.",
+        display_name="Generate Content Structure",
+        category="creative_output",
+        purpose="Generate a persistent content structure directly from a selected topic.",
         required_inputs=["topic_id", "positioning_snapshot"],
         optional_inputs=["compact_analysis_context"],
         context_policy={
@@ -635,7 +768,7 @@ BUILTIN_SKILLS = [
             "disallowed_fields": ["raw_input_assets", "full_workspace"],
         },
         output_schema={"root": "structure"},
-        artifact_effect="Draft",
+        artifact_effect="Draft(kind=content_structure)",
         side_effects=["creates draft", "stores generated snapshot and editable content"],
         failure_mode="atomic",
         composable_with=["draft.edit", "simulation.normalize_target"],
@@ -645,12 +778,39 @@ BUILTIN_SKILLS = [
         ],
     ),
     BuiltinSkillDefinition(
-        skill_id="draft.edit",
-        display_name="Edit Draft",
-        category="draft",
+        skill_id="draft.generate_structure_from_brief",
+        display_name="Generate Structure From Brief",
+        category="creative_output",
         purpose=(
-            "Persist user edits to draft editable content without modifying "
-            "generated snapshot."
+            "Generate a persistent content structure from a user-confirmed creative "
+            "brief, preserving the brief in the structure input snapshot."
+        ),
+        required_inputs=["content_brief_draft_id", "positioning_snapshot"],
+        optional_inputs=["compact_analysis_context"],
+        context_policy={
+            "allowed_fields": ["positioning", "topic", "sourceBrief", "background"],
+            "disallowed_fields": ["raw_input_assets", "full_workspace"],
+        },
+        output_schema={"root": "structure"},
+        artifact_effect="Draft(kind=content_structure)",
+        side_effects=[
+            "creates content structure artifact",
+            "stores source brief reference in input snapshot",
+        ],
+        failure_mode="atomic",
+        composable_with=["draft.edit", "simulation.normalize_target"],
+        implementation_refs=[
+            "DraftGenerationService.generate_structure_from_brief",
+            "ModelOperation.STRUCTURE",
+        ],
+    ),
+    BuiltinSkillDefinition(
+        skill_id="draft.edit",
+        display_name="Edit Creative Output",
+        category="creative_output",
+        purpose=(
+            "Persist user edits to a creative brief or content structure without "
+            "modifying generated snapshot."
         ),
         required_inputs=["draft_id", "editable_content", "expected_updated_at"],
         output_schema={"type": "Draft"},
@@ -874,6 +1034,7 @@ BUILTIN_SKILLS = [
                 "entryAgentIds",
                 "agentPlan",
                 "artifactEffect",
+                "callBinding",
                 "version",
             ],
         },
@@ -910,6 +1071,18 @@ class SkillService:
             row = self.repository.get(connection, skill_asset_id)
         return self._to_response(row)
 
+    def get_by_skill_id(self, workspace_id: str, skill_id: str) -> SkillResponse:
+        self._sync_builtin_skills(workspace_id)
+        with self.database.read() as connection:
+            row = self.repository.get_by_skill_id(
+                connection,
+                workspace_id=workspace_id,
+                skill_id=skill_id,
+            )
+        if row is None:
+            raise ValidationError("Skill not found")
+        return self._to_response(row)
+
     def update(self, skill_asset_id: str, payload: SkillUpdate) -> SkillResponse:
         if payload.status is None and payload.user_notes is None:
             raise ValidationError("At least one editable field is required")
@@ -923,6 +1096,203 @@ class SkillService:
                 now=utc_now(),
             )
         return self._to_response(row)
+
+    def update_definition(
+        self, skill_asset_id: str, payload: SkillDefinitionUpdate
+    ) -> SkillResponse:
+        self._validate_definition_payload(payload)
+        with self.database.transaction() as connection:
+            current = self.repository.get(connection, skill_asset_id)
+            if current["updated_at"] != as_iso(payload.expected_updated_at):
+                raise ConflictError("Skill changed since it was loaded")
+            row = self.repository.replace_definition(
+                connection,
+                skill_asset_id=skill_asset_id,
+                display_name=payload.display_name,
+                category=payload.category,
+                purpose=payload.purpose,
+                trigger_intents_json=json.dumps(
+                    payload.trigger_intents, ensure_ascii=False
+                ),
+                required_inputs_json=json.dumps(
+                    payload.required_inputs, ensure_ascii=False
+                ),
+                optional_inputs_json=json.dumps(
+                    payload.optional_inputs, ensure_ascii=False
+                ),
+                context_policy_json=json.dumps(
+                    payload.context_policy, ensure_ascii=False
+                ),
+                output_schema_json=json.dumps(
+                    payload.output_schema, ensure_ascii=False
+                ),
+                artifact_effect=payload.artifact_effect,
+                side_effects_json=json.dumps(payload.side_effects, ensure_ascii=False),
+                failure_mode=payload.failure_mode,
+                composable_with_json=json.dumps(
+                    payload.composable_with, ensure_ascii=False
+                ),
+                implementation_refs_json=json.dumps(
+                    payload.implementation_refs, ensure_ascii=False
+                ),
+                version=payload.version,
+                now=utc_now(),
+            )
+            row = self.repository.update(
+                connection,
+                skill_asset_id=skill_asset_id,
+                status=None,
+                user_notes=payload.user_notes,
+                expected_updated_at=row["updated_at"],
+                now=utc_now(),
+            )
+        return self._to_response(row)
+
+    def definition_diff(self, skill_asset_id: str) -> CapabilityDefinitionDiffResponse:
+        with self.database.read() as connection:
+            row = self.repository.get(connection, skill_asset_id)
+        current_definition = self._definition_dict_from_row(row)
+        builtin = self._builtin_definition_by_skill_id(row["skill_id"])
+        builtin_definition = (
+            self._definition_dict_from_builtin(builtin) if builtin is not None else None
+        )
+        changed_fields = self._changed_definition_fields(
+            current_definition, builtin_definition
+        )
+        return CapabilityDefinitionDiffResponse(
+            asset_id=row["id"],
+            asset_type="skill",
+            stable_id=row["skill_id"],
+            source=row["source"],
+            can_revert=row["source"] == "generated" and builtin_definition is not None,
+            changed_fields=changed_fields,
+            current_definition=current_definition,
+            builtin_definition=builtin_definition,
+        )
+
+    def revert_definition(
+        self, skill_asset_id: str, payload: CapabilityDefinitionRevert
+    ) -> SkillResponse:
+        with self.database.transaction() as connection:
+            current = self.repository.get(connection, skill_asset_id)
+            builtin = self._builtin_definition_by_skill_id(current["skill_id"])
+            if builtin is None:
+                raise ValidationError("No builtin definition is available for this skill")
+            row = self.repository.revert_definition_to_builtin(
+                connection,
+                skill_asset_id=skill_asset_id,
+                display_name=builtin.display_name,
+                category=builtin.category,
+                purpose=builtin.purpose,
+                trigger_intents_json=json.dumps(
+                    builtin.trigger_intents, ensure_ascii=False
+                ),
+                required_inputs_json=json.dumps(
+                    builtin.required_inputs, ensure_ascii=False
+                ),
+                optional_inputs_json=json.dumps(
+                    builtin.optional_inputs, ensure_ascii=False
+                ),
+                context_policy_json=json.dumps(
+                    builtin.context_policy, ensure_ascii=False
+                ),
+                output_schema_json=json.dumps(
+                    builtin.output_schema, ensure_ascii=False
+                ),
+                artifact_effect=builtin.artifact_effect,
+                side_effects_json=json.dumps(builtin.side_effects, ensure_ascii=False),
+                failure_mode=builtin.failure_mode,
+                composable_with_json=json.dumps(
+                    builtin.composable_with, ensure_ascii=False
+                ),
+                implementation_refs_json=json.dumps(
+                    builtin.implementation_refs, ensure_ascii=False
+                ),
+                version=builtin.version,
+                definition_hash=self._definition_hash(builtin),
+                expected_updated_at=as_iso(payload.expected_updated_at),
+                now=utc_now(),
+            )
+        return self._to_response(row)
+
+    @staticmethod
+    def _validate_definition_payload(payload: SkillDefinitionUpdate) -> None:
+        list_fields = {
+            "trigger_intents": payload.trigger_intents,
+            "required_inputs": payload.required_inputs,
+            "optional_inputs": payload.optional_inputs,
+            "side_effects": payload.side_effects,
+            "composable_with": payload.composable_with,
+            "implementation_refs": payload.implementation_refs,
+        }
+        for field_name, values in list_fields.items():
+            for value in values:
+                if not value.strip():
+                    raise ValidationError(f"{field_name} cannot contain blank items")
+        if not payload.category.strip():
+            raise ValidationError("Skill category is required")
+
+    @staticmethod
+    def _builtin_definition_by_skill_id(
+        skill_id: str,
+    ) -> BuiltinSkillDefinition | None:
+        return next(
+            (definition for definition in BUILTIN_SKILLS if definition.skill_id == skill_id),
+            None,
+        )
+
+    @staticmethod
+    def _definition_dict_from_builtin(
+        definition: BuiltinSkillDefinition,
+    ) -> dict[str, Any]:
+        return {
+            "displayName": definition.display_name,
+            "category": definition.category,
+            "purpose": definition.purpose,
+            "triggerIntents": definition.trigger_intents,
+            "requiredInputs": definition.required_inputs,
+            "optionalInputs": definition.optional_inputs,
+            "contextPolicy": definition.context_policy,
+            "outputSchema": definition.output_schema,
+            "artifactEffect": definition.artifact_effect,
+            "sideEffects": definition.side_effects,
+            "failureMode": definition.failure_mode,
+            "composableWith": definition.composable_with,
+            "implementationRefs": definition.implementation_refs,
+            "version": definition.version,
+        }
+
+    @staticmethod
+    def _definition_dict_from_row(row: dict) -> dict[str, Any]:
+        return {
+            "displayName": row["display_name"],
+            "category": row["category"],
+            "purpose": row["purpose"],
+            "triggerIntents": json.loads(row["trigger_intents_json"]),
+            "requiredInputs": json.loads(row["required_inputs_json"]),
+            "optionalInputs": json.loads(row["optional_inputs_json"]),
+            "contextPolicy": json.loads(row["context_policy_json"]),
+            "outputSchema": json.loads(row["output_schema_json"]),
+            "artifactEffect": row["artifact_effect"],
+            "sideEffects": json.loads(row["side_effects_json"]),
+            "failureMode": row["failure_mode"],
+            "composableWith": json.loads(row["composable_with_json"]),
+            "implementationRefs": json.loads(row["implementation_refs_json"]),
+            "version": row["version"],
+        }
+
+    @staticmethod
+    def _changed_definition_fields(
+        current_definition: dict[str, Any],
+        builtin_definition: dict[str, Any] | None,
+    ) -> list[str]:
+        if builtin_definition is None:
+            return sorted(current_definition.keys())
+        return sorted(
+            field
+            for field, value in current_definition.items()
+            if builtin_definition.get(field) != value
+        )
 
     def invoke(
         self, skill_asset_id: str, payload: SkillInvokeRequest

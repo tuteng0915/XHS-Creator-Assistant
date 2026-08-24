@@ -1,6 +1,6 @@
 # 当前状态与 TODO
 
-更新日期：2026-08-13
+更新日期：2026-08-24
 
 本文档只记录当前实现状态、明确限制和 TODO。产品设计思想和功能全貌见 `docs/product-design.md`；更细的 PRD 和验收标准见 `docs/product-requirements.md`。
 
@@ -39,6 +39,7 @@ https://your-domain/api/...
 - 原始 `index.html` 保留为行为参考。
 - 工作区目前前端隐藏创建/切换入口，自动使用默认 workspace。
 - 左侧是内容资产；右侧是能力资产和 workflow 调用。
+- 右侧 workflow 调用入口已经由 workflow asset 的 `callBinding` 生成，内置账号诊断、热点分析、视频博主质量诊断默认注册；新生成或手动修改的 workflow 可注册为额外入口，但仍绑定到已有产品执行类型。
 
 ### 内容资产
 
@@ -55,17 +56,25 @@ https://your-domain/api/...
 - 视频素材；
 - 分析结果；
 - 选题库；
+- 创作输出；
 - 受众模拟。
+- 对话记录。
 
 已实现：
 
 - 资产实例列表；
 - 资产详情编辑；
-- 创作者档案组合概览，聚合当前小红书主页、账号概况、历史笔记、评论样本和视频创作样本；
+- 创作者档案组合概览，聚合用户显式打开的小红书主页、账号概况、历史笔记、评论样本和视频创作样本；
+- 内容资产管理页进入后先显示空态，不自动打开 workflow 当前默认选择的 QSheep 或其它示例实例；
 - 显式保存；
 - workflow 运行前自动保存必要输入；
+- Agent conversation / Maker conversation 会自动持久化，并在左侧“对话记录”作为内容资产入口复盘；
+- 对话记录支持重命名、归档和恢复；消息、context pack、model metadata 作为执行历史保持只读；
+- 分析结果和受众模拟支持人工复盘状态 `unreviewed/useful/rejected` 与备注编辑；input snapshot、stage results、模拟结果和 model metadata 继续只读；
 - 小红书创作者主页在后端仍是独立 input asset type，但前端归入“创作者档案”；它可由本地 MediaCrawler fixture 导入，并可直接作为账号诊断输入；
 - 历史分析结果 CSV 导出；
+- 选题可调用创作 Brief 生成能力；Brief 和内容结构作为创作输出复用 Draft 表，通过 `kind` 区分；
+- 已支持从 Brief 继续生成内容结构，并在结构 Draft 的 input snapshot 中记录 sourceBrief；
 - 输入素材整理 agent 草稿入口；
 - 输入素材整理通过后端 `input_asset.format_*` skills 调用，不再是纯前端假整理。
 - 图文/视频媒体资产基础层：
@@ -79,6 +88,7 @@ https://your-domain/api/...
   - 本地上传视频可通过 ffmpeg 抽取预览帧，帧会作为 `extracted_frame` 图文素材保存；
   - Qwen 理解结果会先作为草稿展示，用户确认后写入 `MediaAsset.derived`；
   - 生成类 media skills 会把远程结果下载到本地受控 media storage，并登记为 `MediaAsset`。
+  - 图文/视频素材页中，上传和生成入口位于左侧列表，点击后在右侧展开；右侧不默认平铺所有操作表单。
 
 当前媒体资产仍不包含：
 
@@ -119,6 +129,7 @@ https://your-domain/api/...
 - 视频博主质量诊断已按同一产品接口实现，支持小红书创作者主页派生 evidence pack，也兼容视频创作样本文本，并可选择已保存的图文/视频素材 compact understanding 作为补充上下文；
 - 运行结果、stage 结果、错误和 input snapshot 会持久化。
 - “下期选题”只用于受众模拟，不是账号诊断、热点分析或视频质量诊断的必填输入。
+- 选题后的推荐链路已经从“直接生成结构”扩展为 Topic → Content Brief → Content Structure；Topic 直接生成结构仍保留为快捷兼容路径。
 
 ### 能力资产
 
@@ -130,6 +141,7 @@ https://your-domain/api/...
 - agent conversation；
 - Capability Maker agent；
 - Creator Dossier Formatter agent；
+- Topic and Creative Output Editor agent；
 - AssetProposal apply/reject 流程。
 
 当前定位：
@@ -138,9 +150,18 @@ https://your-domain/api/...
 - 前后端和后端 seed 逻辑把它们当成可组合、可编辑、可新增的产品资产；
 - Maker conversation 可以携带当前选中的 Skill / Agent / Workflow 详情作为 context target；
 - Skills 已有受控的后端调用入口：`POST /api/skills/{skill_asset_id}/invoke`；
-- 当前可直接调用的是产品内置输入素材整理类 skills，以及 Qwen 图片/视频理解与生成类 media skills；
+- 当前可直接调用或产品内调用的是产品内置输入素材整理类 skills、创作输出类 skills，以及 Qwen 图片/视频理解与生成类 media skills；
+- 创作类生成动作属于能力资产，例如 `topic.refine_to_brief`、`draft.generate_structure`、`draft.generate_structure_from_brief`；生成出的 Brief 和内容结构属于内容资产；
+- Capability Maker 生成的 Skill / Agent / Workflow proposal 已可 apply 为 generated capability asset；命中已有 asset 时会更新为 workspace-level generated override；
+- Agent / Workflow proposal 会校验引用的 skill / agent 是否存在；
 - media skills 不是通用代码沙箱，也不是任意工具运行时；
 - 不把用户界面做成通用 workflow 编辑器或通用 agent 平台。
+- PM 已可以在 Skills 详情页直接编辑 Skill contract，并保存为 workspace-level generated override；
+- 视频诊断相关 Skill 已有结构化 Rubric 编辑区，保存后会进入视频博主质量诊断 workflow 的真实模型调用上下文；
+- 视频诊断 stage metadata 会保存当次使用的 `skillContext`，用于复盘 skillId、版本和 pmRubric。
+- PM 已可以在 Agents 详情页直接编辑 Agent definition，包括 system prompt、skillIds、default context policy、version 和 notes；后端会校验引用的 skill 是否存在。
+- PM 已可以在 Workflows 详情页直接编辑 Workflow definition，包括 entryAgentIds、agentPlan、artifactEffect、callBinding、version 和 notes；后端会校验引用的 agent / skill 是否存在。
+- PM 已可以在 Skill / Agent / Workflow 详情页查看 workspace generated override 与 builtin definition 的差异，并用乐观并发保护恢复内置版本；恢复时保留 workspace 备注和启用状态。
 
 ### 模型调用
 
@@ -175,7 +196,16 @@ https://your-domain/api/...
 - Maker conversation 已经可以携带当前正在查看的具体 Skill / Agent / Workflow 作为 context target。
 - Asset proposal 已支持 pending 状态下编辑 title、description 和 proposed action JSON 后再 apply。
 - Apply / reject 会持久化状态、结果和错误；非 pending proposal 不可重复编辑或应用。
-- proposed action validation 还需要按 action type 定义 schema。
+- Skill / Agent / Workflow proposal 已有基础字段校验、stable id 不可变校验和引用存在性校验。
+- Skill 详情页已经支持直接编辑 contract；视频诊断 Skill 已支持 Rubric 表单化编辑。
+- Skill 详情页已经有最小 Skill Test 面板，可直接测试 `input_asset.format_*` 和 `media.*` 这类已有 invoke 实现的受控 Skill。
+
+仍需增强：
+
+- AssetProposal apply 前的 diff 预览；能力资产详情页的 definition diff / revert 已完成第一版；
+- Agent / Workflow 详情页更友好的表单化辅助编辑；当前第一版已经可以编辑并保存 definition，但 task plan 仍主要是 JSON editor；
+- Skill dry-run，用当前 workspace 资产快速测试分析类 Skill 的输入 context、模型输出和 validation；当前最小 Skill Test 只支持已有 direct invoke 的 formatter/media skills；
+- conversation message 显式 idempotency key。
 
 ### P1：输入素材整理继续模型化
 
@@ -251,7 +281,7 @@ agent conversation 现在已经不是同步等待模型完成：
 
 ## 当前明确限制
 
-- Workflow assets 是产品能力目录和调用说明，不是前端可编辑的任意 nodegraph。
+- Workflow assets 是产品能力目录和调用说明，不是前端可编辑的任意 nodegraph；`callBinding` 只负责把 workflow asset 注册到右侧调用入口，并复用现有产品执行路径。
 - Skills 当前是产品内受控能力；formatter skills 与 media skills 支持直接 invoke，不支持任意代码工具调用。
 - 视频博主质量诊断优先使用小红书创作者主页派生的 compact evidence pack，兼容文本化视频创作样本；如果用户先保存 Qwen 图片/视频理解结果，workflow 可以读取 compact media understanding，但不做自动视频抓取或本地视频直传。
 - 视频诊断 stage result 已持久化 evidenceScope、evidenceConfidence、evidenceLimitations、recommendedNextEvidence；video quality 还会保存 cannotAssess，避免在缺少真实视频理解时假装评估镜头、剪辑、口型或音频。

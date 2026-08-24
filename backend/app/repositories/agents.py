@@ -155,3 +155,79 @@ class AgentRepository:
             ),
         )
         return self.get(connection, agent_asset_id)
+
+    def replace_definition(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        agent_asset_id: str,
+        display_name: str,
+        purpose: str,
+        system_prompt: str,
+        skill_ids_json: str,
+        default_context_policy_json: str,
+        version: str,
+        now: str,
+    ) -> dict:
+        self.get(connection, agent_asset_id)
+        connection.execute(
+            """
+            UPDATE workspace_agents
+            SET display_name = ?, purpose = ?, system_prompt = ?,
+                skill_ids_json = ?, default_context_policy_json = ?,
+                version = ?, source = 'generated', definition_hash = '', updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                display_name,
+                purpose,
+                system_prompt,
+                skill_ids_json,
+                default_context_policy_json,
+                version,
+                now,
+                agent_asset_id,
+            ),
+        )
+        return self.get(connection, agent_asset_id)
+
+    def revert_definition_to_builtin(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        agent_asset_id: str,
+        display_name: str,
+        purpose: str,
+        system_prompt: str,
+        skill_ids_json: str,
+        default_context_policy_json: str,
+        version: str,
+        definition_hash: str,
+        expected_updated_at: str,
+        now: str,
+    ) -> dict:
+        self.get(connection, agent_asset_id)
+        cursor = connection.execute(
+            """
+            UPDATE workspace_agents
+            SET display_name = ?, purpose = ?, system_prompt = ?,
+                skill_ids_json = ?, default_context_policy_json = ?,
+                version = ?, source = 'builtin', definition_hash = ?, updated_at = ?
+            WHERE id = ? AND updated_at = ?
+            """,
+            (
+                display_name,
+                purpose,
+                system_prompt,
+                skill_ids_json,
+                default_context_policy_json,
+                version,
+                definition_hash,
+                now,
+                agent_asset_id,
+                expected_updated_at,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ConflictError("Agent changed since it was loaded")
+        return self.get(connection, agent_asset_id)

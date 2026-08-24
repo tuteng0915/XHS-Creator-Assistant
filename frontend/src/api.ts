@@ -2,11 +2,14 @@ import type {
   Agent,
   AgentConversation,
   AgentConversationSummary,
+  AgentConversationUpdate,
+  AgentDefinitionUpdate,
   AssetProposal,
   AgentStatus,
   AgentSummary,
   AnalysisRun,
   AnalysisRunSummary,
+  CapabilityDefinitionDiff,
   Draft,
   DraftSummary,
   InputAsset,
@@ -17,6 +20,7 @@ import type {
   SimulationRun,
   SimulationRunSummary,
   Skill,
+  SkillDefinitionUpdate,
   SkillInvokeResponse,
   SkillSummary,
   SkillStatus,
@@ -27,6 +31,7 @@ import type {
   TrendCsvInputAsset,
   Workspace,
   WorkflowAsset,
+  WorkflowAssetDefinitionUpdate,
   WorkflowAssetStatus,
   WorkflowAssetSummary,
   WorkflowType,
@@ -271,6 +276,25 @@ export const skillApi = {
       body: JSON.stringify(payload),
     }),
 
+  updateDefinition: (skillAssetId: string, payload: SkillDefinitionUpdate) =>
+    request<Skill>(`/api/skills/${skillAssetId}/definition`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+
+  definitionDiff: (skillAssetId: string) =>
+    request<CapabilityDefinitionDiff>(
+      `/api/skills/${skillAssetId}/definition-diff`,
+    ),
+
+  revertDefinition: (skillAssetId: string, expectedUpdatedAt: string) =>
+    request<Skill>(`/api/skills/${skillAssetId}/revert-definition`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ expectedUpdatedAt }),
+    }),
+
   invoke: (
     skillAssetId: string,
     payload: {
@@ -304,6 +328,25 @@ export const agentApi = {
       headers: jsonHeaders,
       body: JSON.stringify(payload),
     }),
+
+  updateDefinition: (agentAssetId: string, payload: AgentDefinitionUpdate) =>
+    request<Agent>(`/api/agents/${agentAssetId}/definition`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+
+  definitionDiff: (agentAssetId: string) =>
+    request<CapabilityDefinitionDiff>(
+      `/api/agents/${agentAssetId}/definition-diff`,
+    ),
+
+  revertDefinition: (agentAssetId: string, expectedUpdatedAt: string) =>
+    request<Agent>(`/api/agents/${agentAssetId}/revert-definition`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ expectedUpdatedAt }),
+    }),
 }
 
 export const agentConversationApi = {
@@ -329,6 +372,13 @@ export const agentConversationApi = {
 
   get: (conversationId: string) =>
     request<AgentConversation>(`/api/agent-conversations/${conversationId}`),
+
+  update: (conversationId: string, payload: AgentConversationUpdate) =>
+    request<AgentConversation>(`/api/agent-conversations/${conversationId}`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
 
   sendMessage: (
     conversationId: string,
@@ -397,6 +447,41 @@ export const workflowAssetApi = {
       headers: jsonHeaders,
       body: JSON.stringify(payload),
     }),
+
+  updateCallBinding: (
+    workflowAssetId: string,
+    payload: {
+      callBinding: '' | 'account' | 'trend' | 'video'
+      expectedUpdatedAt: string
+    },
+  ) =>
+    request<WorkflowAsset>(`/api/workflows/${workflowAssetId}/call-binding`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+
+  updateDefinition: (
+    workflowAssetId: string,
+    payload: WorkflowAssetDefinitionUpdate,
+  ) =>
+    request<WorkflowAsset>(`/api/workflows/${workflowAssetId}/definition`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+
+  definitionDiff: (workflowAssetId: string) =>
+    request<CapabilityDefinitionDiff>(
+      `/api/workflows/${workflowAssetId}/definition-diff`,
+    ),
+
+  revertDefinition: (workflowAssetId: string, expectedUpdatedAt: string) =>
+    request<WorkflowAsset>(`/api/workflows/${workflowAssetId}/revert-definition`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ expectedUpdatedAt }),
+    }),
 }
 
 export const analysisRunApi = {
@@ -429,6 +514,20 @@ export const analysisRunApi = {
 
   get: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${runId}`),
 
+  updateReview: (
+    runId: string,
+    payload: {
+      userNotes?: string
+      reviewStatus?: 'unreviewed' | 'useful' | 'rejected'
+      expectedUpdatedAt: string
+    },
+  ) =>
+    request<AnalysisRun>(`/api/analysis-runs/${runId}/review`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+
   exportCsvUrl: (workspaceId: string, workflowType?: WorkflowType) => {
     const query = workflowType ? `?workflowType=${workflowType}` : ''
     return `/api/workspaces/${workspaceId}/analysis-runs/export.csv${query}`
@@ -458,6 +557,20 @@ export const simulationRunApi = {
 
   get: (simulationId: string) =>
     request<SimulationRun>(`/api/simulation-runs/${simulationId}`),
+
+  updateReview: (
+    simulationId: string,
+    payload: {
+      userNotes?: string
+      reviewStatus?: 'unreviewed' | 'useful' | 'rejected'
+      expectedUpdatedAt: string
+    },
+  ) =>
+    request<SimulationRun>(`/api/simulation-runs/${simulationId}/review`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
 }
 
 export const draftApi = {
@@ -466,8 +579,22 @@ export const draftApi = {
 
   get: (draftId: string) => request<Draft>(`/api/drafts/${draftId}`),
 
+  generateBriefFromTopic: (topicId: string, mode: 'demo' | 'live') =>
+    request<Draft>(`/api/topics/${topicId}/briefs/generate`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ mode }),
+    }),
+
   generateFromTopic: (topicId: string, mode: 'demo' | 'live') =>
     request<Draft>(`/api/topics/${topicId}/drafts/generate`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ mode }),
+    }),
+
+  generateStructureFromBrief: (draftId: string, mode: 'demo' | 'live') =>
+    request<Draft>(`/api/drafts/${draftId}/structure/generate`, {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify({ mode }),

@@ -6,8 +6,15 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from app.db.database import SQLiteDatabase
-from app.errors import ValidationError
-from app.models import AgentResponse, AgentSummary, AgentUpdate
+from app.errors import ConflictError, ValidationError
+from app.models import (
+    AgentDefinitionUpdate,
+    AgentResponse,
+    AgentSummary,
+    AgentUpdate,
+    CapabilityDefinitionDiffResponse,
+    CapabilityDefinitionRevert,
+)
 from app.repositories.agents import AgentRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.common import as_iso, utc_now
@@ -160,21 +167,31 @@ BUILTIN_AGENTS = [
     ),
     BuiltinAgentDefinition(
         agent_id="topic_draft_editor",
-        display_name="Topic and Draft Editor",
-        purpose="Turns selected topics into content structures and preserves user edits.",
+        display_name="Topic and Creative Output Editor",
+        purpose=(
+            "Turns selected topics into creative briefs, content structures, and "
+            "preserves user edits."
+        ),
         system_prompt=(
             "You are a creator content editor. Work from selected Topic artifacts "
-            "and compact analysis context. Generated snapshots must remain separate "
-            "from user-editable draft content."
+            "and compact analysis context. Use creative briefs to align target reader, "
+            "content promise, and core point before structure generation when possible. "
+            "Generated snapshots must remain separate from user-editable content."
         ),
         skill_ids=[
             "topic.save_candidate",
             "topic.select",
+            "topic.refine_to_brief",
             "draft.generate_structure",
+            "draft.generate_structure_from_brief",
             "draft.edit",
         ],
         default_context_policy={
-            "may_read": ["selected topic", "compact source analysis context"],
+            "may_read": [
+                "selected topic",
+                "selected creative brief",
+                "compact source analysis context",
+            ],
             "must_not_read": ["raw input assets unless explicitly provided"],
         },
     ),
@@ -307,6 +324,158 @@ class AgentService:
                 now=utc_now(),
             )
         return self._to_response(row)
+
+    def update_definition(
+        self, agent_asset_id: str, payload: AgentDefinitionUpdate
+    ) -> AgentResponse:
+        self._validate_definition_payload(payload)
+        with self.database.read() as connection:
+            current = self.repository.get(connection, agent_asset_id)
+        skill_ids = {skill.skill_id for skill in self.skill_service.list(current["workspace_id"])}
+        missing_skill_ids = [
+            skill_id for skill_id in payload.skill_ids if skill_id not in skill_ids
+        ]
+        if missing_skill_ids:
+            raise ValidationError(
+                f"Agent references unknown skills: {', '.join(missing_skill_ids)}"
+            )
+        with self.database.transaction() as connection:
+            current = self.repository.get(connection, agent_asset_id)
+            if current["updated_at"] != as_iso(payload.expected_updated_at):
+                raise ConflictError("Agent changed since it was loaded")
+            row = self.repository.replace_definition(
+                connection,
+                agent_asset_id=agent_asset_id,
+                display_name=payload.display_name,
+                purpose=payload.purpose,
+                system_prompt=payload.system_prompt,
+                skill_ids_json=json.dumps(payload.skill_ids, ensure_ascii=False),
+                default_context_policy_json=json.dumps(
+                    payload.default_context_policy, ensure_ascii=False
+                ),
+                version=payload.version,
+                now=utc_now(),
+            )
+            row = self.repository.update(
+                connection,
+                agent_asset_id=agent_asset_id,
+                status=None,
+                user_notes=payload.user_notes,
+                expected_updated_at=row["updated_at"],
+                now=utc_now(),
+            )
+        return self._to_response(row)
+
+    def definition_diff(self, agent_asset_id: str) -> CapabilityDefinitionDiffResponse:
+        with self.database.read() as connection:
+            row = self.repository.get(connection, agent_asset_id)
+        current_definition = self._definition_dict_from_row(row)
+        builtin = self._builtin_definition_by_agent_id(row["agent_id"])
+        builtin_definition = (
+            self._definition_dict_from_builtin(builtin) if builtin is not None else None
+        )
+        return CapabilityDefinitionDiffResponse(
+            asset_id=row["id"],
+            asset_type="agent",
+            stable_id=row["agent_id"],
+            source=row["source"],
+            can_revert=row["source"] == "generated" and builtin_definition is not None,
+            changed_fields=self._changed_definition_fields(
+                current_definition, builtin_definition
+            ),
+            current_definition=current_definition,
+            builtin_definition=builtin_definition,
+        )
+
+    def revert_definition(
+        self, agent_asset_id: str, payload: CapabilityDefinitionRevert
+    ) -> AgentResponse:
+        with self.database.read() as connection:
+            current = self.repository.get(connection, agent_asset_id)
+        builtin = self._builtin_definition_by_agent_id(current["agent_id"])
+        if builtin is None:
+            raise ValidationError("No builtin definition is available for this agent")
+        skill_ids = {
+            skill.skill_id for skill in self.skill_service.list(current["workspace_id"])
+        }
+        missing_skill_ids = [
+            skill_id for skill_id in builtin.skill_ids if skill_id not in skill_ids
+        ]
+        if missing_skill_ids:
+            raise ValidationError(
+                f"Builtin agent references missing skills: {', '.join(missing_skill_ids)}"
+            )
+        with self.database.transaction() as connection:
+            row = self.repository.revert_definition_to_builtin(
+                connection,
+                agent_asset_id=agent_asset_id,
+                display_name=builtin.display_name,
+                purpose=builtin.purpose,
+                system_prompt=builtin.system_prompt,
+                skill_ids_json=json.dumps(builtin.skill_ids, ensure_ascii=False),
+                default_context_policy_json=json.dumps(
+                    builtin.default_context_policy, ensure_ascii=False
+                ),
+                version=builtin.version,
+                definition_hash=self._definition_hash(builtin),
+                expected_updated_at=as_iso(payload.expected_updated_at),
+                now=utc_now(),
+            )
+        return self._to_response(row)
+
+    @staticmethod
+    def _validate_definition_payload(payload: AgentDefinitionUpdate) -> None:
+        if not payload.system_prompt.strip():
+            raise ValidationError("Agent system prompt is required")
+        for skill_id in payload.skill_ids:
+            if not skill_id.strip():
+                raise ValidationError("Agent skillIds cannot contain blank items")
+
+    @staticmethod
+    def _builtin_definition_by_agent_id(
+        agent_id: str,
+    ) -> BuiltinAgentDefinition | None:
+        return next(
+            (definition for definition in BUILTIN_AGENTS if definition.agent_id == agent_id),
+            None,
+        )
+
+    @staticmethod
+    def _definition_dict_from_builtin(
+        definition: BuiltinAgentDefinition,
+    ) -> dict[str, Any]:
+        return {
+            "displayName": definition.display_name,
+            "purpose": definition.purpose,
+            "systemPrompt": definition.system_prompt,
+            "skillIds": definition.skill_ids,
+            "defaultContextPolicy": definition.default_context_policy,
+            "version": definition.version,
+        }
+
+    @staticmethod
+    def _definition_dict_from_row(row: dict) -> dict[str, Any]:
+        return {
+            "displayName": row["display_name"],
+            "purpose": row["purpose"],
+            "systemPrompt": row["system_prompt"],
+            "skillIds": json.loads(row["skill_ids_json"]),
+            "defaultContextPolicy": json.loads(row["default_context_policy_json"]),
+            "version": row["version"],
+        }
+
+    @staticmethod
+    def _changed_definition_fields(
+        current_definition: dict[str, Any],
+        builtin_definition: dict[str, Any] | None,
+    ) -> list[str]:
+        if builtin_definition is None:
+            return sorted(current_definition.keys())
+        return sorted(
+            field
+            for field, value in current_definition.items()
+            if builtin_definition.get(field) != value
+        )
 
     def _sync_builtin_agents(self, workspace_id: str) -> None:
         now = utc_now()

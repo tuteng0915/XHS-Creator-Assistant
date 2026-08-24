@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from uuid import uuid4
 
-from app.errors import NotFoundError
+from app.errors import ConflictError, NotFoundError
 
 
 class AgentConversationRepository:
@@ -55,6 +55,37 @@ class AgentConversationRepository:
         if row is None:
             raise NotFoundError("Agent conversation not found")
         return dict(row)
+
+    def update(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        conversation_id: str,
+        title: str | None,
+        status: str | None,
+        expected_updated_at: str,
+        now: str,
+    ) -> dict:
+        current = self.get(connection, conversation_id)
+        if current["updated_at"] != expected_updated_at:
+            raise ConflictError("Agent conversation changed since it was loaded")
+        cursor = connection.execute(
+            """
+            UPDATE agent_conversations
+            SET title = ?, status = ?, updated_at = ?
+            WHERE id = ? AND updated_at = ?
+            """,
+            (
+                current["title"] if title is None else title,
+                current["status"] if status is None else status,
+                now,
+                conversation_id,
+                expected_updated_at,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ConflictError("Agent conversation changed since it was loaded")
+        return self.get(connection, conversation_id)
 
     def touch(
         self, connection: sqlite3.Connection, *, conversation_id: str, now: str

@@ -1,8 +1,15 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MediaAssetsPage } from './MediaAssetsPage'
-import type { MediaAsset } from '../types'
+import type { MediaAsset, SkillSummary } from '../types'
 
 const imageAsset: MediaAsset = {
   id: 'media-image-1',
@@ -59,6 +66,65 @@ afterEach(() => {
 })
 
 describe('MediaAssetsPage', () => {
+  it('shows media mode and allows switching to live before invoking image understanding', async () => {
+    const onAssetsChange = vi.fn()
+    const onModeChange = vi.fn()
+    const skills: SkillSummary[] = [
+      {
+        id: 'skill-understand-image',
+        workspaceId: 'workspace-1',
+        skillId: 'media.understand_image',
+        displayName: 'Understand Image',
+        category: 'media',
+        purpose: '',
+        artifactEffect: '',
+        source: 'builtin',
+        status: 'enabled',
+        version: 'v1',
+        updatedAt: '2026-07-11T10:00:00Z',
+      },
+    ]
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      expect(String(input)).toBe('/api/skills/skill-understand-image/invoke')
+      const body = JSON.parse(String(init?.body)) as {
+        mode: string
+        input: Record<string, unknown>
+      }
+      expect(body.mode).toBe('live')
+      expect(body.input.mediaAssetId).toBe('media-image-1')
+      return jsonResponse({
+        skillAssetId: 'skill-understand-image',
+        skillId: 'media.understand_image',
+        status: 'completed',
+        output: {
+          text: '真实图片理解结果',
+          imageUnderstanding: { visualSummary: '真实图片理解结果' },
+        },
+      })
+    })
+    const props = {
+      workspaceId: 'workspace-1',
+      mediaType: 'image' as const,
+      skills,
+      assets: [imageAsset],
+      onAssetsChange,
+      onModeChange,
+    }
+    const { rerender } = render(<MediaAssetsPage {...props} mode="demo" />)
+
+    expect(
+      screen.getByText(/理解和生成会返回 demo 结果，不会调用 Qwen/),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '实时生成' }))
+    expect(onModeChange).toHaveBeenCalledWith('live')
+
+    rerender(<MediaAssetsPage {...props} mode="live" />)
+    fireEvent.click(screen.getByRole('button', { name: '理解图片' }))
+
+    expect(await screen.findByText('真实图片理解结果')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('renders and saves editable image metadata without replacing the file', async () => {
     const onAssetsChange = vi.fn()
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
@@ -164,6 +230,11 @@ describe('MediaAssetsPage', () => {
       />,
     )
 
+    fireEvent.click(screen.getByRole('button', { name: /上传视频/ }))
+    const leftList = document.querySelector('.history-list') as HTMLElement
+    const rightDetail = document.querySelector('.history-detail') as HTMLElement
+    expect(within(leftList).queryByLabelText('视频素材名称')).not.toBeInTheDocument()
+    expect(within(rightDetail).getByLabelText('视频素材名称')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('视频素材名称'), {
       target: { value: 'AI短剧样本' },
     })
@@ -218,6 +289,12 @@ describe('MediaAssetsPage', () => {
       />,
     )
 
+    expect(screen.queryByLabelText('图文素材名称')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /上传图片/ }))
+    const leftList = document.querySelector('.history-list') as HTMLElement
+    const rightDetail = document.querySelector('.history-detail') as HTMLElement
+    expect(within(leftList).queryByLabelText('图文素材名称')).not.toBeInTheDocument()
+    expect(within(rightDetail).getByLabelText('图文素材名称')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('图文素材名称'), {
       target: { value: '主页截图' },
     })
@@ -379,10 +456,15 @@ describe('MediaAssetsPage', () => {
       />,
     )
 
+    fireEvent.click(screen.getByRole('button', { name: /生成图文素材/ }))
+    const leftList = document.querySelector('.history-list') as HTMLElement
+    const rightDetail = document.querySelector('.history-detail') as HTMLElement
+    expect(within(leftList).queryByLabelText('生成 prompt')).not.toBeInTheDocument()
+    expect(within(rightDetail).getByLabelText('生成 prompt')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('生成 prompt'), {
       target: { value: '生成一张主页参考图' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '生成图片' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成图文素材' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     expect(onAssetsChange).toHaveBeenCalledWith([generated, imageAsset])

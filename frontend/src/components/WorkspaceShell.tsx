@@ -6,6 +6,7 @@ import {
   type InputAssetPanel,
 } from '../inputAssets'
 import type { Workspace } from '../types'
+import type { WorkflowAssetSummary } from '../types'
 import type { WorkflowTab } from '../workflows'
 
 export type ActivePage =
@@ -20,6 +21,7 @@ export type ActivePage =
   | 'topics'
   | 'drafts'
   | 'simulations'
+  | 'conversations'
   | 'skills'
   | 'agents'
   | 'workflows'
@@ -36,6 +38,7 @@ type WorkspaceShellProps = {
   inputAssetPanel: InputAssetPanel
   showHelp: boolean
   helpContent: HelpContent
+  workflowAssets: WorkflowAssetSummary[]
   children: ReactNode
   onOpenInputAsset: (panel: InputAssetPanel) => void
   onSetActivePage: (page: ActivePage) => void
@@ -49,12 +52,78 @@ export function WorkspaceShell({
   inputAssetPanel,
   showHelp,
   helpContent,
+  workflowAssets = [],
   children,
   onOpenInputAsset,
   onSetActivePage,
   onSetWorkflowTab,
   onToggleHelp,
 }: WorkspaceShellProps) {
+  const fallbackWorkflowAssets: WorkflowAssetSummary[] = [
+    {
+      id: '__builtin_account_call__',
+      workspaceId: workspace?.id || '',
+      workflowId: 'account_diagnosis',
+      displayName: '账号诊断',
+      purpose: 'Diagnose account positioning and generate topic candidates.',
+      entryAgentIds: [],
+      artifactEffect: 'AnalysisRun + Topic candidates',
+      source: 'builtin',
+      status: 'enabled',
+      version: 'v1',
+      callBinding: 'account',
+      updatedAt: '',
+    },
+    {
+      id: '__builtin_trend_call__',
+      workspaceId: workspace?.id || '',
+      workflowId: 'trend_analysis',
+      displayName: '热点分析',
+      purpose: 'Analyze trend data and generate topic candidates.',
+      entryAgentIds: [],
+      artifactEffect: 'AnalysisRun + Topic candidates',
+      source: 'builtin',
+      status: 'enabled',
+      version: 'v1',
+      callBinding: 'trend',
+      updatedAt: '',
+    },
+    {
+      id: '__builtin_video_call__',
+      workspaceId: workspace?.id || '',
+      workflowId: 'video_creator_quality',
+      displayName: '视频博主质量诊断',
+      purpose: 'Diagnose video creator quality and incentive fit.',
+      entryAgentIds: [],
+      artifactEffect: 'AnalysisRun(video_creator_quality)',
+      source: 'builtin',
+      status: 'enabled',
+      version: 'v1',
+      callBinding: 'video',
+      updatedAt: '',
+    },
+  ]
+  const workflowCallAssets = workflowAssets.length > 0 ? workflowAssets : fallbackWorkflowAssets
+  const runnableWorkflowAssets = workflowCallAssets.filter(
+    (workflow) => workflow.callBinding && workflow.status === 'enabled',
+  )
+  const workflowIcon = (binding: WorkflowTab) => {
+    if (binding === 'account') return '📊'
+    if (binding === 'trend') return '🔥'
+    return '🎬'
+  }
+  const workflowPage = (binding: WorkflowTab): ActivePage => {
+    if (binding === 'account') return 'account-diagnosis'
+    if (binding === 'trend') return 'trend-analysis'
+    return 'video-quality'
+  }
+  const workflowCallLabel = (workflow: WorkflowAssetSummary) => {
+    if (workflow.workflowId === 'account_diagnosis') return '账号诊断'
+    if (workflow.workflowId === 'trend_analysis') return '热点分析'
+    if (workflow.workflowId === 'video_creator_quality') return '视频博主质量诊断'
+    return workflow.displayName
+  }
+
   return (
     <div className="app-shell">
       <aside className="workspace-sidebar">
@@ -126,10 +195,22 @@ export function WorkspaceShell({
             <span>◇</span> 选题库
           </button>
           <button
+            className={activePage === 'drafts' ? 'active' : ''}
+            onClick={() => onSetActivePage('drafts')}
+          >
+            <span>▱</span> 创作输出
+          </button>
+          <button
             className={activePage === 'simulations' ? 'active' : ''}
             onClick={() => onSetActivePage('simulations')}
           >
             <span>👥</span> 受众模拟
+          </button>
+          <button
+            className={activePage === 'conversations' ? 'active' : ''}
+            onClick={() => onSetActivePage('conversations')}
+          >
+            <span>💬</span> 对话记录
           </button>
         </nav>
       </aside>
@@ -186,33 +267,26 @@ export function WorkspaceShell({
         </div>
         <nav aria-label="能力资产导航">
           <div className="nav-section-title">workflow 调用</div>
-          <button
-            className={activePage === 'account-diagnosis' ? 'active' : ''}
-            onClick={() => {
-              onSetWorkflowTab('account')
-              onSetActivePage('account-diagnosis')
-            }}
-          >
-            <span>📊</span> 账号诊断
-          </button>
-          <button
-            className={activePage === 'trend-analysis' ? 'active' : ''}
-            onClick={() => {
-              onSetWorkflowTab('trend')
-              onSetActivePage('trend-analysis')
-            }}
-          >
-            <span>🔥</span> 热点分析
-          </button>
-          <button
-            className={activePage === 'video-quality' ? 'active' : ''}
-            onClick={() => {
-              onSetWorkflowTab('video')
-              onSetActivePage('video-quality')
-            }}
-          >
-            <span>🎬</span> 视频博主质量诊断
-          </button>
+          {runnableWorkflowAssets.length === 0 ? (
+            <span className="sidebar-empty-note">暂无已注册 workflow 调用</span>
+          ) : (
+            runnableWorkflowAssets.map((workflow) => {
+              const binding = workflow.callBinding as WorkflowTab
+              const page = workflowPage(binding)
+              return (
+                <button
+                  key={workflow.id}
+                  className={activePage === page ? 'active' : ''}
+                  onClick={() => {
+                    onSetWorkflowTab(binding)
+                    onSetActivePage(page)
+                  }}
+                >
+                  <span>{workflowIcon(binding)}</span> {workflowCallLabel(workflow)}
+                </button>
+              )
+            })
+          )}
           <div className="nav-section-title">能力资产</div>
           <button
             className={activePage === 'skills' ? 'active' : ''}

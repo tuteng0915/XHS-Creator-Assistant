@@ -214,6 +214,40 @@ class SkillUpdate(APIModel):
     expected_updated_at: datetime
 
 
+class SkillDefinitionUpdate(APIModel):
+    display_name: str = Field(min_length=1, max_length=160)
+    category: str = Field(min_length=1, max_length=80)
+    purpose: str = Field(default="", max_length=2_000)
+    trigger_intents: list[str] = Field(default_factory=list, max_length=40)
+    required_inputs: list[str] = Field(default_factory=list, max_length=80)
+    optional_inputs: list[str] = Field(default_factory=list, max_length=80)
+    context_policy: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] = Field(default_factory=dict)
+    artifact_effect: str = Field(default="", max_length=500)
+    side_effects: list[str] = Field(default_factory=list, max_length=80)
+    failure_mode: str = Field(default="", max_length=300)
+    composable_with: list[str] = Field(default_factory=list, max_length=120)
+    implementation_refs: list[str] = Field(default_factory=list, max_length=120)
+    version: str = Field(default="v1", min_length=1, max_length=40)
+    user_notes: str = Field(default="", max_length=10_000)
+    expected_updated_at: datetime
+
+
+class CapabilityDefinitionDiffResponse(APIModel):
+    asset_id: str
+    asset_type: Literal["skill", "agent", "workflow"]
+    stable_id: str
+    source: Literal["builtin", "generated"]
+    can_revert: bool
+    changed_fields: list[str]
+    current_definition: dict[str, Any]
+    builtin_definition: dict[str, Any] | None = None
+
+
+class CapabilityDefinitionRevert(APIModel):
+    expected_updated_at: datetime
+
+
 class SkillInvokeRequest(APIModel):
     input: dict[str, Any] = Field(default_factory=dict)
     mode: Literal["demo", "live"] = "demo"
@@ -262,6 +296,17 @@ class AgentUpdate(APIModel):
     expected_updated_at: datetime
 
 
+class AgentDefinitionUpdate(APIModel):
+    display_name: str = Field(min_length=1, max_length=160)
+    purpose: str = Field(default="", max_length=2_000)
+    system_prompt: str = Field(default="", max_length=20_000)
+    skill_ids: list[str] = Field(default_factory=list, min_length=1, max_length=80)
+    default_context_policy: dict[str, Any] = Field(default_factory=dict)
+    version: str = Field(default="v1", min_length=1, max_length=40)
+    user_notes: str = Field(default="", max_length=10_000)
+    expected_updated_at: datetime
+
+
 class AgentConversationStatus(StrEnum):
     ACTIVE = "active"
     ARCHIVED = "archived"
@@ -276,6 +321,12 @@ class AgentConversationCreate(APIModel):
     agent_asset_id: str
     title: str | None = Field(default=None, max_length=160)
     context_target: ConversationContextTarget | None = None
+
+
+class AgentConversationUpdate(APIModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    status: AgentConversationStatus | None = None
+    expected_updated_at: datetime
 
 
 class AgentMessageCreate(APIModel):
@@ -363,6 +414,7 @@ class WorkflowAssetSummary(APIModel):
     source: WorkflowAssetSource
     status: WorkflowAssetStatus
     version: str
+    call_binding: Literal["", "account", "trend", "video"] = ""
     updated_at: datetime
 
 
@@ -374,6 +426,23 @@ class WorkflowAssetResponse(WorkflowAssetSummary):
 class WorkflowAssetUpdate(APIModel):
     status: WorkflowAssetStatus | None = None
     user_notes: str | None = Field(default=None, max_length=10_000)
+    expected_updated_at: datetime
+
+
+class WorkflowAssetDefinitionUpdate(APIModel):
+    display_name: str = Field(min_length=1, max_length=160)
+    purpose: str = Field(default="", max_length=2_000)
+    entry_agent_ids: list[str] = Field(default_factory=list, min_length=1, max_length=80)
+    agent_plan: dict[str, Any] = Field(default_factory=dict)
+    artifact_effect: str = Field(default="", max_length=500)
+    call_binding: Literal["", "account", "trend", "video"] = ""
+    version: str = Field(default="v1", min_length=1, max_length=40)
+    user_notes: str = Field(default="", max_length=10_000)
+    expected_updated_at: datetime
+
+
+class WorkflowCallBindingUpdate(APIModel):
+    call_binding: Literal["", "account", "trend", "video"]
     expected_updated_at: datetime
 
 
@@ -454,6 +523,18 @@ class AnalysisRunTransition(APIModel):
     model_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class ReviewStatus(StrEnum):
+    UNREVIEWED = "unreviewed"
+    USEFUL = "useful"
+    REJECTED = "rejected"
+
+
+class RunReviewUpdate(APIModel):
+    user_notes: str | None = Field(default=None, max_length=100_000)
+    review_status: ReviewStatus | None = None
+    expected_updated_at: datetime
+
+
 class AnalysisStageUpdate(APIModel):
     status: AnalysisRunStatus
     result: dict[str, Any] | list[Any] | str | None = None
@@ -466,6 +547,8 @@ class AnalysisRunSummary(APIModel):
     workspace_id: str
     workflow_type: WorkflowType
     status: AnalysisRunStatus
+    user_notes: str = ""
+    review_status: ReviewStatus = ReviewStatus.UNREVIEWED
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -529,6 +612,11 @@ class DraftStatus(StrEnum):
     FAILED = "failed"
 
 
+class DraftKind(StrEnum):
+    CONTENT_BRIEF = "content_brief"
+    CONTENT_STRUCTURE = "content_structure"
+
+
 class DraftGenerateRequest(APIModel):
     mode: Literal["demo", "live"] = "demo"
 
@@ -542,6 +630,7 @@ class DraftSummary(APIModel):
     id: str
     workspace_id: str
     topic_id: str
+    kind: DraftKind
     source_analysis_run_id: str | None
     source_workflow: TopicSourceWorkflow
     status: DraftStatus
@@ -562,6 +651,7 @@ class ModelOperation(StrEnum):
     PROFILE = "profile"
     PAIN_POINTS = "pain_points"
     TOPICS = "topics"
+    CONTENT_BRIEF = "content_brief"
     STRUCTURE = "structure"
     TREND_ANALYSIS = "trend_analysis"
     TREND_TOPICS = "trend_topics"
@@ -606,6 +696,8 @@ class SimulationRunSummary(APIModel):
     topic_id: str | None
     draft_id: str | None = None
     status: SimulationRunStatus
+    user_notes: str = ""
+    review_status: ReviewStatus = ReviewStatus.UNREVIEWED
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None

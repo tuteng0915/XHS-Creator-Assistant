@@ -24,6 +24,7 @@ from app.repositories.graph_checkpoints import GraphCheckpointRepository
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
+from app.services.skills import SkillService
 
 VIDEO_CREATOR_QUALITY_STAGE_ORDER = [
     "creator_profile",
@@ -36,6 +37,11 @@ VIDEO_CREATOR_QUALITY_GRAPH_NODE_ORDER = [
     "incentive_fit",
     "finalize",
 ]
+VIDEO_STAGE_SKILL_IDS = {
+    "creator_profile": "analysis.video_creator_profile",
+    "video_quality": "analysis.video_quality",
+    "incentive_fit": "analysis.incentive_fit",
+}
 ACTIVE_VIDEO_EXECUTION: contextvars.ContextVar[
     _VideoCreatorQualityGraphExecution | None
 ] = contextvars.ContextVar("video_creator_quality_execution", default=None)
@@ -140,6 +146,7 @@ class VideoCreatorQualityModelProvider(Protocol):
         video_creator_samples: str,
         video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
+        pm_rubric: dict[str, Any],
     ) -> dict[str, Any]: ...
 
     async def video_quality(
@@ -150,6 +157,7 @@ class VideoCreatorQualityModelProvider(Protocol):
         video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
         creator_profile: dict[str, Any] | None,
+        pm_rubric: dict[str, Any],
     ) -> dict[str, Any]: ...
 
     async def incentive_fit(
@@ -158,6 +166,7 @@ class VideoCreatorQualityModelProvider(Protocol):
         positioning: str,
         creator_profile: dict[str, Any] | None,
         video_quality: dict[str, Any] | None,
+        pm_rubric: dict[str, Any],
     ) -> dict[str, Any]: ...
 
 
@@ -226,6 +235,7 @@ class FakeVideoCreatorQualityModelProvider:
         video_creator_samples: str,
         video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
+        pm_rubric: dict[str, Any],
     ) -> dict[str, Any]:
         self.calls.append("creator_profile")
         if "creator_profile" in self.failures:
@@ -240,6 +250,7 @@ class FakeVideoCreatorQualityModelProvider:
         video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
         creator_profile: dict[str, Any] | None,
+        pm_rubric: dict[str, Any],
     ) -> dict[str, Any]:
         self.calls.append("video_quality")
         if "video_quality" in self.failures:
@@ -252,6 +263,7 @@ class FakeVideoCreatorQualityModelProvider:
         positioning: str,
         creator_profile: dict[str, Any] | None,
         video_quality: dict[str, Any] | None,
+        pm_rubric: dict[str, Any],
     ) -> dict[str, Any]:
         self.calls.append("incentive_fit")
         if "incentive_fit" in self.failures:
@@ -270,6 +282,7 @@ class RealVideoCreatorQualityModelProvider:
         video_creator_samples: str,
         video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
+        pm_rubric: dict[str, Any],
     ) -> dict[str, Any]:
         response = await self.model_call_service.call_operation(
             ModelOperation.VIDEO_CREATOR_PROFILE,
@@ -278,6 +291,7 @@ class RealVideoCreatorQualityModelProvider:
                 "videoCreatorSamples": video_creator_samples,
                 "videoCreatorEvidencePack": video_creator_evidence_pack,
                 "mediaAssets": media_assets,
+                "pmRubric": pm_rubric,
             },
         )
         return response.output
@@ -290,6 +304,7 @@ class RealVideoCreatorQualityModelProvider:
         video_creator_evidence_pack: dict[str, Any],
         media_assets: list[dict[str, Any]],
         creator_profile: dict[str, Any] | None,
+        pm_rubric: dict[str, Any],
     ) -> dict[str, Any]:
         response = await self.model_call_service.call_operation(
             ModelOperation.VIDEO_QUALITY_ANALYSIS,
@@ -299,6 +314,7 @@ class RealVideoCreatorQualityModelProvider:
                 "videoCreatorEvidencePack": video_creator_evidence_pack,
                 "mediaAssets": media_assets,
                 "creatorProfile": creator_profile,
+                "pmRubric": pm_rubric,
             },
         )
         return response.output
@@ -309,6 +325,7 @@ class RealVideoCreatorQualityModelProvider:
         positioning: str,
         creator_profile: dict[str, Any] | None,
         video_quality: dict[str, Any] | None,
+        pm_rubric: dict[str, Any],
     ) -> dict[str, Any]:
         response = await self.model_call_service.call_operation(
             ModelOperation.INCENTIVE_FIT_ANALYSIS,
@@ -316,6 +333,7 @@ class RealVideoCreatorQualityModelProvider:
                 "positioning": positioning,
                 "creatorProfile": creator_profile,
                 "videoQuality": video_quality,
+                "pmRubric": pm_rubric,
             },
         )
         return response.output
@@ -334,13 +352,32 @@ class VideoCreatorQualityWorkflowService:
         analysis_service: AnalysisRunService,
         fake_provider: VideoCreatorQualityModelProvider,
         live_provider: VideoCreatorQualityModelProvider,
+        skill_service: SkillService | None = None,
     ) -> None:
         self.database = database
         self.checkpoint_repository = checkpoint_repository
         self.analysis_service = analysis_service
         self.fake_provider = fake_provider
         self.live_provider = live_provider
+        self.skill_service = skill_service
         self.graph = self._build_graph()
+
+    def skill_execution_context(
+        self, workspace_id: str, stage_key: str
+    ) -> dict[str, Any]:
+        skill_id = VIDEO_STAGE_SKILL_IDS[stage_key]
+        if self.skill_service is None:
+            return {"skillId": skill_id, "pmRubric": {}}
+        skill = self.skill_service.get_by_skill_id(workspace_id, skill_id)
+        rubric = skill.context_policy.get("pmRubric", {})
+        if not isinstance(rubric, dict):
+            rubric = {}
+        return {
+            "skillId": skill.skill_id,
+            "skillAssetId": skill.id,
+            "skillVersion": skill.version,
+            "pmRubric": rubric,
+        }
 
     def initial_state_for_run(self, run_id: str) -> VideoCreatorQualityState:
         run = self.analysis_service.get(run_id)
@@ -501,6 +538,9 @@ class _VideoCreatorQualityGraphExecution:
             return VideoCreatorQualityState(**updated)
         await self.emit("stage.started", "creator_profile", "running", {})
         try:
+            skill_context = self.service.skill_execution_context(
+                str(updated["workspace_id"]), "creator_profile"
+            )
             output = await self.provider().creator_profile(
                 positioning=str(self.snapshot()["accountPositioning"]),
                 video_creator_samples=str(
@@ -510,6 +550,7 @@ class _VideoCreatorQualityGraphExecution:
                     "videoCreatorEvidencePack", {}
                 ),
                 media_assets=self.snapshot().get("mediaAssets", []),
+                pm_rubric=skill_context["pmRubric"],
             )
             result = CreatorProfileStageResult.model_validate(output).model_dump(
                 mode="json"
@@ -521,7 +562,10 @@ class _VideoCreatorQualityGraphExecution:
                 AnalysisStageUpdate(
                     status=AnalysisRunStatus.COMPLETED,
                     result=result,
-                    model_metadata={"engine": "langgraph"},
+                    model_metadata={
+                        "engine": "langgraph",
+                        "skillContext": skill_context,
+                    },
                 ),
             )
             updated["creator_profile"] = result["creatorProfile"]
@@ -540,6 +584,9 @@ class _VideoCreatorQualityGraphExecution:
             return VideoCreatorQualityState(**updated)
         await self.emit("stage.started", "video_quality", "running", {})
         try:
+            skill_context = self.service.skill_execution_context(
+                str(updated["workspace_id"]), "video_quality"
+            )
             output = await self.provider().video_quality(
                 positioning=str(self.snapshot()["accountPositioning"]),
                 video_creator_samples=str(
@@ -550,6 +597,7 @@ class _VideoCreatorQualityGraphExecution:
                 ),
                 media_assets=self.snapshot().get("mediaAssets", []),
                 creator_profile=updated.get("creator_profile"),
+                pm_rubric=skill_context["pmRubric"],
             )
             result = VideoQualityStageResult.model_validate(output).model_dump(
                 mode="json"
@@ -561,7 +609,10 @@ class _VideoCreatorQualityGraphExecution:
                 AnalysisStageUpdate(
                     status=AnalysisRunStatus.COMPLETED,
                     result=result,
-                    model_metadata={"engine": "langgraph"},
+                    model_metadata={
+                        "engine": "langgraph",
+                        "skillContext": skill_context,
+                    },
                 ),
             )
             updated["video_quality"] = result["videoQuality"]
@@ -583,10 +634,14 @@ class _VideoCreatorQualityGraphExecution:
             return VideoCreatorQualityState(**updated)
         await self.emit("stage.started", "incentive_fit", "running", {})
         try:
+            skill_context = self.service.skill_execution_context(
+                str(updated["workspace_id"]), "incentive_fit"
+            )
             output = await self.provider().incentive_fit(
                 positioning=str(self.snapshot()["accountPositioning"]),
                 creator_profile=updated.get("creator_profile"),
                 video_quality=updated.get("video_quality"),
+                pm_rubric=skill_context["pmRubric"],
             )
             result = IncentiveFitStageResult.model_validate(output).model_dump(
                 mode="json"
@@ -598,7 +653,10 @@ class _VideoCreatorQualityGraphExecution:
                 AnalysisStageUpdate(
                     status=AnalysisRunStatus.COMPLETED,
                     result=result,
-                    model_metadata={"engine": "langgraph"},
+                    model_metadata={
+                        "engine": "langgraph",
+                        "skillContext": skill_context,
+                    },
                 ),
             )
             updated["incentive_fit"] = result["incentiveFit"]

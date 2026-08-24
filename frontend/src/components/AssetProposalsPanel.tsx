@@ -20,7 +20,7 @@ type AssetProposalsPanelProps = {
       description: string
       proposedAction: Record<string, unknown>
     },
-  ) => Promise<void>
+  ) => Promise<AssetProposal>
   onApply: (proposal: AssetProposal) => Promise<void>
   onReject: (proposal: AssetProposal) => Promise<void>
 }
@@ -33,6 +33,28 @@ function draftFromProposal(proposal: AssetProposal): AssetProposalDraft {
     error: '',
     dirty: false,
     saving: false,
+  }
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function capabilitySummary(proposal: AssetProposal) {
+  const payload = objectValue(proposal.proposedAction.payload)
+  const definition = objectValue(payload?.definition) || payload
+  if (!definition) return null
+  const stableId =
+    definition.skillId || definition.agentId || definition.workflowId || payload?.targetAssetId
+  const displayName = definition.displayName
+  const artifactEffect = definition.artifactEffect
+  if (!stableId && !displayName && !artifactEffect) return null
+  return {
+    stableId: typeof stableId === 'string' ? stableId : '',
+    displayName: typeof displayName === 'string' ? displayName : '',
+    artifactEffect: typeof artifactEffect === 'string' ? artifactEffect : '',
   }
 }
 
@@ -72,9 +94,9 @@ export function AssetProposalsPanel({
     }))
   }
 
-  async function saveProposal(proposal: AssetProposal) {
+  function parseProposalDraft(proposal: AssetProposal) {
     const draft = drafts[proposal.id]
-    if (!draft) return
+    if (!draft) return null
     let proposedAction: Record<string, unknown>
     try {
       const parsed = JSON.parse(draft.proposedActionText) as unknown
@@ -87,11 +109,18 @@ export function AssetProposalsPanel({
         error: error instanceof Error ? error.message : 'JSON 解析失败。',
         dirty: true,
       })
-      return
+      return null
     }
+    return { draft, proposedAction }
+  }
+
+  async function saveProposal(proposal: AssetProposal) {
+    const parsed = parseProposalDraft(proposal)
+    if (!parsed) return null
+    const { draft, proposedAction } = parsed
     updateDraft(proposal.id, { saving: true, error: '', dirty: draft.dirty })
     try {
-      await onUpdate(proposal, {
+      const updated = await onUpdate(proposal, {
         title: draft.title,
         description: draft.description,
         proposedAction,
@@ -105,13 +134,26 @@ export function AssetProposalsPanel({
           error: '',
         },
       }))
+      return updated
     } catch (error) {
       updateDraft(proposal.id, {
         saving: false,
         error: error instanceof Error ? error.message : '保存 proposal 失败。',
         dirty: true,
       })
+      return null
     }
+  }
+
+  async function applyProposal(proposal: AssetProposal) {
+    const draft = drafts[proposal.id]
+    let proposalToApply = proposal
+    if (draft?.dirty) {
+      const saved = await saveProposal(proposal)
+      if (!saved) return
+      proposalToApply = saved
+    }
+    await onApply(proposalToApply)
   }
 
   return (
@@ -120,6 +162,7 @@ export function AssetProposalsPanel({
       {proposals.map((proposal) => {
         const draft = drafts[proposal.id] || draftFromProposal(proposal)
         const isPending = proposal.status === 'pending'
+        const summary = capabilitySummary(proposal)
         return (
           <details className="asset-requirement" key={proposal.id} open>
             <summary>
@@ -133,6 +176,15 @@ export function AssetProposalsPanel({
               <em className={proposal.status}>{proposal.status}</em>
             </summary>
             <div className="proposal-editor">
+              {summary && (
+                <div className="why">
+                  {summary.displayName && <div>名称：{summary.displayName}</div>}
+                  {summary.stableId && <div>ID：{summary.stableId}</div>}
+                  {summary.artifactEffect && (
+                    <div>生成/影响：{summary.artifactEffect}</div>
+                  )}
+                </div>
+              )}
               <label>标题</label>
               <input
                 disabled={!isPending}
@@ -180,11 +232,11 @@ export function AssetProposalsPanel({
                     >
                       {draft.saving ? '保存中…' : '保存提案'}
                     </button>
-                    <button type="button" onClick={() => onApply(proposal)}>
-                      Apply
+                    <button type="button" onClick={() => applyProposal(proposal)}>
+                      应用提案
                     </button>
                     <button type="button" onClick={() => onReject(proposal)}>
-                      Reject
+                      拒绝
                     </button>
                   </>
                 )}

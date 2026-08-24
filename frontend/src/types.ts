@@ -122,6 +122,36 @@ export interface Skill extends SkillSummary {
   userNotes: string
 }
 
+export interface SkillDefinitionUpdate {
+  displayName: string
+  category: string
+  purpose: string
+  triggerIntents: string[]
+  requiredInputs: string[]
+  optionalInputs: string[]
+  contextPolicy: Record<string, unknown>
+  outputSchema: Record<string, unknown>
+  artifactEffect: string
+  sideEffects: string[]
+  failureMode: string
+  composableWith: string[]
+  implementationRefs: string[]
+  version: string
+  userNotes: string
+  expectedUpdatedAt: string
+}
+
+export interface CapabilityDefinitionDiff {
+  assetId: string
+  assetType: 'skill' | 'agent' | 'workflow'
+  stableId: string
+  source: 'builtin' | 'generated'
+  canRevert: boolean
+  changedFields: string[]
+  currentDefinition: Record<string, unknown>
+  builtinDefinition: Record<string, unknown> | null
+}
+
 export interface SkillInvokeResponse {
   skillAssetId: string
   skillId: string
@@ -152,7 +182,24 @@ export interface Agent extends AgentSummary {
   userNotes: string
 }
 
+export interface AgentDefinitionUpdate {
+  displayName: string
+  purpose: string
+  systemPrompt: string
+  skillIds: string[]
+  defaultContextPolicy: Record<string, unknown>
+  version: string
+  userNotes: string
+  expectedUpdatedAt: string
+}
+
 export type AgentConversationStatus = 'active' | 'archived'
+
+export interface AgentConversationUpdate {
+  title?: string
+  status?: AgentConversationStatus
+  expectedUpdatedAt: string
+}
 
 export interface AgentConversationSummary {
   id: string
@@ -215,12 +262,25 @@ export interface WorkflowAssetSummary {
   source: WorkflowAssetSource
   status: WorkflowAssetStatus
   version: string
+  callBinding: '' | 'account' | 'trend' | 'video'
   updatedAt: string
 }
 
 export interface WorkflowAsset extends WorkflowAssetSummary {
   agentPlan: Record<string, unknown>
   userNotes: string
+}
+
+export interface WorkflowAssetDefinitionUpdate {
+  displayName: string
+  purpose: string
+  entryAgentIds: string[]
+  agentPlan: Record<string, unknown>
+  artifactEffect: string
+  callBinding: '' | 'account' | 'trend' | 'video'
+  version: string
+  userNotes: string
+  expectedUpdatedAt: string
 }
 
 export type WorkflowType =
@@ -234,12 +294,15 @@ export type RunStatus =
   | 'completed'
   | 'partially_completed'
   | 'failed'
+export type ReviewStatus = 'unreviewed' | 'useful' | 'rejected'
 
 export interface AnalysisRunSummary {
   id: string
   workspaceId: string
   workflowType: WorkflowType
   status: RunStatus
+  userNotes: string
+  reviewStatus: ReviewStatus
   createdAt: string
   startedAt: string | null
   completedAt: string | null
@@ -259,6 +322,8 @@ export interface SimulationRunSummary {
   topicId: string | null
   draftId: string | null
   status: RunStatus
+  userNotes: string
+  reviewStatus: ReviewStatus
   createdAt: string
   startedAt: string | null
   completedAt: string | null
@@ -276,11 +341,13 @@ export interface SimulationRun extends SimulationRunSummary {
 }
 
 export type DraftStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type DraftKind = 'content_brief' | 'content_structure'
 
 export interface DraftSummary {
   id: string
   workspaceId: string
   topicId: string
+  kind: DraftKind
   sourceAnalysisRunId: string | null
   sourceWorkflow: TopicSourceWorkflow
   status: DraftStatus

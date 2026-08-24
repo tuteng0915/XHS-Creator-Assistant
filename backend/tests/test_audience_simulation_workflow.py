@@ -143,3 +143,41 @@ def test_simulation_history_and_reopen(app: FastAPI) -> None:
     reopened = send(app, "GET", f"/api/simulation-runs/{run['id']}").json()
     assert reopened["id"] == run["id"]
     assert reopened["synthesis"]["strongestAngle"]
+
+
+def test_simulation_run_review_metadata_is_editable_without_mutating_result(
+    app: FastAPI,
+) -> None:
+    run = create_simulation_run(app)
+    collect(app, run["id"])
+    completed = send(app, "GET", f"/api/simulation-runs/{run['id']}").json()
+    assert completed["userNotes"] == ""
+    assert completed["reviewStatus"] == "unreviewed"
+
+    updated = send(
+        app,
+        "PATCH",
+        f"/api/simulation-runs/{run['id']}/review",
+        json={
+            "userNotes": "反对意见有用，可用于改标题。",
+            "reviewStatus": "useful",
+            "expectedUpdatedAt": completed["updatedAt"],
+        },
+    )
+    assert updated.status_code == 200
+    updated_json = updated.json()
+    assert updated_json["userNotes"] == "反对意见有用，可用于改标题。"
+    assert updated_json["reviewStatus"] == "useful"
+    assert updated_json["synthesis"] == completed["synthesis"]
+    assert updated_json["reactionResults"] == completed["reactionResults"]
+
+    stale = send(
+        app,
+        "PATCH",
+        f"/api/simulation-runs/{run['id']}/review",
+        json={
+            "reviewStatus": "rejected",
+            "expectedUpdatedAt": completed["updatedAt"],
+        },
+    )
+    assert stale.status_code == 409

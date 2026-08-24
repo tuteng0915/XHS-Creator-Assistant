@@ -1,6 +1,6 @@
 # 创作者工作区 PRD（Reverse PRD）
 
-更新日期：2026-08-13
+更新日期：2026-08-24
 
 本文档是基于当前代码与已迁移产品形态反向整理的 PRD。它描述的是当前产品应该被如何理解、使用和继续演进，而不是一个通用 agent 平台规格。
 
@@ -79,6 +79,13 @@
 - conversations；
 - proposals。
 
+创作类对象的划分原则：
+
+- Topic、Content Brief、Content Structure、Draft、SimulationRun 是内容资产；
+- 生成 Brief、生成结构、改写、润色、基于模拟反馈修订，是能力资产；
+- 前端按钮可以直接触发这些能力，但按钮不是资产本身；
+- 能力资产 catalog 必须能解释这些按钮背后调用的是哪个 skill / agent / workflow。
+
 ### 4.2 产品特定，而非通用平台
 
 资产类型、workflow、agent 和 skill 都围绕创作者内容运营场景设计。
@@ -151,6 +158,7 @@ workflow 执行不应依赖前端连接。
 - 视频素材；
 - 分析结果；
 - 选题库；
+- 创作输出；
 - 受众模拟。
 
 ### 5.2 中间：当前页面
@@ -168,7 +176,7 @@ workflow 执行不应依赖前端连接。
 
 ### 5.3 右侧：能力资产
 
-右侧用于发起 workflow 调用和查看能力资产。
+右侧用于发起 workflow 调用和查看能力资产。workflow 调用入口由 enabled workflow asset 的 `callBinding` 生成；当工作区能力资产尚未加载完成时，前端显示内置主 workflow 入口作为保底。
 
 当前入口：
 
@@ -178,6 +186,8 @@ workflow 执行不应依赖前端连接。
 - Skills；
 - Agents；
 - Workflows。
+
+内置调用入口显示为账号诊断、热点分析和视频博主质量诊断。新设计或手动修改的 workflow 如果设置了 `callBinding`，也会作为额外入口出现在这里；它绑定的是现有产品执行类型，不是任意图执行器。
 
 ## 6. 核心资产模型
 
@@ -233,6 +243,13 @@ workflow 执行不应依赖前端连接。
 - workflow 运行前自动保存当前必要输入；
 - 输入素材整理 agent 生成草稿。
 
+资源管理页的选择规则：
+
+- 左侧进入“创作者档案”或任意 input asset 子类时，不自动打开 workflow 当前默认选中的实例；
+- 右侧详情区先显示空态，要求用户从左侧实例列表中显式选择，或点击新建；
+- workflow 页面仍可以保留默认输入选择，用于直接运行；
+- 资源管理页的显式选择和 workflow 输入默认值是两个不同概念，避免用户以为进入资源页就已经在编辑某个资产。
+
 媒体资产当前实现：
 
 - 上传；
@@ -248,7 +265,14 @@ workflow 执行不应依赖前端连接。
 - Qwen 图片生成；
 - Qwen 视频生成。
 
-Qwen 理解结果先展示为草稿，用户确认后才写入 `MediaAsset.derived`。生成类 media skills 会把远程结果下载到本地受控 media storage，并登记为 `MediaAsset`。
+图文素材和视频素材页采用“左侧列表选择，右侧展开详情”的交互：
+
+- 上传图片 / 上传视频是列表中的动作项，点击后在右侧展开上传表单；
+- 生成图文素材 / 生成视频素材是列表中的动作项，点击后在右侧展开生成表单；
+- 选择已有素材时，右侧展示该素材详情、预览、理解草稿和保存入口；
+- 不在右侧默认平铺上传和生成表单，避免管理页信息过载。
+
+Qwen 理解结果先展示为草稿，用户确认后才写入 `MediaAsset.derived`。生成类 media skills 会把远程结果下载到本地受控 media storage，并登记为 `MediaAsset`。Demo 模式下媒体理解/生成必须明确标识为 demo；Live 模式才调用 Qwen。
 
 当前仍不做：
 
@@ -282,7 +306,14 @@ AnalysisRun 生命周期：
 - stage results；
 - stage errors；
 - model metadata；
+- review status：unreviewed / useful / rejected；
+- user notes；
 - timestamps。
+
+编辑边界：
+
+- `reviewStatus` 和 `userNotes` 是人工复盘元数据，可以通过 optimistic lock 显式保存；
+- `inputSnapshot`、`stageResults`、`stageErrors` 和 `modelMetadata` 是不可变执行历史，前端只读展示。
 
 ### 6.4 选题资产
 
@@ -309,17 +340,39 @@ Topic 来源：
 - 设为当前选题；
 - 编辑标题和角度；
 - archive；
+- 生成创作 Brief；
 - 发送到受众模拟；
 - 生成内容结构。
 
-### 6.5 Draft / 内容结构资产
+### 6.5 Draft / 创作 Brief / 内容结构资产
 
-当前 Draft 表示由选题生成的内容结构或用户继续编辑的草稿。
+当前 Draft 表示由选题生成的创作 Brief、内容结构或用户继续编辑的草稿。系统通过 `kind` 区分：
+
+- `content_brief`：选题对齐后的创作任务说明；
+- `content_structure`：可继续编辑的内容结构。
+
+Content Brief 字段包括：
+
+- topicTitle；
+- refinedAngle；
+- targetReader；
+- readerPain；
+- contentPromise；
+- corePoint；
+- formatRecommendation；
+- openingHook；
+- argumentPath；
+- materialNeeds；
+- titleDirections；
+- cta；
+- risks；
+- revisionSuggestions。
 
 关键原则：
 
 - generated snapshot 和 user editable content 分离；
 - 每次生成都必须有数据库记录；
+- 从 Brief 继续生成内容结构时，结构 Draft 的 input snapshot 必须保存 sourceBrief draft ID 和 Brief editable content；
 - 不引入版本表；
 - 不把 Draft 做成通用文档系统。
 
@@ -335,13 +388,16 @@ Topic 来源：
 - synthesis；
 - stage errors；
 - input snapshot；
+- review status：unreviewed / useful / rejected；
+- user notes；
 - timestamps。
 
 要求：
 
 - persona 是产品内置 runtime role，不是用户可配置 platform agent；
 - 单个 persona 失败时保留部分结果；
-- 可重新打开历史 simulation。
+- 可重新打开历史 simulation；
+- `reviewStatus` 和 `userNotes` 可编辑，原始模拟结果和 model metadata 保持只读。
 
 ### 6.7 能力资产
 
@@ -372,7 +428,12 @@ Topic 来源：
 - status；
 - version。
 
-当前支持直接 invoke 的主要是输入素材整理类 skills。
+当前 skills 分两类调用入口：
+
+- 可通过 `POST /api/skills/{id}/invoke` 直接调用：输入素材整理类 skills、Qwen 图片/视频理解与生成类 media skills；
+- 通过产品入口调用并落库：`topic.refine_to_brief`、`draft.generate_structure`、`draft.generate_structure_from_brief`。
+
+创作输出类 skill 不需要先开放成通用 invoke API。当前更重要的是保持 Topic / Draft 的产品语义：用户从选题触发 Brief 或结构生成，后端创建持久 Draft，generated snapshot 和 editable content 分离。
 
 #### Agent
 
@@ -384,7 +445,7 @@ Agent = system prompt + 多个 skills + 默认 context policy。
 - Account Diagnosis Strategist；
 - Trend Opportunity Strategist；
 - Video Creator Quality Analyst；
-- Topic and Draft Editor；
+- Topic and Creative Output Editor；
 - Audience Simulation Researcher；
 - Capability Maker；
 - Creator Dossier Formatter。
@@ -395,12 +456,25 @@ Workflow = 多 agent、多 task 的产品任务计划。
 
 当前 workflow asset 是能力目录和调用说明，不是前端可编辑 nodegraph。
 
+核心字段：
+
+- `workflowId`：稳定 ID；
+- `displayName`：展示名称；
+- `purpose`：用途；
+- `entryAgentIds`：入口 agent；
+- `agentPlan`：多级 task plan；
+- `artifactEffect`：会产生或更新的产品资产；
+- `callBinding`：可选调用注册，允许值为 `account`、`trend`、`video` 或空字符串；
+- `status`、`version`、`source`、`updatedAt`。
+
+`callBinding` 的含义是：把该 workflow asset 显示到右侧 workflow 调用区，并绑定到已有产品执行入口。它不代表前端可以编辑任意 nodegraph，也不代表后端会按任意 generated workflow plan 自动执行。
+
 当前内置 workflow：
 
 - Account Diagnosis Workflow；
 - Trend Analysis Workflow；
 - Video Creator Quality Workflow；
-- Topic to Draft Workflow；
+- Topic to Creative Output Workflow；
 - Audience Simulation Workflow。
 
 #### Conversation
@@ -416,6 +490,9 @@ Agent conversation 用于直接和某个 agent 对话。
 - 支持 queued/running/completed/failed 状态；
 - 可携带当前选中的 Skill / Agent / Workflow 作为 context target；
 - 可产生 AssetProposal。
+- conversation 会作为内容资产出现在左侧“对话记录”入口，支持按 workspace 复盘消息、引用资产、model metadata 和 proposed actions；
+- 重新打开 conversation 只读取已保存记录，不重新执行模型。
+- conversation title 和 status 可编辑，用于重命名、归档和恢复；message content、context pack、model metadata 和 proposed actions 原始记录保持只读。
 
 #### AssetProposal
 
@@ -424,14 +501,26 @@ Capability Maker 产生的变更建议。
 当前能力：
 
 - 保存 proposal；
+- pending proposal 可编辑 title、description 和 proposed action JSON；
 - apply；
 - reject。
 
+Apply 规则：
+
+- `skill.propose_definition` 创建或更新 Skill；
+- `agent.propose_definition` 创建或更新 Agent；
+- `workflow.propose_definition` 创建或更新 Workflow；
+- payload 可用 `targetAssetId` 指向已有能力资产；
+- 如果没有 `targetAssetId`，后端会用 `skillId` / `agentId` / `workflowId` 在当前 workspace 内查找已有资产，命中则更新，未命中则创建；
+- stable id 不可通过 proposal 修改；
+- 更新已有 builtin asset 时，该 workspace 内的资产会转为 generated override，避免后续 builtin seed 覆盖已经确认的修改；
+- Agent proposal 的 `skillIds` 必须引用当前 workspace 已存在的 Skill；
+- Workflow proposal 的 `entryAgentIds`、task `agentId` 和 task `skillIds` 必须引用当前 workspace 已存在的 Agent / Skill。
+
 待增强：
 
-- apply 前编辑；
-- 按 action type 校验 schema；
-- 更清楚的 diff 预览。
+- 更清楚的 diff 预览；
+- 更细的前端表单化校验；当前仍以 JSON editor 为主。
 
 ## 7. 关键用户流程
 
@@ -454,7 +543,9 @@ Capability Maker 产生的变更建议。
 - 保存时显示 saving/saved/error；
 - 中文内容必须 UTF-8 原样保存；
 - 新建资产必须有名称字段；
-- 保存后的每条资产实例都可被 workflow 显式选择。
+- 保存后的每条资产实例都可被 workflow 显式选择；
+- 进入资源管理页不应自动打开 workflow 当前默认选择的实例；
+- 必须点击实例或新建按钮后，才显示对应详情/编辑器。
 
 ### 7.2 小红书创作者主页离线导入
 
@@ -641,7 +732,7 @@ xhs_import_package/
 3. 用户可设为当前选题。
 4. 用户可编辑 title 和 angle。
 5. 用户可 archive。
-6. 用户可发送到受众模拟或内容结构生成。
+6. 用户可调用 Brief 生成、结构生成或发送到受众模拟。
 
 验收标准：
 
@@ -649,23 +740,33 @@ xhs_import_package/
 - 手动创建 topic 也应进入同一 Topic 模型；
 - 当前选题可以被后续 workflow 引用。
 
-### 7.7 内容结构 / Draft 流程
+### 7.7 创作输出流程
 
-目标：从选题生成可继续编辑的内容结构。
+目标：从选题生成可执行的创作 Brief，再从 Brief 或 Topic 生成可继续编辑的内容结构。
 
 流程：
 
 1. 用户选择 Topic。
-2. 用户点击生成内容结构。
-3. 后端生成 Draft。
-4. generated snapshot 持久化。
-5. 用户编辑内容时写入 editable content。
+2. 用户点击生成创作 Brief。
+3. 后端生成 `Draft(kind=content_brief)`。
+4. 用户检查或编辑 Brief。
+5. 用户从 Brief 继续生成内容结构。
+6. 后端生成 `Draft(kind=content_structure)`，并在 input snapshot 中记录 sourceBrief。
+7. generated snapshot 持久化。
+8. 用户编辑内容时写入 editable content。
+
+兼容行为：
+
+- 用户仍可从 Topic 直接生成内容结构；
+- 但推荐链路是 Topic → Content Brief → Content Structure。
 
 验收标准：
 
 - 不再存在 production fake structure；
 - 每个生成结果必须有 Draft record；
-- 用户编辑不覆盖 generated snapshot。
+- 用户编辑不覆盖 generated snapshot；
+- Brief 和 Structure 通过 Draft.kind 区分；
+- 从 Brief 生成结构时，结构生成应使用 Brief 的 editable content，而不是只使用 Topic 标题。
 
 ### 7.8 受众模拟 workflow
 
@@ -710,12 +811,16 @@ xhs_import_package/
 3. 对话自动携带 workspace broad context 和当前选中的 capability asset detail。
 4. agent 返回解释和 proposed actions。
 5. proposed actions 持久化为 AssetProposal。
-6. 用户 apply 或 reject。
+6. 用户可以编辑 pending proposal。
+7. 用户 apply 或 reject。
 
 验收标准：
 
 - Maker 必须看到 capability catalog；
 - 如果用户从具体资产进入，必须带上当前资产 detail；
+- capability proposal 必须给出可应用的完整 definition；
+- apply 支持创建新能力资产和更新已有能力资产；
+- 引用不存在的 skill / agent 时必须失败并持久化错误；
 - apply/reject 状态必须持久化；
 - 不应直接静默修改资产。
 
@@ -864,7 +969,7 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 4. Workflow assets 不是可视化 nodegraph editor。
 5. Conversation 后端执行是 in-process task，不是完整 durable job queue。
 6. SSE 是 observation replay，不是完整 durable event log。
-7. AssetProposal 已支持 pending 状态下编辑后 apply，但还缺 action-type 级字段校验。
+7. AssetProposal 已支持 pending 状态下编辑后 apply，并对 skill / agent / workflow proposal 做基础字段和引用校验；前端仍是 JSON editor，不是表单化 diff 预览。
 8. qwen 结构化输出已有 operation-level 根字段校验，仍需要更多真实响应 fixture 加固。
 9. 批量能力已从当前产品目标移除；后端遗留 batch endpoint 暂时只作为兼容路径。
 
@@ -905,9 +1010,8 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 
 - qwen live workflow smoke test；
 - 更多真实模型响应 fixture；
-- AssetProposal action-type 级字段校验；
+- AssetProposal diff 预览和更细前端校验；
 - conversation message 显式 idempotency key；
-- workflow 输入区更清晰地展示 XHS 创作者主页摘要和派生输入关系；
 - workflow 输入区更清晰地展示 XHS 创作者主页摘要和派生输入关系。
 
 ### P2：下一阶段产品能力
@@ -923,7 +1027,9 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 
 - 默认 workspace 可自动进入；
 - 左侧内容资产可管理；
+- 内容资产页进入后不自动打开默认实例，用户必须显式选择或新建；
 - 小红书创作者主页可通过离线导入包导入、预览、更新和另存为新资产；
+- 图文/视频素材页的上传和生成入口从左侧列表进入，并在右侧展开；
 - 右侧 workflow 可运行；
 - 账号诊断、热点分析、视频质量诊断、受众模拟结果可持久化；
 - 生成 topic 可进入选题库；

@@ -197,3 +197,119 @@ class SkillRepository:
             ),
         )
         return self.get(connection, skill_asset_id)
+
+    def replace_definition(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        skill_asset_id: str,
+        display_name: str,
+        category: str,
+        purpose: str,
+        trigger_intents_json: str,
+        required_inputs_json: str,
+        optional_inputs_json: str,
+        context_policy_json: str,
+        output_schema_json: str,
+        artifact_effect: str,
+        side_effects_json: str,
+        failure_mode: str,
+        composable_with_json: str,
+        implementation_refs_json: str,
+        version: str,
+        now: str,
+    ) -> dict:
+        self.get(connection, skill_asset_id)
+        connection.execute(
+            """
+            UPDATE workspace_skills
+            SET display_name = ?, category = ?, purpose = ?,
+                trigger_intents_json = ?, required_inputs_json = ?,
+                optional_inputs_json = ?, context_policy_json = ?,
+                output_schema_json = ?, artifact_effect = ?,
+                side_effects_json = ?, failure_mode = ?,
+                composable_with_json = ?, implementation_refs_json = ?,
+                version = ?, source = 'generated', definition_hash = '', updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                display_name,
+                category,
+                purpose,
+                trigger_intents_json,
+                required_inputs_json,
+                optional_inputs_json,
+                context_policy_json,
+                output_schema_json,
+                artifact_effect,
+                side_effects_json,
+                failure_mode,
+                composable_with_json,
+                implementation_refs_json,
+                version,
+                now,
+                skill_asset_id,
+            ),
+        )
+        return self.get(connection, skill_asset_id)
+
+    def revert_definition_to_builtin(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        skill_asset_id: str,
+        display_name: str,
+        category: str,
+        purpose: str,
+        trigger_intents_json: str,
+        required_inputs_json: str,
+        optional_inputs_json: str,
+        context_policy_json: str,
+        output_schema_json: str,
+        artifact_effect: str,
+        side_effects_json: str,
+        failure_mode: str,
+        composable_with_json: str,
+        implementation_refs_json: str,
+        version: str,
+        definition_hash: str,
+        expected_updated_at: str,
+        now: str,
+    ) -> dict:
+        self.get(connection, skill_asset_id)
+        cursor = connection.execute(
+            """
+            UPDATE workspace_skills
+            SET display_name = ?, category = ?, purpose = ?,
+                trigger_intents_json = ?, required_inputs_json = ?,
+                optional_inputs_json = ?, context_policy_json = ?,
+                output_schema_json = ?, artifact_effect = ?,
+                side_effects_json = ?, failure_mode = ?,
+                composable_with_json = ?, implementation_refs_json = ?,
+                version = ?, source = 'builtin', definition_hash = ?, updated_at = ?
+            WHERE id = ? AND updated_at = ?
+            """,
+            (
+                display_name,
+                category,
+                purpose,
+                trigger_intents_json,
+                required_inputs_json,
+                optional_inputs_json,
+                context_policy_json,
+                output_schema_json,
+                artifact_effect,
+                side_effects_json,
+                failure_mode,
+                composable_with_json,
+                implementation_refs_json,
+                version,
+                definition_hash,
+                now,
+                skill_asset_id,
+                expected_updated_at,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ConflictError("Skill changed since it was loaded")
+        return self.get(connection, skill_asset_id)

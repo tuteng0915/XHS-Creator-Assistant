@@ -5,6 +5,7 @@ import json
 from app.db.database import SQLiteDatabase
 from app.errors import ValidationError
 from app.models import (
+    RunReviewUpdate,
     SimulationRunCreate,
     SimulationRunResponse,
     SimulationRunStatus,
@@ -14,7 +15,7 @@ from app.repositories.drafts import DraftRepository
 from app.repositories.simulation_runs import SimulationRunRepository
 from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
-from app.services.common import utc_now
+from app.services.common import as_iso, utc_now
 
 
 class SimulationRunService:
@@ -119,6 +120,31 @@ class SimulationRunService:
     def get(self, simulation_id: str) -> SimulationRunResponse:
         with self.database.read() as connection:
             row = self.repository.get(connection, simulation_id)
+        return self._to_response(row)
+
+    def update_review(
+        self, simulation_id: str, payload: RunReviewUpdate
+    ) -> SimulationRunResponse:
+        current = self.get(simulation_id)
+        user_notes = (
+            payload.user_notes if payload.user_notes is not None else current.user_notes
+        )
+        review_status = (
+            payload.review_status.value
+            if payload.review_status is not None
+            else current.review_status.value
+        )
+        if payload.user_notes is None and payload.review_status is None:
+            raise ValidationError("No review changes provided")
+        with self.database.transaction() as connection:
+            row = self.repository.update_review(
+                connection,
+                simulation_id=simulation_id,
+                user_notes=user_notes,
+                review_status=review_status,
+                expected_updated_at=as_iso(payload.expected_updated_at),
+                now=utc_now(),
+            )
         return self._to_response(row)
 
     def save_progress(

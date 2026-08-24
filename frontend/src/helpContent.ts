@@ -44,9 +44,11 @@ export function getWorkspaceHelpContent({
       description:
         '媒体素材是内容资产的一部分，用于保存创作者图文/视频材料和后续可复用的派生信息。',
       bullets: [
-        '当前版本只做上传、metadata、derived JSON 和用户备注，不做视频理解或图片理解。',
+        '媒体页支持上传、metadata、derived JSON、用户备注、Qwen 图片/视频理解和 Qwen 图片/视频生成。',
+        '演示模式不会调用 Qwen，会返回 demo 结果；实时生成模式会使用后端已配置的 Qwen API。',
+        '图片/视频理解结果先作为草稿展示，用户点击保存后才写入 derived，避免静默覆盖素材。',
         '原始文件由后端受控保存，前端通过 /api/media-assets/{id}/file 预览。',
-        'metadata 和 derived 字段先允许手动编辑，为后续 OCR、ASR、视觉摘要、生成链路预留结构。',
+        '本地视频理解会先抽取少量预览帧，不会把完整视频文件直接发送给模型。',
         '后续视频博主质量诊断可以读取媒体资产的 compact snapshot，而不是直接读取完整二进制。',
       ],
     }
@@ -101,7 +103,8 @@ export function getWorkspaceHelpContent({
       bullets: [
         '每条 run 都包含 workflow type、status、input snapshot、stage results 和 errors。',
         '重新打开历史结果不会重新执行 workflow。',
-        'Input snapshot 是不可变执行历史，用于复盘和后续生成选题/结构。',
+        'Input snapshot 和 stage results 是不可变执行历史，用于复盘和后续生成选题/结构。',
+        '人工复盘状态和备注可以编辑，用来标记结果是否有用、是否需要弃用。',
         '失败或部分完成的 run 也会保留可用 stage result。',
       ],
     }
@@ -112,7 +115,7 @@ export function getWorkspaceHelpContent({
       title: '选题库帮助',
       description: '选题库保存来自诊断、热点分析或手动录入的选题资产。',
       bullets: [
-        '选题可以被设为 Current Topic，用于内容结构生成或受众模拟。',
+        '选题可以先生成创作 Brief，再继续生成内容结构或发送到受众模拟。',
         'title 和 angle 可编辑；generated snapshot 作为来源记录保留。',
         'Archive 会把选题从候选工作流中移出，但不删除历史。',
         '从生成卡片“填入下一步”的快捷动作会尽量绑定到 Topic entity。',
@@ -122,13 +125,15 @@ export function getWorkspaceHelpContent({
 
   if (activePage === 'drafts') {
     return {
-      title: '内容结构帮助',
-      description: '内容结构保存从选题生成的结构化草稿，以及用户后续编辑内容。',
+      title: '创作输出帮助',
+      description: '这里保存由能力资产生成的创作 Brief、内容结构，以及用户后续编辑内容。',
       bullets: [
         'generated snapshot 是模型生成快照，不应被用户编辑覆盖。',
         'editable content 保存用户修改版本。',
-        '结构可以继续发送到受众模拟。',
-        '这个页面当前不作为左侧一级导航暴露，但仍是 Topic 到 Simulation 的连接资产。',
+        '生成 Brief、生成结构、改写润色等动作属于能力资产；这里保存的是这些能力产生的内容资产。',
+        '创作 Brief 用于对齐目标读者、内容承诺、核心观点和素材需求。',
+        '内容结构可以从 Topic 直接生成，也可以从已确认的 Brief 继续生成。',
+        'Brief 和结构都可以继续发送到受众模拟。',
       ],
     }
   }
@@ -136,12 +141,29 @@ export function getWorkspaceHelpContent({
   if (activePage === 'simulations') {
     return {
       title: '受众模拟帮助',
-      description: '这里保存围绕某个 Topic 或内容结构运行的受众模拟结果。',
+      description: '这里保存围绕某个 Topic、创作 Brief 或内容结构运行的受众模拟结果。',
       bullets: [
         '模拟会生成产品特定 personas，不是通用可配置 agents。',
         '每个 persona 的反应是独立结果，失败时尽量保留部分反应。',
         '可以重新打开历史 simulation，不会重新执行。',
+        '人工复盘状态和备注可以编辑；persona、reaction、debate、synthesis 和 model metadata 保持只读。',
         '适合验证选题角度、受众疑虑、反对意见和内容策略。',
+      ],
+    }
+  }
+
+  if (activePage === 'conversations') {
+    return {
+      title: '对话记录帮助',
+      description:
+        '这里保存和 Agent、Capability Maker、输入素材整理能力相关的对话历史，作为可复盘的内容资产。',
+      bullets: [
+        '每条对话会显示对应 Agent、执行状态、更新时间和完整消息。',
+        '对话标题和归档状态可编辑，方便整理生成历史。',
+        'Assistant 消息里的引用资产、model metadata 和 proposed actions 会一起保留。',
+        '重新打开对话不会重新执行模型；它只是读取已保存的 conversation 记录。',
+        '消息正文、context pack 和 model metadata 是执行历史，保持只读。',
+        '如果需要继续和某个 Agent 对话，可以从右侧 Agents 页面进入对应 Agent。',
       ],
     }
   }
@@ -190,7 +212,7 @@ export function getWorkspaceHelpContent({
   return {
     title: '工作区整体帮助',
     description:
-      '这个 workspace 用来管理创作者内容资产、分析结果、选题、内容结构、受众模拟，以及 Skills / Agents / Workflows 能力资产。',
+      '这个 workspace 用来管理创作者内容资产、分析结果、选题、创作输出、受众模拟，以及 Skills / Agents / Workflows 能力资产。',
     bullets: [
       '左侧是内容资产：输入素材和可复用输出统一放在一起。',
       '右侧是能力资产与 workflow 调用入口：Skills、Agents、Workflows。',

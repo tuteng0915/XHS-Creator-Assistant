@@ -374,6 +374,70 @@ def test_fake_video_creator_graph_routes_and_persists_successful_stages(
     assert incentive_fit["evidenceLimitations"]
 
 
+def test_video_creator_graph_uses_pm_rubric_from_skill_definition(app: FastAPI) -> None:
+    class RecordingProvider(FakeVideoCreatorQualityModelProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.kwargs_by_stage: dict[str, dict] = {}
+
+        async def video_quality(self, **kwargs):
+            self.kwargs_by_stage["video_quality"] = kwargs
+            return await super().video_quality(**kwargs)
+
+    run = create_video_creator_run(app, mode="live")
+    workspace_id = run["workspaceId"]
+    skills = send(app, "GET", f"/api/workspaces/{workspace_id}/skills").json()
+    skill = next(item for item in skills if item["skillId"] == "analysis.video_quality")
+    detail = send(app, "GET", f"/api/skills/{skill['id']}").json()
+    pm_rubric = {
+        "qualityDimensions": [
+            {
+                "dimension": "商业化干扰风险",
+                "high": "几乎无商单干扰，内容主线稳定。",
+                "medium": "偶有商业化内容，但不破坏主线。",
+                "low": "商单明显主导内容选择。",
+                "evidenceRequired": "样本标题、正文、评论或运营备注。",
+            }
+        ],
+        "evidenceRules": ["必须区分内容能力和商业动机。"],
+    }
+    update = send(
+        app,
+        "PATCH",
+        f"/api/skills/{skill['id']}/definition",
+        json={
+            "displayName": detail["displayName"],
+            "category": detail["category"],
+            "purpose": detail["purpose"],
+            "triggerIntents": detail["triggerIntents"],
+            "requiredInputs": detail["requiredInputs"],
+            "optionalInputs": detail["optionalInputs"],
+            "contextPolicy": {**detail["contextPolicy"], "pmRubric": pm_rubric},
+            "outputSchema": detail["outputSchema"],
+            "artifactEffect": detail["artifactEffect"],
+            "sideEffects": detail["sideEffects"],
+            "failureMode": detail["failureMode"],
+            "composableWith": detail["composableWith"],
+            "implementationRefs": detail["implementationRefs"],
+            "version": "pm-rubric-v1",
+            "userNotes": detail["userNotes"],
+            "expectedUpdatedAt": detail["updatedAt"],
+        },
+    )
+    assert update.status_code == 200
+    provider = RecordingProvider()
+    app.state.video_workflow_service.live_provider = provider
+
+    collect(app, run["id"])
+
+    assert provider.kwargs_by_stage["video_quality"]["pm_rubric"] == pm_rubric
+    completed = send(app, "GET", f"/api/analysis-runs/{run['id']}").json()
+    skill_context = completed["modelMetadata"]["video_quality"]["skillContext"]
+    assert skill_context["skillId"] == "analysis.video_quality"
+    assert skill_context["skillVersion"] == "pm-rubric-v1"
+    assert skill_context["pmRubric"] == pm_rubric
+
+
 def test_video_creator_stage_failure_allows_partial_result(app: FastAPI) -> None:
     run = create_video_creator_run(app)
     app.state.video_workflow_service.fake_provider = FakeVideoCreatorQualityModelProvider(

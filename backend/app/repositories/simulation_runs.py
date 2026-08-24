@@ -113,3 +113,26 @@ class SimulationRunRepository:
             ),
         )
         return self.get(connection, simulation_id)
+
+    def update_review(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        simulation_id: str,
+        user_notes: str,
+        review_status: str,
+        expected_updated_at: str,
+        now: str,
+    ) -> dict:
+        self.get(connection, simulation_id)
+        cursor = connection.execute(
+            """
+            UPDATE simulation_runs
+            SET user_notes = ?, review_status = ?, updated_at = ?
+            WHERE id = ? AND updated_at = ?
+            """,
+            (user_notes, review_status, now, simulation_id, expected_updated_at),
+        )
+        if cursor.rowcount == 0:
+            raise ConflictError("Simulation run changed since it was loaded")
+        return self.get(connection, simulation_id)
