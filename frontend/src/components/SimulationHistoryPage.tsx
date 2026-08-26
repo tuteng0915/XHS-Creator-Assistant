@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { EmptyState, JsonPreview } from './CommonUi'
+import { RunReviewEditor } from './AnalysisHistoryPage'
 import type { SaveState } from './StageResultViews'
 import type { ReviewStatus, SimulationRun, SimulationRunSummary } from '../types'
 import type { StageView } from './WorkflowOutputPanel'
@@ -19,14 +20,6 @@ type Props = {
   onOpenSimulationRun: (runId: string, showInOutput?: boolean) => void
   onSimulationReviewDraftChange: (draft: ReviewDraft) => void
   onSaveSimulationRunReview: () => void
-  renderRunReviewEditor: (args: {
-    idPrefix: string
-    draft: ReviewDraft
-    onDraftChange: (draft: ReviewDraft) => void
-    onSave: () => void
-    saveState: SaveState
-    hint: string
-  }) => ReactNode
   stageSeedFromSimulation: (run: SimulationRun) => StageView[]
   renderStageResult: (stage: StageView) => ReactNode
 }
@@ -40,7 +33,6 @@ export function SimulationHistoryPage({
   onOpenSimulationRun,
   onSimulationReviewDraftChange,
   onSaveSimulationRunReview,
-  renderRunReviewEditor,
   stageSeedFromSimulation,
   renderStageResult,
 }: Props) {
@@ -80,14 +72,14 @@ export function SimulationHistoryPage({
                 在输出区打开
               </button>
             </div>
-            {renderRunReviewEditor({
-              idPrefix: 'simulation-run-review',
-              draft: simulationReviewDraft,
-              onDraftChange: onSimulationReviewDraftChange,
-              onSave: onSaveSimulationRunReview,
-              saveState: simulationReviewSaveState,
-              hint: '受众角色、反应、辩论和综合结论是不可变历史；这里仅保存人工复盘判断。',
-            })}
+            <RunReviewEditor
+              idPrefix="simulation-run-review"
+              draft={simulationReviewDraft}
+              onDraftChange={onSimulationReviewDraftChange}
+              onSave={onSaveSimulationRunReview}
+              saveState={simulationReviewSaveState}
+              hint="受众角色、反应、辩论和综合结论是不可变历史；这里仅保存人工复盘判断。"
+            />
             <label>原始输入快照</label>
             <JsonPreview value={selectedSimulationRun.inputSnapshot} />
             <label>模拟结果</label>

@@ -8,7 +8,6 @@ import {
 } from 'react'
 
 import {
-  ApiError,
   agentApi,
   agentConversationApi,
   analysisRunApi,
@@ -27,11 +26,15 @@ import { HealthPage } from './HealthPage'
 import { AccountProfilePage } from './components/AccountProfilePage'
 import { AgentConversationPanel } from './components/AgentConversationPanel'
 import { AgentsPage } from './components/AgentsPage'
+import { AnalysisHistoryPage } from './components/AnalysisHistoryPage'
+import { CapabilityDefinitionDiffPanel } from './components/CapabilityDefinitionDiffPanel'
 import { ConversationsPage } from './components/ConversationsPage'
 import { DraftsPage } from './components/DraftsPage'
 import { InputAssetsPage } from './components/InputAssetsPage'
 import { MediaAssetsPage } from './components/MediaAssetsPage'
 import { SimulationHistoryPage } from './components/SimulationHistoryPage'
+import { SkillDefinitionEditor } from './components/SkillDefinitionEditor'
+import { SkillTestPanel } from './components/SkillTestPanel'
 import {
   agentPlanJsonWithTasks,
   listFromText,
@@ -45,13 +48,46 @@ import {
   type WorkflowTaskDraft,
 } from './capabilityDefinitionValidation'
 import {
+  DEFAULT_WORKSPACE_NAME,
+  EMPTY_INPUT_ASSET_NAMES,
+  FORMATTER_SKILL_ID_BY_PANEL,
+  MAKER_AGENT_IDS,
+  NEW_INPUT_ASSET_ID,
+  SAMPLE_ASSET_NAMES,
+  SAVE_KEY_BY_XHS_IMPORT_PANEL,
+  XHS_IMPORT_TYPE_BY_PANEL,
+  agentToDefinitionDraft,
+  capabilityStatusClass,
+  chooseDefaultWorkspaceId,
+  defaultSkillTestInput,
+  emptyXhsImportFiles,
+  errorMessage,
+  fileRelativePath,
+  getTopicsFromStage,
+  idleState,
+  isDirectlyInvokableSkill,
+  latestTextMaterial,
+  latestTrendMaterial,
+  newClientRequestKey,
+  reviewStatusLabel,
+  skillToDefinitionDraft,
+  workflowFromTab,
+  workflowTabFromSimulation,
+  workflowTabFromSource,
+  workflowToDefinitionDraft,
+  type CapabilityAssetType,
+  type ConversationContextTarget,
+  type DefinitionDiffStatus,
+  type SaveKey,
+  type XhsImportPanel,
+} from './appUtils'
+import {
   IncentiveFitView,
   ListBlock,
   PainPointsView,
   PersonaListView,
   ProfileView,
   ReactionListView,
-  SaveIndicator,
   StructureView,
   SynthesisView,
   TitlesView,
@@ -106,7 +142,6 @@ import type {
   WorkflowAsset,
   WorkflowAssetDefinitionUpdate,
   WorkflowAssetSummary,
-  WorkflowType,
 } from './types'
 import {
   type GenerationMode,
@@ -130,159 +165,7 @@ import {
   type XhsImportPackagePreview,
 } from './xhsCreatorProfile'
 
-type SaveKey =
-  | 'workspace'
-  | 'accountProfiles'
-  | 'historical'
-  | 'comments'
-  | 'trend'
-  | 'video'
-  | 'xhs'
-  | 'manualTopic'
-  | 'topic'
-  | 'draft'
-  | 'analysisReview'
-  | 'simulationReview'
-
-type CapabilityAssetType = 'skill' | 'agent' | 'workflow'
-type DefinitionDiffStatus =
-  | 'idle'
-  | 'loading'
-  | 'loaded'
-  | 'reverting'
-  | 'reverted'
-  | 'error'
-type TextInputAssetPanel = Exclude<InputAssetPanel, 'trend_csv'>
-type XhsImportPanel = Extract<
-  TextInputAssetPanel,
-  'historical_posts' | 'video_creator_samples' | 'xhs_creator_profiles'
->
-type ConversationContextTarget = {
-  assetType: 'skill' | 'agent' | 'workflow'
-  assetId: string
-}
-type VideoRubricTextDraft = {
-  creatorTypes: string
-  qualityDimensions: string
-  evidenceRules: string
-  incentiveRules: string
-}
 type SkillTestStatus = 'idle' | 'running' | 'completed' | 'error'
-const MAKER_AGENT_IDS = {
-  skill: 'capability_maker',
-  agent: 'capability_maker',
-  workflow: 'capability_maker',
-} as const
-const VIDEO_RUBRIC_SKILL_IDS = new Set([
-  'analysis.video_creator_profile',
-  'analysis.video_quality',
-  'analysis.incentive_fit',
-])
-const DEFAULT_VIDEO_PM_RUBRIC = {
-  creatorTypes: [
-    {
-      type: '剧本驱动型',
-      fitForIncentive: '高',
-      rule: '连续发布剧情/角色/世界观内容，评论区出现催更、追剧情、讨论人物关系等信号。',
-    },
-    {
-      type: '商单驱动型',
-      fitForIncentive: '低',
-      rule: '内容以品牌植入、商品转化或短期商业任务为主，非商单内容弱或不稳定。',
-    },
-    {
-      type: '技术探索驱动型',
-      fitForIncentive: '中',
-      rule: '主要展示工具链、模型实验或制作流程，需要结合更新稳定性和受众反馈判断。',
-    },
-  ],
-  qualityDimensions: [
-    {
-      dimension: '叙事完整度',
-      high: '有清晰冲突、转折和结尾钩子，适合系列化。',
-      medium: '有主题但结构松散，缺少强钩子或连续性。',
-      low: '只有概念展示，缺少故事推进或观看理由。',
-      evidenceRequired: '标题、正文、评论反馈、视频理解或封面线索。',
-    },
-    {
-      dimension: '画面完成度',
-      high: '风格统一、主体清晰、构图稳定，封面/画面能支撑内容承诺。',
-      medium: '整体可用但存在风格跳变、信息密度不足或封面弱。',
-      low: '画面粗糙、主体混乱或明显影响可信度。',
-      evidenceRequired: '封面、截图、视频理解或用户手动样本观察。',
-    },
-  ],
-  evidenceRules: [
-    '必须引用标题、正文、互动、评论、封面或已保存媒体理解中的具体证据。',
-    '没有真实视频理解时，不得声称看过镜头、剪辑、口型、配音或完整视频。',
-    '证据弱时必须降低 evidenceConfidence，并填写 cannotAssess 或 recommendedNextEvidence。',
-  ],
-  incentiveRules: [
-    {
-      signal: '剧本驱动 + 系列化潜力高',
-      interpretation: '适合用连续更新任务、流量扶持和阶段奖励放大。',
-      operatorAction: '设计 4 周连续更新激励，要求保留同一世界观或栏目。',
-    },
-    {
-      signal: '商单占比高 + 非商单互动弱',
-      interpretation: '激励计划较难改变其内容行为。',
-      operatorAction: '谨慎纳入，优先谈商业合作或限定非商单内容任务。',
-    },
-  ],
-}
-const NEW_INPUT_ASSET_ID = '__new_input_asset__'
-const DEFAULT_WORKSPACE_NAME = '默认创作者工作区'
-
-const SAVE_KEY_BY_XHS_IMPORT_PANEL: Record<XhsImportPanel, SaveKey> = {
-  historical_posts: 'historical',
-  video_creator_samples: 'video',
-  xhs_creator_profiles: 'xhs',
-}
-const XHS_IMPORT_TYPE_BY_PANEL: Record<
-  XhsImportPanel,
-  'historical_posts' | 'video_creator_samples' | 'xhs_creator_profile'
-> = {
-  historical_posts: 'historical_posts',
-  video_creator_samples: 'video_creator_samples',
-  xhs_creator_profiles: 'xhs_creator_profile',
-}
-const FORMATTER_SKILL_ID_BY_PANEL: Record<InputAssetPanel, string> = {
-  account_profiles: 'input_asset.format_profile',
-  historical_posts: 'input_asset.format_historical_posts',
-  comments: 'input_asset.format_comments',
-  trend_csv: 'input_asset.format_trend_csv_brief',
-  video_creator_samples: 'input_asset.format_video_creator_samples',
-  xhs_creator_profiles: 'input_asset.format_xhs_creator_profile',
-}
-const emptyXhsImportFiles = (): Record<XhsImportPanel, File | null> => ({
-  historical_posts: null,
-  video_creator_samples: null,
-  xhs_creator_profiles: null,
-})
-
-function fileRelativePath(file: File): string {
-  return (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
-}
-
-const idleState: SaveState = { phase: 'idle' }
-const SAMPLE_ASSET_NAMES = {
-  qsheepProfile: 'Qsheep 留学账号',
-  nomadProfile: '数字游民生活方式账号',
-  videoProgramProfile: 'AIGC视频创作者激励计划',
-  historicalPosts: '留学帖子数据合集',
-  comments: '留学评论区合集',
-  trendCsv: '数字游民趋势.csv',
-  videoCreatorSamples: 'AI短剧创作者样本',
-  xhsCreatorProfile: 'XHS QSheep 创作者主页',
-} as const
-const EMPTY_INPUT_ASSET_NAMES = {
-  account_profile: '',
-  historical_posts: '',
-  comments: '',
-  trend_csv: '',
-  video_creator_samples: '',
-  xhs_creator_profile: '',
-} as const
 const SAMPLE_ACCOUNT_INPUT = {
   positioning: `账号:@QSheep｜留学内容创作者,1.4K 粉。核心人群=正在准备/纠结出国读研的文科生(传媒、社科、人类学),目标英港新前30。
 内容主张:真实反思 + 决策方法,不贩卖焦虑、不灌鸡汤。
@@ -339,311 +222,6 @@ const SAMPLE_VIDEO_INPUT = {
 4. 最近 30 天更新 18 条，其中 12 条是同一世界观短剧，4 条工具教程，2 条品牌合作植入。
 运营备注：评论区大量催更剧情线，商单内容互动明显低于剧情内容。`,
   simulationTopic: '如果把 @AI短剧研究所 纳入 4 周 AIGC 短剧连续更新激励计划，应该怎么设计任务和风险边界？',
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof ApiError || error instanceof Error
-    ? error.message
-    : '操作失败，请重试。'
-}
-
-function latestTextMaterial(
-  materials: InputAsset[],
-  type: TextInputAsset['type'],
-): TextInputAsset | undefined {
-  return materials.find(
-    (material): material is TextInputAsset => material.type === type,
-  )
-}
-
-function latestTrendMaterial(
-  materials: InputAsset[],
-): TrendCsvInputAsset | undefined {
-  return materials.find(
-    (material): material is TrendCsvInputAsset =>
-      material.type === 'trend_csv',
-  )
-}
-
-async function chooseDefaultWorkspaceId(items: Workspace[]): Promise<string> {
-  if (items.length === 1) return items[0].id
-  const assetChecks = await Promise.all(
-    items.map(async (item) => {
-      try {
-        const assets = await inputAssetApi.list(item.id)
-        return { workspaceId: item.id, assetCount: assets.length }
-      } catch {
-        return { workspaceId: item.id, assetCount: 0 }
-      }
-    }),
-  )
-  return (
-    assetChecks.find((item) => item.assetCount > 0)?.workspaceId ||
-    items[0].id
-  )
-}
-
-function workflowFromTab(tab: WorkflowTab): WorkflowType {
-  if (tab === 'account') return 'account_diagnosis'
-  if (tab === 'video') return 'video_creator_quality'
-  return 'trend_analysis'
-}
-
-function workflowTabFromSource(sourceWorkflow?: unknown): WorkflowTab {
-  if (sourceWorkflow === 'video_creator_quality') return 'video'
-  return sourceWorkflow === 'trend_analysis' ? 'trend' : 'account'
-}
-
-function workflowTabFromSimulation(run: SimulationRun): WorkflowTab {
-  const topic = run.inputSnapshot.topic as { sourceWorkflow?: unknown } | null
-  const draft = run.inputSnapshot.draft as { sourceWorkflow?: unknown } | null
-  return workflowTabFromSource(draft?.sourceWorkflow || topic?.sourceWorkflow)
-}
-
-function workflowLabel(type: WorkflowType): string {
-  if (type === 'account_diagnosis') return '账号诊断'
-  if (type === 'video_creator_quality') return '视频创作者质量诊断'
-  return '热点分析'
-}
-
-function reviewStatusLabel(status: ReviewStatus): string {
-  const labels: Record<ReviewStatus, string> = {
-    unreviewed: '未复盘',
-    useful: '有用',
-    rejected: '弃用',
-  }
-  return labels[status]
-}
-
-function capabilityStatusClass(status: 'enabled' | 'disabled'): string {
-  return `capability-status ${status}`
-}
-
-function skillToDefinitionDraft(skill: Skill): SkillDefinitionDraft {
-  return {
-    displayName: skill.displayName,
-    category: skill.category,
-    purpose: skill.purpose,
-    artifactEffect: skill.artifactEffect,
-    failureMode: skill.failureMode,
-    version: skill.version,
-    userNotes: skill.userNotes,
-    triggerIntents: textFromList(skill.triggerIntents),
-    requiredInputs: textFromList(skill.requiredInputs),
-    optionalInputs: textFromList(skill.optionalInputs),
-    sideEffects: textFromList(skill.sideEffects),
-    composableWith: textFromList(skill.composableWith),
-    implementationRefs: textFromList(skill.implementationRefs),
-    contextPolicyJson: JSON.stringify(skill.contextPolicy, null, 2),
-    outputSchemaJson: JSON.stringify(skill.outputSchema, null, 2),
-  }
-}
-
-function agentToDefinitionDraft(agent: Agent): AgentDefinitionDraft {
-  return {
-    displayName: agent.displayName,
-    purpose: agent.purpose,
-    systemPrompt: agent.systemPrompt,
-    skillIds: textFromList(agent.skillIds),
-    defaultContextPolicyJson: JSON.stringify(agent.defaultContextPolicy, null, 2),
-    version: agent.version,
-    userNotes: agent.userNotes,
-  }
-}
-
-function workflowToDefinitionDraft(
-  workflowAsset: WorkflowAsset,
-): WorkflowDefinitionDraft {
-  return {
-    displayName: workflowAsset.displayName,
-    purpose: workflowAsset.purpose,
-    entryAgentIds: textFromList(workflowAsset.entryAgentIds),
-    agentPlanJson: JSON.stringify(workflowAsset.agentPlan, null, 2),
-    artifactEffect: workflowAsset.artifactEffect,
-    callBinding: workflowAsset.callBinding,
-    version: workflowAsset.version,
-    userNotes: workflowAsset.userNotes,
-  }
-}
-
-function isVideoRubricSkill(skillId: string): boolean {
-  return VIDEO_RUBRIC_SKILL_IDS.has(skillId)
-}
-
-function isDirectlyInvokableSkill(skillId: string): boolean {
-  return skillId.startsWith('input_asset.format_') || skillId.startsWith('media.')
-}
-
-function supportsSkillDryRun(skillId: string): boolean {
-  return (
-    skillId.startsWith('analysis.') ||
-    skillId.startsWith('topic.') ||
-    skillId.startsWith('draft.') ||
-    skillId.startsWith('simulation.') ||
-    skillId.startsWith('input_asset.format_') ||
-    skillId.startsWith('media.')
-  )
-}
-
-function defaultSkillTestInput(skill: Skill): string {
-  if (skill.skillId.startsWith('input_asset.format_')) {
-    return JSON.stringify(
-      {
-        rawText: '这里粘贴一段待整理素材。\n例如：评论1：太焦虑了，不知道怎么选校。',
-      },
-      null,
-      2,
-    )
-  }
-  if (skill.skillId === 'media.understand_image') {
-    return JSON.stringify(
-      {
-        prompt: '请理解这张图文素材，提取画面摘要、文字、创作者信号和不确定性。',
-        imageUrl: 'https://example.com/image.png',
-      },
-      null,
-      2,
-    )
-  }
-  if (skill.skillId === 'media.understand_video') {
-    return JSON.stringify(
-      {
-        prompt: '请基于视频预览帧理解这个视频素材，提取内容质量信号和不确定性。',
-        videoUrl: 'https://example.com/video.mp4',
-      },
-      null,
-      2,
-    )
-  }
-  if (skill.skillId === 'media.generate_image') {
-    return JSON.stringify(
-      {
-        prompt: '生成一张适合小红书封面的 AIGC 创作者视觉参考图。',
-      },
-      null,
-      2,
-    )
-  }
-  if (skill.skillId === 'media.generate_video') {
-    return JSON.stringify(
-      {
-        prompt: '生成一段 3 秒 AIGC 视频概念片，用于测试视觉方向。',
-      },
-      null,
-      2,
-    )
-  }
-  return JSON.stringify({}, null, 2)
-}
-
-function objectArrayToPipeText(
-  items: unknown,
-  fields: string[],
-  fallbackItems: Record<string, string>[],
-): string {
-  const rows = Array.isArray(items) && items.length > 0 ? items : fallbackItems
-  return rows
-    .map((item) => {
-      const row = item && typeof item === 'object' ? (item as Record<string, unknown>) : {}
-      return fields.map((field) => String(row[field] || '')).join(' | ')
-    })
-    .join('\n')
-}
-
-function pipeTextToObjectArray(value: string, fields: string[]): Record<string, string>[] {
-  return value
-    .split('\n')
-    .map((row) => row.trim())
-    .filter(Boolean)
-    .map((row) => {
-      const cells = row.split('|').map((cell) => cell.trim())
-      return fields.reduce<Record<string, string>>((acc, field, index) => {
-        acc[field] = cells[index] || ''
-        return acc
-      }, {})
-    })
-}
-
-function videoRubricDraftFromContextPolicyJson(value: string): VideoRubricTextDraft | null {
-  try {
-    const contextPolicy = JSON.parse(value) as Record<string, unknown>
-    const rubric =
-      contextPolicy.pmRubric && typeof contextPolicy.pmRubric === 'object'
-        ? (contextPolicy.pmRubric as Record<string, unknown>)
-        : DEFAULT_VIDEO_PM_RUBRIC
-    return {
-      creatorTypes: objectArrayToPipeText(
-        rubric.creatorTypes,
-        ['type', 'fitForIncentive', 'rule'],
-        DEFAULT_VIDEO_PM_RUBRIC.creatorTypes,
-      ),
-      qualityDimensions: objectArrayToPipeText(
-        rubric.qualityDimensions,
-        ['dimension', 'high', 'medium', 'low', 'evidenceRequired'],
-        DEFAULT_VIDEO_PM_RUBRIC.qualityDimensions,
-      ),
-      evidenceRules: textFromList(
-        Array.isArray(rubric.evidenceRules)
-          ? rubric.evidenceRules.map((item) => String(item))
-          : DEFAULT_VIDEO_PM_RUBRIC.evidenceRules,
-      ),
-      incentiveRules: objectArrayToPipeText(
-        rubric.incentiveRules,
-        ['signal', 'interpretation', 'operatorAction'],
-        DEFAULT_VIDEO_PM_RUBRIC.incentiveRules,
-      ),
-    }
-  } catch {
-    return null
-  }
-}
-
-function contextPolicyJsonWithVideoRubric(
-  value: string,
-  rubricDraft: VideoRubricTextDraft,
-): string {
-  const contextPolicy = JSON.parse(value) as Record<string, unknown>
-  return JSON.stringify(
-    {
-      ...contextPolicy,
-      pmRubric: {
-        creatorTypes: pipeTextToObjectArray(rubricDraft.creatorTypes, [
-          'type',
-          'fitForIncentive',
-          'rule',
-        ]),
-        qualityDimensions: pipeTextToObjectArray(rubricDraft.qualityDimensions, [
-          'dimension',
-          'high',
-          'medium',
-          'low',
-          'evidenceRequired',
-        ]),
-        evidenceRules: listFromText(rubricDraft.evidenceRules),
-        incentiveRules: pipeTextToObjectArray(rubricDraft.incentiveRules, [
-          'signal',
-          'interpretation',
-          'operatorAction',
-        ]),
-      },
-    },
-    null,
-    2,
-  )
-}
-
-function newClientRequestKey(prefix: string): string {
-  const randomId =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
-  return `${prefix}-${randomId}`
-}
-
-function getTopicsFromStage(result: unknown): TopicCandidate[] {
-  if (!result || typeof result !== 'object') return []
-  const topics = (result as { topics?: unknown }).topics
-  return Array.isArray(topics) ? (topics as TopicCandidate[]) : []
 }
 
 function WorkspaceApp() {
@@ -3244,7 +2822,18 @@ function WorkspaceApp() {
         activePage === 'video-quality' &&
         renderWorkflowRunPage('video')}
 
-      {!loading && workspace && activePage === 'history' && renderHistoryPage()}
+      {!loading && workspace && activePage === 'history' && (
+        <AnalysisHistoryPage
+          analysisRuns={analysisRuns}
+          selectedRun={selectedRun}
+          analysisReviewDraft={analysisReviewDraft}
+          analysisReviewSaveState={saveStates.analysisReview}
+          renderStageResult={renderStageResult}
+          onOpenRun={openRun}
+          onAnalysisReviewDraftChange={setAnalysisReviewDraft}
+          onSaveAnalysisRunReview={saveAnalysisRunReview}
+        />
+      )}
       {!loading && workspace && activePage === 'topics' && (
         <TopicLibraryPage
           visibleTopics={visibleTopics}
@@ -3297,7 +2886,6 @@ function WorkspaceApp() {
           onOpenSimulationRun={openSimulationRun}
           onSimulationReviewDraftChange={setSimulationReviewDraft}
           onSaveSimulationRunReview={saveSimulationRunReview}
-          renderRunReviewEditor={renderRunReviewEditor}
           stageSeedFromSimulation={stageSeedFromSimulation}
           renderStageResult={renderStageResult}
         />
@@ -3704,560 +3292,16 @@ function WorkspaceApp() {
     )
   }
 
-  function renderHistoryPage() {
-    return (
-      <div className="workspace-page">
-        <section className="history-list">
-          <div className="panel-title">◷ 分析结果</div>
-          {analysisRuns.length === 0 ? (
-            <div className="empty-card">暂无分析运行。</div>
-          ) : (
-            analysisRuns.map((run) => (
-              <button
-                key={run.id}
-                className={`run-row ${selectedRun?.id === run.id ? 'active' : ''}`}
-                onClick={() => openRun(run.id)}
-              >
-                <span>{workflowLabel(run.workflowType)}</span>
-                <b>{run.status}</b>
-                <small>{reviewStatusLabel(run.reviewStatus)}</small>
-                <small>{new Date(run.createdAt).toLocaleString()}</small>
-              </button>
-            ))
-          )}
-        </section>
-        <section className="history-detail">
-          {selectedRun ? (
-            <>
-              <div className="detail-head">
-                <div>
-                  <h2>{workflowLabel(selectedRun.workflowType)}</h2>
-                  <p>
-                    {selectedRun.status} ·{' '}
-                    {new Date(selectedRun.createdAt).toLocaleString()}
-                  </p>
-                </div>
-                <button onClick={() => openRun(selectedRun.id, true)}>
-                  在输出区打开
-                </button>
-              </div>
-              {renderRunReviewEditor({
-                idPrefix: 'analysis-run-review',
-                draft: analysisReviewDraft,
-                onDraftChange: setAnalysisReviewDraft,
-                onSave: saveAnalysisRunReview,
-                saveState: saveStates.analysisReview,
-                hint: '执行输入、阶段结果和模型元数据是不可变历史；这里仅保存人工复盘判断。',
-              })}
-              <label>原始输入快照</label>
-              <pre className="json-preview">
-                {JSON.stringify(selectedRun.inputSnapshot, null, 2)}
-              </pre>
-              <label>生成结果</label>
-              {stageSeedFromRun(selectedRun).map((stage) => (
-                <div className="stage compact" key={stage.key}>
-                  <div className="stage-h">
-                    <div className="stage-n">{stage.n}</div>
-                    <h3>{stage.title}</h3>
-                  </div>
-                  {stage.error && <div className="err">{stage.error}</div>}
-                  {renderStageResult(stage)}
-                </div>
-              ))}
-            </>
-          ) : (
-            <div className="empty-card">选择一次运行查看输入和结果。</div>
-          )}
-        </section>
-      </div>
-    )
-  }
-
-  function renderRunReviewEditor({
-    idPrefix,
-    draft,
-    onDraftChange,
-    onSave,
-    saveState,
-    hint,
-  }: {
-    idPrefix: string
-    draft: { userNotes: string; reviewStatus: ReviewStatus }
-    onDraftChange: (draft: { userNotes: string; reviewStatus: ReviewStatus }) => void
-    onSave: () => void
-    saveState: SaveState
-    hint: string
-  }) {
-    return (
-      <section className="review-card">
-        <div className="detail-head">
-          <div>
-            <h3>人工复盘</h3>
-            <p>{hint}</p>
-          </div>
-          <SaveIndicator state={saveState} />
-        </div>
-        <label htmlFor={`${idPrefix}-status`}>复盘状态</label>
-        <select
-          id={`${idPrefix}-status`}
-          value={draft.reviewStatus}
-          onChange={(event) =>
-            onDraftChange({
-              ...draft,
-              reviewStatus: event.target.value as ReviewStatus,
-            })
-          }
-        >
-          <option value="unreviewed">未复盘</option>
-          <option value="useful">有用</option>
-          <option value="rejected">弃用</option>
-        </select>
-        <label htmlFor={`${idPrefix}-notes`}>复盘备注</label>
-        <textarea
-          id={`${idPrefix}-notes`}
-          rows={4}
-          placeholder="记录这次结果是否可复用、哪里需要调整、后续如何改 prompt 或资产。"
-          value={draft.userNotes}
-          onChange={(event) =>
-            onDraftChange({ ...draft, userNotes: event.target.value })
-          }
-        />
-        <div className="save-row">
-          <button type="button" onClick={onSave}>
-            保存复盘
-          </button>
-          <SaveIndicator state={saveState} />
-        </div>
-      </section>
-    )
-  }
-
   function renderCapabilityDefinitionDiffPanel(assetType: CapabilityAssetType) {
-    const isCurrentDiff = definitionDiff?.assetType === assetType
-    const statusText =
-      definitionDiffStatus === 'loading'
-        ? '加载中…'
-        : definitionDiffStatus === 'reverting'
-          ? '恢复中…'
-          : definitionDiffStatus === 'reverted'
-            ? '已恢复内置版本'
-            : definitionDiffStatus === 'error'
-              ? `失败：${definitionDiffError}`
-              : ''
     return (
-      <div className="source-editor-card capability-diff-card">
-        <div className="detail-head compact">
-          <div>
-            <h3>Definition Diff</h3>
-            <p>对比当前 workspace override 和代码内置版本；只影响能力资产定义。</p>
-          </div>
-          <span>{isCurrentDiff ? definitionDiff.source : 'not loaded'}</span>
-        </div>
-        <div className="save-row">
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={
-              definitionDiffStatus === 'loading' ||
-              definitionDiffStatus === 'reverting'
-            }
-            onClick={() => loadCapabilityDefinitionDiff(assetType)}
-          >
-            查看与内置差异
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={
-              !isCurrentDiff ||
-              !definitionDiff.canRevert ||
-              definitionDiffStatus === 'reverting'
-            }
-            onClick={() => revertCapabilityDefinition(assetType)}
-          >
-            恢复内置版本
-          </button>
-          {statusText && (
-            <span
-              className={
-                definitionDiffStatus === 'error' ? 'inline-error' : 'inline-save-state'
-              }
-            >
-              {statusText}
-            </span>
-          )}
-        </div>
-        {isCurrentDiff && (
-          <>
-            <label>Changed Fields</label>
-            <div className="why">
-              {definitionDiff.changedFields.length > 0
-                ? definitionDiff.changedFields.join(' / ')
-                : '没有定义字段差异'}
-            </div>
-            <div className="compact-grid two-col">
-              <div>
-                <label>Current Definition</label>
-                <pre className="json-preview">
-                  {JSON.stringify(definitionDiff.currentDefinition, null, 2)}
-                </pre>
-              </div>
-              <div>
-                <label>Builtin Definition</label>
-                <pre className="json-preview">
-                  {JSON.stringify(definitionDiff.builtinDefinition, null, 2)}
-                </pre>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    )
-  }
-
-  function renderSkillDefinitionEditor() {
-    if (!skillDefinitionDraft) return null
-    const updateDraft = (patch: Partial<SkillDefinitionDraft>) => {
-      setSkillDefinitionDraft((current) => (current ? { ...current, ...patch } : current))
-    }
-    const statusText =
-      skillDefinitionStatus === 'saving'
-        ? '保存中…'
-        : skillDefinitionStatus === 'saved'
-          ? '已保存'
-          : skillDefinitionStatus.startsWith('error:')
-            ? skillDefinitionStatus.replace('error:', '保存失败：')
-            : ''
-    return (
-      <div className="source-editor-card capability-editor-card">
-        <p className="subline">
-          PM 调优模式：保存后会把当前 skill 变成 workspace-level generated override，
-          不会直接修改 builtin seed。
-        </p>
-        <div className="compact-grid two-col">
-          <div>
-            <label htmlFor="skill-display-name">Skill 名称</label>
-            <input
-              id="skill-display-name"
-              value={skillDefinitionDraft.displayName}
-              onChange={(event) => updateDraft({ displayName: event.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="skill-category">分类</label>
-            <input
-              id="skill-category"
-              value={skillDefinitionDraft.category}
-              onChange={(event) => updateDraft({ category: event.target.value })}
-            />
-          </div>
-        </div>
-        <label htmlFor="skill-purpose">用途 / 调优说明</label>
-        <textarea
-          id="skill-purpose"
-          rows={3}
-          value={skillDefinitionDraft.purpose}
-          onChange={(event) => updateDraft({ purpose: event.target.value })}
-        />
-        <div className="compact-grid two-col">
-          <div>
-            <label htmlFor="skill-artifact-effect">Artifact Effect</label>
-            <input
-              id="skill-artifact-effect"
-              value={skillDefinitionDraft.artifactEffect}
-              onChange={(event) => updateDraft({ artifactEffect: event.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="skill-version">版本</label>
-            <input
-              id="skill-version"
-              value={skillDefinitionDraft.version}
-              onChange={(event) => updateDraft({ version: event.target.value })}
-            />
-          </div>
-        </div>
-        <label htmlFor="skill-failure-mode">Failure Mode</label>
-        <textarea
-          id="skill-failure-mode"
-          rows={2}
-          value={skillDefinitionDraft.failureMode}
-          onChange={(event) => updateDraft({ failureMode: event.target.value })}
-        />
-        {selectedSkill &&
-          isVideoRubricSkill(selectedSkill.skillId) &&
-          renderVideoRubricEditor(skillDefinitionDraft, updateDraft)}
-        <div className="compact-grid two-col">
-          <div>
-            <label htmlFor="skill-required-inputs">Required Inputs（一行一个）</label>
-            <textarea
-              id="skill-required-inputs"
-              rows={5}
-              value={skillDefinitionDraft.requiredInputs}
-              onChange={(event) => updateDraft({ requiredInputs: event.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="skill-optional-inputs">Optional Inputs（一行一个）</label>
-            <textarea
-              id="skill-optional-inputs"
-              rows={5}
-              value={skillDefinitionDraft.optionalInputs}
-              onChange={(event) => updateDraft({ optionalInputs: event.target.value })}
-            />
-          </div>
-        </div>
-        <div className="compact-grid two-col">
-          <div>
-            <label htmlFor="skill-trigger-intents">Trigger Intents（一行一个）</label>
-            <textarea
-              id="skill-trigger-intents"
-              rows={4}
-              value={skillDefinitionDraft.triggerIntents}
-              onChange={(event) => updateDraft({ triggerIntents: event.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="skill-composable-with">Composable With（一行一个）</label>
-            <textarea
-              id="skill-composable-with"
-              rows={4}
-              value={skillDefinitionDraft.composableWith}
-              onChange={(event) => updateDraft({ composableWith: event.target.value })}
-            />
-          </div>
-        </div>
-        <div className="compact-grid two-col">
-          <div>
-            <label htmlFor="skill-side-effects">Side Effects（一行一个）</label>
-            <textarea
-              id="skill-side-effects"
-              rows={4}
-              value={skillDefinitionDraft.sideEffects}
-              onChange={(event) => updateDraft({ sideEffects: event.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="skill-implementation-refs">Implementation Refs（一行一个）</label>
-            <textarea
-              id="skill-implementation-refs"
-              rows={4}
-              value={skillDefinitionDraft.implementationRefs}
-              onChange={(event) => updateDraft({ implementationRefs: event.target.value })}
-            />
-          </div>
-        </div>
-        <label htmlFor="skill-context-policy-json">Context Policy JSON</label>
-        <textarea
-          id="skill-context-policy-json"
-          rows={8}
-          value={skillDefinitionDraft.contextPolicyJson}
-          onChange={(event) => updateDraft({ contextPolicyJson: event.target.value })}
-        />
-        <label htmlFor="skill-output-schema-json">Output Schema JSON</label>
-        <textarea
-          id="skill-output-schema-json"
-          rows={8}
-          value={skillDefinitionDraft.outputSchemaJson}
-          onChange={(event) => updateDraft({ outputSchemaJson: event.target.value })}
-        />
-        <label htmlFor="skill-user-notes">Workspace Notes</label>
-        <textarea
-          id="skill-user-notes"
-          rows={3}
-          value={skillDefinitionDraft.userNotes}
-          onChange={(event) => updateDraft({ userNotes: event.target.value })}
-        />
-        <div className="save-row">
-          <button
-            className="save-button"
-            disabled={skillDefinitionSaving}
-            onClick={saveSkillDefinition}
-          >
-            {skillDefinitionSaving ? '保存中…' : '保存 Skill Contract'}
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={skillDefinitionSaving}
-            onClick={() => {
-              setSkillDefinitionDraft(null)
-              setSkillDefinitionStatus('')
-            }}
-          >
-            取消编辑
-          </button>
-          {statusText && (
-            <span
-              className={
-                skillDefinitionStatus.startsWith('error:')
-                  ? 'inline-error'
-                  : 'inline-save-state'
-              }
-            >
-              {statusText}
-            </span>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  function renderVideoRubricEditor(
-    draft: SkillDefinitionDraft,
-    updateDraft: (patch: Partial<SkillDefinitionDraft>) => void,
-  ) {
-    const rubricDraft = videoRubricDraftFromContextPolicyJson(draft.contextPolicyJson)
-    if (!rubricDraft) {
-      return (
-        <div className="rubric-editor-card error">
-          <b>视频诊断 Rubric</b>
-          <p>Context Policy JSON 当前无法解析。先修复 JSON 后，才能使用结构化 rubric 编辑器。</p>
-        </div>
-      )
-    }
-    const updateRubric = (patch: Partial<VideoRubricTextDraft>) => {
-      updateDraft({
-        contextPolicyJson: contextPolicyJsonWithVideoRubric(draft.contextPolicyJson, {
-          ...rubricDraft,
-          ...patch,
-        }),
-      })
-    }
-    return (
-      <div className="rubric-editor-card">
-        <div className="rubric-editor-head">
-          <div>
-            <b>视频诊断 Rubric</b>
-            <p>
-              这里会写入 <code>contextPolicy.pmRubric</code>。每行是一条规则，
-              用竖线分隔字段。
-            </p>
-          </div>
-          <span>structured</span>
-        </div>
-        <label htmlFor="video-rubric-creator-types">
-          创作者类型规则：类型 | 激励适配度 | 判定规则
-        </label>
-        <textarea
-          id="video-rubric-creator-types"
-          rows={5}
-          value={rubricDraft.creatorTypes}
-          onChange={(event) => updateRubric({ creatorTypes: event.target.value })}
-        />
-        <label htmlFor="video-rubric-quality-dimensions">
-          质量评价维度：维度 | 高分标准 | 中分标准 | 低分标准 | 必要证据
-        </label>
-        <textarea
-          id="video-rubric-quality-dimensions"
-          rows={6}
-          value={rubricDraft.qualityDimensions}
-          onChange={(event) => updateRubric({ qualityDimensions: event.target.value })}
-        />
-        <label htmlFor="video-rubric-evidence-rules">证据限制规则（一行一个）</label>
-        <textarea
-          id="video-rubric-evidence-rules"
-          rows={4}
-          value={rubricDraft.evidenceRules}
-          onChange={(event) => updateRubric({ evidenceRules: event.target.value })}
-        />
-        <label htmlFor="video-rubric-incentive-rules">
-          激励适配规则：信号 | 解读 | 运营动作
-        </label>
-        <textarea
-          id="video-rubric-incentive-rules"
-          rows={5}
-          value={rubricDraft.incentiveRules}
-          onChange={(event) => updateRubric({ incentiveRules: event.target.value })}
-        />
-      </div>
-    )
-  }
-
-  function renderSkillTestPanel(skill: Skill) {
-    const canInvoke = isDirectlyInvokableSkill(skill.skillId)
-    const canDryRun = supportsSkillDryRun(skill.skillId)
-    return (
-      <div className="source-editor-card skill-test-card">
-        <div className="detail-head compact">
-          <div>
-            <h3>Skill Test</h3>
-            <p>用当前 Skill 的受控 invoke / dry-run API 做一次最小测试。</p>
-          </div>
-          {canInvoke ? (
-            <span>invoke-ready</span>
-          ) : canDryRun ? (
-            <span>dry-run-ready</span>
-          ) : (
-            <span>workflow-only</span>
-          )}
-        </div>
-        {!canInvoke && !canDryRun ? (
-          <div className="empty-card">
-            这个 Skill 当前不能单独 invoke 或 dry-run。它会通过绑定的产品 workflow 执行。
-          </div>
-        ) : (
-          <>
-            <div className="compact-grid two-col">
-              <div>
-                <label htmlFor="skill-test-mode">模式</label>
-                <select
-                  id="skill-test-mode"
-                  value={skillTestMode}
-                  onChange={(event) =>
-                    setSkillTestMode(event.target.value as GenerationMode)
-                  }
-                >
-                  <option value="demo">demo</option>
-                  <option value="live">live</option>
-                </select>
-              </div>
-              <div className="skill-test-hint">
-                invoke-ready 可在 live 模式调用真实后端；dry-run 不写业务资产。
-              </div>
-            </div>
-            <label htmlFor="skill-test-input">Input JSON</label>
-            <textarea
-              id="skill-test-input"
-              rows={7}
-              value={skillTestInput}
-              onChange={(event) => {
-                setSkillTestInput(event.target.value)
-                setSkillTestStatus('idle')
-                setSkillTestResult(null)
-                setSkillTestError('')
-              }}
-            />
-            <div className="save-row">
-              <button
-                className="save-button"
-                disabled={skillTestStatus === 'running'}
-                onClick={runSkillTest}
-              >
-                {skillTestStatus === 'running' ? '测试中…' : '运行 Skill Test'}
-              </button>
-              {skillTestStatus === 'completed' && (
-                <span className="inline-save-state">测试完成</span>
-              )}
-              {skillTestStatus === 'error' && (
-                <span className="inline-error">测试失败：{skillTestError}</span>
-              )}
-            </div>
-            {skillTestResult && (
-              <>
-                <label>Output</label>
-                <pre className="json-preview">
-                  {JSON.stringify(skillTestResult.output, null, 2)}
-                </pre>
-                <label>Model Metadata</label>
-                <pre className="json-preview">
-                  {JSON.stringify(skillTestResult.modelMetadata, null, 2)}
-                </pre>
-              </>
-            )}
-          </>
-        )}
-      </div>
+      <CapabilityDefinitionDiffPanel
+        assetType={assetType}
+        definitionDiff={definitionDiff}
+        definitionDiffStatus={definitionDiffStatus}
+        definitionDiffError={definitionDiffError}
+        onLoadDiff={loadCapabilityDefinitionDiff}
+        onRevertDefinition={revertCapabilityDefinition}
+      />
     )
   }
 
@@ -4816,8 +3860,31 @@ function WorkspaceApp() {
                 </button>
               </div>
               {renderCapabilityDefinitionDiffPanel('skill')}
-              {renderSkillDefinitionEditor()}
-              {renderSkillTestPanel(selectedSkill)}
+              <SkillDefinitionEditor
+                selectedSkill={selectedSkill}
+                draft={skillDefinitionDraft}
+                saving={skillDefinitionSaving}
+                status={skillDefinitionStatus}
+                onDraftChange={setSkillDefinitionDraft}
+                onStatusChange={setSkillDefinitionStatus}
+                onSave={saveSkillDefinition}
+              />
+              <SkillTestPanel
+                skill={selectedSkill}
+                skillTestMode={skillTestMode}
+                skillTestInput={skillTestInput}
+                skillTestStatus={skillTestStatus}
+                skillTestError={skillTestError}
+                skillTestResult={skillTestResult}
+                onSkillTestModeChange={setSkillTestMode}
+                onSkillTestInputChange={(value) => {
+                  setSkillTestInput(value)
+                  setSkillTestStatus('idle')
+                  setSkillTestResult(null)
+                  setSkillTestError('')
+                }}
+                onRunSkillTest={runSkillTest}
+              />
               <p>{selectedSkill.purpose}</p>
               <label>Artifact Effect</label>
               <div className="why">{selectedSkill.artifactEffect}</div>
