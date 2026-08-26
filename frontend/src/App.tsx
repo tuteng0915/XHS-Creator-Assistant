@@ -24,6 +24,7 @@ import {
 import sampleTrendCsv from '../../sample_trend.csv?raw'
 import { HealthPage } from './HealthPage'
 import { AccountProfilePage } from './components/AccountProfilePage'
+import { AgentDefinitionEditor } from './components/AgentDefinitionEditor'
 import { AgentConversationPanel } from './components/AgentConversationPanel'
 import { AgentsPage } from './components/AgentsPage'
 import { AnalysisHistoryPage } from './components/AnalysisHistoryPage'
@@ -36,16 +37,12 @@ import { SimulationHistoryPage } from './components/SimulationHistoryPage'
 import { SkillDefinitionEditor } from './components/SkillDefinitionEditor'
 import { SkillTestPanel } from './components/SkillTestPanel'
 import {
-  agentPlanJsonWithTasks,
   listFromText,
-  textFromList,
   validateAgentDefinitionDraft,
   validateWorkflowDefinitionDraft,
-  workflowTasksFromPlanJson,
   type AgentDefinitionDraft,
   type SkillDefinitionDraft,
   type WorkflowDefinitionDraft,
-  type WorkflowTaskDraft,
 } from './capabilityDefinitionValidation'
 import {
   DEFAULT_WORKSPACE_NAME,
@@ -98,6 +95,7 @@ import {
 } from './components/StageResultViews'
 import { TopicLibraryPage } from './components/TopicLibraryPage'
 import { WorkspaceShell, type ActivePage } from './components/WorkspaceShell'
+import { WorkflowDefinitionEditor } from './components/WorkflowDefinitionEditor'
 import { WorkflowsPage } from './components/WorkflowsPage'
 import { WorkflowCallPanel } from './components/WorkflowCallPanel'
 import {
@@ -3305,447 +3303,6 @@ function WorkspaceApp() {
     )
   }
 
-  function renderAgentDefinitionEditor() {
-    if (!agentDefinitionDraft) return null
-    const updateDraft = (patch: Partial<AgentDefinitionDraft>) => {
-      setAgentDefinitionDraft((current) => (current ? { ...current, ...patch } : current))
-    }
-    const statusText =
-      agentDefinitionStatus === 'saving'
-        ? '保存中…'
-        : agentDefinitionStatus === 'saved'
-          ? '已保存'
-          : agentDefinitionStatus.startsWith('error:')
-            ? agentDefinitionStatus.replace('error:', '保存失败：')
-            : ''
-    return (
-      <div className="source-editor-card capability-editor-card">
-        <p className="subline">
-          PM 调优模式：保存后会把当前 agent 变成 workspace-level generated override。
-          skillIds 必须引用当前 workspace 已存在的 Skills。
-        </p>
-        <div className="compact-grid two-col">
-          <div>
-            <label htmlFor="agent-display-name">Agent 名称</label>
-            <input
-              id="agent-display-name"
-              value={agentDefinitionDraft.displayName}
-              onChange={(event) => updateDraft({ displayName: event.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="agent-version">版本</label>
-            <input
-              id="agent-version"
-              value={agentDefinitionDraft.version}
-              onChange={(event) => updateDraft({ version: event.target.value })}
-            />
-          </div>
-        </div>
-        <label htmlFor="agent-purpose">用途 / 调优说明</label>
-        <textarea
-          id="agent-purpose"
-          rows={3}
-          value={agentDefinitionDraft.purpose}
-          onChange={(event) => updateDraft({ purpose: event.target.value })}
-        />
-        <label htmlFor="agent-system-prompt">System Prompt</label>
-        <textarea
-          id="agent-system-prompt"
-          rows={8}
-          value={agentDefinitionDraft.systemPrompt}
-          onChange={(event) => updateDraft({ systemPrompt: event.target.value })}
-        />
-        <label htmlFor="agent-skill-ids">Skill IDs（一行一个）</label>
-        <textarea
-          id="agent-skill-ids"
-          rows={6}
-          value={agentDefinitionDraft.skillIds}
-          onChange={(event) => updateDraft({ skillIds: event.target.value })}
-        />
-        <div className="structured-editor-card">
-          <div className="asset-section-head">
-            <h3>组合 Skills</h3>
-            <span>structured</span>
-          </div>
-          <p className="subline">
-            这里会同步写入 Skill IDs。仍可在上方 textarea 中手动补充暂未登记的 stable id。
-          </p>
-          <div className="capability-checkbox-list">
-            {skills.map((skill) => {
-              const selected = listFromText(agentDefinitionDraft.skillIds).includes(
-                skill.skillId,
-              )
-              return (
-                <label key={skill.id}>
-                  <input
-                    type="checkbox"
-                    checked={selected}
-                    onChange={(event) => {
-                      const next = new Set(listFromText(agentDefinitionDraft.skillIds))
-                      if (event.target.checked) next.add(skill.skillId)
-                      else next.delete(skill.skillId)
-                      updateDraft({ skillIds: textFromList([...next]) })
-                    }}
-                  />
-                  <span>
-                    <b>{skill.displayName}</b>
-                    <small>{skill.skillId}</small>
-                  </span>
-                </label>
-              )
-            })}
-          </div>
-        </div>
-        <label htmlFor="agent-context-policy-json">Default Context Policy JSON</label>
-        <textarea
-          id="agent-context-policy-json"
-          rows={8}
-          value={agentDefinitionDraft.defaultContextPolicyJson}
-          onChange={(event) =>
-            updateDraft({ defaultContextPolicyJson: event.target.value })
-          }
-        />
-        <label htmlFor="agent-user-notes">Workspace Notes</label>
-        <textarea
-          id="agent-user-notes"
-          rows={3}
-          value={agentDefinitionDraft.userNotes}
-          onChange={(event) => updateDraft({ userNotes: event.target.value })}
-        />
-        <div className="save-row">
-          <button
-            className="save-button"
-            disabled={agentDefinitionSaving}
-            onClick={saveAgentDefinition}
-          >
-            {agentDefinitionSaving ? '保存中…' : '保存 Agent Definition'}
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={agentDefinitionSaving}
-            onClick={() => {
-              setAgentDefinitionDraft(null)
-              setAgentDefinitionStatus('')
-            }}
-          >
-            取消编辑
-          </button>
-          {statusText && (
-            <span
-              className={
-                agentDefinitionStatus.startsWith('error:')
-                  ? 'inline-error'
-                  : 'inline-save-state'
-              }
-            >
-              {statusText}
-            </span>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  function renderWorkflowDefinitionEditor() {
-    if (!workflowDefinitionDraft) return null
-    const updateDraft = (patch: Partial<WorkflowDefinitionDraft>) => {
-      setWorkflowDefinitionDraft((current) =>
-        current ? { ...current, ...patch } : current,
-      )
-    }
-    const workflowTaskDrafts = workflowTasksFromPlanJson(
-      workflowDefinitionDraft.agentPlanJson,
-    )
-    const updateTaskDrafts = (tasks: WorkflowTaskDraft[]) => {
-      updateDraft({
-        agentPlanJson: agentPlanJsonWithTasks(
-          workflowDefinitionDraft.agentPlanJson,
-          tasks,
-        ),
-      })
-    }
-    const statusText =
-      workflowDefinitionStatus === 'saving'
-        ? '保存中…'
-        : workflowDefinitionStatus === 'saved'
-          ? '已保存'
-          : workflowDefinitionStatus.startsWith('error:')
-            ? workflowDefinitionStatus.replace('error:', '保存失败：')
-            : ''
-    return (
-      <div className="source-editor-card capability-editor-card">
-        <p className="subline">
-          PM 调优模式：保存后会把当前 workflow 变成 workspace-level generated override。
-          这里编辑的是产品 task plan，不是任意图执行器。
-        </p>
-        <div className="compact-grid two-col">
-          <div>
-            <label htmlFor="workflow-display-name">Workflow 名称</label>
-            <input
-              id="workflow-display-name"
-              value={workflowDefinitionDraft.displayName}
-              onChange={(event) => updateDraft({ displayName: event.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="workflow-version">版本</label>
-            <input
-              id="workflow-version"
-              value={workflowDefinitionDraft.version}
-              onChange={(event) => updateDraft({ version: event.target.value })}
-            />
-          </div>
-        </div>
-        <label htmlFor="workflow-purpose">用途 / 调优说明</label>
-        <textarea
-          id="workflow-purpose"
-          rows={3}
-          value={workflowDefinitionDraft.purpose}
-          onChange={(event) => updateDraft({ purpose: event.target.value })}
-        />
-        <label htmlFor="workflow-entry-agent-ids">Entry Agent IDs（一行一个）</label>
-        <textarea
-          id="workflow-entry-agent-ids"
-          rows={4}
-          value={workflowDefinitionDraft.entryAgentIds}
-          onChange={(event) => updateDraft({ entryAgentIds: event.target.value })}
-        />
-        <div className="structured-editor-card">
-          <div className="asset-section-head">
-            <h3>Workflow Tasks</h3>
-            <span>structured</span>
-          </div>
-          <p className="subline">
-            表格会同步写入 agentPlan.tasks。复杂字段仍可在下方 JSON 里手动编辑。
-          </p>
-          {workflowTaskDrafts === null ? (
-            <div className="err">Agent Task Plan JSON 当前无法解析，先修复 JSON。</div>
-          ) : (
-            <>
-              <div className="workflow-task-editor">
-                {workflowTaskDrafts.map((task, index) => (
-                  <div className="workflow-task-card" key={`${task.taskId}-${index}`}>
-                    <div className="asset-section-head">
-                      <h3>Task {index + 1}</h3>
-                      <button
-                        type="button"
-                        className="secondary-button"
-                        onClick={() =>
-                          updateTaskDrafts(
-                            workflowTaskDrafts.filter((_, itemIndex) => itemIndex !== index),
-                          )
-                        }
-                      >
-                        删除
-                      </button>
-                    </div>
-                    <div className="compact-grid two-col">
-                      <div>
-                        <label htmlFor={`workflow-task-id-${index}`}>Task ID</label>
-                        <input
-                          id={`workflow-task-id-${index}`}
-                          value={task.taskId}
-                          onChange={(event) => {
-                            const next = [...workflowTaskDrafts]
-                            next[index] = { ...task, taskId: event.target.value }
-                            updateTaskDrafts(next)
-                          }}
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor={`workflow-task-agent-${index}`}>Agent</label>
-                        <select
-                          id={`workflow-task-agent-${index}`}
-                          value={task.agentId}
-                          onChange={(event) => {
-                            const next = [...workflowTaskDrafts]
-                            next[index] = { ...task, agentId: event.target.value }
-                            updateTaskDrafts(next)
-                          }}
-                        >
-                          <option value="">未选择</option>
-                          {agents.map((agent) => (
-                            <option key={agent.id} value={agent.agentId}>
-                              {agent.displayName} · {agent.agentId}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <label htmlFor={`workflow-task-skills-${index}`}>
-                      Skill IDs（一行一个）
-                    </label>
-                    <textarea
-                      id={`workflow-task-skills-${index}`}
-                      rows={3}
-                      value={task.skillIds}
-                      onChange={(event) => {
-                        const next = [...workflowTaskDrafts]
-                        next[index] = { ...task, skillIds: event.target.value }
-                        updateTaskDrafts(next)
-                      }}
-                    />
-                    <div className="capability-checkbox-list compact">
-                      {skills.map((skill) => {
-                        const selected = listFromText(task.skillIds).includes(
-                          skill.skillId,
-                        )
-                        return (
-                          <label key={skill.id}>
-                            <input
-                              type="checkbox"
-                              checked={selected}
-                              onChange={(event) => {
-                                const nextSkills = new Set(listFromText(task.skillIds))
-                                if (event.target.checked) nextSkills.add(skill.skillId)
-                                else nextSkills.delete(skill.skillId)
-                                const next = [...workflowTaskDrafts]
-                                next[index] = {
-                                  ...task,
-                                  skillIds: textFromList([...nextSkills]),
-                                }
-                                updateTaskDrafts(next)
-                              }}
-                            />
-                            <span>
-                              <b>{skill.displayName}</b>
-                              <small>{skill.skillId}</small>
-                            </span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                    <div className="compact-grid two-col">
-                      <div>
-                        <label htmlFor={`workflow-task-depends-${index}`}>
-                          Depends On（一行一个 taskId）
-                        </label>
-                        <textarea
-                          id={`workflow-task-depends-${index}`}
-                          rows={3}
-                          value={task.dependsOn}
-                          onChange={(event) => {
-                            const next = [...workflowTaskDrafts]
-                            next[index] = { ...task, dependsOn: event.target.value }
-                            updateTaskDrafts(next)
-                          }}
-                        />
-                      </div>
-                      <label className="checkbox-line">
-                        <input
-                          type="checkbox"
-                          checked={task.parallel}
-                          onChange={(event) => {
-                            const next = [...workflowTaskDrafts]
-                            next[index] = { ...task, parallel: event.target.checked }
-                            updateTaskDrafts(next)
-                          }}
-                        />
-                        可并行执行
-                      </label>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() =>
-                  updateTaskDrafts([
-                    ...workflowTaskDrafts,
-                    {
-                      taskId: `task_${workflowTaskDrafts.length + 1}`,
-                      agentId: '',
-                      skillIds: '',
-                      dependsOn: '',
-                      parallel: false,
-                    },
-                  ])
-                }
-              >
-                添加 Task
-              </button>
-            </>
-          )}
-        </div>
-        <label htmlFor="workflow-agent-plan-json">Agent Task Plan JSON</label>
-        <textarea
-          id="workflow-agent-plan-json"
-          rows={12}
-          value={workflowDefinitionDraft.agentPlanJson}
-          onChange={(event) => updateDraft({ agentPlanJson: event.target.value })}
-        />
-        <div className="compact-grid two-col">
-          <div>
-            <label htmlFor="workflow-artifact-effect">Artifact Effect</label>
-            <input
-              id="workflow-artifact-effect"
-              value={workflowDefinitionDraft.artifactEffect}
-              onChange={(event) => updateDraft({ artifactEffect: event.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="workflow-call-binding-edit">调用注册</label>
-            <select
-              id="workflow-call-binding-edit"
-              value={workflowDefinitionDraft.callBinding}
-              onChange={(event) =>
-                updateDraft({
-                  callBinding: event.target.value as WorkflowAsset['callBinding'],
-                })
-              }
-            >
-              <option value="">不注册为调用入口</option>
-              <option value="account">账号诊断执行入口</option>
-              <option value="trend">热点分析执行入口</option>
-              <option value="video">视频博主质量诊断执行入口</option>
-            </select>
-          </div>
-        </div>
-        <label htmlFor="workflow-user-notes">Workspace Notes</label>
-        <textarea
-          id="workflow-user-notes"
-          rows={3}
-          value={workflowDefinitionDraft.userNotes}
-          onChange={(event) => updateDraft({ userNotes: event.target.value })}
-        />
-        <div className="save-row">
-          <button
-            className="save-button"
-            disabled={workflowDefinitionSaving}
-            onClick={saveWorkflowDefinition}
-          >
-            {workflowDefinitionSaving ? '保存中…' : '保存 Workflow Definition'}
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={workflowDefinitionSaving}
-            onClick={() => {
-              setWorkflowDefinitionDraft(null)
-              setWorkflowDefinitionStatus('')
-            }}
-          >
-            取消编辑
-          </button>
-          {statusText && (
-            <span
-              className={
-                workflowDefinitionStatus.startsWith('error:')
-                  ? 'inline-error'
-                  : 'inline-save-state'
-              }
-            >
-              {statusText}
-            </span>
-          )}
-        </div>
-      </div>
-    )
-  }
-
   function renderConversationsPage() {
     return (
       <ConversationsPage
@@ -3932,7 +3489,17 @@ function WorkspaceApp() {
         agentConversationCreating={agentConversationCreating}
         runError={runError}
         definitionDiffPanel={renderCapabilityDefinitionDiffPanel('agent')}
-        definitionEditor={renderAgentDefinitionEditor()}
+        definitionEditor={
+          <AgentDefinitionEditor
+            draft={agentDefinitionDraft}
+            saving={agentDefinitionSaving}
+            status={agentDefinitionStatus}
+            skills={skills}
+            onDraftChange={setAgentDefinitionDraft}
+            onStatusChange={setAgentDefinitionStatus}
+            onSave={saveAgentDefinition}
+          />
+        }
         conversationPanel={
           <AgentConversationPanel
             conversation={selectedAgentConversation}
@@ -3990,7 +3557,18 @@ function WorkspaceApp() {
         selectedWorkflowAsset={selectedWorkflowAsset}
         agentConversationCreating={agentConversationCreating}
         definitionDiffPanel={renderCapabilityDefinitionDiffPanel('workflow')}
-        definitionEditor={renderWorkflowDefinitionEditor()}
+        definitionEditor={
+          <WorkflowDefinitionEditor
+            draft={workflowDefinitionDraft}
+            saving={workflowDefinitionSaving}
+            status={workflowDefinitionStatus}
+            agents={agents}
+            skills={skills}
+            onDraftChange={setWorkflowDefinitionDraft}
+            onStatusChange={setWorkflowDefinitionStatus}
+            onSave={saveWorkflowDefinition}
+          />
+        }
         onOpenWorkflow={openWorkflowAsset}
         onEditWorkflow={startWorkflowDefinitionEdit}
         onDesignWorkflow={() =>
