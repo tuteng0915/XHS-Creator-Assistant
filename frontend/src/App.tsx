@@ -21,13 +21,16 @@ import {
   workspaceApi,
   workflowAssetApi,
 } from './api'
-import sampleTrendCsv from '../../sample_trend.csv?raw'
 import { HealthPage } from './HealthPage'
 import { AccountProfilePage } from './components/AccountProfilePage'
 import { AgentDefinitionEditor } from './components/AgentDefinitionEditor'
 import { AgentConversationPanel } from './components/AgentConversationPanel'
 import { AgentsPage } from './components/AgentsPage'
 import { AnalysisHistoryPage } from './components/AnalysisHistoryPage'
+import {
+  DraftStructureRenderer,
+  StageResultRenderer,
+} from './components/ArtifactRenderers'
 import { CapabilityDefinitionDiffPanel } from './components/CapabilityDefinitionDiffPanel'
 import { ConversationsPage } from './components/ConversationsPage'
 import { DraftsPage } from './components/DraftsPage'
@@ -35,6 +38,7 @@ import { InputAssetsPage } from './components/InputAssetsPage'
 import { MediaAssetsPage } from './components/MediaAssetsPage'
 import { SimulationHistoryPage } from './components/SimulationHistoryPage'
 import { SkillDefinitionEditor } from './components/SkillDefinitionEditor'
+import { SkillsPage } from './components/SkillsPage'
 import { SkillTestPanel } from './components/SkillTestPanel'
 import {
   listFromText,
@@ -54,13 +58,13 @@ import {
   SAVE_KEY_BY_XHS_IMPORT_PANEL,
   XHS_IMPORT_TYPE_BY_PANEL,
   agentToDefinitionDraft,
-  capabilityStatusClass,
   chooseDefaultWorkspaceId,
   defaultSkillTestInput,
+  draftDisplayTitle,
+  draftKindLabel,
   emptyXhsImportFiles,
   errorMessage,
   fileRelativePath,
-  getTopicsFromStage,
   idleState,
   isDirectlyInvokableSkill,
   latestTextMaterial,
@@ -78,28 +82,13 @@ import {
   type SaveKey,
   type XhsImportPanel,
 } from './appUtils'
-import {
-  IncentiveFitView,
-  ListBlock,
-  PainPointsView,
-  PersonaListView,
-  ProfileView,
-  ReactionListView,
-  StructureView,
-  SynthesisView,
-  TitlesView,
-  TrendAnalysisView,
-  VideoCreatorProfileView,
-  VideoQualityView,
-  type SaveState,
-} from './components/StageResultViews'
+import { type SaveState } from './components/StageResultViews'
 import { TopicLibraryPage } from './components/TopicLibraryPage'
 import { WorkspaceShell, type ActivePage } from './components/WorkspaceShell'
 import { WorkflowDefinitionEditor } from './components/WorkflowDefinitionEditor'
 import { WorkflowsPage } from './components/WorkflowsPage'
-import { WorkflowCallPanel } from './components/WorkflowCallPanel'
+import { WorkflowRunPage } from './components/WorkflowRunPage'
 import {
-  WorkflowOutputPanel,
   type StageView,
   type WorkflowOutputKind,
 } from './components/WorkflowOutputPanel'
@@ -162,65 +151,14 @@ import {
   xhsPackageRelativePaths,
   type XhsImportPackagePreview,
 } from './xhsCreatorProfile'
+import {
+  SAMPLE_ACCOUNT_INPUT,
+  SAMPLE_TREND_CSV,
+  SAMPLE_TREND_INPUT,
+  SAMPLE_VIDEO_INPUT,
+} from './sampleInputs'
 
 type SkillTestStatus = 'idle' | 'running' | 'completed' | 'error'
-const SAMPLE_ACCOUNT_INPUT = {
-  positioning: `账号:@QSheep｜留学内容创作者,1.4K 粉。核心人群=正在准备/纠结出国读研的文科生(传媒、社科、人类学),目标英港新前30。
-内容主张:真实反思 + 决策方法,不贩卖焦虑、不灌鸡汤。
-作者优势:亲历者视角、擅长把模糊焦虑拆成可执行的决策步骤、文笔好。
-目标:选题持续围绕「选校决策 / 申请策略 / 留学反思」,但要避开已经写过的老话题。`,
-  historicalPosts: `二本逆袭G5?别再被这种标题骗了 ｜ 赞1.4k 藏980 ｜ 爆
-留学中介到底值不值5万块|我的真实账单与避坑清单 ｜ 赞1.1k 藏860 ｜ 爆
-选校时我后悔没早知道的6件事 ｜ 赞720 藏610 ｜ 爆
-文科留学回国到底有没有用|工作一年后说点实话 ｜ 赞90 藏40 ｜ 平
-DIY申请时间线:从大三暑假到递交我每个月都干了啥 ｜ 赞60 藏150 ｜ 差`,
-  comments: `中介那部分太真实了,我现在就纠结要不要DIY,自己怕搞砸
-想问下双非背景冲英国前30有戏吗,真的好焦虑
-回国后发现海归学历根本不值钱,有点后悔
-求一个选校时间线!完全不知道几月该干嘛,好慌
-文书到底自己写还是找人改啊,我憋了两周写不出来
-家里不太支持留学,该怎么说服父母
-雅思一直卡6.5,是不是该先把雅思考完再准备申请
-想知道港三和英国前30到底怎么选,纠结死了
-均分85冲刺前20稳吗,GPA算是劣势吗
-看了好多博主都在贩卖焦虑,终于有人好好说话了
-转专业申请会不会很吃亏,本科传媒想转社科
-预算有限,中介和DIY的钱到底该花在哪一步
-实习经历很水,文书里要不要硬写
-拿到offer了但突然不确定该不该去,好迷茫`,
-  simulationTopic: '5万块中介费,该花的是这3步,剩下4步你自己做更好',
-}
-const SAMPLE_TREND_INPUT = {
-  positioning: `账号：数字游民生活方式推广者
-核心人群：想从城市职场转向远程工作/自由职业的年轻人，尤其是文科生、非技术背景人群
-内容主张：真实、可执行，不贩卖自由幻觉；强调技能准备、成本意识和风险管理
-目标：围绕「如何开始数字游民生活」「旅居地选择与成本」「远程收入来源」持续产出`,
-  keyword: '数字游民',
-  simulationTopic:
-    '文科生/非技术背景，靠什么开始数字游民？6条真实路径\n切入角度：把「没有可以远程的技能」这个最大卡点，拆成6个具体可行的技能转换方向',
-}
-const SAMPLE_TREND_CSV = sampleTrendCsv
-
-const SAMPLE_VIDEO_INPUT = {
-  positioning: `业务场景：AIGC 视频创作者激励计划
-目标：从收集到的视频创作者中筛选适合长期激励和运营扶持的对象。
-判断原则：
-- 剧本驱动型创作者通常适合激励计划，因为激励能放大持续更新、系列化和剧情迭代。
-- 商单驱动型创作者主要受品牌预算和转化目标影响，平台激励通常很难改变行为。
-- 技术探索驱动型创作者需要分类讨论：能转化为稳定栏目则可条件适配，否则更适合技术共创或专项活动。`,
-  videoCreatorSamples: `创作者：@AI短剧研究所
-平台：小红书 / 抖音
-样本：
-1.《机器人女友觉醒后删除了我的记忆》｜AIGC短剧｜赞 2.3w｜评论 1800｜完播率较高
-观察：固定赛博都市世界观，同一女主角连续出现，开头 3 秒直接给冲突，结尾留悬念。
-2.《当古代谋士拿到 ChatGPT》｜AIGC剧情｜赞 1.7w｜收藏 4200
-观察：角色设定清晰，台词有反转，画面风格统一，但人物手部和口型偶有跳变。
-3.《用 5 个 AI 工具做一支广告片》｜工具教程｜赞 3200｜收藏 5100
-观察：偏技术拆解，互动主要来自创作者询问工具链。
-4. 最近 30 天更新 18 条，其中 12 条是同一世界观短剧，4 条工具教程，2 条品牌合作植入。
-运营备注：评论区大量催更剧情线，商单内容互动明显低于剧情内容。`,
-  simulationTopic: '如果把 @AI短剧研究所 纳入 4 周 AIGC 短剧连续更新激励计划，应该怎么设计任务和风险边界？',
-}
 
 function WorkspaceApp() {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('')
@@ -2543,210 +2481,21 @@ function WorkspaceApp() {
   }
 
   function renderStageResult(stage: StageView): ReactNode {
-    if (!stage.result) return null
-    const result = stage.result as Record<string, unknown>
-    if (stage.key === 'profile' && result.profile) {
-      return <ProfileView data={result.profile as Record<string, unknown>} />
-    }
-    if (stage.key === 'trend_analysis' && result.trendAnalysis) {
-      return (
-        <TrendAnalysisView data={result.trendAnalysis as Record<string, unknown>} />
-      )
-    }
-    if (stage.key === 'pain_points') return <PainPointsView items={result.painPoints} />
-    if (stage.key === 'topics') {
-      return (
-        <>
-          {getTopicsFromStage(stage.result).map((topic) => (
-            <GeneratedTopicCard key={topic.title} topic={topic} />
-          ))}
-        </>
-      )
-    }
-    if (stage.key === 'titles') return <TitlesView items={result.titles} />
-    if (stage.key === 'structure' && result.structure) {
-      return <StructureView data={result.structure as Record<string, unknown>} />
-    }
-    if (stage.key === 'personas') return <PersonaListView items={result.personas} />
-    if (stage.key === 'initial_reactions') {
-      return <ReactionListView items={result.reactions} type="reaction" />
-    }
-    if (stage.key === 'debate_responses') {
-      return <ReactionListView items={result.debateResponses} type="debate" />
-    }
-    if (stage.key === 'synthesis' && result.synthesis) {
-      return <SynthesisView data={result.synthesis as Record<string, unknown>} />
-    }
-    if (stage.key === 'creator_profile' && result.creatorProfile) {
-      return (
-        <VideoCreatorProfileView
-          data={result.creatorProfile as Record<string, unknown>}
-        />
-      )
-    }
-    if (stage.key === 'video_quality' && result.videoQuality) {
-      return (
-        <VideoQualityView data={result.videoQuality as Record<string, unknown>} />
-      )
-    }
-    if (stage.key === 'incentive_fit' && result.incentiveFit) {
-      return (
-        <IncentiveFitView data={result.incentiveFit as Record<string, unknown>} />
-      )
-    }
-    return <pre className="json-preview">{JSON.stringify(stage.result, null, 2)}</pre>
-  }
-
-  function draftDisplayTitle(draft: Draft) {
-    const inputTopic = draft.inputSnapshot.topic as { title?: string } | undefined
-    const brief = (draft.editableContent.brief || {}) as {
-      topicTitle?: string
-      refinedAngle?: string
-    }
-    if (draft.kind === 'content_brief') {
-      return brief.topicTitle || inputTopic?.title || '创作 Brief'
-    }
-    const structure = (draft.editableContent.structure || {}) as {
-      topicChosen?: string
-    }
-    return structure.topicChosen || inputTopic?.title || '内容结构'
-  }
-
-  function draftKindLabel(draft: Draft | DraftSummary) {
-    return draft.kind === 'content_brief' ? '创作 Brief' : '内容结构'
-  }
-
-  function renderContentBrief(value: Record<string, unknown>) {
-    const brief = (value.brief || null) as Record<string, unknown> | null
-    if (!brief) return <pre className="json-preview">{JSON.stringify(value, null, 2)}</pre>
-    const list = (key: string) => (Array.isArray(brief[key]) ? (brief[key] as unknown[]) : [])
     return (
-      <div className="stage-card">
-        <h3>{String(brief.topicTitle || '创作 Brief')}</h3>
-        <p>
-          <b>精炼角度：</b>
-          {String(brief.refinedAngle || '未填写')}
-        </p>
-        <p>
-          <b>目标读者：</b>
-          {String(brief.targetReader || '未填写')}
-        </p>
-        <p>
-          <b>内容承诺：</b>
-          {String(brief.contentPromise || '未填写')}
-        </p>
-        <p>
-          <b>核心观点：</b>
-          {String(brief.corePoint || '未填写')}
-        </p>
-        <p>
-          <b>开头钩子：</b>
-          {String(brief.openingHook || '未填写')}
-        </p>
-        <div className="mini-grid">
-          <div>
-            <b>论证路径</b>
-            <ul>
-              {list('argumentPath').map((item, index) => (
-                <li key={`${index}-${String(item)}`}>{String(item)}</li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <b>素材需求</b>
-            <ul>
-              {list('materialNeeds').map((item, index) => (
-                <li key={`${index}-${String(item)}`}>{String(item)}</li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <b>标题方向</b>
-            <ul>
-              {list('titleDirections').map((item, index) => (
-                <li key={`${index}-${String(item)}`}>{String(item)}</li>
-              ))}
-            </ul>
-          </div>
-          <div>
-            <b>风险</b>
-            <ul>
-              {list('risks').map((item, index) => (
-                <li key={`${index}-${String(item)}`}>{String(item)}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </div>
+      <StageResultRenderer
+        stage={stage}
+        currentRun={currentRun}
+        onSaveGeneratedTopic={saveGeneratedTopic}
+        onSelectTopic={selectTopic}
+        onGenerateBrief={generateBriefForTopic}
+        onGenerateDraft={generateDraftForTopic}
+        onFillSimulationTopic={setSimulationTopic}
+      />
     )
   }
 
-  function renderDraftStructure(value: Record<string, unknown>) {
-    if (value.brief) return renderContentBrief(value)
-    const structure = (value.structure || null) as Record<string, unknown> | null
-    if (structure) return <StructureView data={structure} />
-    return <pre className="json-preview">{JSON.stringify(value, null, 2)}</pre>
-  }
-
-  function GeneratedTopicCard({ topic }: { topic: TopicCandidate }) {
-    async function ensureSavedAndSelect() {
-      const saved = await saveGeneratedTopic(topic, currentRun)
-      await selectTopic(saved)
-      return saved
-    }
-    return (
-      <div className="topic">
-        <h4>{topic.title}</h4>
-        <div className="angle">
-          切入角度：{topic.angle} · 对应痛点：{topic.pain || ''}
-        </div>
-        <div className="why">
-          <b>为什么适合：</b> {topic.whyFit}
-          {topic.whyTrending && (
-            <>
-              <br />
-              <b>趋势依据：</b> {topic.whyTrending}
-            </>
-          )}
-        </div>
-        <div className="topic-actions">
-          <button onClick={() => saveGeneratedTopic(topic, currentRun)}>
-            保存到选题库
-          </button>
-          <button onClick={ensureSavedAndSelect}>设为当前选题</button>
-          <button
-            onClick={async () => {
-              const saved = await ensureSavedAndSelect()
-              setSimulationTopic(`${saved.title}\n切入角度：${saved.angle}`)
-            }}
-          >
-            发送到受众模拟
-          </button>
-          <button
-            onClick={async () => {
-              const saved = await ensureSavedAndSelect()
-              await generateBriefForTopic(saved)
-            }}
-          >
-            生成创作 Brief
-          </button>
-          <button
-            onClick={async () => {
-              const saved = await ensureSavedAndSelect()
-              await generateDraftForTopic(saved)
-            }}
-          >
-            生成内容结构
-          </button>
-          <button
-            className="btn-fill"
-            onClick={() => setSimulationTopic(`${topic.title}\n切入角度：${topic.angle}`)}
-          >
-            → 填入下期选题
-          </button>
-        </div>
-      </div>
-    )
+  function renderDraftStructure(value: Record<string, unknown>): ReactNode {
+    return <DraftStructureRenderer value={value} />
   }
 
   useEffect(() => {
@@ -2892,7 +2641,61 @@ function WorkspaceApp() {
         workspace &&
         activePage === 'conversations' &&
         renderConversationsPage()}
-      {!loading && workspace && activePage === 'skills' && renderSkillsPage()}
+      {!loading && workspace && activePage === 'skills' && (
+        <SkillsPage
+          skills={skills}
+          selectedSkill={selectedSkill}
+          agentConversationCreating={agentConversationCreating}
+          definitionDiffPanel={renderCapabilityDefinitionDiffPanel('skill')}
+          definitionEditor={
+            <SkillDefinitionEditor
+              selectedSkill={selectedSkill}
+              draft={skillDefinitionDraft}
+              saving={skillDefinitionSaving}
+              status={skillDefinitionStatus}
+              onDraftChange={setSkillDefinitionDraft}
+              onStatusChange={setSkillDefinitionStatus}
+              onSave={saveSkillDefinition}
+            />
+          }
+          skillTestPanel={
+            selectedSkill ? (
+              <SkillTestPanel
+                skill={selectedSkill}
+                skillTestMode={skillTestMode}
+                skillTestInput={skillTestInput}
+                skillTestStatus={skillTestStatus}
+                skillTestError={skillTestError}
+                skillTestResult={skillTestResult}
+                onSkillTestModeChange={setSkillTestMode}
+                onSkillTestInputChange={(value) => {
+                  setSkillTestInput(value)
+                  setSkillTestStatus('idle')
+                  setSkillTestResult(null)
+                  setSkillTestError('')
+                }}
+                onRunSkillTest={runSkillTest}
+              />
+            ) : null
+          }
+          onOpenSkill={openSkill}
+          onEditSkill={startSkillDefinitionEdit}
+          onDesignSkill={(contextTarget) =>
+            startMakerConversation(
+              MAKER_AGENT_IDS.skill,
+              '我想设计一个新的 Skill，用来：\n\n它应该读取哪些 workspace 资产：\n\n它应该输出什么结构：',
+              contextTarget,
+            )
+          }
+          onTuneSkill={(skill) =>
+            startMakerConversation(
+              MAKER_AGENT_IDS.skill,
+              `我想调优这个 Skill：${skill.displayName}\n\n需要修改的 rubric / prompt / 输出结构：`,
+              { assetType: 'skill', assetId: skill.id },
+            )
+          }
+        />
+      )}
       {!loading && workspace && activePage === 'agents' && renderAgentsPage()}
       {!loading &&
         workspace &&
@@ -3222,67 +3025,51 @@ function WorkspaceApp() {
   }
 
   function renderWorkflowRunPage(targetTab: WorkflowTab) {
+    const outputKind = workflowOutputKindByWorkflow[targetTab]
     return (
-      <div className="prototype-grid">
-        <WorkflowCallPanel
-          targetTab={targetTab}
-          mode={mode}
-          running={running}
-          simulationTopic={simulationTopic}
-          selectedXhsCreatorProfileInputAssetId={
-            selectedXhsCreatorProfileInputAssetId
-          }
-          xhsCreatorProfileMaterial={xhsCreatorProfileMaterial}
-          xhsCreatorProfileMaterials={xhsCreatorProfileMaterials}
-          selectedProfileMaterial={selectedProfileMaterial}
-          accountProfileMaterials={accountProfileMaterials}
-          historicalMaterial={historicalMaterial}
-          historicalMaterials={historicalMaterials}
-          commentsMaterial={commentsMaterial}
-          commentsMaterials={commentsMaterials}
-          trendMaterial={trendMaterial}
-          trendMaterials={trendMaterials}
-          videoCreatorSamplesMaterial={videoCreatorSamplesMaterial}
-          videoCreatorSamplesMaterials={videoCreatorSamplesMaterials}
-          mediaAssets={mediaAssets}
-          selectedVideoWorkflowMediaAssetIds={selectedVideoWorkflowMediaAssetIds}
-          videoWorkflowMediaAssets={videoWorkflowMediaAssets}
-          onSelectXhsCreatorProfileInputAssetId={
-            setSelectedXhsCreatorProfileInputAssetId
-          }
-          onSelectProfileInputAssetId={setSelectedProfileInputAssetId}
-          onChooseTextMaterial={chooseTextMaterial}
-          onChooseTrendMaterial={chooseTrendMaterial}
-          onSetSelectedVideoWorkflowMediaAssetIds={
-            setSelectedVideoWorkflowMediaAssetIds
-          }
-          onSimulationTopicChange={setSimulationTopic}
-          onSetMode={setMode}
-          onApplyDemoSample={applyDemoSample}
-          onRunDiagnosis={runDiagnosis}
-          onRunAudienceSimulation={runAudienceSimulation}
-          onDownloadAnalysisRunsCsv={downloadAnalysisRunsCsv}
-        />
-        {renderWorkflowOutputPanel(
-          targetTab,
-          workflowOutputKindByWorkflow[targetTab] === 'simulation'
-            ? simulationStageViews
-            : analysisStageViewsByWorkflow[targetTab],
-          workflowOutputKindByWorkflow[targetTab],
-        )}
-      </div>
-    )
-  }
-
-  function renderWorkflowOutputPanel(
-    targetTab: WorkflowTab,
-    views: StageView[],
-    outputKind: WorkflowOutputKind,
-  ) {
-    return (
-      <WorkflowOutputPanel
+      <WorkflowRunPage
         targetTab={targetTab}
-        views={views}
+        mode={mode}
+        running={running}
+        simulationTopic={simulationTopic}
+        selectedXhsCreatorProfileInputAssetId={
+          selectedXhsCreatorProfileInputAssetId
+        }
+        xhsCreatorProfileMaterial={xhsCreatorProfileMaterial}
+        xhsCreatorProfileMaterials={xhsCreatorProfileMaterials}
+        selectedProfileMaterial={selectedProfileMaterial}
+        accountProfileMaterials={accountProfileMaterials}
+        historicalMaterial={historicalMaterial}
+        historicalMaterials={historicalMaterials}
+        commentsMaterial={commentsMaterial}
+        commentsMaterials={commentsMaterials}
+        trendMaterial={trendMaterial}
+        trendMaterials={trendMaterials}
+        videoCreatorSamplesMaterial={videoCreatorSamplesMaterial}
+        videoCreatorSamplesMaterials={videoCreatorSamplesMaterials}
+        mediaAssets={mediaAssets}
+        selectedVideoWorkflowMediaAssetIds={selectedVideoWorkflowMediaAssetIds}
+        videoWorkflowMediaAssets={videoWorkflowMediaAssets}
+        onSelectXhsCreatorProfileInputAssetId={
+          setSelectedXhsCreatorProfileInputAssetId
+        }
+        onSelectProfileInputAssetId={setSelectedProfileInputAssetId}
+        onChooseTextMaterial={chooseTextMaterial}
+        onChooseTrendMaterial={chooseTrendMaterial}
+        onSetSelectedVideoWorkflowMediaAssetIds={
+          setSelectedVideoWorkflowMediaAssetIds
+        }
+        onSimulationTopicChange={setSimulationTopic}
+        onSetMode={setMode}
+        onApplyDemoSample={applyDemoSample}
+        onRunDiagnosis={runDiagnosis}
+        onRunAudienceSimulation={runAudienceSimulation}
+        onDownloadAnalysisRunsCsv={downloadAnalysisRunsCsv}
+        views={
+          outputKind === 'simulation'
+            ? simulationStageViews
+            : analysisStageViewsByWorkflow[targetTab]
+        }
         outputKind={outputKind}
         runError={runError}
         renderStageResult={renderStageResult}
@@ -3329,152 +3116,6 @@ function WorkspaceApp() {
         onApplyProposal={applyAssetProposal}
         onRejectProposal={rejectAssetProposal}
       />
-    )
-  }
-
-  function renderSkillsPage() {
-    const grouped = skills.reduce<Record<string, SkillSummary[]>>((acc, skill) => {
-      acc[skill.category] = [...(acc[skill.category] || []), skill]
-      return acc
-    }, {})
-    return (
-      <div className="workspace-page">
-        <section className="history-list">
-          <div className="panel-title">✦ Skills</div>
-          <p className="subline">
-            Skills 是当前 workspace 可组合的产品能力资产；用户侧只读展示 contract，
-            不提供通用 agent builder。
-          </p>
-          <div className="asset-maker-call">
-            <span>不要手填 contract：描述你需要的能力，让 Capability Maker 生成 Skill 提案。</span>
-            <button
-              className="small-primary"
-              disabled={agentConversationCreating}
-              onClick={() =>
-                startMakerConversation(
-                  MAKER_AGENT_IDS.skill,
-                  '我想设计一个新的 Skill，用来：\n\n它应该读取哪些 workspace 资产：\n\n它应该输出什么结构：',
-                  selectedSkill
-                    ? { assetType: 'skill', assetId: selectedSkill.id }
-                    : undefined,
-                )
-              }
-            >
-              让 Capability Maker 设计 Skill
-            </button>
-          </div>
-          {Object.entries(grouped).map(([category, items]) => (
-            <div key={category} className="skill-group">
-              <label>{category}</label>
-              {items.map((skill) => (
-                <button
-                  key={skill.id}
-                  className={`run-row ${selectedSkill?.id === skill.id ? 'active' : ''}`}
-                  onClick={() => openSkill(skill.id)}
-                >
-                  <span>{skill.displayName}</span>
-                  <b className={capabilityStatusClass(skill.status)}>{skill.status}</b>
-                  <small>{skill.skillId}</small>
-                </button>
-              ))}
-            </div>
-          ))}
-        </section>
-        <section className="history-detail">
-          {selectedSkill ? (
-            <>
-              <div className="detail-head">
-                <div>
-                  <h2>{selectedSkill.displayName}</h2>
-                  <p>
-                    {selectedSkill.skillId} · {selectedSkill.category} ·{' '}
-                    {selectedSkill.source} · {selectedSkill.version}
-                  </p>
-                </div>
-                <span className={capabilityStatusClass(selectedSkill.status)}>
-                  {selectedSkill.status}
-                </span>
-              </div>
-              <div className="detail-actions">
-                <button
-                  type="button"
-                  onClick={() => startSkillDefinitionEdit(selectedSkill)}
-                >
-                  编辑 contract
-                </button>
-                <button
-                  type="button"
-                  disabled={agentConversationCreating}
-                  onClick={() =>
-                    startMakerConversation(
-                      MAKER_AGENT_IDS.skill,
-                      `我想调优这个 Skill：${selectedSkill.displayName}\n\n需要修改的 rubric / prompt / 输出结构：`,
-                      { assetType: 'skill', assetId: selectedSkill.id },
-                    )
-                  }
-                >
-                  让 Capability Maker 调优
-                </button>
-              </div>
-              {renderCapabilityDefinitionDiffPanel('skill')}
-              <SkillDefinitionEditor
-                selectedSkill={selectedSkill}
-                draft={skillDefinitionDraft}
-                saving={skillDefinitionSaving}
-                status={skillDefinitionStatus}
-                onDraftChange={setSkillDefinitionDraft}
-                onStatusChange={setSkillDefinitionStatus}
-                onSave={saveSkillDefinition}
-              />
-              <SkillTestPanel
-                skill={selectedSkill}
-                skillTestMode={skillTestMode}
-                skillTestInput={skillTestInput}
-                skillTestStatus={skillTestStatus}
-                skillTestError={skillTestError}
-                skillTestResult={skillTestResult}
-                onSkillTestModeChange={setSkillTestMode}
-                onSkillTestInputChange={(value) => {
-                  setSkillTestInput(value)
-                  setSkillTestStatus('idle')
-                  setSkillTestResult(null)
-                  setSkillTestError('')
-                }}
-                onRunSkillTest={runSkillTest}
-              />
-              <p>{selectedSkill.purpose}</p>
-              <label>Artifact Effect</label>
-              <div className="why">{selectedSkill.artifactEffect}</div>
-              <label>Required Inputs</label>
-              <ListBlock title="输入" items={selectedSkill.requiredInputs} />
-              <label>Optional Inputs</label>
-              <ListBlock title="可选" items={selectedSkill.optionalInputs} />
-              <label>Composable With</label>
-              <ListBlock title="下游 Skill" items={selectedSkill.composableWith} />
-              <label>Failure Mode</label>
-              <div className="why">{selectedSkill.failureMode}</div>
-              <label>Context Policy</label>
-              <pre className="json-preview">
-                {JSON.stringify(selectedSkill.contextPolicy, null, 2)}
-              </pre>
-              <label>Output Schema</label>
-              <pre className="json-preview">
-                {JSON.stringify(selectedSkill.outputSchema, null, 2)}
-              </pre>
-              <label>Implementation Refs</label>
-              <ListBlock title="代码引用" items={selectedSkill.implementationRefs} />
-              {selectedSkill.userNotes && (
-                <>
-                  <label>Workspace Notes</label>
-                  <div className="why">{selectedSkill.userNotes}</div>
-                </>
-              )}
-            </>
-          ) : (
-            <div className="empty-card">选择一个 Skill 查看输入、输出和组合边界。</div>
-          )}
-        </section>
-      </div>
     )
   }
 

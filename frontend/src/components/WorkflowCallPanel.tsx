@@ -10,7 +10,7 @@ import type {
 import type { GenerationMode, WorkflowTab } from '../workflows'
 import { xhsCreatorProfileSummaryFromAsset } from '../xhsCreatorProfile'
 
-type WorkflowCallPanelProps = {
+export type WorkflowCallPanelProps = {
   targetTab: WorkflowTab
   mode: GenerationMode
   running: boolean

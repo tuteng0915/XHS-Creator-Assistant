@@ -129,6 +129,7 @@ https://your-domain/api/...
 - 账号诊断、热点分析、受众模拟已经接入 LangGraph；
 - 视频博主质量诊断已按同一产品接口实现，支持小红书创作者主页派生 evidence pack，也兼容视频创作样本文本，并可选择已保存的图文/视频素材 compact understanding 作为补充上下文；
 - 视频博主质量诊断结果页已强化证据边界展示：当缺少真实视频理解、图片理解或评论证据时，质量判断和激励适配会明确显示不可可靠评估项与建议补充证据；
+- 视频博主质量诊断已用真实 Qwen live 路径回归 `_tt` 和 `QSheep` 两个小红书导入 fixture：两者均能完成 `creator_profile`、`video_quality`、`incentive_fit` 三个 stage；`_tt` 因没有 video 类型笔记，会保守保留 evidenceLimitations 和 cannotAssess；
 - 运行结果、stage 结果、错误和 input snapshot 会持久化。
 - “下期选题”只用于受众模拟，不是账号诊断、热点分析或视频质量诊断的必填输入。
 - 选题后的推荐链路已经从“直接生成结构”扩展为 Topic → Content Brief → Content Structure；Topic 直接生成结构仍保留为快捷兼容路径。
@@ -262,6 +263,7 @@ agent conversation 现在已经不是同步等待模型完成：
 - 已按 model operation 校验必要根字段和基本字段类型，例如 `painPoints` 必须是 list，`creatorProfile` 必须是 object。
 - 图片/视频理解已要求结构化 JSON，并把 `imageUnderstanding` / `videoUnderstanding` 保存到 media asset derived JSON。
 - 已加入脱敏 qwen fixture 测试，覆盖 wrapper、fenced JSON 和 snake_case/camelCase root alias 归一。
+- 视频诊断 score 字段已加固：Qwen 偶尔把 0-100 分数输出为 `0~1` 小数时，会在视频 workflow schema 层归一为百分制整数，例如 `0.55 -> 55`。
 - 后续仍可增加 action-type 级 schema、字段级 repair 和真实响应 fixture。
 
 ### P1：前端结构继续拆分

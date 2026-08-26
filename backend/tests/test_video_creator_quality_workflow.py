@@ -7,6 +7,8 @@ from test_workspace_api import create_workspace, send
 from app.workflows.video_creator_quality import (
     VIDEO_CREATOR_QUALITY_GRAPH_NODE_ORDER,
     FakeVideoCreatorQualityModelProvider,
+    IncentiveFitStageResult,
+    VideoQualityStageResult,
 )
 
 
@@ -231,6 +233,32 @@ def collect(app: FastAPI, run_id: str, stop_after_node: str | None = None) -> li
             run_id, stop_after_node=stop_after_node
         )
     )
+
+
+def test_video_creator_quality_scores_accept_qwen_fractional_values() -> None:
+    quality = VideoQualityStageResult.model_validate(
+        {
+            "videoQuality": {
+                "overallScore": 0.72,
+                "level": "中",
+                "dimensionScores": [
+                    {"dimension": "visualExecution", "score": "65%", "reason": "封面可用"}
+                ],
+            }
+        }
+    )
+    fit = IncentiveFitStageResult.model_validate(
+        {
+            "incentiveFit": {
+                "recommendation": "conditional_fit",
+                "fitScore": 0.55,
+            }
+        }
+    )
+
+    assert quality.videoQuality.overallScore == 72
+    assert quality.videoQuality.dimensionScores[0].score == 65
+    assert fit.incentiveFit.fitScore == 55
 
 
 def test_video_creator_graph_state_keeps_full_samples_outside_state(

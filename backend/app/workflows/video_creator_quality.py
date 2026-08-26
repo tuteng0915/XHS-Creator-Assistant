@@ -7,7 +7,7 @@ from typing import Any, Literal, Protocol, TypedDict
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from app.db.database import SQLiteDatabase
@@ -95,6 +95,11 @@ class VideoQualityDimensionScore(BaseModel):
     score: int
     reason: str = ""
 
+    @field_validator("score", mode="before")
+    @classmethod
+    def normalize_dimension_score(cls, value: Any) -> int:
+        return normalize_score(value)
+
 
 class VideoQualityData(BaseModel):
     overallScore: int
@@ -108,6 +113,11 @@ class VideoQualityData(BaseModel):
     evidenceLimitations: list[str] = Field(default_factory=list)
     cannotAssess: list[str] = Field(default_factory=list)
     recommendedNextEvidence: list[str] = Field(default_factory=list)
+
+    @field_validator("overallScore", mode="before")
+    @classmethod
+    def normalize_overall_score(cls, value: Any) -> int:
+        return normalize_score(value)
 
 
 class VideoQualityStageResult(BaseModel):
@@ -133,9 +143,28 @@ class IncentiveFitData(BaseModel):
     evidenceLimitations: list[str] = Field(default_factory=list)
     recommendedNextEvidence: list[str] = Field(default_factory=list)
 
+    @field_validator("fitScore", mode="before")
+    @classmethod
+    def normalize_fit_score(cls, value: Any) -> int:
+        return normalize_score(value)
+
 
 class IncentiveFitStageResult(BaseModel):
     incentiveFit: IncentiveFitData
+
+
+def normalize_score(value: Any) -> int:
+    if isinstance(value, str):
+        stripped = value.strip().rstrip("%")
+        value = float(stripped)
+    if isinstance(value, bool):
+        raise ValueError("score must be numeric")
+    if isinstance(value, int):
+        return max(0, min(100, value))
+    if isinstance(value, float):
+        score = value * 100 if 0 <= value <= 1 else value
+        return max(0, min(100, round(score)))
+    raise ValueError("score must be numeric")
 
 
 class VideoCreatorQualityModelProvider(Protocol):

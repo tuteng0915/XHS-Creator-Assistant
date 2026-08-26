@@ -8,6 +8,8 @@ import {
 } from './capabilityDefinitionValidation'
 import type {
   Agent,
+  Draft,
+  DraftSummary,
   InputAsset,
   ReviewStatus,
   SimulationRun,
@@ -492,4 +494,23 @@ export function getTopicsFromStage(result: unknown): TopicCandidate[] {
   if (!result || typeof result !== 'object') return []
   const topics = (result as { topics?: unknown }).topics
   return Array.isArray(topics) ? (topics as TopicCandidate[]) : []
+}
+
+export function draftDisplayTitle(draft: Draft) {
+  const inputTopic = draft.inputSnapshot.topic as { title?: string } | undefined
+  const brief = (draft.editableContent.brief || {}) as {
+    topicTitle?: string
+    refinedAngle?: string
+  }
+  if (draft.kind === 'content_brief') {
+    return brief.topicTitle || inputTopic?.title || '创作 Brief'
+  }
+  const structure = (draft.editableContent.structure || {}) as {
+    topicChosen?: string
+  }
+  return structure.topicChosen || inputTopic?.title || '内容结构'
+}
+
+export function draftKindLabel(draft: Draft | DraftSummary) {
+  return draft.kind === 'content_brief' ? '创作 Brief' : '内容结构'
 }
