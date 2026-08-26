@@ -28,8 +28,10 @@ import { AccountProfilePage } from './components/AccountProfilePage'
 import { AgentConversationPanel } from './components/AgentConversationPanel'
 import { AgentsPage } from './components/AgentsPage'
 import { ConversationsPage } from './components/ConversationsPage'
+import { DraftsPage } from './components/DraftsPage'
 import { InputAssetsPage } from './components/InputAssetsPage'
 import { MediaAssetsPage } from './components/MediaAssetsPage'
+import { SimulationHistoryPage } from './components/SimulationHistoryPage'
 import {
   agentPlanJsonWithTasks,
   listFromText,
@@ -58,6 +60,7 @@ import {
   VideoQualityView,
   type SaveState,
 } from './components/StageResultViews'
+import { TopicLibraryPage } from './components/TopicLibraryPage'
 import { WorkspaceShell, type ActivePage } from './components/WorkspaceShell'
 import { WorkflowsPage } from './components/WorkflowsPage'
 import { WorkflowCallPanel } from './components/WorkflowCallPanel'
@@ -469,6 +472,17 @@ function isVideoRubricSkill(skillId: string): boolean {
 
 function isDirectlyInvokableSkill(skillId: string): boolean {
   return skillId.startsWith('input_asset.format_') || skillId.startsWith('media.')
+}
+
+function supportsSkillDryRun(skillId: string): boolean {
+  return (
+    skillId.startsWith('analysis.') ||
+    skillId.startsWith('topic.') ||
+    skillId.startsWith('draft.') ||
+    skillId.startsWith('simulation.') ||
+    skillId.startsWith('input_asset.format_') ||
+    skillId.startsWith('media.')
+  )
 }
 
 function defaultSkillTestInput(skill: Skill): string {
@@ -2548,7 +2562,10 @@ function WorkspaceApp() {
     setSkillTestResult(null)
     try {
       const input = JSON.parse(skillTestInput) as Record<string, unknown>
-      const result = await skillApi.invoke(selectedSkill.id, {
+      const runner = isDirectlyInvokableSkill(selectedSkill.skillId)
+        ? skillApi.invoke
+        : skillApi.dryRun
+      const result = await runner(selectedSkill.id, {
         input,
         mode: skillTestMode,
       })
@@ -3228,12 +3245,63 @@ function WorkspaceApp() {
         renderWorkflowRunPage('video')}
 
       {!loading && workspace && activePage === 'history' && renderHistoryPage()}
-      {!loading && workspace && activePage === 'topics' && renderTopicsPage()}
-      {!loading && workspace && activePage === 'drafts' && renderDraftsPage()}
-      {!loading &&
-        workspace &&
-        activePage === 'simulations' &&
-        renderSimulationsPage()}
+      {!loading && workspace && activePage === 'topics' && (
+        <TopicLibraryPage
+          visibleTopics={visibleTopics}
+          selectedTopic={selectedTopic}
+          topicFilter={topicFilter}
+          manualTopicTitle={manualTopicTitle}
+          manualTopicAngle={manualTopicAngle}
+          topicDraft={topicDraft}
+          manualTopicSaveState={saveStates.manualTopic}
+          topicSaveState={saveStates.topic}
+          onManualTopicTitleChange={setManualTopicTitle}
+          onManualTopicAngleChange={setManualTopicAngle}
+          onSaveManualTopic={saveManualTopic}
+          onTopicFilterChange={setTopicFilter}
+          onSelectTopicRow={setSelectedTopic}
+          onSelectCurrentTopic={selectTopic}
+          onGenerateBrief={generateBriefForTopic}
+          onGenerateDraft={generateDraftForTopic}
+          onArchiveTopic={archiveTopic}
+          onTopicDraftChange={setTopicDraft}
+          onSaveTopicEdits={updateSelectedTopic}
+        />
+      )}
+      {!loading && workspace && activePage === 'drafts' && (
+        <DraftsPage
+          drafts={drafts}
+          selectedDraft={selectedDraft}
+          draftEditor={draftEditor}
+          draftSaveState={saveStates.draft}
+          onOpenDraft={openDraft}
+          onDraftEditorChange={(value) => {
+            setDraftEditor(value)
+            setSaveState('draft', idleState)
+          }}
+          onSaveDraftEdits={saveDraftEdits}
+          onGenerateStructureFromBrief={generateStructureFromBrief}
+          onRunAudienceSimulation={runAudienceSimulation}
+          renderDraftStructure={renderDraftStructure}
+          draftDisplayTitle={draftDisplayTitle}
+          draftKindLabel={draftKindLabel}
+        />
+      )}
+      {!loading && workspace && activePage === 'simulations' && (
+        <SimulationHistoryPage
+          simulationRuns={simulationRuns}
+          selectedSimulationRun={selectedSimulationRun}
+          simulationReviewDraft={simulationReviewDraft}
+          simulationReviewSaveState={saveStates.simulationReview}
+          reviewStatusLabel={reviewStatusLabel}
+          onOpenSimulationRun={openSimulationRun}
+          onSimulationReviewDraftChange={setSimulationReviewDraft}
+          onSaveSimulationRunReview={saveSimulationRunReview}
+          renderRunReviewEditor={renderRunReviewEditor}
+          stageSeedFromSimulation={stageSeedFromSimulation}
+          renderStageResult={renderStageResult}
+        />
+      )}
       {!loading &&
         workspace &&
         activePage === 'conversations' &&
@@ -3764,301 +3832,6 @@ function WorkspaceApp() {
     )
   }
 
-  function renderTopicsPage() {
-    return (
-      <div className="workspace-page topics-page">
-        <section className="history-list">
-          <div className="panel-title">◇ 选题库</div>
-          <form className="manual-topic" onSubmit={saveManualTopic}>
-            <input
-              aria-label="手动选题标题"
-              placeholder="手动输入选题"
-              value={manualTopicTitle}
-              onChange={(event) => setManualTopicTitle(event.target.value)}
-            />
-            <textarea
-              aria-label="手动选题角度"
-              placeholder="切入角度"
-              rows={2}
-              value={manualTopicAngle}
-              onChange={(event) => setManualTopicAngle(event.target.value)}
-            />
-            <div className="save-row">
-              <button className="small-primary">保存选题</button>
-              <SaveIndicator state={saveStates.manualTopic} />
-            </div>
-          </form>
-          <div className="filter-row">
-            {(['all', 'account_diagnosis', 'trend_analysis', 'manual'] as const).map(
-              (item) => (
-                <button
-                  key={item}
-                  className={topicFilter === item ? 'active' : ''}
-                  onClick={() => setTopicFilter(item)}
-                >
-                  {item === 'all'
-                    ? '全部'
-                    : item === 'account_diagnosis'
-                      ? '账号诊断'
-                      : item === 'trend_analysis'
-                        ? '热点分析'
-                        : '手动'}
-                </button>
-              ),
-            )}
-          </div>
-          {visibleTopics.map((topic) => (
-            <button
-              key={topic.id}
-              className={`topic-row ${selectedTopic?.id === topic.id ? 'active' : ''}`}
-              onClick={() => setSelectedTopic(topic)}
-            >
-              <span>{topic.title}</span>
-              <b>{topic.status}</b>
-              <small>{topic.sourceWorkflow}</small>
-            </button>
-          ))}
-        </section>
-        <section className="history-detail">
-          {selectedTopic ? (
-            <>
-              <div className="detail-head asset-detail-head">
-                <div>
-                  <h2>{selectedTopic.title}</h2>
-                  <p>
-                    {selectedTopic.sourceWorkflow} · {selectedTopic.status}
-                  </p>
-                </div>
-                <div className="detail-actions">
-                  <button onClick={() => selectTopic(selectedTopic)}>设为当前</button>
-                  <button onClick={() => generateBriefForTopic(selectedTopic)}>
-                    生成创作 Brief
-                  </button>
-                  <button onClick={() => generateDraftForTopic(selectedTopic)}>
-                    生成内容结构
-                  </button>
-                  <button onClick={() => archiveTopic(selectedTopic)}>归档</button>
-                </div>
-              </div>
-              <div className="asset-detail-card">
-                <div className="asset-section-head">
-                  <h3>可编辑资产字段</h3>
-                  <span>用户编辑区</span>
-                </div>
-                <label htmlFor="topic-title">标题</label>
-                <input
-                  id="topic-title"
-                  value={topicDraft.title}
-                  onChange={(event) =>
-                    setTopicDraft((current) => ({
-                      ...current,
-                      title: event.target.value,
-                    }))
-                  }
-                />
-                <label htmlFor="topic-angle">切入角度</label>
-                <textarea
-                  id="topic-angle"
-                  rows={4}
-                  value={topicDraft.angle}
-                  onChange={(event) =>
-                    setTopicDraft((current) => ({
-                      ...current,
-                      angle: event.target.value,
-                    }))
-                  }
-                />
-                <div className="save-row">
-                  <button className="save-button" onClick={updateSelectedTopic}>
-                    保存选题资产
-                  </button>
-                  <SaveIndicator state={saveStates.topic} />
-                </div>
-              </div>
-              <div className="asset-detail-card readonly">
-                <div className="asset-section-head">
-                  <h3>来源与适配理由</h3>
-                  <span>只读</span>
-                </div>
-                <div className="asset-meta-grid">
-                  <div>
-                    <b>来源 workflow</b>
-                    <span>{selectedTopic.sourceWorkflow}</span>
-                  </div>
-                  <div>
-                    <b>来源分析</b>
-                    <span>{selectedTopic.sourceAnalysisRunId || '无'}</span>
-                  </div>
-                  <div>
-                    <b>创建时间</b>
-                    <span>{new Date(selectedTopic.createdAt).toLocaleString()}</span>
-                  </div>
-                  <div>
-                    <b>更新时间</b>
-                    <span>{new Date(selectedTopic.updatedAt).toLocaleString()}</span>
-                  </div>
-                </div>
-                <label>关联痛点</label>
-                <div className="readonly-box">
-                  {selectedTopic.associatedPainPoint || '无'}
-                </div>
-                <label>为什么适合</label>
-                <div className="readonly-box">{selectedTopic.whyItFits || '无'}</div>
-                <details className="asset-json-details">
-                  <summary>Generated Snapshot</summary>
-                  <pre className="json-preview">
-                    {JSON.stringify(selectedTopic.generatedSnapshot, null, 2)}
-                  </pre>
-                </details>
-              </div>
-            </>
-          ) : (
-            <div className="empty-card">选择或创建一个选题。</div>
-          )}
-        </section>
-      </div>
-    )
-  }
-
-  function renderDraftsPage() {
-    return (
-      <div className="workspace-page">
-        <section className="history-list">
-          <div className="panel-title">▱ 创作输出</div>
-          {drafts.length === 0 ? (
-            <div className="empty-card">
-              暂无创作 Brief 或内容结构。请先从选题生成 Brief，再继续生成结构。
-            </div>
-          ) : (
-            drafts.map((draft) => (
-              <button
-                key={draft.id}
-                className={`run-row ${selectedDraft?.id === draft.id ? 'active' : ''}`}
-                onClick={() => openDraft(draft.id)}
-              >
-                <span>
-                  {draft.sourceWorkflow === 'trend_analysis' ? '热点' : '账号'} ·{' '}
-                  {draftKindLabel(draft)}
-                </span>
-                <b>{draft.status}</b>
-                <small>{new Date(draft.createdAt).toLocaleString()}</small>
-              </button>
-            ))
-          )}
-        </section>
-        <section className="history-detail">
-          {selectedDraft ? (
-            <>
-              <div className="detail-head asset-detail-head">
-                <div>
-                  <h2>{draftDisplayTitle(selectedDraft)}</h2>
-                  <p>
-                    {draftKindLabel(selectedDraft)} · {selectedDraft.status} ·{' '}
-                    {new Date(selectedDraft.createdAt).toLocaleString()}
-                  </p>
-                </div>
-                <div className="detail-actions">
-                  {selectedDraft.kind === 'content_brief' && (
-                    <button onClick={() => generateStructureFromBrief(selectedDraft)}>
-                      继续生成内容结构
-                    </button>
-                  )}
-                  <button onClick={() => runAudienceSimulation(selectedDraft)}>
-                    发送到受众模拟
-                  </button>
-                </div>
-              </div>
-              <div className="asset-detail-card">
-                <div className="asset-section-head">
-                  <h3>可编辑内容</h3>
-                  <span>用户编辑区</span>
-                </div>
-                <label htmlFor="draft-editor">Editable Content JSON</label>
-                <textarea
-                  id="draft-editor"
-                  rows={12}
-                  value={draftEditor}
-                  onChange={(event) => {
-                    setDraftEditor(event.target.value)
-                    setSaveState('draft', idleState)
-                  }}
-                />
-                <div className="save-row">
-                  <button className="save-button" onClick={saveDraftEdits}>
-                    保存创作输出资产
-                  </button>
-                  <SaveIndicator state={saveStates.draft} />
-                </div>
-              </div>
-              <div className="asset-detail-card readonly">
-                <div className="asset-section-head">
-                  <h3>生成快照</h3>
-                  <span>只读</span>
-                </div>
-                {renderDraftStructure(selectedDraft.generatedSnapshot)}
-              </div>
-              <div className="asset-detail-card readonly">
-                <div className="asset-section-head">
-                  <h3>来源与执行记录</h3>
-                  <span>只读</span>
-                </div>
-                <div className="asset-meta-grid">
-                  <div>
-                    <b>类型</b>
-                    <span>{draftKindLabel(selectedDraft)}</span>
-                  </div>
-                  <div>
-                    <b>来源 workflow</b>
-                    <span>{selectedDraft.sourceWorkflow}</span>
-                  </div>
-                  <div>
-                    <b>Topic ID</b>
-                    <span>{selectedDraft.topicId}</span>
-                  </div>
-                  <div>
-                    <b>来源分析</b>
-                    <span>{selectedDraft.sourceAnalysisRunId || '无'}</span>
-                  </div>
-                  <div>
-                    <b>创建时间</b>
-                    <span>{new Date(selectedDraft.createdAt).toLocaleString()}</span>
-                  </div>
-                  <div>
-                    <b>更新时间</b>
-                    <span>{new Date(selectedDraft.updatedAt).toLocaleString()}</span>
-                  </div>
-                </div>
-                <details className="asset-json-details" open>
-                  <summary>Input Snapshot</summary>
-                  <pre className="json-preview">
-                    {JSON.stringify(selectedDraft.inputSnapshot, null, 2)}
-                  </pre>
-                </details>
-                <details className="asset-json-details">
-                  <summary>Stage Errors / Model Metadata</summary>
-                  <pre className="json-preview">
-                    {JSON.stringify(
-                      {
-                        stageErrors: selectedDraft.stageErrors,
-                        modelMetadata: selectedDraft.modelMetadata,
-                      },
-                      null,
-                      2,
-                    )}
-                  </pre>
-                </details>
-              </div>
-            </>
-          ) : (
-            <div className="empty-card">
-              选择一个创作 Brief 或内容结构，查看生成快照和当前编辑内容。
-            </div>
-          )}
-        </section>
-      </div>
-    )
-  }
-
   function renderCapabilityDefinitionDiffPanel(assetType: CapabilityAssetType) {
     const isCurrentDiff = definitionDiff?.assetType === assetType
     const statusText =
@@ -4403,19 +4176,25 @@ function WorkspaceApp() {
 
   function renderSkillTestPanel(skill: Skill) {
     const canInvoke = isDirectlyInvokableSkill(skill.skillId)
+    const canDryRun = supportsSkillDryRun(skill.skillId)
     return (
       <div className="source-editor-card skill-test-card">
         <div className="detail-head compact">
           <div>
             <h3>Skill Test</h3>
-            <p>用当前 Skill 的受控 invoke API 做一次最小测试。</p>
+            <p>用当前 Skill 的受控 invoke / dry-run API 做一次最小测试。</p>
           </div>
-          {canInvoke ? <span>invoke-ready</span> : <span>workflow-only</span>}
+          {canInvoke ? (
+            <span>invoke-ready</span>
+          ) : canDryRun ? (
+            <span>dry-run-ready</span>
+          ) : (
+            <span>workflow-only</span>
+          )}
         </div>
-        {!canInvoke ? (
+        {!canInvoke && !canDryRun ? (
           <div className="empty-card">
-            这个 Skill 当前不能单独 invoke。它会通过绑定的产品 workflow 执行；后续需要补
-            dry-run 才能直接测试分析类 Skill。
+            这个 Skill 当前不能单独 invoke 或 dry-run。它会通过绑定的产品 workflow 执行。
           </div>
         ) : (
           <>
@@ -4434,7 +4213,7 @@ function WorkspaceApp() {
                 </select>
               </div>
               <div className="skill-test-hint">
-                demo 不消耗模型；live 会使用后端已配置的模型 provider。
+                invoke-ready 可在 live 模式调用真实后端；dry-run 不写业务资产。
               </div>
             </div>
             <label htmlFor="skill-test-input">Input JSON</label>
@@ -5176,76 +4955,6 @@ function WorkspaceApp() {
     )
   }
 
-  function renderSimulationsPage() {
-    return (
-      <div className="workspace-page">
-        <section className="history-list">
-          <div className="panel-title">👥 受众模拟</div>
-          {simulationRuns.length === 0 ? (
-            <div className="empty-card">暂无受众模拟。</div>
-          ) : (
-            simulationRuns.map((run) => (
-              <button
-                key={run.id}
-                className={`run-row ${
-                  selectedSimulationRun?.id === run.id ? 'active' : ''
-                }`}
-                onClick={() => openSimulationRun(run.id)}
-              >
-                <span>受众模拟</span>
-                <b>{run.status}</b>
-                <small>{reviewStatusLabel(run.reviewStatus)}</small>
-                <small>{new Date(run.createdAt).toLocaleString()}</small>
-              </button>
-            ))
-          )}
-        </section>
-        <section className="history-detail">
-          {selectedSimulationRun ? (
-            <>
-              <div className="detail-head">
-                <div>
-                  <h2>受众模拟</h2>
-                  <p>
-                    {selectedSimulationRun.status} ·{' '}
-                    {new Date(selectedSimulationRun.createdAt).toLocaleString()}
-                  </p>
-                </div>
-                <button onClick={() => openSimulationRun(selectedSimulationRun.id, true)}>
-                  在输出区打开
-                </button>
-              </div>
-              {renderRunReviewEditor({
-                idPrefix: 'simulation-run-review',
-                draft: simulationReviewDraft,
-                onDraftChange: setSimulationReviewDraft,
-                onSave: saveSimulationRunReview,
-                saveState: saveStates.simulationReview,
-                hint: '受众角色、反应、辩论和综合结论是不可变历史；这里仅保存人工复盘判断。',
-              })}
-              <label>原始输入快照</label>
-              <pre className="json-preview">
-                {JSON.stringify(selectedSimulationRun.inputSnapshot, null, 2)}
-              </pre>
-              <label>模拟结果</label>
-              {stageSeedFromSimulation(selectedSimulationRun).map((stage) => (
-                <div className="stage compact" key={stage.key}>
-                  <div className="stage-h">
-                    <div className="stage-n">{stage.n}</div>
-                    <h3>{stage.title}</h3>
-                  </div>
-                  {stage.error && <div className="err">{stage.error}</div>}
-                  {renderStageResult(stage)}
-                </div>
-              ))}
-            </>
-          ) : (
-            <div className="empty-card">选择一次受众模拟查看输入和结果。</div>
-          )}
-        </section>
-      </div>
-    )
-  }
 }
 
 function App() {

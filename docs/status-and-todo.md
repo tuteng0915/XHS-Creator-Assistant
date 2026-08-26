@@ -1,6 +1,6 @@
 # 当前状态与 TODO
 
-更新日期：2026-08-24
+更新日期：2026-08-26
 
 本文档只记录当前实现状态、明确限制和 TODO。产品设计思想和功能全貌见 `docs/product-design.md`；更细的 PRD 和验收标准见 `docs/product-requirements.md`。
 
@@ -165,6 +165,7 @@ https://your-domain/api/...
 - PM 已可以在 Workflows 详情页直接编辑 Workflow definition，包括 entryAgentIds、agentPlan、artifactEffect、callBinding、version 和 notes；后端会校验引用的 agent / skill 是否存在。
 - PM 已可以在 Skill / Agent / Workflow 详情页查看 workspace generated override 与 builtin definition 的差异，并用乐观并发保护恢复内置版本；恢复时保留 workspace 备注和启用状态。
 - Agent 详情页的 skill 引用、Workflow 详情页的 entry agent / task agent / task skill 引用已经可点击跳转到对应能力资产，便于 PM 调试组合关系。
+- Skill 详情页已经支持两类测试：`input_asset.format_*` 和 `media.*` 走受控 invoke；analysis/topic/draft/simulation/video 诊断类 Skill 走 dry-run，返回结构化样例输出，不写业务资产。
 
 ### 模型调用
 
@@ -180,6 +181,7 @@ https://your-domain/api/...
 - 后端已支持通过 `.env.local` 配置 qwen OpenAI-compatible endpoint；
 - agent conversation 的 live 路径已经走后端模型 provider；
 - qwen 请求会尽量使用 JSON response format；解析器可从 fenced JSON、前后带解释文字的 JSON、`data/result/output` 外层包裹，以及 OpenAI-compatible `function_call/tool_calls.arguments` 中提取结构化 JSON；
+- qwen 结构化解析会归一部分常见字段别名，例如 `pain_points -> painPoints`、`proposed_actions -> proposedActions`、`video_quality -> videoQuality`，归一后仍按 operation 校验产品 root schema；
 - 图片理解和视频理解已通过 Qwen vision chat completions 接入为受控 skills；
 - 本地上传视频理解会先抽取预览帧，再把帧作为图片输入发送给 Qwen；完整视频文件不会直接发送；
 - 图片生成和视频生成已通过 DashScope async task 接入为受控 skills；
@@ -189,7 +191,7 @@ https://your-domain/api/...
 - 理解结果先展示为草稿，用户确认后才写回 `MediaAsset.derived`；
 - `scripts/smoke_qwen_media.py` 可用于真实 API smoke test，不进入常规自动化测试；
 - 自动化测试仍默认使用 fake provider，避免 CI 或本地测试消耗模型额度；
-- 完整 workflow live smoke test 可以按需手动执行，不作为常规测试前置条件。
+- 完整 workflow smoke test 可用 `scripts/smoke_live_workflows.py` 在不打开前端的情况下跑账号诊断、热点分析和视频博主质量诊断；默认 demo，不作为常规测试前置条件，`--mode live` 才会消耗模型额度。
 
 最近一次真实 smoke 结果：
 
@@ -200,7 +202,7 @@ https://your-domain/api/...
 
 ## 当前 TODO
 
-### P1：资产 proposal 编辑与校验
+### 已完成：资产 proposal 编辑、校验与 Skill dry-run
 
 - Capability Maker 已经可以拿到 capability catalog。
 - Maker conversation 已经可以携带当前正在查看的具体 Skill / Agent / Workflow 作为 context target。
@@ -211,11 +213,11 @@ https://your-domain/api/...
 - Skill / Agent / Workflow proposal 已有基础字段校验、stable id 不可变校验和引用存在性校验。
 - Skill 详情页已经支持直接编辑 contract；视频诊断 Skill 已支持 Rubric 表单化编辑。
 - Agent 详情页已经支持用 checklist 组合 Skills；Workflow 详情页已经支持用 task 表格编辑 agentPlan.tasks。
-- Skill 详情页已经有最小 Skill Test 面板，可直接测试 `input_asset.format_*` 和 `media.*` 这类已有 invoke 实现的受控 Skill。
+- Skill 详情页已经有最小 Skill Test 面板，可直接测试 `input_asset.format_*` 和 `media.*` 这类已有 invoke 实现的受控 Skill，也可 dry-run 分析/选题/草稿/模拟/视频诊断类 Skill。
+- Skill dry-run 不会创建 AnalysisRun、Topic、Draft、SimulationRun 或 MediaAsset；它只验证当前 Skill contract 的输出形状。
 
 仍需增强：
 
-- Skill dry-run，用当前 workspace 资产快速测试分析类 Skill 的输入 context、模型输出和 validation；当前最小 Skill Test 只支持已有 direct invoke 的 formatter/media skills；
 - 更细粒度的 proposal schema diff，例如按 nested field 展示 agentPlan.tasks 的变化。
 
 ### P1：输入素材整理继续模型化
@@ -233,7 +235,7 @@ https://your-domain/api/...
 
 批量能力暂时从产品路线中移除。当前产品优先做好单个创作者、单组输入资产的诊断质量、证据检查、可复盘历史和 agent-assisted 资产整理。后端遗留 batch endpoint 暂保留为兼容路径，但前端不暴露，也不继续扩展。
 
-### P1：conversation 执行持久化继续增强
+### 已完成：conversation 执行持久化增强
 
 agent conversation 现在已经不是同步等待模型完成：
 
@@ -243,14 +245,14 @@ agent conversation 现在已经不是同步等待模型完成：
 - conversation summary 已包含派生 `executionStatus`；
 - 同一 conversation 存在 queued/running assistant message 时，重复发送不会创建新的 user message 或重复执行；
 - 每条前端发送的用户消息已携带 `clientMessageKey`；同一 conversation 下同一个 key 的重试会返回已有对话，不会重复创建 user/assistant message；
-- provider 失败会留下 assistant failure message。
-- assistant 占位消息会持久化 `queuedAt / startedAt / completedAt`，刷新后可以复盘单条回复的执行时间线。
+- provider 失败会留下 assistant failure message；
+- assistant 占位消息会持久化 `queuedAt / startedAt / completedAt`，刷新后可以复盘单条回复的执行时间线；
+- 每次 assistant 生成现在都有 `agent_conversation_jobs` 记录，保存 conversation、assistant message、用户输入、mode、status、attempt count 和错误；
+- 应用启动时会恢复 queued/running conversation job；旧数据仍可按 assistant metadata 兼容恢复。
 
 剩余问题：
 
-- 这仍是进程内任务，不是 SQLite durable job；
-- 进程崩溃时只能按 queued/running message 尝试恢复；
-- 还没有 SQLite claim/lease 表，所以 conversation 仍不适合承担长时间任务队列职责。
+- 这仍是单进程本地 worker，没有跨进程 claim/lease，因此不适合多进程部署或长时间任务队列。
 
 ### P1：qwen 结构化输出继续加固
 
@@ -259,7 +261,7 @@ agent conversation 现在已经不是同步等待模型完成：
 - 已支持 `data/result/output` 外层包裹解包，以及 OpenAI-compatible `function_call/tool_calls.arguments` 提取。
 - 已按 model operation 校验必要根字段和基本字段类型，例如 `painPoints` 必须是 list，`creatorProfile` 必须是 object。
 - 图片/视频理解已要求结构化 JSON，并把 `imageUnderstanding` / `videoUnderstanding` 保存到 media asset derived JSON。
-- 后续为更多 qwen 真实响应补充脱敏 fixture。
+- 已加入脱敏 qwen fixture 测试，覆盖 wrapper、fenced JSON 和 snake_case/camelCase root alias 归一。
 - 后续仍可增加 action-type 级 schema、字段级 repair 和真实响应 fixture。
 
 ### P1：前端结构继续拆分
@@ -267,9 +269,8 @@ agent conversation 现在已经不是同步等待模型完成：
 - 已将 stage/result 纯展示组件从 `App.tsx` 拆到 `frontend/src/components/StageResultViews.tsx`。
 - 已拆出 `WorkspaceShell`、媒体资产页、输入资产页、账号概况页、workflow 调用面板、workflow 输出面板和 conversation pending polling hook。
 - 已拆出帮助内容模块、workflow stage view 纯工具、AssetProposalsPanel、AgentConversationPanel、AgentsPage、WorkflowsPage 和 ConversationsPage。
+- 已拆出 TopicLibraryPage、DraftsPage、SimulationHistoryPage，并沉淀 CommonUi 的 EmptyState、ErrorBanner、JsonPreview。
 - 下一步继续拆：
-  - TopicLibraryPage；
-  - DraftsPage；
   - AnalysisHistoryPage；
   - shared workspace data hooks。
 

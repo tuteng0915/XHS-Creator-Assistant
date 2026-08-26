@@ -160,6 +160,8 @@ export interface SkillInvokeResponse {
   modelMetadata: Record<string, unknown>
 }
 
+export type SkillDryRunResponse = SkillInvokeResponse
+
 export type AgentStatus = 'enabled' | 'disabled'
 export type AgentSource = 'builtin' | 'generated'
 

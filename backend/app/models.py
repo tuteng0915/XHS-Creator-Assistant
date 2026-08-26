@@ -261,6 +261,19 @@ class SkillInvokeResponse(APIModel):
     model_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SkillDryRunRequest(APIModel):
+    input: dict[str, Any] = Field(default_factory=dict)
+    mode: Literal["demo", "live"] = "demo"
+
+
+class SkillDryRunResponse(APIModel):
+    skill_asset_id: str
+    skill_id: str
+    status: Literal["completed"]
+    output: dict[str, Any]
+    model_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class AgentStatus(StrEnum):
     ENABLED = "enabled"
     DISABLED = "disabled"

@@ -179,3 +179,37 @@ def test_non_callable_skill_returns_clear_error(app: FastAPI) -> None:
 
     assert response.status_code == 422
     assert "only supports direct invocation" in response.json()["detail"]
+
+
+def test_analysis_skill_supports_dry_run_without_persistence(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    skills = send(app, "GET", f"/api/workspaces/{workspace['id']}/skills").json()
+    analysis_skill = next(
+        item for item in skills if item["skillId"] == "analysis.profile_from_history"
+    )
+
+    response = send(
+        app,
+        "POST",
+        f"/api/skills/{analysis_skill['id']}/dry-run",
+        json={
+            "mode": "live",
+            "input": {
+                "positioningSnapshot": "留学账号",
+                "historicalPosts": "选校避坑｜赞100",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["skillId"] == "analysis.profile_from_history"
+    assert body["status"] == "completed"
+    assert body["output"]["profile"]["pillars"]
+    assert body["modelMetadata"]["operation"] == "skill.dry_run"
+    runs = send(
+        app,
+        "GET",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+    ).json()
+    assert runs == []

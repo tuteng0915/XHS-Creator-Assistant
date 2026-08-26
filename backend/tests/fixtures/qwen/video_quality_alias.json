@@ -1,0 +1,26 @@
+{
+  "output": {
+    "video_quality": {
+      "overallScore": 62,
+      "level": "中",
+      "dimensionScores": [
+        {
+          "dimension": "叙事完整度",
+          "score": 60,
+          "reason": "只有封面和正文线索，需要保守判断。"
+        }
+      ],
+      "strengths": ["主题明确"],
+      "weaknesses": ["缺少真实视频理解"],
+      "evidence": ["标题和封面信息"],
+      "evidenceScope": {
+        "hasVideoUnderstanding": false
+      },
+      "evidenceConfidence": "低",
+      "evidenceLimitations": ["未提供视频画面"],
+      "cannotAssess": ["剪辑节奏"],
+      "recommendedNextEvidence": ["补充视频链接或抽帧"]
+    }
+  }
+}
+

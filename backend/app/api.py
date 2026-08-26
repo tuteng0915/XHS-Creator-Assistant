@@ -41,6 +41,8 @@ from app.models import (
     SimulationRunResponse,
     SimulationRunSummary,
     SkillDefinitionUpdate,
+    SkillDryRunRequest,
+    SkillDryRunResponse,
     SkillInvokeRequest,
     SkillInvokeResponse,
     SkillResponse,
@@ -505,6 +507,15 @@ def create_api_router(
         skill_asset_id: str, payload: SkillInvokeRequest
     ) -> SkillInvokeResponse:
         return skill_service.invoke(skill_asset_id, payload)
+
+    @router.post(
+        "/skills/{skill_asset_id}/dry-run",
+        response_model=SkillDryRunResponse,
+    )
+    def dry_run_skill(
+        skill_asset_id: str, payload: SkillDryRunRequest
+    ) -> SkillDryRunResponse:
+        return skill_service.dry_run(skill_asset_id, payload)
 
     @router.get(
         "/workspaces/{workspace_id}/agents",

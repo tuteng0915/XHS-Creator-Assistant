@@ -1,0 +1,17 @@
+```json
+{
+  "reply": "模型 API 可用，我会基于当前资产提出建议。",
+  "proposed_actions": [
+    {
+      "type": "topic.create_or_update",
+      "status": "requires_confirmation",
+      "description": "基于当前需求创建一个待确认选题。",
+      "payload": {
+        "title": "如何判断一个选题值得做",
+        "angle": "用创作者资产和受众反馈交叉验证"
+      }
+    }
+  ]
+}
+```
+

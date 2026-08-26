@@ -150,6 +150,105 @@ def test_agent_message_client_key_prevents_duplicate_user_messages(
     assert len(proposals) == 1
 
 
+def test_agent_conversation_message_creates_durable_completed_job(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    agent = next(item for item in agents if item["agentId"] == "creator_material_curator")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": agent["id"], "title": "检查 job"},
+    ).json()
+
+    response = send(
+        app,
+        "POST",
+        f"/api/agent-conversations/{conversation['id']}/messages",
+        json={"content": "帮我看看账号定位"},
+    )
+
+    assert response.status_code == 200
+    assistant_message = response.json()["messages"][1]
+    with app.state.database.read() as connection:
+        job = app.state.agent_conversation_service.repository.get_job_by_assistant_message(
+            connection,
+            assistant_message["id"],
+        )
+    assert job is not None
+    assert job["conversation_id"] == conversation["id"]
+    assert job["status"] == "completed"
+    assert job["attempt_count"] == 1
+
+
+def test_agent_conversation_resume_uses_durable_job_after_restart(
+    app: FastAPI,
+) -> None:
+    workspace = create_workspace(app)
+    agents = send(app, "GET", f"/api/workspaces/{workspace['id']}/agents").json()
+    agent = next(item for item in agents if item["agentId"] == "creator_material_curator")
+    conversation = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/agent-conversations",
+        json={"agentAssetId": agent["id"], "title": "恢复 job"},
+    ).json()
+    with app.state.database.transaction() as connection:
+        user_message = app.state.agent_conversation_service.repository.create_message(
+            connection,
+            conversation_id=conversation["id"],
+            role="user",
+            content="帮我恢复生成",
+            context_pack_json="{}",
+            asset_refs_json="[]",
+            proposed_actions_json="[]",
+            model_metadata_json="{}",
+            now="2026-08-26T00:00:00Z",
+        )
+        assistant_message = app.state.agent_conversation_service.repository.create_message(
+            connection,
+            conversation_id=conversation["id"],
+            role="assistant",
+            content="Agent 正在生成回复…",
+            context_pack_json="{}",
+            asset_refs_json="[]",
+            proposed_actions_json="[]",
+            model_metadata_json=(
+                '{"operation":"agent_chat","mode":"demo","status":"queued"}'
+            ),
+            now="2026-08-26T00:00:01Z",
+        )
+        job = app.state.agent_conversation_service.repository.create_job(
+            connection,
+            conversation_id=conversation["id"],
+            assistant_message_id=assistant_message["id"],
+            user_content=user_message["content"],
+            mode="demo",
+            now="2026-08-26T00:00:01Z",
+        )
+
+    app.state.agent_conversation_service.resume_unfinished()
+
+    async def wait() -> None:
+        tasks = list(app.state.agent_conversation_service._tasks.values())
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    asyncio.run(wait())
+    loaded = send(app, "GET", f"/api/agent-conversations/{conversation['id']}").json()
+    assert loaded["executionStatus"] == "completed"
+    assert loaded["messages"][1]["content"] != "Agent 正在生成回复…"
+    with app.state.database.read() as connection:
+        reloaded_job = app.state.agent_conversation_service.repository.get_job(
+            connection,
+            job["id"],
+        )
+    assert reloaded_job["status"] == "completed"
+    assert reloaded_job["attempt_count"] == 1
+
+
 def test_agent_conversation_title_and_status_are_editable_assets(
     app: FastAPI,
 ) -> None:

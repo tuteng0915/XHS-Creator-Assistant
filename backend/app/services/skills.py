@@ -11,6 +11,8 @@ from app.models import (
     CapabilityDefinitionDiffResponse,
     CapabilityDefinitionRevert,
     SkillDefinitionUpdate,
+    SkillDryRunRequest,
+    SkillDryRunResponse,
     SkillInvokeRequest,
     SkillInvokeResponse,
     SkillResponse,
@@ -1341,6 +1343,246 @@ class SkillService:
                 "implementation": "deterministic_input_asset_formatter",
             },
         )
+
+    def dry_run(
+        self, skill_asset_id: str, payload: SkillDryRunRequest
+    ) -> SkillDryRunResponse:
+        with self.database.read() as connection:
+            row = self.repository.get(connection, skill_asset_id)
+        if row["status"] != "enabled":
+            raise ValidationError("Skill is disabled")
+        skill_id = row["skill_id"]
+        output = self._dry_run_output(skill_id, payload.input)
+        return SkillDryRunResponse(
+            skill_asset_id=row["id"],
+            skill_id=skill_id,
+            status="completed",
+            output=output,
+            model_metadata={
+                "provider": "deterministic",
+                "mode": payload.mode,
+                "operation": "skill.dry_run",
+                "writes": [],
+            },
+        )
+
+    def _dry_run_output(
+        self, skill_id: str, input_payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        if skill_id.startswith("input_asset.format_"):
+            return self._invoke_input_asset_formatter(skill_id, input_payload)
+        if skill_id.startswith("media."):
+            return {
+                "dryRun": True,
+                "assetType": "media",
+                "skillId": skill_id,
+                "inputKeys": sorted(input_payload.keys()),
+                "note": "dry-run 不调用 Qwen media API，也不创建 MediaAsset。",
+            }
+        mapping: dict[str, dict[str, Any]] = {
+            "analysis.profile_from_history": {
+                "profile": {
+                    "pillars": ["定位表达", "经验复盘"],
+                    "titleFormulas": [
+                        {"formula": "明确对象 + 具体问题", "examples": ["留学生如何避坑"]}
+                    ],
+                    "hookStyles": ["直接指出痛点"],
+                    "viralStructure": {
+                        "name": "痛点-拆解-建议",
+                        "steps": ["指出问题", "解释原因", "给出行动"],
+                    },
+                    "voiceFingerprint": ["具体", "克制"],
+                    "contrast": {
+                        "winners": [],
+                        "losers": [],
+                        "winFactors": ["选题具体"],
+                        "loseFactors": [],
+                        "takeaways": ["继续强化明确对象"],
+                    },
+                }
+            },
+            "analysis.pain_points_from_comments": {
+                "painPoints": [
+                    {
+                        "theme": "决策焦虑",
+                        "intensity": "高",
+                        "count": 3,
+                        "evidence": ["不知道怎么判断"],
+                    }
+                ]
+            },
+            "analysis.trend_patterns": {
+                "trendAnalysis": {
+                    "themes": [
+                        {
+                            "theme": "趋势主题",
+                            "count": 5,
+                            "topPost": "高互动样例",
+                            "engagement": "高",
+                            "summary": "dry-run 主题摘要",
+                        }
+                    ],
+                    "viralPatterns": ["具体场景切入"],
+                    "opportunityWindows": ["供给不足的细分角度"],
+                }
+            },
+            "analysis.pain_points_from_trend_posts": {
+                "painPoints": [
+                    {
+                        "theme": "趋势下的真实困惑",
+                        "intensity": "中",
+                        "count": 2,
+                        "evidence": ["评论/标题中的困惑信号"],
+                    }
+                ]
+            },
+            "topic.generate_from_account_diagnosis": {
+                "topics": [
+                    {
+                        "title": "dry-run 账号诊断选题",
+                        "angle": "从最高频痛点切入",
+                        "pain": "决策焦虑",
+                        "whyFit": "匹配账号结构和表达风格",
+                    }
+                ],
+                "titles": [{"topic": "dry-run 账号诊断选题", "variants": ["标题 A", "标题 B"]}],
+            },
+            "topic.generate_from_trend_analysis": {
+                "topics": [
+                    {
+                        "title": "dry-run 热点选题",
+                        "angle": "把热点转为账号可讲角度",
+                        "pain": "趋势困惑",
+                        "whyFit": "与定位匹配",
+                        "whyTrending": "当前互动集中",
+                    }
+                ],
+                "titles": [{"topic": "dry-run 热点选题", "variants": ["热点标题 A", "热点标题 B"]}],
+            },
+            "topic.refine_to_brief": {
+                "brief": {
+                    "topicTitle": "dry-run 创作 Brief",
+                    "refinedAngle": "明确对象和交付",
+                    "targetReader": "目标读者",
+                    "readerPain": "核心痛点",
+                    "contentPromise": "读完能做出判断",
+                    "corePoint": "核心论点",
+                    "formatRecommendation": "图文笔记",
+                    "openingHook": "直接提问",
+                    "argumentPath": ["问题", "判断", "建议"],
+                    "materialNeeds": ["历史案例"],
+                    "titleDirections": ["对象 + 问题"],
+                    "cta": "评论补充",
+                    "risks": ["不要泛化"],
+                    "revisionSuggestions": ["补充例子"],
+                }
+            },
+            "draft.generate_structure": {
+                "structure": {
+                    "topicChosen": "dry-run 内容结构",
+                    "outline": [
+                        {"sec": "开头", "ct": "提出具体痛点"},
+                        {"sec": "主体", "ct": "拆解原因与判断标准"},
+                    ],
+                    "reuse": "痛点-标准-行动建议",
+                }
+            },
+            "draft.generate_structure_from_brief": {
+                "structure": {
+                    "topicChosen": "dry-run Brief 转结构",
+                    "outline": [{"sec": "承接 Brief", "ct": "保留内容承诺"}],
+                    "reuse": "Brief 到结构的可复用转换",
+                }
+            },
+            "simulation.derive_personas": {
+                "personas": [
+                    {
+                        "id": "p1",
+                        "name": "谨慎决策者",
+                        "profile": "需要可信证据",
+                        "coreConcern": "是否可靠",
+                        "contentPreference": "具体案例",
+                    }
+                ]
+            },
+            "simulation.initial_reactions": {
+                "reaction": {
+                    "personaId": "p1",
+                    "stance": "犹豫",
+                    "quote": "需要更多证据。",
+                    "concerns": ["信息是否充分"],
+                    "opportunities": ["补充案例会更可信"],
+                }
+            },
+            "simulation.debate_responses": {
+                "debateResponse": {
+                    "personaId": "p1",
+                    "response": "看到其他反馈后仍建议补充证据。",
+                    "changedMind": False,
+                    "newConcerns": [],
+                    "strongerSignals": ["案例需求强"],
+                }
+            },
+            "simulation.synthesize": {
+                "synthesis": {
+                    "verdict": "值得继续打磨",
+                    "mainResistance": "证据不足",
+                    "strongestAngle": "用真实案例降低判断成本",
+                    "contentAdjustments": ["补充对比"],
+                    "riskWarnings": ["避免过度承诺"],
+                }
+            },
+            "analysis.video_creator_profile": {
+                "creatorProfile": {
+                    "creatorType": "unclear",
+                    "typeConfidence": "低",
+                    "summary": "dry-run 不基于真实视频判断。",
+                    "audiencePositioning": "待确认",
+                    "contentPillars": [],
+                    "motivationSignals": [],
+                    "evidence": [],
+                    "uncertainties": ["需要真实视频或封面理解"],
+                    "evidenceScope": {"dryRun": True},
+                    "evidenceConfidence": "低",
+                    "evidenceLimitations": ["未执行模型调用"],
+                    "recommendedNextEvidence": ["补充视频链接、封面或转写"],
+                }
+            },
+            "analysis.video_quality": {
+                "videoQuality": {
+                    "overallScore": 0,
+                    "level": "低",
+                    "dimensionScores": [],
+                    "strengths": [],
+                    "weaknesses": [],
+                    "evidence": [],
+                    "evidenceScope": {"dryRun": True},
+                    "evidenceConfidence": "低",
+                    "evidenceLimitations": ["未执行模型调用"],
+                    "cannotAssess": ["visualExecution", "aigcTechniqueUse"],
+                    "recommendedNextEvidence": ["补充真实视频理解结果"],
+                }
+            },
+            "analysis.incentive_fit": {
+                "incentiveFit": {
+                    "recommendation": "conditional_fit",
+                    "fitScore": 50,
+                    "rationale": "dry-run 仅验证 contract。",
+                    "conditions": ["补充证据后再判断"],
+                    "risks": ["证据不足"],
+                    "operatorActions": ["收集样本"],
+                    "programMatch": {"bestProgramType": "待定", "why": "", "avoid": ""},
+                    "evidenceScope": {"dryRun": True},
+                    "evidenceConfidence": "低",
+                    "evidenceLimitations": ["未执行模型调用"],
+                    "recommendedNextEvidence": ["补充真实创作者证据包"],
+                }
+            },
+        }
+        output = mapping.get(skill_id)
+        if output is None:
+            raise ValidationError("This skill does not support dry-run yet")
+        return output
 
     def _invoke_input_asset_formatter(
         self, skill_id: str, input_payload: dict[str, Any]

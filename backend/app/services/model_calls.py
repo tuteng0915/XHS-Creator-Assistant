@@ -478,7 +478,9 @@ class ModelCallService:
             ModelOperation.VIDEO_QUALITY_ANALYSIS: {"videoQuality": dict},
             ModelOperation.INCENTIVE_FIT_ANALYSIS: {"incentiveFit": dict},
         }
+        value = cls._normalize_output_aliases(operation, value)
         value = cls._unwrap_structured_output(operation, value, requirements)
+        value = cls._normalize_output_aliases(operation, value)
         for key, expected_type in requirements.get(operation, {}).items():
             if key not in value:
                 raise ValidationError(
@@ -493,6 +495,32 @@ class ModelCallService:
             raise ValidationError("Model response field reply must not be blank")
         return value
 
+    @staticmethod
+    def _normalize_output_aliases(
+        operation: ModelOperation, value: dict[str, Any]
+    ) -> dict[str, Any]:
+        aliases: dict[ModelOperation, dict[str, str]] = {
+            ModelOperation.PAIN_POINTS: {"pain_points": "painPoints"},
+            ModelOperation.TREND_ANALYSIS: {"trend_analysis": "trendAnalysis"},
+            ModelOperation.AGENT_CHAT: {
+                "proposed_actions": "proposedActions",
+                "message": "reply",
+                "answer": "reply",
+            },
+            ModelOperation.VIDEO_CREATOR_PROFILE: {
+                "creator_profile": "creatorProfile"
+            },
+            ModelOperation.VIDEO_QUALITY_ANALYSIS: {"video_quality": "videoQuality"},
+            ModelOperation.INCENTIVE_FIT_ANALYSIS: {"incentive_fit": "incentiveFit"},
+            ModelOperation.CONTENT_BRIEF: {"contentBrief": "brief"},
+        }
+        operation_aliases = aliases.get(operation, {})
+        normalized = dict(value)
+        for source_key, target_key in operation_aliases.items():
+            if target_key not in normalized and source_key in normalized:
+                normalized[target_key] = normalized[source_key]
+        return normalized
+
     @classmethod
     def _unwrap_structured_output(
         cls,
@@ -505,8 +533,10 @@ class ModelCallService:
             return value
         for wrapper_key in ("data", "result", "output"):
             nested = value.get(wrapper_key)
-            if isinstance(nested, dict) and expected_keys.intersection(nested):
-                return nested
+            if isinstance(nested, dict):
+                nested = cls._normalize_output_aliases(operation, nested)
+                if expected_keys.intersection(nested):
+                    return nested
         return value
 
     @staticmethod

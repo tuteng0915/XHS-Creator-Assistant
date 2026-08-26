@@ -119,8 +119,9 @@ Analysis run creation now accepts an `idempotencyKey`. Repeating the same
 workspace + key returns the existing run instead of creating another one. The
 frontend sends a client-generated key for user-triggered single workflow creation.
 
-Remaining gap: the in-process worker still has no durable SQLite claim/lease
-metadata.
+Remaining gap: the workflow worker still has no durable SQLite claim/lease
+metadata. Agent conversation replies now have a lightweight SQLite job table,
+but workflow runs still rely on persisted run state plus in-process tasks.
 
 ### Public execution mutation
 
@@ -218,7 +219,7 @@ durable event log. However:
 
 Remaining gap: this is still observation replay, not a durable event log.
 
-### Improved — conversation provider failure is now auditable
+### Improved — conversation execution has a lightweight durable job record
 
 Live conversation model failures now create an assistant failure message instead
 of leaving only the user message. The failure is recorded in message
@@ -227,20 +228,22 @@ of leaving only the user message. The failure is recorded in message
 Recent update:
 
 - sending a message now creates the user message and an assistant placeholder;
+- sending a message also creates an `agent_conversation_jobs` row that stores
+  conversation, assistant message, original user content, mode, status, attempt
+  count, error, and timestamps;
 - the placeholder records `queued`, `running`, `completed`, or `failed` in
   message metadata;
 - the placeholder also records `queuedAt`, `startedAt`, and `completedAt` where
   applicable;
 - backend in-process tasks generate the assistant reply after the request
   returns;
-- startup recovery attempts to resume assistant messages left in `queued` or
-  `running`;
+- startup recovery resumes queued/running conversation jobs and still supports
+  legacy recovery from assistant message metadata;
 - frontend observes pending replies by polling the conversation.
 
-Remaining gap: this is still an in-process task model, not a durable
-conversation job table with persisted leases. Message-level client idempotency
-keys are implemented for ordinary frontend retries, but they are not a durable
-job queue.
+Remaining gap: this is still a single-process local worker without cross-process
+claim/lease semantics. It is sufficient for the current local product, but it is
+not a production distributed queue.
 
 ### Improved — input asset formatter is now a backend skill invocation
 
@@ -273,8 +276,10 @@ Current status: improved.
 
 The backend now exposes a controlled skill invocation endpoint for directly
 callable product skills. Current direct invocation is intentionally limited to
-input asset formatter skills and Qwen media skills. Non-callable skills return
-a clear 422 response.
+input asset formatter skills and Qwen media skills. Analysis, topic, draft,
+simulation, and video diagnosis skills support deterministic dry-run, which
+validates their output contract without creating product artifacts. Non-callable
+skills return a clear 422 response.
 
 Remaining gap: this is not a general code tool runtime. That is intentional for
 the current product version.
@@ -321,16 +326,18 @@ Recommended fix:
 - Keep snapshot-first loading.
 - Only add durable event log if debugging or audit requirements justify it.
 
-### P1 — conversation execution is async but not durably queued
+### P1 — conversation execution is durably recorded but not lease-based
 
 Agent conversation message sending now returns before the live model call
-finishes. The assistant placeholder carries message-level status and the
-frontend observes it.
+finishes. The assistant placeholder carries message-level status, an
+`agent_conversation_jobs` row records execution lifecycle, and the frontend
+observes persisted state.
 
 Remaining risks:
 
-- in-process task loss on process crash;
-- no SQLite claim/lease table for conversation replies;
+- process crash during an external model call may repeat the current assistant
+  reply on restart;
+- no SQLite claim/lease table for cross-process conversation workers;
 - per-message client idempotency keys now prevent duplicate user/assistant
   message creation on ordinary frontend retry, but they do not replace a durable
   job queue;
@@ -340,8 +347,8 @@ Remaining risks:
 Recommended fix:
 
 - Keep the current lightweight implementation for local use.
-- Add a small persisted conversation job table only if conversation becomes a
-  central long-running execution path.
+- Add claim/lease only if conversation becomes a central long-running execution
+  path or the app moves beyond one local backend process.
 
 ### P1 — context packs favor breadth but need explicit budget policy
 
@@ -377,6 +384,9 @@ Implemented:
 - parser extracts the first JSON object from responses with surrounding prose;
 - parser unwraps conservative `data`, `result`, or `output` wrapper objects when
   the nested object contains the required operation root field;
+- parser normalizes common qwen aliases such as `pain_points`,
+  `proposed_actions`, and `video_quality` before final operation-level
+  validation;
 - parser can read OpenAI-compatible `function_call.arguments` or
   `tool_calls[].function.arguments` when message content is blank;
 - parsed output is validated against operation-level required root fields and
@@ -389,7 +399,8 @@ Implemented:
   frame images to Qwen instead of uploading the full video file;
 - media understanding results are staged as user-confirmed derived JSON before
   being reused by workflows;
-- tests cover realistic qwen-compatible response shapes.
+- tests cover realistic qwen-compatible response shapes through sanitized
+  fixtures.
 
 Remaining risks:
 

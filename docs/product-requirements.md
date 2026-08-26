@@ -437,11 +437,12 @@ Content Brief 字段包括：
 当前 skills 分两类调用入口：
 
 - 可通过 `POST /api/skills/{id}/invoke` 直接调用：输入素材整理类 skills、Qwen 图片/视频理解与生成类 media skills；
+- 可通过 `POST /api/skills/{id}/dry-run` 做无副作用测试：analysis/topic/draft/simulation/video 诊断类 skills 返回结构化样例输出，不创建 AnalysisRun、Topic、Draft、SimulationRun 或 MediaAsset；
 - 通过产品入口调用并落库：`topic.refine_to_brief`、`draft.generate_structure`、`draft.generate_structure_from_brief`。
 
 创作输出类 skill 不需要先开放成通用 invoke API。当前更重要的是保持 Topic / Draft 的产品语义：用户从选题触发 Brief 或结构生成，后端创建持久 Draft，generated snapshot 和 editable content 分离。
 
-当前可直接 smoke test 的 skill 主要是 formatter/media 这类有受控实现的 skill。分析类 skill 仍主要通过 workflow 执行，后续如果要让 PM 更细地调 prompt，需要补 workflow 外的 dry-run 能力。
+当前 Skill Test 面板会根据 skill 类型选择 invoke 或 dry-run。dry-run 用于帮助 PM 验证 contract 和预期输出形状，但不代表该 skill 已经具备独立真实执行链路。
 
 #### Agent
 
@@ -506,6 +507,7 @@ Agent conversation 用于直接和某个 agent 对话。
 - conversation title 和 status 可编辑，用于重命名、归档和恢复；message content、context pack、model metadata 和 proposed actions 原始记录保持只读。
 - 发送消息携带 `clientMessageKey`，同一 conversation 下相同 key 的重试不会重复创建 user / assistant message；
 - assistant 占位消息的 model metadata 记录 `queuedAt / startedAt / completedAt`，用于刷新后观察和复盘执行生命周期。
+- assistant 生成有独立 `agent_conversation_jobs` 记录，保存 mode、status、attempt count、错误和时间戳；应用启动时会恢复 queued/running job。
 
 #### AssetProposal
 
@@ -879,6 +881,7 @@ xhs_import_package/
 - 支持 fenced JSON；
 - 支持响应前后带说明文字时提取 JSON object；
 - 支持 `data/result/output` 外层包裹解包；
+- 支持常见 root 字段别名归一，例如 `pain_points -> painPoints`、`proposed_actions -> proposedActions`、`video_quality -> videoQuality`；
 - 支持 OpenAI-compatible `function_call/tool_calls.arguments` 作为结构化输出来源；
 - 对缺字段做 validation；
 - 失败时生成 stage error 或 assistant failure message。
@@ -892,6 +895,7 @@ xhs_import_package/
 - `scripts/smoke_model_api.py --operation pain_points`：验证文本结构化模型调用；
 - `scripts/smoke_model_api.py --operation agent_chat`：验证 agent conversation 的 live schema；
 - `scripts/smoke_qwen_media.py image-understand`：验证 media skill 的 Qwen vision path。
+- `scripts/smoke_live_workflows.py --mode demo --workflow all`：不打开前端，走真实 FastAPI 路径验证账号诊断、热点分析、视频博主质量诊断三条 workflow；加 `--mode live` 才会调用真实文本模型。
 
 最近一次真实 smoke 结果：
 
@@ -1008,12 +1012,12 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 
 1. 视频博主质量诊断优先使用小红书创作者主页派生的 compact evidence pack，兼容文本样本；可读取已保存的 compact media understanding，但不自动抓取或解析视频链接。
 2. 图文/视频素材已经接入 Qwen 理解、生成和本地视频预览抽帧；仍没有独立 OCR、ASR、平台抓取或长视频语义切片。
-3. Skills 是受控产品能力，不是任意代码工具；formatter skills 与 media skills 可直接 invoke。
+3. Skills 是受控产品能力，不是任意代码工具；formatter skills 与 media skills 可直接 invoke，分析/选题/草稿/模拟/视频诊断类 skills 可 dry-run。
 4. Workflow assets 不是可视化 nodegraph editor。
-5. Conversation 后端执行是 in-process task，不是完整 durable job queue。
+5. Conversation 后端执行已有 SQLite job 记录和启动恢复，但仍是单进程本地 worker，不是带跨进程 claim/lease 的完整 durable queue。
 6. SSE 是 observation replay，不是完整 durable event log。
 7. AssetProposal 已支持 pending 状态下编辑后 apply，并对 skill / agent / workflow proposal 做基础字段和引用校验；apply 前已有后端 diff preview，但前端仍主要是 JSON editor，不是表单化编辑器。
-8. qwen 结构化输出已有 operation-level 根字段校验，仍需要更多真实响应 fixture 加固。
+8. qwen 结构化输出已有 operation-level 根字段校验、常见别名归一和脱敏 fixture 测试；仍可继续补字段级 repair。
 9. 批量能力已从当前产品目标移除；后端遗留 batch endpoint 暂时只作为兼容路径。
 10. 如果本地只配置 `ANTHROPIC_*`，文本模型 live 可用，但 Qwen media skills 不可用；media skills 需要单独的 `QWEN_*` / `DASHSCOPE_*` 配置。
 
@@ -1036,7 +1040,7 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 
 ### 15.3 可维护性指标
 
-- App.tsx 继续拆分；
+- App.tsx 持续拆分；
 - 新增 workflow 时复用产品资产模型；
 - 新增 skill/agent/workflow 时进入能力资产 catalog；
 - 上下文输入有可审计 context pack。
@@ -1047,15 +1051,15 @@ API 应保持产品语义，不暴露 LangGraph 内部术语。
 
 - 保持前后端测试通过；
 - 保持 README、PRD、产品设计和 XHS 导入文档一致；
-- 继续拆分前端页面组件，降低 `App.tsx` 复杂度；
+- 继续拆分 Analysis History 和 workspace data hooks，降低 `App.tsx` 复杂度；
 - 明确所有 fake / demo / live 边界。
 
 ### P1：真正接入 API 后的稳定化
 
-- qwen live workflow smoke test：账号诊断、视频博主质量诊断各跑一次完整 live workflow；
-- 更多真实模型响应 fixture；
+- qwen live workflow smoke test：按需跑 `scripts/smoke_live_workflows.py --mode live`；
+- 更多真实模型响应 fixture 和字段级 repair；
 - AssetProposal 更细 nested diff 和更多 action-type schema；
-- conversation durable job / SQLite lease 是否值得加入；
+- conversation / workflow SQLite lease 是否值得加入；
 - workflow 输入区更清晰地展示 XHS 创作者主页摘要和派生输入关系。
 
 ### P2：下一阶段产品能力

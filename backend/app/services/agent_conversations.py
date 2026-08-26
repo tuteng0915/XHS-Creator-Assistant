@@ -454,15 +454,18 @@ class AgentConversationService:
                 ),
                 now=utc_now(),
             )
+            job = self.repository.create_job(
+                connection,
+                conversation_id=conversation_id,
+                assistant_message_id=assistant_message["id"],
+                user_content=payload.content,
+                mode=payload.mode,
+                now=utc_now(),
+            )
             row = self.repository.get(connection, conversation_id)
             messages = self.repository.list_messages(connection, conversation_id)
 
-        task = self._enqueue_reply(
-            conversation_id=conversation_id,
-            assistant_message_id=assistant_message["id"],
-            user_content=payload.content,
-            mode=payload.mode,
-        )
+        task = self._enqueue_reply(job_id=job["id"])
         await asyncio.wait({task}, timeout=0.001)
         with self.database.read() as connection:
             row = self.repository.get(connection, conversation_id)
@@ -471,6 +474,7 @@ class AgentConversationService:
 
     def resume_unfinished(self) -> None:
         with self.database.read() as connection:
+            jobs = self.repository.list_unfinished_jobs(connection)
             rows = connection.execute(
                 """
                 SELECT m.*, c.id AS conversation_id
@@ -480,6 +484,8 @@ class AgentConversationService:
                 ORDER BY m.created_at ASC, m.id ASC
                 """
             ).fetchall()
+        for job in jobs:
+            self._enqueue_reply_from_sync(job_id=job["id"])
         for row in rows:
             message = dict(row)
             try:
@@ -488,14 +494,24 @@ class AgentConversationService:
                 continue
             if metadata.get("status") not in {"queued", "running"}:
                 continue
+            with self.database.read() as connection:
+                existing_job = self.repository.get_job_by_assistant_message(
+                    connection, message["id"]
+                )
+            if existing_job is not None:
+                continue
             user_content = self._previous_user_message(message["conversation_id"], message["id"])
             if user_content:
-                self._enqueue_reply(
-                    conversation_id=message["conversation_id"],
-                    assistant_message_id=message["id"],
-                    user_content=user_content,
-                    mode=str(metadata.get("mode") or "demo"),
-                )
+                with self.database.transaction() as connection:
+                    job = self.repository.create_job(
+                        connection,
+                        conversation_id=message["conversation_id"],
+                        assistant_message_id=message["id"],
+                        user_content=user_content,
+                        mode=str(metadata.get("mode") or "demo"),
+                        now=utc_now(),
+                    )
+                self._enqueue_reply_from_sync(job_id=job["id"])
 
     async def shutdown(self) -> None:
         tasks = list(self._tasks.values())
@@ -508,39 +524,44 @@ class AgentConversationService:
     def _enqueue_reply(
         self,
         *,
-        conversation_id: str,
-        assistant_message_id: str,
-        user_content: str,
-        mode: str,
+        job_id: str,
     ) -> asyncio.Task:
-        existing = self._tasks.get(assistant_message_id)
+        existing = self._tasks.get(job_id)
         if existing and not existing.done():
             return existing
         task = asyncio.create_task(
             self._execute_reply(
-                conversation_id=conversation_id,
-                assistant_message_id=assistant_message_id,
-                user_content=user_content,
-                mode=mode,
+                job_id=job_id,
             )
         )
-        self._tasks[assistant_message_id] = task
-        task.add_done_callback(lambda _task: self._tasks.pop(assistant_message_id, None))
+        self._tasks[job_id] = task
+        task.add_done_callback(lambda _task: self._tasks.pop(job_id, None))
         return task
+
+    def _enqueue_reply_from_sync(self, *, job_id: str) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self._execute_reply(job_id=job_id))
+            return
+        self._enqueue_reply(job_id=job_id)
 
     async def _execute_reply(
         self,
         *,
-        conversation_id: str,
-        assistant_message_id: str,
-        user_content: str,
-        mode: str,
+        job_id: str,
     ) -> None:
         now = utc_now()
         with self.database.transaction() as connection:
+            job = self.repository.mark_job_running(connection, job_id=job_id, now=now)
+            conversation_id = job["conversation_id"]
+            assistant_message_id = job["assistant_message_id"]
+            user_content = job["user_content"]
+            mode = job["mode"]
             current = self.repository.get_message(connection, assistant_message_id)
             metadata = json.loads(current["model_metadata_json"])
             if metadata.get("status") not in {"queued", "running"}:
+                self.repository.mark_job_completed(connection, job_id=job_id, now=now)
                 return
             self.repository.update_message(
                 connection,
@@ -661,6 +682,19 @@ class AgentConversationService:
                     conversation=conversation,
                     message_id=assistant_message["id"],
                     action=action,
+                )
+            if reply_metadata.get("status") == "failed":
+                self.repository.mark_job_failed(
+                    connection,
+                    job_id=job_id,
+                    error=str(reply_metadata.get("error") or "Model call failed"),
+                    now=utc_now(),
+                )
+            else:
+                self.repository.mark_job_completed(
+                    connection,
+                    job_id=job_id,
+                    now=utc_now(),
                 )
 
     def _previous_user_message(self, conversation_id: str, assistant_message_id: str) -> str:

@@ -886,6 +886,22 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
         },
       })
     }
+    if (url === '/api/skills/skill-profile/dry-run' && method === 'POST') {
+      return jsonResponse({
+        skillAssetId: 'skill-profile',
+        skillId: 'analysis.profile_from_history',
+        status: 'completed',
+        output: {
+          profile: {
+            pillars: ['定位表达'],
+          },
+        },
+        modelMetadata: {
+          provider: 'deterministic',
+          operation: 'skill.dry_run',
+        },
+      })
+    }
     const agentsMatch = url.match(/^\/api\/workspaces\/(workspace-[12])\/agents$/)
     if (agentsMatch && method === 'GET') {
       return jsonResponse(agents[agentsMatch[1]])
@@ -2352,18 +2368,26 @@ describe('workspace UI', () => {
     expect(screen.getByText(/skill.invoke/)).toBeInTheDocument()
   })
 
-  it('explains that workflow analysis skills are not directly invokable yet', async () => {
-    installWorkspaceApiMock()
+  it('supports dry-run for workflow analysis skills without direct invoke', async () => {
+    const fetchMock = installWorkspaceApiMock()
     render(<App />)
 
     fireEvent.click(await screen.findByRole('button', { name: /Skills/ }))
     fireEvent.click(await screen.findByRole('button', { name: /Analyze Account Profile/ }))
 
-    expect(await screen.findByText('workflow-only')).toBeInTheDocument()
-    expect(screen.getByText(/这个 Skill 当前不能单独 invoke/)).toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: '运行 Skill Test' }),
-    ).not.toBeInTheDocument()
+    expect(await screen.findByText('dry-run-ready')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '运行 Skill Test' }))
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url) === '/api/skills/skill-profile/dry-run' &&
+            init?.method === 'POST',
+        ),
+      ).toBe(true)
+    })
+    expect(await screen.findByText('测试完成')).toBeInTheDocument()
+    expect(screen.getByText(/skill.dry_run/)).toBeInTheDocument()
   })
 
   it('shows workspace agents as composed product roles', async () => {

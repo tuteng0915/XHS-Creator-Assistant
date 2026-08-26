@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { ErrorBanner } from './CommonUi'
 import type {
   Agent,
   AgentConversation,
@@ -77,7 +78,7 @@ export function AgentsPage({
             让 Capability Maker 设计 Agent
           </button>
         </div>
-        {runError && <div className="error-banner">⚠ {runError}</div>}
+        <ErrorBanner message={runError} />
         {agents.map((agent) => (
           <button
             key={agent.id}

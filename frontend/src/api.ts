@@ -22,6 +22,7 @@ import type {
   SimulationRunSummary,
   Skill,
   SkillDefinitionUpdate,
+  SkillDryRunResponse,
   SkillInvokeResponse,
   SkillSummary,
   SkillStatus,
@@ -304,6 +305,19 @@ export const skillApi = {
     },
   ) =>
     request<SkillInvokeResponse>(`/api/skills/${skillAssetId}/invoke`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify(payload),
+    }),
+
+  dryRun: (
+    skillAssetId: string,
+    payload: {
+      input: Record<string, unknown>
+      mode: 'demo' | 'live'
+    },
+  ) =>
+    request<SkillDryRunResponse>(`/api/skills/${skillAssetId}/dry-run`, {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify(payload),
