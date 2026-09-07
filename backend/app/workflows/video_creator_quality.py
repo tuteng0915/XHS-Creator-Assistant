@@ -71,9 +71,25 @@ class VideoCreatorQualityState(TypedDict, total=False):
     stage_errors: dict[str, str]
 
 
+CreatorType = Literal[
+    "script_driven",
+    "commercial_driven",
+    "tech_exploration_driven",
+    "mixed",
+    "unclear",
+]
+ConfidenceLevel = Literal["高", "中", "低"]
+IncentiveRecommendation = Literal[
+    "strong_fit",
+    "conditional_fit",
+    "weak_fit",
+    "not_fit",
+]
+
+
 class CreatorProfileData(BaseModel):
-    creatorType: str
-    typeConfidence: str
+    creatorType: CreatorType
+    typeConfidence: ConfidenceLevel
     summary: str = ""
     audiencePositioning: str = ""
     contentPillars: list[str] = Field(default_factory=list)
@@ -84,6 +100,16 @@ class CreatorProfileData(BaseModel):
     evidenceConfidence: str = ""
     evidenceLimitations: list[str] = Field(default_factory=list)
     recommendedNextEvidence: list[str] = Field(default_factory=list)
+
+    @field_validator("creatorType", mode="before")
+    @classmethod
+    def normalize_creator_type(cls, value: Any) -> CreatorType:
+        return normalize_creator_type(value)
+
+    @field_validator("typeConfidence", mode="before")
+    @classmethod
+    def normalize_type_confidence(cls, value: Any) -> ConfidenceLevel:
+        return normalize_confidence(value)
 
 
 class CreatorProfileStageResult(BaseModel):
@@ -103,7 +129,7 @@ class VideoQualityDimensionScore(BaseModel):
 
 class VideoQualityData(BaseModel):
     overallScore: int
-    level: str
+    level: ConfidenceLevel
     dimensionScores: list[VideoQualityDimensionScore] = Field(default_factory=list)
     strengths: list[str] = Field(default_factory=list)
     weaknesses: list[str] = Field(default_factory=list)
@@ -119,6 +145,11 @@ class VideoQualityData(BaseModel):
     def normalize_overall_score(cls, value: Any) -> int:
         return normalize_score(value)
 
+    @field_validator("level", mode="before")
+    @classmethod
+    def normalize_level(cls, value: Any) -> ConfidenceLevel:
+        return normalize_confidence(value)
+
 
 class VideoQualityStageResult(BaseModel):
     videoQuality: VideoQualityData
@@ -131,7 +162,7 @@ class ProgramMatch(BaseModel):
 
 
 class IncentiveFitData(BaseModel):
-    recommendation: str
+    recommendation: IncentiveRecommendation
     fitScore: int
     rationale: str = ""
     conditions: list[str] = Field(default_factory=list)
@@ -148,9 +179,179 @@ class IncentiveFitData(BaseModel):
     def normalize_fit_score(cls, value: Any) -> int:
         return normalize_score(value)
 
+    @field_validator("recommendation", mode="before")
+    @classmethod
+    def normalize_recommendation(cls, value: Any) -> IncentiveRecommendation:
+        return normalize_incentive_recommendation(value)
+
 
 class IncentiveFitStageResult(BaseModel):
     incentiveFit: IncentiveFitData
+
+
+def normalize_creator_type(value: Any) -> CreatorType:
+    text = normalize_text_choice(value)
+    compact = compact_choice(text)
+    allowed: set[CreatorType] = {
+        "script_driven",
+        "commercial_driven",
+        "tech_exploration_driven",
+        "mixed",
+        "unclear",
+    }
+    if compact in allowed:
+        return compact  # type: ignore[return-value]
+    if any(
+        marker in compact
+        for marker in [
+            "script",
+            "story",
+            "narrative",
+            "剧本",
+            "剧情",
+            "叙事",
+            "角色",
+            "短剧",
+        ]
+    ):
+        return "script_driven"
+    if any(
+        marker in compact
+        for marker in [
+            "commercial",
+            "commerce",
+            "brand",
+            "sales",
+            "ad",
+            "商单",
+            "商业",
+            "品牌",
+            "带货",
+            "广告",
+            "推广",
+            "种草",
+        ]
+    ):
+        return "commercial_driven"
+    if any(
+        marker in compact
+        for marker in [
+            "tech",
+            "tool",
+            "model",
+            "experiment",
+            "技术",
+            "工具",
+            "模型",
+            "教程",
+            "探索",
+            "实验",
+        ]
+    ):
+        return "tech_exploration_driven"
+    if any(marker in compact for marker in ["mixed", "hybrid", "混合", "复合"]):
+        return "mixed"
+    if any(
+        marker in compact
+        for marker in ["unclear", "unknown", "insufficient", "不明确", "未知", "不足"]
+    ):
+        return "unclear"
+    raise ValueError("creatorType must be a known video creator type")
+
+
+def normalize_confidence(value: Any) -> ConfidenceLevel:
+    text = normalize_text_choice(value)
+    compact = compact_choice(text)
+    if compact in {"高", "high", "strong", "较高", "高置信", "高质量"}:
+        return "高"
+    if compact in {
+        "中",
+        "medium",
+        "mid",
+        "moderate",
+        "一般",
+        "中等",
+        "中等置信",
+        "中等质量",
+    }:
+        return "中"
+    if compact in {"低", "low", "weak", "poor", "较低", "低置信", "低质量"}:
+        return "低"
+    if "高" in compact or "high" in compact or "strong" in compact:
+        return "高"
+    if "低" in compact or "low" in compact or "weak" in compact or "poor" in compact:
+        return "低"
+    if "中" in compact or "medium" in compact or "moderate" in compact:
+        return "中"
+    raise ValueError("confidence/level must be 高, 中, or 低")
+
+
+def normalize_incentive_recommendation(value: Any) -> IncentiveRecommendation:
+    text = normalize_text_choice(value)
+    compact = compact_choice(text)
+    allowed: set[IncentiveRecommendation] = {
+        "strong_fit",
+        "conditional_fit",
+        "weak_fit",
+        "not_fit",
+    }
+    if compact in allowed:
+        return compact  # type: ignore[return-value]
+    if any(
+        marker in compact
+        for marker in ["notfit", "not_fit", "不适配", "不适合", "不建议", "不推荐"]
+    ):
+        return "not_fit"
+    if any(
+        marker in compact
+        for marker in ["strongfit", "strong_fit", "强适配", "强烈适合", "非常适合"]
+    ):
+        return "strong_fit"
+    if any(
+        marker in compact
+        for marker in ["weakfit", "weak_fit", "弱适配", "较弱适配", "弱匹配"]
+    ):
+        return "weak_fit"
+    if any(
+        marker in compact
+        for marker in [
+            "conditionalfit",
+            "conditional_fit",
+            "fit",
+            "适合",
+            "适配",
+            "推荐",
+            "条件适配",
+            "有条件",
+            "谨慎适配",
+            "部分适配",
+        ]
+    ):
+        return "conditional_fit"
+    raise ValueError("recommendation must be a known incentive fit value")
+
+
+def normalize_text_choice(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("value must be text")
+    text = value.strip()
+    if not text:
+        raise ValueError("value must not be blank")
+    return text
+
+
+def compact_choice(value: str) -> str:
+    return (
+        value.strip()
+        .lower()
+        .replace("-", "_")
+        .replace(" ", "_")
+        .replace("/", "_")
+        .replace("（", "_")
+        .replace("）", "_")
+        .replace("(", "_")
+        .replace(")", "_")
+    )
 
 
 def normalize_score(value: Any) -> int:

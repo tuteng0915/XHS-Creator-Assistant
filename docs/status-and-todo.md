@@ -264,6 +264,7 @@ agent conversation 现在已经不是同步等待模型完成：
 - 图片/视频理解已要求结构化 JSON，并把 `imageUnderstanding` / `videoUnderstanding` 保存到 media asset derived JSON。
 - 已加入脱敏 qwen fixture 测试，覆盖 wrapper、fenced JSON 和 snake_case/camelCase root alias 归一。
 - 视频诊断 score 字段已加固：Qwen 偶尔把 0-100 分数输出为 `0~1` 小数时，会在视频 workflow schema 层归一为百分制整数，例如 `0.55 -> 55`。
+- 视频诊断关键枚举字段已加固：`creatorType`、质量 `level`、`typeConfidence` 和 `recommendation` 会兼容常见中英文标签并归一到产品内部值；真正未知的 recommendation 会失败并进入 stage-level error，避免脏判断进入历史。
 - 后续仍可增加 action-type 级 schema、字段级 repair 和真实响应 fixture。
 
 ### P1：前端结构继续拆分

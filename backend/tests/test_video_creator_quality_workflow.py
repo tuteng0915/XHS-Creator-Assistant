@@ -1,11 +1,14 @@
 import asyncio
 import json
 
+import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError as PydanticValidationError
 from test_workspace_api import create_workspace, send
 
 from app.workflows.video_creator_quality import (
     VIDEO_CREATOR_QUALITY_GRAPH_NODE_ORDER,
+    CreatorProfileStageResult,
     FakeVideoCreatorQualityModelProvider,
     IncentiveFitStageResult,
     VideoQualityStageResult,
@@ -259,6 +262,80 @@ def test_video_creator_quality_scores_accept_qwen_fractional_values() -> None:
     assert quality.videoQuality.overallScore == 72
     assert quality.videoQuality.dimensionScores[0].score == 65
     assert fit.incentiveFit.fitScore == 55
+
+
+def test_video_creator_quality_schema_normalizes_common_qwen_labels() -> None:
+    profile = CreatorProfileStageResult.model_validate(
+        {
+            "creatorProfile": {
+                "creatorType": "剧本/叙事驱动型",
+                "typeConfidence": "high",
+            }
+        }
+    )
+    quality = VideoQualityStageResult.model_validate(
+        {
+            "videoQuality": {
+                "overallScore": "68%",
+                "level": "medium",
+                "dimensionScores": [
+                    {
+                        "dimension": "scriptAndNarrative",
+                        "score": 0.8,
+                    }
+                ],
+            }
+        }
+    )
+    fit = IncentiveFitStageResult.model_validate(
+        {
+            "incentiveFit": {
+                "recommendation": "条件适配",
+                "fitScore": "55%",
+            }
+        }
+    )
+
+    assert profile.creatorProfile.creatorType == "script_driven"
+    assert profile.creatorProfile.typeConfidence == "高"
+    assert quality.videoQuality.overallScore == 68
+    assert quality.videoQuality.level == "中"
+    assert quality.videoQuality.dimensionScores[0].score == 80
+    assert fit.incentiveFit.recommendation == "conditional_fit"
+    assert fit.incentiveFit.fitScore == 55
+
+
+def test_video_creator_quality_recommendation_alias_order_is_stable() -> None:
+    assert (
+        IncentiveFitStageResult.model_validate(
+            {"incentiveFit": {"recommendation": "强适配", "fitScore": 90}}
+        ).incentiveFit.recommendation
+        == "strong_fit"
+    )
+    assert (
+        IncentiveFitStageResult.model_validate(
+            {"incentiveFit": {"recommendation": "弱适配", "fitScore": 35}}
+        ).incentiveFit.recommendation
+        == "weak_fit"
+    )
+    assert (
+        IncentiveFitStageResult.model_validate(
+            {"incentiveFit": {"recommendation": "不适配", "fitScore": 10}}
+        ).incentiveFit.recommendation
+        == "not_fit"
+    )
+
+
+def test_video_creator_quality_schema_rejects_unknown_recommendation() -> None:
+    with pytest.raises(PydanticValidationError):
+        IncentiveFitStageResult.model_validate(
+            {
+                "incentiveFit": {
+                    "recommendation": "需要再看看",
+                    "fitScore": 50,
+                }
+            }
+        )
 
 
 def test_video_creator_graph_state_keeps_full_samples_outside_state(
