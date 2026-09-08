@@ -1,6 +1,6 @@
 import {
+  useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -97,7 +97,10 @@ import {
   type InputAssetPanel,
 } from './inputAssets'
 import { getWorkspaceHelpContent } from './helpContent'
+import { useAgentConversationAutoFocus } from './hooks/useAgentConversationAutoFocus'
 import { usePendingAgentConversationPolling } from './hooks/usePendingAgentConversationPolling'
+import { useSaveStates } from './hooks/useSaveStates'
+import { useWorkspaceAssetSelections } from './hooks/useWorkspaceAssetSelections'
 import type {
   Agent,
   AgentConversation,
@@ -286,20 +289,8 @@ function WorkspaceApp() {
   const [manualTopicTitle, setManualTopicTitle] = useState('')
   const [manualTopicAngle, setManualTopicAngle] = useState('')
   const [topicDraft, setTopicDraft] = useState({ title: '', angle: '' })
-  const [saveStates, setSaveStates] = useState<Record<SaveKey, SaveState>>({
-    workspace: idleState,
-    accountProfiles: idleState,
-    historical: idleState,
-    comments: idleState,
-    trend: idleState,
-    video: idleState,
-    xhs: idleState,
-    manualTopic: idleState,
-    topic: idleState,
-    draft: idleState,
-    analysisReview: idleState,
-    simulationReview: idleState,
-  })
+  const { saveStates, setSaveState, resetSaveStates, setSaveStates } =
+    useSaveStates()
   const [analysisReviewDraft, setAnalysisReviewDraft] = useState<{
     userNotes: string
     reviewStatus: ReviewStatus
@@ -309,158 +300,41 @@ function WorkspaceApp() {
     reviewStatus: ReviewStatus
   }>({ userNotes: '', reviewStatus: 'unreviewed' })
 
-  const accountProfileMaterials = useMemo(
-    () =>
-      materials.filter(
-        (material): material is TextInputAsset =>
-          material.type === 'account_profile',
-      ),
-    [materials],
-  )
-  const selectedProfileMaterial = useMemo(
-    () => {
-      if (selectedProfileInputAssetId === NEW_INPUT_ASSET_ID) return null
-      return (
-        accountProfileMaterials.find(
-        (material) => material.id === selectedProfileInputAssetId,
-        ) ||
-        accountProfileMaterials[0] ||
-        null
-      )
-    },
-    [accountProfileMaterials, selectedProfileInputAssetId],
-  )
-  const historicalMaterials = useMemo(
-    () =>
-      materials.filter(
-        (material): material is TextInputAsset =>
-          material.type === 'historical_posts',
-      ),
-    [materials],
-  )
-  const commentsMaterials = useMemo(
-    () =>
-      materials.filter(
-        (material): material is TextInputAsset => material.type === 'comments',
-      ),
-    [materials],
-  )
-  const trendMaterials = useMemo(
-    () =>
-      materials.filter(
-        (material): material is TrendCsvInputAsset =>
-          material.type === 'trend_csv',
-      ),
-    [materials],
-  )
-  const videoCreatorSamplesMaterials = useMemo(
-    () =>
-      materials.filter(
-        (material): material is TextInputAsset =>
-          material.type === 'video_creator_samples',
-      ),
-    [materials],
-  )
-  const xhsCreatorProfileMaterials = useMemo(
-    () =>
-      materials.filter(
-        (material): material is TextInputAsset =>
-          material.type === 'xhs_creator_profile',
-      ),
-    [materials],
-  )
-  const historicalMaterial = useMemo(
-    () => {
-      if (selectedHistoricalInputAssetId === NEW_INPUT_ASSET_ID) return undefined
-      return (
-        historicalMaterials.find(
-        (material) => material.id === selectedHistoricalInputAssetId,
-        ) ||
-        historicalMaterials[0] ||
-        undefined
-      )
-    },
-    [historicalMaterials, selectedHistoricalInputAssetId],
-  )
-  const commentsMaterial = useMemo(
-    () => {
-      if (selectedCommentsInputAssetId === NEW_INPUT_ASSET_ID) return undefined
-      return (
-        commentsMaterials.find(
-          (material) => material.id === selectedCommentsInputAssetId,
-        ) ||
-        commentsMaterials[0] ||
-        undefined
-      )
-    },
-    [commentsMaterials, selectedCommentsInputAssetId],
-  )
-  const videoCreatorSamplesMaterial = useMemo(
-    () => {
-      if (selectedVideoInputAssetId === NEW_INPUT_ASSET_ID) return undefined
-      return (
-        videoCreatorSamplesMaterials.find(
-        (material) => material.id === selectedVideoInputAssetId,
-        ) ||
-        videoCreatorSamplesMaterials[0] ||
-        undefined
-      )
-    },
-    [videoCreatorSamplesMaterials, selectedVideoInputAssetId],
-  )
-  const xhsCreatorProfileMaterial = useMemo(
-    () => {
-      if (selectedXhsCreatorProfileInputAssetId === NEW_INPUT_ASSET_ID) {
-        return undefined
-      }
-      return (
-        xhsCreatorProfileMaterials.find(
-          (material) => material.id === selectedXhsCreatorProfileInputAssetId,
-        ) || undefined
-      )
-    },
-    [xhsCreatorProfileMaterials, selectedXhsCreatorProfileInputAssetId],
-  )
-  const matchingXhsPackageMaterial = useMemo(() => {
-    if (!xhsPackagePreview) return null
-    const expectedName = `XHS ${xhsPackagePreview.displayName} 创作者主页`
-    return (
-      xhsCreatorProfileMaterials.find((material) => material.name === expectedName) ||
-      null
-    )
-  }, [xhsCreatorProfileMaterials, xhsPackagePreview])
-  const trendMaterial = useMemo(
-    () => {
-      if (selectedTrendInputAssetId === NEW_INPUT_ASSET_ID) return undefined
-      return (
-        trendMaterials.find((material) => material.id === selectedTrendInputAssetId) ||
-        trendMaterials[0] ||
-        undefined
-      )
-    },
-    [trendMaterials, selectedTrendInputAssetId],
-  )
-  const videoWorkflowMediaAssets = useMemo(
-    () =>
-      selectedVideoWorkflowMediaAssetIds
-        .map((assetId) => mediaAssets.find((asset) => asset.id === assetId))
-        .filter((asset): asset is MediaAsset => Boolean(asset)),
-    [mediaAssets, selectedVideoWorkflowMediaAssetIds],
-  )
+  const {
+    accountProfileMaterials,
+    selectedProfileMaterial,
+    historicalMaterials,
+    commentsMaterials,
+    trendMaterials,
+    videoCreatorSamplesMaterials,
+    xhsCreatorProfileMaterials,
+    historicalMaterial,
+    commentsMaterial,
+    videoCreatorSamplesMaterial,
+    xhsCreatorProfileMaterial,
+    matchingXhsPackageMaterial,
+    trendMaterial,
+    videoWorkflowMediaAssets,
+  } = useWorkspaceAssetSelections({
+    materials,
+    mediaAssets,
+    selectedProfileInputAssetId,
+    selectedHistoricalInputAssetId,
+    selectedCommentsInputAssetId,
+    selectedTrendInputAssetId,
+    selectedVideoInputAssetId,
+    selectedXhsCreatorProfileInputAssetId,
+    selectedVideoWorkflowMediaAssetIds,
+    xhsPackagePreview,
+  })
   const agentChatComposerRef = useRef<HTMLTextAreaElement | null>(null)
   const selectedAgentConversationId = selectedAgentConversation?.id
 
-  useEffect(() => {
-    if (activePage !== 'agents' || !selectedAgentConversationId) return
-    window.setTimeout(() => {
-      const composer = agentChatComposerRef.current
-      if (!composer) return
-      if (typeof composer.scrollIntoView === 'function') {
-        composer.scrollIntoView({ block: 'center', behavior: 'smooth' })
-      }
-      composer.focus()
-    }, 0)
-  }, [activePage, selectedAgentConversationId])
+  useAgentConversationAutoFocus({
+    activePage,
+    selectedAgentConversationId,
+    composerRef: agentChatComposerRef,
+  })
 
   function updateAgentMessageDraft(value: string) {
     setAgentMessageDraft(value)
@@ -474,6 +348,63 @@ function WorkspaceApp() {
     setAgentConversations,
     setAssetProposals,
   })
+
+  const resetWorkspaceState = useCallback(() => {
+    setWorkspace(null)
+    setMaterials([])
+    setMediaAssets([])
+    setAnalysisRuns([])
+    setSimulationRuns([])
+    setSkills([])
+    setAgents([])
+    setWorkflowAssets([])
+    setDrafts([])
+    setTopics([])
+    setSelectedTopic(null)
+    setWorkspaceName('')
+    setPositioning('')
+    setAccountProfileDraftName(SAMPLE_ASSET_NAMES.qsheepProfile)
+    setHistoricalPostsDraftName(SAMPLE_ASSET_NAMES.historicalPosts)
+    setCommentsDraftName(SAMPLE_ASSET_NAMES.comments)
+    setTrendCsvDraftName(SAMPLE_ASSET_NAMES.trendCsv)
+    setVideoCreatorSamplesDraftName(SAMPLE_ASSET_NAMES.videoCreatorSamples)
+    setXhsCreatorProfileDraftName(SAMPLE_ASSET_NAMES.xhsCreatorProfile)
+    setSelectedProfileInputAssetId('')
+    setXhsImportFiles(emptyXhsImportFiles())
+    setXhsPackageFiles([])
+    setXhsPackagePreview(null)
+    setXhsPackagePreviewError('')
+    setXhsImportWarnings([])
+    setInputAssetPanel('historical_posts')
+    setSelectedHistoricalInputAssetId('')
+    setSelectedCommentsInputAssetId('')
+    setSelectedTrendInputAssetId('')
+    setSelectedVideoInputAssetId('')
+    setSelectedXhsCreatorProfileInputAssetId('')
+    setSelectedVideoWorkflowMediaAssetIds([])
+    setHistoricalPosts('')
+    setComments('')
+    setVideoCreatorSamples('')
+    setXhsCreatorProfileContent('')
+    setTrendKeyword('')
+    setCurrentRun(null)
+    setSelectedSimulationRun(null)
+    setSelectedSkill(null)
+    setSelectedAgent(null)
+    setAgentConversations([])
+    setSelectedAgentConversation(null)
+    setAssetProposals([])
+    setAgentMessageDraft('')
+    setAgentMessageClientKey(newClientRequestKey('agent-message'))
+    setAgentConversationCreating(false)
+    setSelectedWorkflowAsset(null)
+    setSelectedDraft(null)
+    setDraftEditor('')
+    setAnalysisStageViewsByWorkflow(emptyWorkflowStageViews())
+    setSimulationStageViews([])
+    setWorkflowOutputKindByWorkflow(defaultWorkflowOutputKinds())
+    resetSaveStates()
+  }, [resetSaveStates])
 
   useEffect(() => {
     let active = true
@@ -623,20 +554,7 @@ function WorkspaceApp() {
         setAnalysisStageViewsByWorkflow(emptyWorkflowStageViews())
         setSimulationStageViews([])
         setWorkflowOutputKindByWorkflow(defaultWorkflowOutputKinds())
-        setSaveStates({
-          workspace: idleState,
-          accountProfiles: idleState,
-          historical: idleState,
-          comments: idleState,
-          trend: idleState,
-          video: idleState,
-          xhs: idleState,
-          manualTopic: idleState,
-          topic: idleState,
-          draft: idleState,
-          analysisReview: idleState,
-          simulationReview: idleState,
-        })
+        resetSaveStates()
         setLoading(false)
       },
       )
@@ -648,81 +566,7 @@ function WorkspaceApp() {
     return () => {
       active = false
     }
-  }, [selectedWorkspaceId])
-
-  function resetWorkspaceState() {
-    setWorkspace(null)
-    setMaterials([])
-    setMediaAssets([])
-    setAnalysisRuns([])
-    setSimulationRuns([])
-    setSkills([])
-    setAgents([])
-    setWorkflowAssets([])
-    setDrafts([])
-    setTopics([])
-    setSelectedTopic(null)
-    setWorkspaceName('')
-    setPositioning('')
-    setAccountProfileDraftName(SAMPLE_ASSET_NAMES.qsheepProfile)
-    setHistoricalPostsDraftName(SAMPLE_ASSET_NAMES.historicalPosts)
-    setCommentsDraftName(SAMPLE_ASSET_NAMES.comments)
-    setTrendCsvDraftName(SAMPLE_ASSET_NAMES.trendCsv)
-    setVideoCreatorSamplesDraftName(SAMPLE_ASSET_NAMES.videoCreatorSamples)
-    setXhsCreatorProfileDraftName(SAMPLE_ASSET_NAMES.xhsCreatorProfile)
-    setSelectedProfileInputAssetId('')
-    setXhsImportFiles(emptyXhsImportFiles())
-    setXhsPackageFiles([])
-    setXhsPackagePreview(null)
-    setXhsPackagePreviewError('')
-    setXhsImportWarnings([])
-    setInputAssetPanel('historical_posts')
-    setSelectedHistoricalInputAssetId('')
-    setSelectedCommentsInputAssetId('')
-    setSelectedTrendInputAssetId('')
-    setSelectedVideoInputAssetId('')
-    setSelectedXhsCreatorProfileInputAssetId('')
-    setSelectedVideoWorkflowMediaAssetIds([])
-    setHistoricalPosts('')
-    setComments('')
-    setVideoCreatorSamples('')
-    setXhsCreatorProfileContent('')
-    setTrendKeyword('')
-    setCurrentRun(null)
-    setSelectedSimulationRun(null)
-    setSelectedSkill(null)
-    setSelectedAgent(null)
-    setAgentConversations([])
-    setSelectedAgentConversation(null)
-    setAssetProposals([])
-    setAgentMessageDraft('')
-    setAgentMessageClientKey(newClientRequestKey('agent-message'))
-    setAgentConversationCreating(false)
-    setSelectedWorkflowAsset(null)
-    setSelectedDraft(null)
-    setDraftEditor('')
-    setAnalysisStageViewsByWorkflow(emptyWorkflowStageViews())
-    setSimulationStageViews([])
-    setWorkflowOutputKindByWorkflow(defaultWorkflowOutputKinds())
-    setSaveStates({
-      workspace: idleState,
-      accountProfiles: idleState,
-      historical: idleState,
-      comments: idleState,
-      trend: idleState,
-      video: idleState,
-      xhs: idleState,
-      manualTopic: idleState,
-      topic: idleState,
-      draft: idleState,
-      analysisReview: idleState,
-      simulationReview: idleState,
-    })
-  }
-
-  function setSaveState(key: SaveKey, state: SaveState) {
-    setSaveStates((current) => ({ ...current, [key]: state }))
-  }
+  }, [resetWorkspaceState, resetSaveStates, selectedWorkspaceId])
 
   function clearXhsImportTransientState() {
     setXhsPackageFiles([])

@@ -130,6 +130,8 @@ https://your-domain/api/...
 - 视频博主质量诊断已按同一产品接口实现，支持小红书创作者主页派生 evidence pack，也兼容视频创作样本文本，并可选择已保存的图文/视频素材 compact understanding 作为补充上下文；
 - 视频博主质量诊断结果页已强化证据边界展示：当缺少真实视频理解、图片理解或评论证据时，质量判断和激励适配会明确显示不可可靠评估项与建议补充证据；
 - 视频博主质量诊断已用真实 Qwen live 路径回归 `_tt` 和 `QSheep` 两个小红书导入 fixture：两者均能完成 `creator_profile`、`video_quality`、`incentive_fit` 三个 stage；`_tt` 因没有 video 类型笔记，会保守保留 evidenceLimitations 和 cannotAssess；
+- 视频博主质量诊断已新增不消耗 API 的 workflow fixture 回归测试：直接读取 `data/xhs-fixtures/_tt` 和 `data/xhs-fixtures/QSheep`，使用脱敏 Qwen stage output fixture 跑完整三阶段 workflow，覆盖真实 XHS 输入快照、证据边界、枚举/分数归一和 no-video 保守判断；
+- 视频诊断 input snapshot 中的 XHS source 已做白名单清洗，只保留 `platform / fixtureCode / importedAt / crawler`，不把本地 `baseDir` 这类路径写入运行历史；
 - 运行结果、stage 结果、错误和 input snapshot 会持久化。
 - “下期选题”只用于受众模拟，不是账号诊断、热点分析或视频质量诊断的必填输入。
 - 选题后的推荐链路已经从“直接生成结构”扩展为 Topic → Content Brief → Content Structure；Topic 直接生成结构仍保留为快捷兼容路径。
@@ -271,11 +273,13 @@ agent conversation 现在已经不是同步等待模型完成：
 
 - 已将 stage/result 纯展示组件从 `App.tsx` 拆到 `frontend/src/components/StageResultViews.tsx`。
 - 已拆出 `WorkspaceShell`、媒体资产页、输入资产页、账号概况页、workflow 调用面板、workflow 输出面板和 conversation pending polling hook。
-- 已拆出帮助内容模块、workflow stage view 纯工具、AssetProposalsPanel、AgentConversationPanel、AgentsPage、WorkflowsPage 和 ConversationsPage。
+- 已拆出帮助内容模块、workflow stage view 纯工具、AssetProposalsPanel、AgentConversationPanel、AgentsPage、WorkflowsPage、ConversationsPage 和 AnalysisHistoryPage。
 - 已拆出 TopicLibraryPage、DraftsPage、SimulationHistoryPage，并沉淀 CommonUi 的 EmptyState、ErrorBanner、JsonPreview。
+- 已拆出 workspace 输入资产派生选择 hook、保存状态 hook 和 agent conversation 自动聚焦 hook；`App.tsx` 继续保留顶层 orchestration 和业务 action。
 - 下一步继续拆：
-  - AnalysisHistoryPage；
-  - shared workspace data hooks。
+  - workspace 初始加载 / 刷新 hook；
+  - workflow 执行 action hook；
+  - topic/draft action hook。
 
 ### P2：文案继续中文化
 

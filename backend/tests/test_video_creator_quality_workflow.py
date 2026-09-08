@@ -1,5 +1,9 @@
 import asyncio
+import importlib.util
 import json
+import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -13,6 +17,9 @@ from app.workflows.video_creator_quality import (
     IncentiveFitStageResult,
     VideoQualityStageResult,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+VIDEO_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "video_creator_quality"
 
 
 def create_text_material(
@@ -230,6 +237,81 @@ def create_minimal_xhs_profile_asset(app: FastAPI, workspace_id: str, name: str)
     )
 
 
+def load_xhs_fixture_module():
+    module_path = REPO_ROOT / "scripts" / "xhs_mediacrawler_fixture.py"
+    spec = importlib.util.spec_from_file_location("xhs_mediacrawler_fixture", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["xhs_mediacrawler_fixture"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def create_xhs_profile_asset_from_real_fixture(
+    app: FastAPI,
+    workspace_id: str,
+    code: str,
+) -> dict:
+    module = load_xhs_fixture_module()
+    export = module.load_mediacrawler_export(
+        REPO_ROOT / "data" / "xhs-fixtures" / code,
+        code=code,
+    )
+    payload = module.build_xhs_creator_profile_payload(export)
+    return create_text_material(
+        app,
+        workspace_id,
+        "xhs_creator_profile",
+        json.dumps(payload, ensure_ascii=False),
+    )
+
+
+def create_video_creator_run_from_real_xhs_fixture(
+    app: FastAPI,
+    code: str,
+) -> dict:
+    workspace = create_workspace(app)
+    xhs_asset = create_xhs_profile_asset_from_real_fixture(app, workspace["id"], code)
+    response = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/analysis-runs",
+        json={
+            "workflowType": "video_creator_quality",
+            "xhsCreatorProfileInputAssetId": xhs_asset["id"],
+            "mode": "live",
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+class QwenVideoFixtureProvider(FakeVideoCreatorQualityModelProvider):
+    def __init__(self, outputs: dict[str, Any]) -> None:
+        super().__init__()
+        self.outputs = outputs
+
+    async def creator_profile(self, **kwargs):
+        self.calls.append("creator_profile")
+        return self.outputs["creator_profile"]
+
+    async def video_quality(self, **kwargs):
+        self.calls.append("video_quality")
+        return self.outputs["video_quality"]
+
+    async def incentive_fit(self, **kwargs):
+        self.calls.append("incentive_fit")
+        return self.outputs["incentive_fit"]
+
+
+def qwen_video_fixture_outputs(code: str) -> dict[str, Any]:
+    fixtures = json.loads(
+        (VIDEO_FIXTURE_ROOT / "qwen_stage_outputs.json").read_text(encoding="utf-8")
+    )
+    return fixtures[code]
+
+
 def collect(app: FastAPI, run_id: str, stop_after_node: str | None = None) -> list[dict]:
     return asyncio.run(
         app.state.video_workflow_service.collect_events(
@@ -417,6 +499,89 @@ def test_video_creator_run_can_use_xhs_profile_evidence_pack(app: FastAPI) -> No
     assert state["xhs_creator_profile_material_id"] == snapshot["xhsCreatorProfile"][
         "materialId"
     ]
+
+
+@pytest.mark.parametrize(
+    ("code", "expected_notes", "expected_comments", "expected_video_notes"),
+    [
+        ("_tt", 4, 26, 0),
+        ("QSheep", 20, 137, 1),
+    ],
+)
+def test_video_creator_real_xhs_fixture_runs_with_qwen_stage_outputs(
+    app: FastAPI,
+    code: str,
+    expected_notes: int,
+    expected_comments: int,
+    expected_video_notes: int,
+) -> None:
+    run = create_video_creator_run_from_real_xhs_fixture(app, code)
+    provider = QwenVideoFixtureProvider(qwen_video_fixture_outputs(code))
+    app.state.video_workflow_service.live_provider = provider
+
+    events = collect(app, run["id"])
+
+    assert provider.calls == ["creator_profile", "video_quality", "incentive_fit"]
+    assert events[-1]["data"]["eventType"] == "run.succeeded"
+    completed = send(app, "GET", f"/api/analysis-runs/{run['id']}").json()
+    assert completed["status"] == "completed"
+    evidence_pack = completed["inputSnapshot"]["videoCreatorEvidencePack"]
+    assert evidence_pack["source"]["type"] == "xhs_creator_profile"
+    assert evidence_pack["source"]["fixtureCode"] == code
+    assert evidence_pack["noteStats"]["totalNotes"] == expected_notes
+    assert evidence_pack["noteStats"]["commentCount"] == expected_comments
+    assert evidence_pack["noteStats"]["videoNotes"] == expected_video_notes
+    assert evidence_pack["evidenceScope"]["hasVideoUnderstanding"] is False
+    assert "baseDir" not in completed["inputSnapshot"]["xhsCreatorProfile"]["source"]
+
+    creator_profile = completed["stageResults"]["creator_profile"]["creatorProfile"]
+    video_quality = completed["stageResults"]["video_quality"]["videoQuality"]
+    incentive_fit = completed["stageResults"]["incentive_fit"]["incentiveFit"]
+    assert creator_profile["creatorType"] in {
+        "script_driven",
+        "commercial_driven",
+        "tech_exploration_driven",
+        "mixed",
+        "unclear",
+    }
+    assert creator_profile["typeConfidence"] in {"高", "中", "低"}
+    assert video_quality["level"] in {"高", "中", "低"}
+    assert all(
+        isinstance(dimension["score"], int)
+        for dimension in video_quality["dimensionScores"]
+    )
+    assert video_quality["cannotAssess"]
+    assert any("完整视频" in item for item in video_quality["cannotAssess"])
+    assert incentive_fit["recommendation"] in {
+        "strong_fit",
+        "conditional_fit",
+        "weak_fit",
+        "not_fit",
+    }
+    assert isinstance(incentive_fit["fitScore"], int)
+    assert incentive_fit["evidenceLimitations"]
+
+
+def test_video_creator_tt_fixture_preserves_no_video_evidence_boundary(
+    app: FastAPI,
+) -> None:
+    run = create_video_creator_run_from_real_xhs_fixture(app, "_tt")
+    app.state.video_workflow_service.live_provider = QwenVideoFixtureProvider(
+        qwen_video_fixture_outputs("_tt")
+    )
+
+    collect(app, run["id"])
+
+    completed = send(app, "GET", f"/api/analysis-runs/{run['id']}").json()
+    evidence_pack = completed["inputSnapshot"]["videoCreatorEvidencePack"]
+    video_quality = completed["stageResults"]["video_quality"]["videoQuality"]
+    assert evidence_pack["evidenceScope"]["hasVideoNotes"] is False
+    assert any(
+        "没有 video 类型笔记" in item
+        for item in evidence_pack["evidenceLimitations"]
+    )
+    assert video_quality["evidenceConfidence"] == "低"
+    assert any("间接判断" in item for item in video_quality["cannotAssess"])
 
 
 def test_video_creator_batch_can_use_multiple_xhs_profiles(app: FastAPI) -> None:

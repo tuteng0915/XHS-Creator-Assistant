@@ -592,7 +592,7 @@ class AnalysisRunService:
                     "name": xhs_asset["name"],
                     "updatedAt": xhs_asset["updated_at"],
                     "schemaVersion": xhs_profile.get("schemaVersion"),
-                    "source": xhs_profile.get("source", {}),
+                    "source": self._public_xhs_source(xhs_profile),
                     "creator": xhs_profile.get("creator", {}),
                     "noteCount": evidence_pack["noteStats"]["totalNotes"],
                     "commentCount": evidence_pack["noteStats"]["commentCount"],
@@ -1123,6 +1123,15 @@ class AnalysisRunService:
         text = str(value or "").strip()
         return text if len(text) <= limit else text[: limit - 1] + "…"
 
+    @staticmethod
+    def _public_xhs_source(profile: dict) -> dict:
+        source = profile.get("source") if isinstance(profile.get("source"), dict) else {}
+        return {
+            key: source[key]
+            for key in ["platform", "fixtureCode", "importedAt", "crawler"]
+            if source.get(key)
+        }
+
     def _engagement_score(self, note: dict) -> int:
         return (
             self._metric(note, "liked")
@@ -1169,7 +1178,7 @@ class AnalysisRunService:
                 "name": xhs_asset["name"],
                 "updatedAt": xhs_asset["updated_at"],
                 "schemaVersion": xhs_profile.get("schemaVersion"),
-                "source": xhs_profile.get("source", {}),
+                "source": self._public_xhs_source(xhs_profile),
                 "creator": xhs_profile.get("creator", {}),
                 "noteCount": len(xhs_profile.get("notes", [])),
                 "commentCount": sum(

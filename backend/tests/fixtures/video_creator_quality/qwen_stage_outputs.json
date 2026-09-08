@@ -1,0 +1,127 @@
+{
+  "_tt": {
+    "creator_profile": {
+      "creatorProfile": {
+        "creatorType": "技术探索驱动型",
+        "typeConfidence": "low",
+        "summary": "该创作者更像是围绕影视文本和 AIGC 相关表达做观点型内容，本次输入没有 video 类型笔记，不能判断真实视频制作能力。",
+        "audiencePositioning": "关注影视解读、科幻文本和 AI 内容讨论的泛内容用户。",
+        "contentPillars": ["影视文本解读", "观点表达", "AI 相关讨论"],
+        "motivationSignals": ["标题和正文集中在观点阐释", "缺少连续视频作品证据"],
+        "evidence": ["基于小红书主页导入的 4 条 normal 类型笔记和评论样本推断。"],
+        "uncertainties": ["未提供完整视频样本或视频理解结果。"],
+        "evidenceConfidence": "低",
+        "evidenceLimitations": [],
+        "recommendedNextEvidence": []
+      }
+    },
+    "video_quality": {
+      "videoQuality": {
+        "overallScore": 0.42,
+        "level": "低",
+        "dimensionScores": [
+          {
+            "dimension": "scriptAndNarrative",
+            "score": "45%",
+            "reason": "可以看到观点表达能力，但无法确认视频叙事和完播体验。"
+          },
+          {
+            "dimension": "visualExecution",
+            "score": 0.2,
+            "reason": "没有真实视频理解，只能保守评分。"
+          }
+        ],
+        "strengths": ["选题有观点性", "评论样本能提供一定受众反馈"],
+        "weaknesses": ["缺少 video 类型笔记", "缺少镜头、转写、剪辑和音频证据"],
+        "evidence": ["本次判断只基于标题、正文和评论。"],
+        "evidenceConfidence": "low",
+        "evidenceLimitations": [],
+        "cannotAssess": [],
+        "recommendedNextEvidence": []
+      }
+    },
+    "incentive_fit": {
+      "incentiveFit": {
+        "recommendation": "条件适配",
+        "fitScore": 0.55,
+        "rationale": "如果目标是鼓励观点型图文或脚本前期能力，可以条件适配；如果目标是视频产能激励，当前证据不足。",
+        "conditions": ["先补充代表视频或关键帧理解", "验证是否能稳定产出视频而非只产出观点文本"],
+        "risks": ["把图文观点能力误判为视频制作能力"],
+        "operatorActions": ["要求创作者提交 1-3 条代表视频", "补充视频理解后再决定激励等级"],
+        "programMatch": {
+          "bestProgramType": "视频能力观察池",
+          "why": "当前只有间接线索，适合作为待观察对象。",
+          "avoid": "不要直接进入强视频产能激励。"
+        },
+        "evidenceConfidence": "低",
+        "evidenceLimitations": [],
+        "recommendedNextEvidence": []
+      }
+    }
+  },
+  "QSheep": {
+    "creator_profile": {
+      "creatorProfile": {
+        "creatorType": "剧本/叙事驱动型",
+        "typeConfidence": "high",
+        "summary": "该创作者在留学和申请决策内容中有稳定的叙事复盘能力，但本次只有 1 条 video 类型笔记，视频能力仍需谨慎判断。",
+        "audiencePositioning": "关注留学申请、保研取舍和人生决策复盘的学生群体。",
+        "contentPillars": ["留学申请", "决策复盘", "真实经历叙事"],
+        "motivationSignals": ["多条高互动内容围绕个人决策和申请路径展开", "评论区存在进一步提问和共鸣反馈"],
+        "evidence": ["基于小红书主页导入的 20 条笔记、137 条一级评论和 1 条 video 类型笔记。"],
+        "uncertainties": ["缺少完整视频内容理解，不能判断镜头和剪辑能力。"],
+        "evidenceConfidence": "中",
+        "evidenceLimitations": [],
+        "recommendedNextEvidence": []
+      }
+    },
+    "video_quality": {
+      "videoQuality": {
+        "overallScore": 72,
+        "level": "medium",
+        "dimensionScores": [
+          {
+            "dimension": "scriptAndNarrative",
+            "score": 78,
+            "reason": "标题、正文和评论显示其叙事复盘能力较稳定。"
+          },
+          {
+            "dimension": "audienceFit",
+            "score": 75,
+            "reason": "受众问题集中，内容能命中留学申请决策焦虑。"
+          },
+          {
+            "dimension": "visualExecution",
+            "score": 0.55,
+            "reason": "没有完整视频理解，只能基于封面和主页线索保守判断。"
+          }
+        ],
+        "strengths": ["真实经历叙事强", "受众反馈明确", "选题和账号定位一致"],
+        "weaknesses": ["video 类型样本较少", "没有转写、镜头和音频证据"],
+        "evidence": ["高互动内容集中在留学申请和人生选择复盘。"],
+        "evidenceConfidence": "中等",
+        "evidenceLimitations": [],
+        "cannotAssess": [],
+        "recommendedNextEvidence": []
+      }
+    },
+    "incentive_fit": {
+      "incentiveFit": {
+        "recommendation": "conditional_fit",
+        "fitScore": "75%",
+        "rationale": "适合进入内容叙事型创作者激励，但应先确认其视频化表达能力和稳定产能。",
+        "conditions": ["补充代表视频的理解结果", "激励目标应强调真实复盘和系列选题延展"],
+        "risks": ["图文优势未必自然迁移到视频", "过强商业化要求可能损害真实感"],
+        "operatorActions": ["给出 2 周视频复盘选题任务", "观察视频完播和评论质量"],
+        "programMatch": {
+          "bestProgramType": "叙事复盘型内容激励",
+          "why": "创作者已有清晰受众和高互动叙事主题。",
+          "avoid": "不要用纯技术炫技或商单导向指标评价。"
+        },
+        "evidenceConfidence": "中",
+        "evidenceLimitations": [],
+        "recommendedNextEvidence": []
+      }
+    }
+  }
+}
