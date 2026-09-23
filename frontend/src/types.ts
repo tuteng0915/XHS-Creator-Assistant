@@ -64,6 +64,31 @@ export interface XhsOfflineImportPackageResponse extends XhsOfflineImportRespons
   mediaAssets: MediaAsset[]
 }
 
+export type XhsCaptureJobStatus =
+  | 'pending'
+  | 'waiting_for_login'
+  | 'running'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+
+export interface XhsCaptureJob {
+  id: string
+  workspaceId: string
+  profileUrl: string
+  resolvedUrl: string
+  status: XhsCaptureJobStatus
+  noteLimit: number
+  includeComments: boolean
+  statusMessage: string
+  error: string
+  resultInputAssetId: string | null
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+  updatedAt: string
+}
+
 export type MediaAssetType = 'image' | 'video'
 export type MediaAssetSourceType = 'upload' | 'url' | 'generated' | 'extracted_frame'
 

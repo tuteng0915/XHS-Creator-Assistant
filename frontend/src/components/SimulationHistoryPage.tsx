@@ -12,6 +12,7 @@ type ReviewDraft = {
 }
 
 type Props = {
+  publicMode?: boolean
   simulationRuns: SimulationRunSummary[]
   selectedSimulationRun: SimulationRun | null
   simulationReviewDraft: ReviewDraft
@@ -25,6 +26,7 @@ type Props = {
 }
 
 export function SimulationHistoryPage({
+  publicMode = false,
   simulationRuns,
   selectedSimulationRun,
   simulationReviewDraft,
@@ -68,21 +70,20 @@ export function SimulationHistoryPage({
                   {new Date(selectedSimulationRun.createdAt).toLocaleString()}
                 </p>
               </div>
-              <button onClick={() => onOpenSimulationRun(selectedSimulationRun.id, true)}>
+              {!publicMode && <button onClick={() => onOpenSimulationRun(selectedSimulationRun.id, true)}>
                 在输出区打开
-              </button>
+              </button>}
             </div>
-            <RunReviewEditor
+            <details open={!publicMode}><summary>复盘备注</summary><RunReviewEditor
               idPrefix="simulation-run-review"
               draft={simulationReviewDraft}
               onDraftChange={onSimulationReviewDraftChange}
               onSave={onSaveSimulationRunReview}
               saveState={simulationReviewSaveState}
               hint="受众角色、反应、辩论和综合结论是不可变历史；这里仅保存人工复盘判断。"
-            />
-            <label>原始输入快照</label>
-            <JsonPreview value={selectedSimulationRun.inputSnapshot} />
-            <label>模拟结果</label>
+            /></details>
+            {!publicMode && <><label>原始输入快照</label><JsonPreview value={selectedSimulationRun.inputSnapshot} /></>}
+            {!publicMode && <label>模拟结果</label>}
             {stageSeedFromSimulation(selectedSimulationRun).map((stage) => (
               <div className="stage compact" key={stage.key}>
                 <div className="stage-h">

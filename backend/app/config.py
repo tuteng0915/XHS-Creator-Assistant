@@ -37,6 +37,9 @@ def load_env_file_defaults(path: Path) -> None:
 class Settings:
     database_path: Path
     upload_directory: Path
+    default_user_id: str = "local-default-user"
+    xhs_capture_directory: Path | None = None
+    xhs_mediacrawler_directory: Path | None = None
     max_upload_bytes: int = 5 * 1024 * 1024
     csv_preview_rows: int = 20
     model_provider: str = "anthropic"
@@ -68,6 +71,19 @@ class Settings:
             upload_directory=Path(
                 os.getenv(
                     "UPLOAD_DIRECTORY", repository_root / "data/uploads/trends"
+                )
+            ),
+            default_user_id=os.getenv("DEFAULT_USER_ID", "local-default-user"),
+            xhs_capture_directory=Path(
+                os.getenv(
+                    "XHS_CAPTURE_DIRECTORY",
+                    repository_root / "data/xhs-captures",
+                )
+            ),
+            xhs_mediacrawler_directory=Path(
+                os.getenv(
+                    "XHS_MEDIACRAWLER_DIRECTORY",
+                    repository_root / "data/external/MediaCrawler",
                 )
             ),
             model_provider=os.getenv("MODEL_PROVIDER", "anthropic"),

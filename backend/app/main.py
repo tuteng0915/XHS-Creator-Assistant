@@ -22,6 +22,7 @@ from app.repositories import (
     TopicRepository,
     WorkflowAssetRepository,
     WorkspaceRepository,
+    XhsCaptureJobRepository,
 )
 from app.services import (
     AgentConversationService,
@@ -35,6 +36,7 @@ from app.services import (
     FakeStructureModelProvider,
     InputAssetService,
     MediaAssetService,
+    MediaCrawlerXhsCaptureRunner,
     ModelCallService,
     QwenMediaService,
     RealAgentConversationModelProvider,
@@ -45,6 +47,7 @@ from app.services import (
     WorkflowAssetService,
     WorkflowWorkerService,
     WorkspaceService,
+    XhsCaptureJobService,
     XhsOfflineImportService,
 )
 from app.workflows import (
@@ -81,6 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     asset_proposal_repository = AssetProposalRepository()
     workflow_asset_repository = WorkflowAssetRepository()
     checkpoint_repository = GraphCheckpointRepository()
+    xhs_capture_repository = XhsCaptureJobRepository()
     context_access_service = ContextAccessService(
         source_repository=source_repository,
         media_asset_repository=media_asset_repository,
@@ -92,7 +96,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         agent_repository=agent_repository,
         workflow_repository=workflow_asset_repository,
     )
-    workspace_service = WorkspaceService(database, workspace_repository)
+    workspace_service = WorkspaceService(
+        database,
+        workspace_repository,
+        default_user_id=active_settings.default_user_id,
+    )
     input_asset_service = InputAssetService(
         database,
         source_repository,
@@ -108,6 +116,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     qwen_media_service = QwenMediaService(active_settings, media_asset_service)
     xhs_import_service = XhsOfflineImportService(
         input_asset_service, media_asset_service
+    )
+    xhs_capture_service = XhsCaptureJobService(
+        database=database,
+        repository=xhs_capture_repository,
+        workspace_repository=workspace_repository,
+        workspace_service=workspace_service,
+        runner=MediaCrawlerXhsCaptureRunner(active_settings, xhs_import_service),
     )
     analysis_service = AnalysisRunService(
         database,
@@ -232,6 +247,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI):
+        xhs_capture_service.recover_interrupted()
         agent_conversation_service.resume_unfinished()
         await workflow_worker.resume_unfinished()
         try:
@@ -239,6 +255,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             await agent_conversation_service.shutdown()
             await workflow_worker.shutdown()
+            xhs_capture_service.shutdown()
 
     application = FastAPI(
         title="Creator Workspace API",
@@ -270,6 +287,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.video_workflow_service = video_workflow_service
     application.state.simulation_workflow_service = simulation_workflow_service
     application.state.workflow_worker = workflow_worker
+    application.state.xhs_capture_service = xhs_capture_service
 
     @application.exception_handler(ApplicationError)
     async def handle_application_error(
@@ -308,6 +326,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             workflow_asset_service,
             workflow_worker,
             xhs_import_service,
+            xhs_capture_service,
         )
     )
     return application

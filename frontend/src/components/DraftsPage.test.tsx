@@ -25,6 +25,17 @@ const draft: Draft = {
 afterEach(() => cleanup())
 
 describe('DraftsPage', () => {
+  it('requires saving changed public draft text before downstream generation', () => {
+    render(<DraftsPage publicMode drafts={[draft]} selectedDraft={draft}
+      draftEditor={JSON.stringify({ brief: { topicTitle: '尚未保存' } }, null, 2)}
+      draftSaveState={{ phase: 'idle' }} onOpenDraft={vi.fn()} onDraftEditorChange={vi.fn()}
+      onSaveDraftEdits={vi.fn()} onGenerateStructureFromBrief={vi.fn()} onRunAudienceSimulation={vi.fn()}
+      renderDraftStructure={() => null} draftDisplayTitle={() => '创作方案'} draftKindLabel={() => '创作方案'} />)
+    expect(screen.getByRole('button', { name: '继续生成内容结构' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送到受众模拟' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '保存修改' })).toBeEnabled()
+  })
+
   it('renders selected draft and saves editable JSON', () => {
     const onDraftEditorChange = vi.fn()
     const onSaveDraftEdits = vi.fn()
@@ -57,4 +68,3 @@ describe('DraftsPage', () => {
     expect(onSaveDraftEdits).toHaveBeenCalledTimes(1)
   })
 })
-

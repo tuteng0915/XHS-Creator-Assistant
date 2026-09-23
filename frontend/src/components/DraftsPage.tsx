@@ -3,8 +3,10 @@ import type { ReactNode } from 'react'
 import { EmptyState, JsonPreview } from './CommonUi'
 import { SaveIndicator, type SaveState } from './StageResultViews'
 import type { Draft, DraftSummary } from '../types'
+import { CreatorDraftEditor } from './CreatorDraftEditor'
 
 type Props = {
+  publicMode?: boolean
   drafts: DraftSummary[]
   selectedDraft: Draft | null
   draftEditor: string
@@ -20,6 +22,7 @@ type Props = {
 }
 
 export function DraftsPage({
+  publicMode = false,
   drafts,
   selectedDraft,
   draftEditor,
@@ -33,10 +36,13 @@ export function DraftsPage({
   draftDisplayTitle,
   draftKindLabel,
 }: Props) {
+  const dirty = Boolean(selectedDraft && draftEditor !== JSON.stringify(selectedDraft.editableContent, null, 2))
+  const actionDisabled = publicMode && (dirty || draftSaveState.phase === 'saving')
   return (
     <div className="workspace-page">
       <section className="history-list">
-        <div className="panel-title">▱ 创作输出</div>
+        <div className="panel-title">{publicMode ? 'AI 创作' : '▱ 创作输出'}</div>
+        {publicMode && <SaveIndicator state={draftSaveState} />}
         {drafts.length === 0 ? (
           <EmptyState>
             暂无创作 Brief 或内容结构。请先从选题生成 Brief，再继续生成结构。
@@ -71,20 +77,21 @@ export function DraftsPage({
               </div>
               <div className="detail-actions">
                 {selectedDraft.kind === 'content_brief' && (
-                  <button onClick={() => onGenerateStructureFromBrief(selectedDraft)}>
+                  <button disabled={actionDisabled} onClick={() => onGenerateStructureFromBrief(selectedDraft)}>
                     继续生成内容结构
                   </button>
                 )}
-                <button onClick={() => onRunAudienceSimulation(selectedDraft)}>
+                <button disabled={actionDisabled} onClick={() => onRunAudienceSimulation(selectedDraft)}>
                   发送到受众模拟
                 </button>
               </div>
             </div>
             <div className="asset-detail-card">
-              <div className="asset-section-head">
+              {!publicMode && <div className="asset-section-head">
                 <h3>可编辑内容</h3>
                 <span>用户编辑区</span>
-              </div>
+              </div>}
+              {publicMode ? <CreatorDraftEditor value={draftEditor} onChange={onDraftEditorChange} /> : <>
               <label htmlFor="draft-editor">Editable Content JSON</label>
               <textarea
                 id="draft-editor"
@@ -92,14 +99,16 @@ export function DraftsPage({
                 value={draftEditor}
                 onChange={(event) => onDraftEditorChange(event.target.value)}
               />
+              </>}
               <div className="save-row">
-                <button className="save-button" onClick={onSaveDraftEdits}>
-                  保存创作输出资产
+                <button className="save-button" disabled={publicMode && (!dirty || draftSaveState.phase === 'saving')} onClick={onSaveDraftEdits}>
+                  {publicMode ? '保存修改' : '保存创作输出资产'}
                 </button>
                 <SaveIndicator state={draftSaveState} />
+                {publicMode && dirty && <small>保存修改后可继续生成或模拟。</small>}
               </div>
             </div>
-            <div className="asset-detail-card readonly">
+            {publicMode ? <details className="asset-detail-card"><summary>最初生成的内容</summary>{renderDraftStructure(selectedDraft.generatedSnapshot)}</details> : <><div className="asset-detail-card readonly">
               <div className="asset-section-head">
                 <h3>生成快照</h3>
                 <span>只读</span>
@@ -151,6 +160,7 @@ export function DraftsPage({
                 />
               </details>
             </div>
+            </>}
           </>
         ) : (
           <EmptyState>

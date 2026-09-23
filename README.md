@@ -1,5 +1,11 @@
 # 创作者内容工作区
 
+当前默认界面正在迁移为面向小红书创作者的聚焦版：导入主页 → 浏览笔记 → 账号诊断 → 选题 → AI 创作 → 受众模拟。公开界面采用单一左侧导航，账号之间分别保存材料和结果；不需要登录。
+
+新版设计与验收标准见 [V2 执行手册](docs/creator-focused-v2-execution-manual.md)。旧开发者工作台和三个分析流程的代码、API、测试均保留，可用 `http://127.0.0.1:5173/?internal=1` 进行内部回归；这个参数只是界面模式，不是权限控制。
+
+主页 URL 导入默认读取 10 条笔记，更多数量或全部读取在弹窗中设置。需要后端所在机器安装 MediaCrawler 及其浏览器依赖；可通过 `XHS_MEDIACRAWLER_DIRECTORY` 指定已有目录，默认 `data/external/MediaCrawler`。首次登录会在该机器打开浏览器，用户按提示扫码。本地导入任务已接入，远程扫码转发尚未实现；真正的平台读取需要单独做一次真人登录验收。
+
 这个仓库包含两部分：原始的单文件 HTML 产品原型，以及已经迁移出来的创作者工作区应用。当前主应用使用 React、TypeScript、FastAPI、SQLite、LangGraph 和 Server-Sent Events；原始 `index.html` 只作为行为参考保留。
 
 ## 打开原始 HTML 原型

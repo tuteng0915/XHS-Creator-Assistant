@@ -52,7 +52,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description="解析小红书短链并调用本地 MediaCrawler 抓取创作者主页。"
     )
     parser.add_argument("url", help="小红书主页 URL 或 xhslink.cn 短链")
-    parser.add_argument("--limit", type=int, default=20, help="最多抓取多少条笔记")
+    parser.add_argument("--limit", type=int, default=10, help="最多抓取多少条笔记；0 表示全部可见笔记")
     parser.add_argument(
         "--comments",
         action="store_true",
@@ -203,8 +203,8 @@ def build_mediacrawler_command(
     save_data_option: str,
     save_data_path: str,
 ) -> list[str]:
-    if limit < 1:
-        raise ValueError("--limit 必须大于 0")
+    if limit < 0:
+        raise ValueError("--limit 不能小于 0")
     return [
         str(python_bin),
         "main.py",
@@ -217,7 +217,7 @@ def build_mediacrawler_command(
         "--creator_id",
         creator_url,
         "--crawler_max_notes_count",
-        str(limit),
+        str(limit if limit else 2_147_483_647),
         "--max_concurrency_num",
         "1",
         "--get_comment",

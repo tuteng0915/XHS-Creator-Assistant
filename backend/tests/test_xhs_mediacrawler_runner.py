@@ -77,14 +77,14 @@ def test_build_mediacrawler_command_uses_resolved_url_and_safe_defaults():
     assert command[command.index("--save_data_path") + 1] == "data/output"
 
 
-def test_build_mediacrawler_command_rejects_empty_limit():
+def test_build_mediacrawler_command_rejects_negative_limit():
     runner = load_runner()
 
     try:
         runner.build_mediacrawler_command(
             python_bin=Path("python"),
             creator_url="https://www.xiaohongshu.com/user/profile/abc",
-            limit=0,
+            limit=-1,
             comments=False,
             sub_comments=False,
             save_data_option="jsonl",
@@ -94,3 +94,14 @@ def test_build_mediacrawler_command_rejects_empty_limit():
         assert "limit" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_explicit_all_removes_count_limit_but_keeps_one_worker():
+    runner = load_runner()
+    command = runner.build_mediacrawler_command(
+        python_bin=Path("python"), creator_url="https://www.xiaohongshu.com/user/profile/abc",
+        limit=0, comments=True, sub_comments=False,
+        save_data_option="jsonl", save_data_path="data/output",
+    )
+    assert command[command.index("--crawler_max_notes_count") + 1] == "2147483647"
+    assert command[command.index("--max_concurrency_num") + 1] == "1"

@@ -11,6 +11,7 @@ from app.repositories.source_materials import SourceMaterialRepository
 from app.repositories.topics import TopicRepository
 from app.repositories.workflow_assets import WorkflowAssetRepository
 from app.repositories.workspaces import WorkspaceRepository
+from app.repositories.xhs_capture_jobs import XhsCaptureJobRepository
 
 __all__ = [
     "AgentRepository",
@@ -26,4 +27,5 @@ __all__ = [
     "TopicRepository",
     "WorkflowAssetRepository",
     "WorkspaceRepository",
+    "XhsCaptureJobRepository",
 ]

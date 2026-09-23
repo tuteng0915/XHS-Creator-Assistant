@@ -15,11 +15,41 @@ export function getWorkspaceHelpContent({
   activePage,
   inputAssetPanel,
   workflowTab,
+  publicMode = false,
 }: {
   activePage: ActivePage
   inputAssetPanel: InputAssetPanel
   workflowTab: WorkflowTab
+  publicMode?: boolean
 }): HelpContent {
+  if (publicMode && activePage !== 'creator-start') {
+    return {
+      title: activePage === 'source-materials' ? '浏览笔记' : '使用帮助',
+      description: '所有材料、分析和创作结果都保存在当前账号下。',
+      bullets: [
+        '从账号概览查看已读取的内容；点击笔记封面可查看正文和对应评论。',
+        '默认分析最近 10 条已导入笔记，也可以调整为最近 7、30、90 天或全部。缺少发布时间的旧笔记不纳入日期筛选。',
+        '诊断生成的推荐会自动保存到选题库；选择选题后可以编辑、用 AI 细化或进行受众模拟。',
+        '受众模拟是方向性参考，不代表真实用户的评论或实际流量。',
+        '保存修改后再进入下一步；原始生成内容会保留以供对照。',
+      ],
+    }
+  }
+  if (activePage === 'creator-start') {
+    return {
+      title: '导入小红书账号',
+      description:
+        '粘贴小红书用户主页链接后，系统会在本机启动低并发导入任务，并把结果保存到当前账号档案。',
+      bullets: [
+        '支持完整的小红书用户主页 URL，也支持用户主页短链。',
+        '首次运行可能打开浏览器窗口；请使用小红书扫码登录，不要关闭该窗口。',
+        '默认读取最近 10 条笔记及一级评论；调整范围可以读取更多或全部可见笔记。',
+        '导入完成后会保存笔记正文、互动数据、评论和可用封面。',
+        '如果主平台和抓取程序不在同一台机器，扫码窗口会出现在抓取程序所在机器。',
+      ],
+    }
+  }
+
   if (activePage === 'source-materials') {
     const definition = INPUT_ASSET_DEFINITION_BY_PANEL[inputAssetPanel]
     return {
@@ -210,14 +240,13 @@ export function getWorkspaceHelpContent({
   }
 
   return {
-    title: '工作区整体帮助',
+    title: '账号诊断助手',
     description:
-      '这个 workspace 用来管理创作者内容资产、分析结果、选题、创作输出、受众模拟，以及 Skills / Agents / Workflows 能力资产。',
+      '这里围绕一个小红书账号保存材料、诊断结果、选题、创作方案和受众模拟。',
     bullets: [
-      '左侧是内容资产：输入素材和可复用输出统一放在一起。',
-      '右侧是能力资产与 workflow 调用入口：Skills、Agents、Workflows。',
-      '两侧组合起来完成调用：内容资产提供上下文，能力资产定义如何处理这些上下文。',
-      '所有 workflow 运行都会尽量保存可复用的数据库记录，避免刷新后丢失。',
+      '每个账号档案的数据彼此独立。',
+      '推荐依次完成导入账号、账号诊断、选题、AI 创作和受众模拟。',
+      '所有生成结果都会保存，刷新页面后仍可重新打开。',
     ],
   }
 }

@@ -25,6 +25,7 @@ class WorkspaceRepository:
         self,
         connection: sqlite3.Connection,
         *,
+        owner_user_id: str = "local-default-user",
         name: str,
         account_positioning: str,
         now: str,
@@ -37,6 +38,13 @@ class WorkspaceRepository:
             VALUES (?, ?, ?, ?)
             """,
             (workspace_id, name, now, now),
+        )
+        connection.execute(
+            """
+            INSERT INTO app_user_workspaces(user_id, workspace_id, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (owner_user_id, workspace_id, now),
         )
         connection.execute(
             """
@@ -56,10 +64,25 @@ class WorkspaceRepository:
         )
         return self.get(connection, workspace_id)
 
-    def list(self, connection: sqlite3.Connection) -> list[dict]:
+    def list(
+        self, connection: sqlite3.Connection, *, owner_user_id: str | None = None
+    ) -> list[dict]:
+        owner_clause = ""
+        parameters: tuple[str, ...] = ()
+        if owner_user_id is not None:
+            owner_clause = """
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM app_user_workspaces AS ownership
+                    WHERE ownership.workspace_id = workspace.id
+                      AND ownership.user_id = ?
+                )
+            """
+            parameters = (owner_user_id,)
         rows = connection.execute(
             f"""
             {self.SELECT}
+            {owner_clause}
             ORDER BY
                 CASE
                     WHEN EXISTS (
@@ -87,7 +110,8 @@ class WorkspaceRepository:
                 END,
                 workspace.updated_at DESC,
                 workspace.id
-            """
+            """,
+            parameters,
         ).fetchall()
         return [dict(row) for row in rows]
 

@@ -1,12 +1,14 @@
 # 文档索引
 
+当前产品已经进入“创作者聚焦版 V2”改造。公开产品范围、账号空间模型、URL 导入链路和分阶段验收以 [creator-focused-v2-execution-manual.md](creator-focused-v2-execution-manual.md) 为准；旧的开发者工作台说明只用于理解保留代码和内部调试能力。
+
 顶层只保留当前仍然有效的产品、设计、架构和实现文档。已经完成或明显过时的迁移文档统一放在 `docs/backup/`，作为历史参考，不再作为当前实现依据。
 
 ## 推荐阅读顺序
 
-1. `product-design.md` — 先理解产品功能、设计思想和核心抽象。
-2. `product-requirements.md` — 再看更细的 PRD、流程、验收清单和非目标。
-3. `pm-capability-tuning-plan.md` — 查看交付给 PM 使用前，能力资产调优前端要怎么铺路。
+1. `creator-focused-v2-execution-manual.md` — 当前公开版的产品范围、交互原则、默认值和实施状态。
+2. `product-design.md`、`product-requirements.md` — 原有内部工作台的功能基线及保留实现；公开版差异以 V2 手册为准。
+3. `pm-capability-tuning-plan.md` — 内部能力调优界面的历史规划。
 4. `status-and-todo.md` — 查看当前完成状态、明确限制和下一步 TODO。
 5. `architecture-review.md` — 查看当前架构风险、已解决问题和工程优先级。
 6. `release-checklist.md` — 准备提交 GitHub 或打 tag 前做发布检查。

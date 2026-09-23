@@ -496,6 +496,9 @@ class AnalysisRunStatus(StrEnum):
 
 class AnalysisRunCreate(APIModel):
     workflow_type: WorkflowType
+    analysis_scope: Literal[
+        "recent_10", "last_7_days", "last_30_days", "last_90_days", "all"
+    ] = "all"
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=120)
     account_profile_input_asset_id: str | None = None
     account_profile_material_id: str | None = None
@@ -550,6 +553,39 @@ class XhsOfflineImportResponse(APIModel):
 
 class XhsOfflineImportPackageResponse(XhsOfflineImportResponse):
     media_assets: list[MediaAssetResponse] = Field(default_factory=list)
+
+
+class XhsCaptureJobStatus(StrEnum):
+    PENDING = "pending"
+    WAITING_FOR_LOGIN = "waiting_for_login"
+    RUNNING = "running"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class XhsCaptureJobCreate(APIModel):
+    profile_url: str = Field(min_length=1, max_length=2_000)
+    # Zero explicitly requests all visible notes; normal requests stay small.
+    note_limit: int = Field(default=10, ge=0, le=1000)
+    include_comments: bool = True
+
+
+class XhsCaptureJobResponse(APIModel):
+    id: str
+    workspace_id: str
+    profile_url: str
+    resolved_url: str = ""
+    status: XhsCaptureJobStatus
+    note_limit: int
+    include_comments: bool
+    status_message: str = ""
+    error: str = ""
+    result_input_asset_id: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    updated_at: datetime
 
 
 class AnalysisRunTransition(APIModel):

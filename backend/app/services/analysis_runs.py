@@ -28,6 +28,7 @@ from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.common import as_iso, utc_now
 from app.services.context_access import ContextAccessService
+from app.services.creator_analysis_scope import scope_creator_profile
 
 STAGE_KEYS = {
     WorkflowType.ACCOUNT_DIAGNOSIS.value: {
@@ -1155,6 +1156,7 @@ class AnalysisRunService:
             "XHS creator profile input asset is required",
         )
         xhs_profile = self._parse_xhs_creator_profile(xhs_asset["text_content"] or "")
+        xhs_profile, analysis_range = scope_creator_profile(xhs_profile, payload.analysis_scope)
         account_positioning = self._derive_xhs_account_positioning(xhs_profile)
         historical_text = self._derive_xhs_historical_posts_text(xhs_profile)
         comments_text = self._derive_xhs_comments_text(xhs_profile)
@@ -1163,6 +1165,7 @@ class AnalysisRunService:
             "workspaceId": workspace["id"],
             "workspaceName": workspace["name"],
             "accountPositioning": account_positioning,
+            "analysisRange": analysis_range,
             "accountProfile": {
                 "source": "xhs_creator_profile",
                 "inputAssetId": xhs_asset["id"],
@@ -1215,6 +1218,7 @@ class AnalysisRunService:
                     "skillId": "analysis.account_diagnosis",
                 },
                 purpose="create_account_diagnosis_analysis_run_from_xhs_creator_profile",
+                selected_evidence_only=payload.analysis_scope != "all",
                 selectors=[
                     "account_positioning",
                     "xhs_creator_profile",

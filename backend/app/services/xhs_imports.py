@@ -164,11 +164,14 @@ class XhsOfflineImportService:
         package_files = self._normalize_package_files(files)
         warnings = list(parsed["warnings"])
         media_assets: list[MediaAssetResponse] = []
-        existing_media_by_name = {
-            asset.name: asset
-            for asset in self.media_asset_service.list(
-                workspace_id, asset_type=MediaAssetType.IMAGE
-            )
+        existing_media = self.media_asset_service.list(
+            workspace_id, asset_type=MediaAssetType.IMAGE
+        )
+        existing_media_by_name = {asset.name: asset for asset in existing_media}
+        existing_media_by_note = {
+            asset.metadata["noteId"]: asset
+            for asset in existing_media
+            if asset.metadata.get("noteId")
         }
 
         for note in creator_profile["notes"]:
@@ -188,7 +191,13 @@ class XhsOfflineImportService:
                 "caption": caption,
             }
 
-            media_asset = existing_media_by_name.get(media_name)
+            media_asset = existing_media_by_note.get(note.get("noteId"))
+            if media_asset is None:
+                named_asset = existing_media_by_name.get(media_name)
+                if named_asset and named_asset.metadata.get("noteId") in {
+                    None, "", note.get("noteId")
+                }:
+                    media_asset = named_asset
             if media_asset is None:
                 media_asset = self.media_asset_service.create_upload(
                     workspace_id,
@@ -211,6 +220,8 @@ class XhsOfflineImportService:
                 ),
             )
             media_assets.append(media_asset)
+            existing_media_by_name[media_name] = media_asset
+            existing_media_by_note[note.get("noteId")] = media_asset
             note["coverMediaAssetId"] = media_asset.id
             note["cover"] = {
                 "relativePath": relative_path,
@@ -419,6 +430,7 @@ class XhsOfflineImportService:
                     "title": title,
                     "desc": desc,
                     "noteUrl": note_url,
+                    "publishedAt": raw_note.get("publishedAt") or raw_note.get("time"),
                     "tags": [
                         self._clean(tag)
                         for tag in raw_note.get("tags", [])
@@ -471,6 +483,8 @@ class XhsOfflineImportService:
                 ),
                 "crawler": self._clean(source.get("crawler")),
                 "sourceUrl": self._clean(source.get("sourceUrl") or raw.get("sourceUrl")),
+                "profileUrl": self._clean(source.get("profileUrl")),
+                "captureNoteLimit": source.get("captureNoteLimit"),
             },
             "creator": {
                 "displayName": self._clean(creator.get("displayName")),

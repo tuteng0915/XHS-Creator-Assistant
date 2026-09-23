@@ -59,6 +59,7 @@ class ContextAccessService:
         selectors: list[str],
         deep_items: list[dict[str, Any]] | None = None,
         max_summary_chars: int = 4_000,
+        selected_evidence_only: bool = False,
     ) -> dict[str, Any]:
         workspace_id = workspace["id"]
         omitted: list[dict[str, Any]] = []
@@ -197,6 +198,9 @@ class ContextAccessService:
             )
         )
 
+        if selected_evidence_only:
+            items = []
+            omitted = [{"reason": "Explicit analysis range excludes other workspace evidence"}]
         for item in deep_items or []:
             items.append(self._item(**item))
 
@@ -206,7 +210,7 @@ class ContextAccessService:
             "requestId": str(uuid4()),
             "workspaceId": workspace_id,
             "mode": "workspace_pack",
-            "scope": "broad",
+            "scope": "selected_evidence" if selected_evidence_only else "broad",
             "requester": requester,
             "purpose": purpose,
             "selectors": selectors,

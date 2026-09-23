@@ -6,9 +6,16 @@ from app.services.common import as_iso, utc_now
 
 
 class WorkspaceService:
-    def __init__(self, database: SQLiteDatabase, repository: WorkspaceRepository) -> None:
+    def __init__(
+        self,
+        database: SQLiteDatabase,
+        repository: WorkspaceRepository,
+        *,
+        default_user_id: str = "local-default-user",
+    ) -> None:
         self.database = database
         self.repository = repository
+        self.default_user_id = default_user_id
 
     def create(self, payload: WorkspaceCreate) -> WorkspaceResponse:
         name = payload.name.strip()
@@ -17,6 +24,7 @@ class WorkspaceService:
         with self.database.transaction() as connection:
             row = self.repository.create(
                 connection,
+                owner_user_id=self.default_user_id,
                 name=name,
                 account_positioning=payload.account_positioning,
                 now=utc_now(),
@@ -25,7 +33,9 @@ class WorkspaceService:
 
     def list(self) -> list[WorkspaceResponse]:
         with self.database.read() as connection:
-            rows = self.repository.list(connection)
+            rows = self.repository.list(
+                connection, owner_user_id=self.default_user_id
+            )
         return [WorkspaceResponse.model_validate(row) for row in rows]
 
     def get(self, workspace_id: str) -> WorkspaceResponse:
@@ -49,4 +59,3 @@ class WorkspaceService:
                 now=utc_now(),
             )
         return WorkspaceResponse.model_validate(row)
-

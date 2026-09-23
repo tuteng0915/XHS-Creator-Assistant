@@ -1657,7 +1657,7 @@ function installWorkspaceApiMock(defaultWorkspaceId: 'workspace-1' | 'workspace-
 }
 
 beforeEach(() => {
-  window.history.pushState({}, '', '/')
+  window.history.pushState({}, '', '/?internal=1')
   agentConversations['workspace-1'] = []
   agentConversations['workspace-2'] = []
   assetProposals['conversation-1'] = []

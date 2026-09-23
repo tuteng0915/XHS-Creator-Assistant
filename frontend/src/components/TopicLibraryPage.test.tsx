@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { TopicLibraryPage } from './TopicLibraryPage'
@@ -22,6 +22,26 @@ const topic: Topic = {
 afterEach(() => cleanup())
 
 describe('TopicLibraryPage', () => {
+  it('closes the creation dialog on success and blocks generation with unsaved edits', async () => {
+    const onSaveManualTopic = vi.fn().mockResolvedValue(true)
+    render(<TopicLibraryPage
+      publicMode visibleTopics={[topic]} selectedTopic={topic} topicFilter="all"
+      manualTopicTitle="新选题" manualTopicAngle="" topicDraft={{ title: '尚未保存的标题', angle: topic.angle }}
+      manualTopicSaveState={{ phase: 'idle' }} topicSaveState={{ phase: 'idle' }}
+      onManualTopicTitleChange={vi.fn()} onManualTopicAngleChange={vi.fn()}
+      onSaveManualTopic={onSaveManualTopic} onTopicFilterChange={vi.fn()}
+      onSelectTopicRow={vi.fn()} onSelectCurrentTopic={vi.fn()} onGenerateBrief={vi.fn()}
+      onGenerateDraft={vi.fn()} onArchiveTopic={vi.fn()} onTopicDraftChange={vi.fn()}
+      onSaveTopicEdits={vi.fn()}
+    />)
+    expect(screen.getByRole('button', { name: 'AI 细化选题' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '受众模拟' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '＋ 新建选题' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存选题' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(onSaveManualTopic).toHaveBeenCalledOnce()
+  })
+
   it('renders topic detail and dispatches edit/save actions', () => {
     const onTopicDraftChange = vi.fn()
     const onSaveTopicEdits = vi.fn()
@@ -62,4 +82,3 @@ describe('TopicLibraryPage', () => {
     expect(onSaveTopicEdits).toHaveBeenCalledTimes(1)
   })
 })
-

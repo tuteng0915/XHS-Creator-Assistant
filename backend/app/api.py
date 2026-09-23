@@ -70,6 +70,8 @@ from app.models import (
     WorkspaceCreate,
     WorkspaceResponse,
     WorkspaceUpdate,
+    XhsCaptureJobCreate,
+    XhsCaptureJobResponse,
     XhsOfflineImportPackageResponse,
     XhsOfflineImportResponse,
 )
@@ -88,6 +90,7 @@ from app.services import (
     WorkflowAssetService,
     WorkflowWorkerService,
     WorkspaceService,
+    XhsCaptureJobService,
     XhsOfflineImportService,
 )
 from app.services.common import utc_now
@@ -151,6 +154,7 @@ def create_api_router(
     workflow_asset_service: WorkflowAssetService,
     workflow_worker: WorkflowWorkerService,
     xhs_import_service: XhsOfflineImportService,
+    xhs_capture_service: XhsCaptureJobService,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -175,6 +179,29 @@ def create_api_router(
         workspace_id: str, payload: WorkspaceUpdate
     ) -> WorkspaceResponse:
         return workspace_service.update(workspace_id, payload)
+
+    @router.post(
+        "/workspaces/{workspace_id}/xhs-capture-jobs",
+        response_model=XhsCaptureJobResponse,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def create_xhs_capture_job(
+        workspace_id: str, payload: XhsCaptureJobCreate
+    ) -> XhsCaptureJobResponse:
+        return xhs_capture_service.create(workspace_id, payload)
+
+    @router.get(
+        "/workspaces/{workspace_id}/xhs-capture-jobs",
+        response_model=list[XhsCaptureJobResponse],
+    )
+    def list_xhs_capture_jobs(workspace_id: str) -> list[XhsCaptureJobResponse]:
+        return xhs_capture_service.list(workspace_id)
+
+    @router.get(
+        "/xhs-capture-jobs/{job_id}", response_model=XhsCaptureJobResponse
+    )
+    def get_xhs_capture_job(job_id: str) -> XhsCaptureJobResponse:
+        return xhs_capture_service.get(job_id)
 
     @router.post(
         "/workspaces/{workspace_id}/source-materials",

@@ -17,6 +17,8 @@ import type { AnalysisRun, Topic } from '../types'
 import type { TopicCandidate } from '../workflows'
 
 type GeneratedTopicCardProps = {
+  publicMode?: boolean
+  onSimulateSavedTopic?: (topic: Topic) => void
   topic: TopicCandidate
   currentRun: AnalysisRun | null
   onSaveGeneratedTopic: (
@@ -30,6 +32,8 @@ type GeneratedTopicCardProps = {
 }
 
 function GeneratedTopicCard({
+  publicMode = false,
+  onSimulateSavedTopic,
   topic,
   currentRun,
   onSaveGeneratedTopic,
@@ -60,6 +64,11 @@ function GeneratedTopicCard({
         )}
       </div>
       <div className="topic-actions">
+        {publicMode ? <>
+          <button onClick={() => void ensureSavedAndSelect().catch(() => undefined)}>查看选题</button>
+          <button onClick={() => void ensureSavedAndSelect().then(onGenerateBrief).catch(() => undefined)}>AI 细化选题</button>
+          <button onClick={() => void ensureSavedAndSelect().then((saved) => onSimulateSavedTopic?.(saved)).catch(() => undefined)}>受众模拟</button>
+        </> : <>
         <button onClick={() => onSaveGeneratedTopic(topic, currentRun)}>
           保存到选题库
         </button>
@@ -94,6 +103,7 @@ function GeneratedTopicCard({
         >
           → 填入下期选题
         </button>
+        </>}
       </div>
     </div>
   )
@@ -107,6 +117,8 @@ type StageResultRendererProps = Omit<
 }
 
 export function StageResultRenderer({
+  publicMode = false,
+  onSimulateSavedTopic,
   stage,
   currentRun,
   onSaveGeneratedTopic,
@@ -131,6 +143,8 @@ export function StageResultRenderer({
       <>
         {getTopicsFromStage(stage.result).map((topic) => (
           <GeneratedTopicCard
+            publicMode={publicMode}
+            onSimulateSavedTopic={onSimulateSavedTopic}
             key={topic.title}
             topic={topic}
             currentRun={currentRun}

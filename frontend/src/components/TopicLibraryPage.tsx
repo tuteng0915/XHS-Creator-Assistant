@@ -1,4 +1,5 @@
-import type { FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
+import { CreatorDialog } from './CreatorDialog'
 
 import { EmptyState, JsonPreview } from './CommonUi'
 import { SaveIndicator, type SaveState } from './StageResultViews'
@@ -7,6 +8,9 @@ import type { Topic, TopicSourceWorkflow } from '../types'
 type TopicFilter = TopicSourceWorkflow | 'all'
 
 type Props = {
+  publicMode?: boolean
+  busy?: boolean
+  onSimulateTopic?: (topic: Topic) => void
   visibleTopics: Topic[]
   selectedTopic: Topic | null
   topicFilter: TopicFilter
@@ -17,7 +21,7 @@ type Props = {
   topicSaveState: SaveState
   onManualTopicTitleChange: (value: string) => void
   onManualTopicAngleChange: (value: string) => void
-  onSaveManualTopic: (event: FormEvent<HTMLFormElement>) => void
+  onSaveManualTopic: (event: FormEvent<HTMLFormElement>) => void | Promise<boolean>
   onTopicFilterChange: (value: TopicFilter) => void
   onSelectTopicRow: (topic: Topic) => void
   onSelectCurrentTopic: (topic: Topic) => void
@@ -36,6 +40,9 @@ function topicSourceLabel(source: TopicSourceWorkflow | 'all'): string {
 }
 
 export function TopicLibraryPage({
+  publicMode = false,
+  busy = false,
+  onSimulateTopic,
   visibleTopics,
   selectedTopic,
   topicFilter,
@@ -56,11 +63,27 @@ export function TopicLibraryPage({
   onTopicDraftChange,
   onSaveTopicEdits,
 }: Props) {
+  const [creating, setCreating] = useState(false)
+  const dirty = Boolean(selectedTopic && (topicDraft.title !== selectedTopic.title || topicDraft.angle !== selectedTopic.angle))
+  const actionDisabled = publicMode && (dirty || busy || topicSaveState.phase === 'saving')
+  const manualForm = (
+    <form className="manual-topic" onSubmit={async (event) => {
+      event.preventDefault()
+      if (await onSaveManualTopic(event)) setCreating(false)
+    }}>
+      <input aria-label="手动选题标题" placeholder="选题标题" required value={manualTopicTitle} onChange={(event) => onManualTopicTitleChange(event.target.value)} />
+      <textarea aria-label="手动选题角度" placeholder="切入角度" rows={3} value={manualTopicAngle} onChange={(event) => onManualTopicAngleChange(event.target.value)} />
+      <div className="save-row"><button className="small-primary" disabled={manualTopicSaveState.phase === 'saving' || !manualTopicTitle.trim()}>保存选题</button><SaveIndicator state={manualTopicSaveState} /></div>
+    </form>
+  )
   return (
     <div className="workspace-page topics-page">
       <section className="history-list">
         <div className="panel-title">◇ 选题库</div>
-        <form className="manual-topic" onSubmit={onSaveManualTopic}>
+        {publicMode ? <>
+          <button type="button" onClick={() => setCreating(true)}>＋ 新建选题</button>
+          {creating && <CreatorDialog title="新建选题" onClose={() => setCreating(false)}>{manualForm}</CreatorDialog>}
+        </> : <form className="manual-topic" onSubmit={onSaveManualTopic}>
           <input
             aria-label="手动选题标题"
             placeholder="手动输入选题"
@@ -78,9 +101,9 @@ export function TopicLibraryPage({
             <button className="small-primary">保存选题</button>
             <SaveIndicator state={manualTopicSaveState} />
           </div>
-        </form>
+        </form>}
         <div className="filter-row">
-          {(['all', 'account_diagnosis', 'trend_analysis', 'manual'] as const).map(
+          {(['all', 'account_diagnosis', 'trend_analysis', 'manual'] as const).filter((item) => !publicMode || item !== 'trend_analysis').map(
             (item) => (
               <button
                 key={item}
@@ -100,7 +123,7 @@ export function TopicLibraryPage({
           >
             <span>{topic.title}</span>
             <b>{topic.status}</b>
-            <small>{topic.sourceWorkflow}</small>
+            <small>{publicMode ? topicSourceLabel(topic.sourceWorkflow) : topic.sourceWorkflow}</small>
           </button>
         ))}
       </section>
@@ -111,27 +134,28 @@ export function TopicLibraryPage({
               <div>
                 <h2>{selectedTopic.title}</h2>
                 <p>
-                  {selectedTopic.sourceWorkflow} · {selectedTopic.status}
+                  {publicMode ? topicSourceLabel(selectedTopic.sourceWorkflow) : selectedTopic.sourceWorkflow} · {selectedTopic.status}
                 </p>
               </div>
               <div className="detail-actions">
-                <button onClick={() => onSelectCurrentTopic(selectedTopic)}>
+                <button disabled={actionDisabled} onClick={() => onSelectCurrentTopic(selectedTopic)}>
                   设为当前
                 </button>
-                <button onClick={() => onGenerateBrief(selectedTopic)}>
-                  生成创作 Brief
+                <button disabled={actionDisabled} onClick={() => onGenerateBrief(selectedTopic)}>
+                  {publicMode ? 'AI 细化选题' : '生成创作 Brief'}
                 </button>
-                <button onClick={() => onGenerateDraft(selectedTopic)}>
+                <button disabled={actionDisabled} onClick={() => onGenerateDraft(selectedTopic)}>
                   生成内容结构
                 </button>
+                {publicMode && <button disabled={actionDisabled} onClick={() => onSimulateTopic?.(selectedTopic)}>受众模拟</button>}
                 <button onClick={() => onArchiveTopic(selectedTopic)}>归档</button>
               </div>
             </div>
             <div className="asset-detail-card">
-              <div className="asset-section-head">
+              {!publicMode && <div className="asset-section-head">
                 <h3>可编辑资产字段</h3>
                 <span>用户编辑区</span>
-              </div>
+              </div>}
               <label htmlFor="topic-title">标题</label>
               <input
                 id="topic-title"
@@ -156,10 +180,11 @@ export function TopicLibraryPage({
                 }
               />
               <div className="save-row">
-                <button className="save-button" onClick={onSaveTopicEdits}>
-                  保存选题资产
+                <button className="save-button" disabled={publicMode && (!dirty || topicSaveState.phase === 'saving')} onClick={onSaveTopicEdits}>
+                  {publicMode ? '保存修改' : '保存选题资产'}
                 </button>
                 <SaveIndicator state={topicSaveState} />
+                {publicMode && dirty && <small>保存修改后可继续生成或模拟。</small>}
               </div>
             </div>
             <div className="asset-detail-card readonly">
@@ -167,7 +192,7 @@ export function TopicLibraryPage({
                 <h3>来源与适配理由</h3>
                 <span>只读</span>
               </div>
-              <div className="asset-meta-grid">
+              {!publicMode && <div className="asset-meta-grid">
                 <div>
                   <b>来源 workflow</b>
                   <span>{selectedTopic.sourceWorkflow}</span>
@@ -184,17 +209,17 @@ export function TopicLibraryPage({
                   <b>更新时间</b>
                   <span>{new Date(selectedTopic.updatedAt).toLocaleString()}</span>
                 </div>
-              </div>
+              </div>}
               <label>关联痛点</label>
               <div className="readonly-box">
                 {selectedTopic.associatedPainPoint || '无'}
               </div>
               <label>为什么适合</label>
               <div className="readonly-box">{selectedTopic.whyItFits || '无'}</div>
-              <details className="asset-json-details">
+              {!publicMode && <details className="asset-json-details">
                 <summary>Generated Snapshot</summary>
                 <JsonPreview value={selectedTopic.generatedSnapshot} />
-              </details>
+              </details>}
             </div>
           </>
         ) : (

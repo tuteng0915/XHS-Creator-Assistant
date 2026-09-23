@@ -39,6 +39,7 @@ import type {
   WorkflowType,
   XhsOfflineImportPackageResponse,
   XhsOfflineImportResponse,
+  XhsCaptureJob,
 } from './types'
 
 export class ApiError extends Error {
@@ -197,6 +198,33 @@ export const inputAssetApi = {
 }
 
 export const sourceMaterialApi = inputAssetApi
+
+export const xhsCaptureApi = {
+  list: (workspaceId: string) =>
+    request<XhsCaptureJob[]>(
+      `/api/workspaces/${workspaceId}/xhs-capture-jobs`,
+    ),
+
+  get: (jobId: string) =>
+    request<XhsCaptureJob>(`/api/xhs-capture-jobs/${jobId}`),
+
+  create: (
+    workspaceId: string,
+    payload: {
+      profileUrl: string
+      noteLimit?: number
+      includeComments?: boolean
+    },
+  ) =>
+    request<XhsCaptureJob>(
+      `/api/workspaces/${workspaceId}/xhs-capture-jobs`,
+      {
+        method: 'POST',
+        headers: jsonHeaders,
+        body: JSON.stringify(payload),
+      },
+    ),
+}
 
 export const mediaAssetApi = {
   list: (workspaceId: string, type?: MediaAssetType) => {
@@ -515,6 +543,7 @@ export const analysisRunApi = {
       trendCsvInputAssetId?: string
       videoCreatorSamplesInputAssetId?: string
       xhsCreatorProfileInputAssetId?: string
+      analysisScope?: import('./creatorNotes').AnalysisScope
       mediaAssetIds?: string[]
       mode: 'demo' | 'live'
       idempotencyKey?: string

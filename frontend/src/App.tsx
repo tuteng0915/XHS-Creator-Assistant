@@ -20,6 +20,7 @@ import {
   topicApi,
   workspaceApi,
   workflowAssetApi,
+  xhsCaptureApi,
 } from './api'
 import { HealthPage } from './HealthPage'
 import { AccountProfilePage } from './components/AccountProfilePage'
@@ -33,6 +34,7 @@ import {
 } from './components/ArtifactRenderers'
 import { CapabilityDefinitionDiffPanel } from './components/CapabilityDefinitionDiffPanel'
 import { ConversationsPage } from './components/ConversationsPage'
+import { CreatorStartPage } from './components/CreatorStartPage'
 import { DraftsPage } from './components/DraftsPage'
 import { InputAssetsPage } from './components/InputAssetsPage'
 import { MediaAssetsPage } from './components/MediaAssetsPage'
@@ -88,7 +90,12 @@ import { WorkspaceShell, type ActivePage } from './components/WorkspaceShell'
 import { WorkflowDefinitionEditor } from './components/WorkflowDefinitionEditor'
 import { WorkflowsPage } from './components/WorkflowsPage'
 import { WorkflowRunPage } from './components/WorkflowRunPage'
+import { CreatorMaterialsPage } from './components/CreatorMaterialsPage'
+import { CreatorDiagnosisPage } from './components/CreatorDiagnosisPage'
+import { CreatorOverviewPage } from './components/CreatorOverviewPage'
+import type { AnalysisScope } from './creatorNotes'
 import {
+  WorkflowOutputPanel,
   type StageView,
   type WorkflowOutputKind,
 } from './components/WorkflowOutputPanel'
@@ -132,6 +139,7 @@ import type {
   WorkflowAsset,
   WorkflowAssetDefinitionUpdate,
   WorkflowAssetSummary,
+  XhsCaptureJob,
 } from './types'
 import {
   type GenerationMode,
@@ -164,7 +172,11 @@ import {
 type SkillTestStatus = 'idle' | 'running' | 'completed' | 'error'
 
 function WorkspaceApp() {
+  const internalMode = new URLSearchParams(window.location.search).get('internal') === '1'
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('')
+  const selectedWorkspaceRef = useRef(selectedWorkspaceId)
+  useEffect(() => { selectedWorkspaceRef.current = selectedWorkspaceId }, [selectedWorkspaceId])
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([])
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
   const [materials, setMaterials] = useState<InputAsset[]>([])
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([])
@@ -228,9 +240,9 @@ function WorkspaceApp() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [showHelp, setShowHelp] = useState(false)
-  const [activePage, setActivePage] = useState<ActivePage>('account-diagnosis')
+  const [activePage, setActivePage] = useState<ActivePage>(internalMode ? 'account-diagnosis' : 'creator-overview')
   const [workflowTab, setWorkflowTab] = useState<WorkflowTab>('account')
-  const [mode, setMode] = useState<GenerationMode>('demo')
+  const [mode, setMode] = useState<GenerationMode>(internalMode ? 'demo' : 'live')
   const [workspaceName, setWorkspaceName] = useState('')
   const [positioning, setPositioning] = useState('')
   const [accountProfileDraftName, setAccountProfileDraftName] = useState<string>(
@@ -275,6 +287,12 @@ function WorkspaceApp() {
   const [trendFile, setTrendFile] = useState<File | null>(null)
   const [videoCreatorSamples, setVideoCreatorSamples] = useState('')
   const [xhsCreatorProfileContent, setXhsCreatorProfileContent] = useState('')
+  const [xhsProfileUrl, setXhsProfileUrl] = useState('')
+  const [captureNoteLimit, setCaptureNoteLimit] = useState(10)
+  const [analysisScope, setAnalysisScope] = useState<AnalysisScope>('recent_10')
+  const [xhsCaptureJob, setXhsCaptureJob] = useState<XhsCaptureJob | null>(null)
+  const [xhsCaptureSubmitting, setXhsCaptureSubmitting] = useState(false)
+  const [xhsCaptureError, setXhsCaptureError] = useState('')
   const [inputAssetFormatterDraft, setInputAssetFormatterDraft] = useState('')
   const [inputAssetFormatterStatus, setInputAssetFormatterStatus] = useState('')
   const [simulationTopic, setSimulationTopic] = useState('')
@@ -386,6 +404,8 @@ function WorkspaceApp() {
     setComments('')
     setVideoCreatorSamples('')
     setXhsCreatorProfileContent('')
+    setXhsCaptureJob(null)
+    setXhsCaptureError('')
     setTrendKeyword('')
     setCurrentRun(null)
     setSelectedSimulationRun(null)
@@ -413,13 +433,23 @@ function WorkspaceApp() {
         const items = await workspaceApi.list()
         if (!active) return
         if (items.length > 0) {
-          const workspaceId = await chooseDefaultWorkspaceId(items)
+          setWorkspaces(items)
+          const rememberedWorkspaceId =
+            typeof window.localStorage?.getItem === 'function'
+              ? window.localStorage.getItem('creator-focused-workspace-id')
+              : null
+          const workspaceId = items.some(
+            (item) => item.id === rememberedWorkspaceId,
+          )
+            ? rememberedWorkspaceId || items[0].id
+            : await chooseDefaultWorkspaceId(items)
           if (!active) return
           setSelectedWorkspaceId((current) => current || workspaceId)
           return
         }
         const created = await workspaceApi.create(DEFAULT_WORKSPACE_NAME, '')
         if (!active) return
+        setWorkspaces([created])
         setSelectedWorkspaceId(created.id)
       } catch (error: unknown) {
         if (!active) return
@@ -432,6 +462,18 @@ function WorkspaceApp() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    if (
+      selectedWorkspaceId &&
+      typeof window.localStorage?.setItem === 'function'
+    ) {
+      window.localStorage.setItem(
+        'creator-focused-workspace-id',
+        selectedWorkspaceId,
+      )
+    }
+  }, [selectedWorkspaceId])
 
   useEffect(() => {
     if (!selectedWorkspaceId) {
@@ -470,6 +512,13 @@ function WorkspaceApp() {
         ]) => {
         if (!active) return
         setWorkspace(loadedWorkspace)
+        setWorkspaces((current) =>
+          current.some((item) => item.id === loadedWorkspace.id)
+            ? current.map((item) =>
+                item.id === loadedWorkspace.id ? loadedWorkspace : item,
+              )
+            : [...current, loadedWorkspace],
+        )
         setMaterials(loadedMaterials)
         setMediaAssets(loadedMediaAssets)
         setAnalysisRuns(loadedRuns)
@@ -537,6 +586,12 @@ function WorkspaceApp() {
         setXhsCreatorProfileContent(
           latestTextMaterial(loadedMaterials, 'xhs_creator_profile')?.content || '',
         )
+        if (
+          !internalMode &&
+          !latestTextMaterial(loadedMaterials, 'xhs_creator_profile')
+        ) {
+          setActivePage('creator-start')
+        }
         setTrendKeyword(latestTrendMaterial(loadedMaterials)?.keyword || '')
         setSimulationTopic('')
         setCurrentRun(null)
@@ -566,7 +621,113 @@ function WorkspaceApp() {
     return () => {
       active = false
     }
-  }, [resetWorkspaceState, resetSaveStates, selectedWorkspaceId])
+  }, [internalMode, resetWorkspaceState, resetSaveStates, selectedWorkspaceId])
+
+  useEffect(() => {
+    if (!selectedWorkspaceId) return
+    let active = true
+    xhsCaptureApi
+      .list(selectedWorkspaceId)
+      .then((jobs) => {
+        if (active) {
+          setXhsCaptureJob(jobs[0] || null)
+          setXhsProfileUrl(jobs[0]?.profileUrl || '')
+        }
+      })
+      .catch(() => {
+        if (active) setXhsCaptureJob(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [selectedWorkspaceId])
+
+  useEffect(() => {
+    if (
+      !xhsCaptureJob ||
+      !['pending', 'waiting_for_login', 'running', 'processing'].includes(
+        xhsCaptureJob.status,
+      )
+    ) {
+      return
+    }
+    let active = true
+    const timer = window.setInterval(() => {
+      void xhsCaptureApi
+        .get(xhsCaptureJob.id)
+        .then(async (job) => {
+          if (!active) return
+          setXhsCaptureJob(job)
+          if (job.status === 'completed') {
+            await refreshImportedCreatorAccount(job.workspaceId)
+          }
+        })
+        .catch((error: unknown) => {
+          if (active) setXhsCaptureError(errorMessage(error))
+        })
+    }, 1_500)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [xhsCaptureJob])
+
+  async function refreshImportedCreatorAccount(workspaceId: string) {
+    const [loadedWorkspace, loadedMaterials, loadedMediaAssets] = await Promise.all([
+      workspaceApi.get(workspaceId),
+      inputAssetApi.list(workspaceId),
+      mediaAssetApi.list(workspaceId),
+    ])
+    if (selectedWorkspaceRef.current !== workspaceId) return
+    setWorkspace(loadedWorkspace)
+    setWorkspaces((current) =>
+      current.map((item) => (item.id === loadedWorkspace.id ? loadedWorkspace : item)),
+    )
+    setMaterials(loadedMaterials)
+    setMediaAssets(loadedMediaAssets)
+    const importedProfile = latestTextMaterial(
+      loadedMaterials,
+      'xhs_creator_profile',
+    )
+    setSelectedXhsCreatorProfileInputAssetId(importedProfile?.id || '')
+    setXhsCreatorProfileDraftName(
+      importedProfile?.name || SAMPLE_ASSET_NAMES.xhsCreatorProfile,
+    )
+    setXhsCreatorProfileContent(importedProfile?.content || '')
+  }
+
+  async function createCreatorProfile() {
+    try {
+      const created = await workspaceApi.create('新账号档案', '')
+      setWorkspaces((current) => [...current, created])
+      setSelectedWorkspaceId(created.id)
+      setXhsProfileUrl('')
+      setXhsCaptureJob(null)
+      setXhsCaptureError('')
+      setActivePage('creator-start')
+    } catch (error: unknown) {
+      setLoadError(errorMessage(error))
+    }
+  }
+
+  async function startXhsCapture(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!workspace) return
+    setXhsCaptureSubmitting(true)
+    setXhsCaptureError('')
+    try {
+      const job = await xhsCaptureApi.create(workspace.id, {
+        profileUrl: xhsProfileUrl,
+        noteLimit: captureNoteLimit,
+        includeComments: true,
+      })
+      setXhsCaptureJob(job)
+    } catch (error: unknown) {
+      setXhsCaptureError(errorMessage(error))
+    } finally {
+      setXhsCaptureSubmitting(false)
+    }
+  }
 
   function clearXhsImportTransientState() {
     setXhsPackageFiles([])
@@ -1357,6 +1518,7 @@ function WorkspaceApp() {
         trendCsvInputAssetId: savedInputs.trend?.id,
         videoCreatorSamplesInputAssetId: savedInputs.video?.id,
         xhsCreatorProfileInputAssetId: savedInputs.xhsCreatorProfile?.id,
+        analysisScope: !internalMode && targetTab === 'account' ? analysisScope : undefined,
         mediaAssetIds:
           targetTab === 'video' ? selectedVideoWorkflowMediaAssetIds : undefined,
         mode,
@@ -1477,7 +1639,7 @@ function WorkspaceApp() {
     })
   }
 
-  async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab) {
+  async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic) {
     if (!workspace) return
     setWorkflowTab(targetTab)
     setRunError('')
@@ -1485,8 +1647,9 @@ function WorkspaceApp() {
     setCurrentRun(null)
     setWorkflowOutputKind(targetTab, 'simulation')
     setSimulationStageViews(simulationStageSeed())
+    if (!internalMode) setActivePage('simulations')
     try {
-      const savedInputs = draft
+      const savedInputs = draft || topic
         ? { simulationTopic }
         : await ensureInputsSavedForRun(targetTab, true, true)
       if (draft) {
@@ -1495,13 +1658,13 @@ function WorkspaceApp() {
         setSaveState('workspace', { phase: 'saved' })
       }
       const topicForSimulation = savedInputs.simulationTopic.trim()
-      if (!draft && !topicForSimulation) throw new Error('请填写受众模拟选题。')
+      if (!draft && !topic && !topicForSimulation) throw new Error('请填写受众模拟选题。')
       const useSavedTopic =
         !draft && selectedTopic && topicForSimulation.includes(selectedTopic.title)
       const created = await simulationRunApi.create(workspace.id, {
         draftId: draft?.id,
-        topicId: useSavedTopic ? selectedTopic.id : null,
-        manualTopic: draft || useSavedTopic ? undefined : topicForSimulation,
+        topicId: topic?.id || (useSavedTopic ? selectedTopic.id : null),
+        manualTopic: draft || topic || useSavedTopic ? undefined : topicForSimulation,
         mode,
       })
       await runSimulationGraphWorkflow(created, targetTab)
@@ -1528,6 +1691,7 @@ function WorkspaceApp() {
       const finish = async () => {
         source.close()
         const completed = await simulationRunApi.get(run.id)
+        setSelectedSimulationRun(completed)
         setWorkflowOutputKind(targetTab, 'simulation')
         setSimulationStageViews(stageSeedFromSimulation(completed))
         resolve()
@@ -1536,6 +1700,7 @@ function WorkspaceApp() {
         source.close()
         for (let attempt = 0; attempt < 40; attempt += 1) {
           const latest = await simulationRunApi.get(run.id)
+          setSelectedSimulationRun(latest)
           setWorkflowOutputKind(targetTab, 'simulation')
           setSimulationStageViews(stageSeedFromSimulation(latest))
           if (
@@ -1621,7 +1786,7 @@ function WorkspaceApp() {
 
   async function saveManualTopic(event: FormEvent) {
     event.preventDefault()
-    if (!workspace || !manualTopicTitle.trim()) return
+    if (!workspace || !manualTopicTitle.trim()) return false
     setSaveState('manualTopic', { phase: 'saving' })
     try {
       const created = await topicApi.create(workspace.id, {
@@ -1634,8 +1799,10 @@ function WorkspaceApp() {
       setSelectedTopic(created)
       await refreshWorkspaceSummary()
       setSaveState('manualTopic', { phase: 'saved' })
+      return true
     } catch (error) {
       setSaveState('manualTopic', { phase: 'error', message: errorMessage(error) })
+      return false
     }
   }
 
@@ -1675,6 +1842,7 @@ function WorkspaceApp() {
   async function generateDraftForTopic(topic: Topic) {
     setRunError('')
     setSaveState('draft', { phase: 'saving' })
+    if (!internalMode) { setSelectedDraft(null); setActivePage('drafts') }
     try {
       const draft = await draftApi.generateFromTopic(topic.id, mode)
       setSelectedDraft(draft)
@@ -1694,6 +1862,7 @@ function WorkspaceApp() {
   async function generateBriefForTopic(topic: Topic) {
     setRunError('')
     setSaveState('draft', { phase: 'saving' })
+    if (!internalMode) { setSelectedDraft(null); setActivePage('drafts') }
     try {
       const draft = await draftApi.generateBriefFromTopic(topic.id, mode)
       setSelectedDraft(draft)
@@ -2327,10 +2496,15 @@ function WorkspaceApp() {
   function renderStageResult(stage: StageView): ReactNode {
     return (
       <StageResultRenderer
+        publicMode={!internalMode}
+        onSimulateSavedTopic={(topic) => void runAudienceSimulation(undefined, 'account', topic)}
         stage={stage}
         currentRun={currentRun}
         onSaveGeneratedTopic={saveGeneratedTopic}
-        onSelectTopic={selectTopic}
+        onSelectTopic={async (topic) => {
+          await selectTopic(topic)
+          if (!internalMode) setActivePage('topics')
+        }}
         onGenerateBrief={generateBriefForTopic}
         onGenerateDraft={generateDraftForTopic}
         onFillSimulationTopic={setSimulationTopic}
@@ -2351,24 +2525,53 @@ function WorkspaceApp() {
   }, [selectedTopic])
 
   const visibleTopics = topics.filter((topic) =>
-    topicFilter === 'all' ? true : topic.sourceWorkflow === topicFilter,
+    (internalMode || topic.sourceWorkflow !== 'trend_analysis') &&
+    (topicFilter === 'all' ? true : topic.sourceWorkflow === topicFilter),
   )
   const helpContent = getWorkspaceHelpContent({
     activePage,
     inputAssetPanel,
     workflowTab,
+    publicMode: !internalMode,
   })
   const mainContent = (
     <>
       {loadError && <div className="error-banner">⚠ {loadError}</div>}
-      {loading && <div className="loading-card">正在加载工作区…</div>}
+      {loading && <div className="loading-card">正在加载账号档案…</div>}
 
       {!loading && !workspace && (
         <div className="empty-workspace">
-          <h2>默认工作区暂不可用</h2>
-          <p>系统会自动使用一个默认工作区保存输入资产、分析结果和能力资产。</p>
+          <h2>账号档案暂不可用</h2>
+          <p>请刷新页面，或新建一个账号档案后再开始导入。</p>
         </div>
       )}
+
+      {!loading && workspace && activePage === 'creator-start' && (
+        <CreatorStartPage
+          workspace={workspace}
+          xhsCreatorProfile={xhsCreatorProfileMaterial || null}
+          profileUrl={xhsProfileUrl}
+          captureJob={xhsCaptureJob}
+          submitting={xhsCaptureSubmitting}
+          error={xhsCaptureError}
+          noteLimit={captureNoteLimit}
+          onNoteLimitChange={setCaptureNoteLimit}
+          onProfileUrlChange={setXhsProfileUrl}
+          onSubmit={startXhsCapture}
+          onOpenMaterials={() => openInputAsset('xhs_creator_profiles')}
+          onOpenDiagnosis={() => {
+            setWorkflowTab('account')
+            setActivePage('account-diagnosis')
+          }}
+        />
+      )}
+      {!loading && workspace && activePage === 'creator-overview' && <CreatorOverviewPage
+        workspace={workspace}
+        profile={xhsCreatorProfileMaterial}
+        onNotes={() => openInputAsset('xhs_creator_profiles')}
+        onAnalyze={() => { setWorkflowTab('account'); setActivePage('account-diagnosis') }}
+        onImport={() => setActivePage('creator-start')}
+      />}
 
       {!loading &&
         workspace &&
@@ -2377,7 +2580,13 @@ function WorkspaceApp() {
       {!loading &&
         workspace &&
         activePage === 'source-materials' &&
-        renderInputAssetsPage()}
+        (internalMode ? renderInputAssetsPage() : <CreatorMaterialsPage
+          key={workspace.id}
+          profile={xhsCreatorProfileMaterial}
+          mediaAssets={mediaAssets}
+          onImport={() => setActivePage('creator-start')}
+          onAnalyze={() => { setWorkflowTab('account'); setActivePage('account-diagnosis') }}
+        />)}
       {!loading && workspace && activePage === 'image-assets' && (
         <MediaAssetsPage
           workspaceId={workspace.id}
@@ -2403,7 +2612,22 @@ function WorkspaceApp() {
       {!loading &&
         workspace &&
         activePage === 'account-diagnosis' &&
-        renderWorkflowRunPage('account')}
+        (internalMode ? renderWorkflowRunPage('account') : <CreatorDiagnosisPage
+          profile={xhsCreatorProfileMaterial}
+          scope={analysisScope}
+          onScopeChange={setAnalysisScope}
+          running={running}
+          onRun={() => void runDiagnosis('account')}
+          onImport={() => setActivePage('creator-start')}
+        >
+          {(analysisStageViewsByWorkflow.account.length > 0 || runError) && <WorkflowOutputPanel
+            targetTab="account"
+            views={analysisStageViewsByWorkflow.account}
+            outputKind="analysis"
+            runError={runError}
+            renderStageResult={renderStageResult}
+          />}
+        </CreatorDiagnosisPage>)}
       {!loading &&
         workspace &&
         activePage === 'trend-analysis' &&
@@ -2415,7 +2639,10 @@ function WorkspaceApp() {
 
       {!loading && workspace && activePage === 'history' && (
         <AnalysisHistoryPage
-          analysisRuns={analysisRuns}
+          publicMode={!internalMode}
+          analysisRuns={analysisRuns.filter(
+            (run) => internalMode || run.workflowType === 'account_diagnosis',
+          )}
           selectedRun={selectedRun}
           analysisReviewDraft={analysisReviewDraft}
           analysisReviewSaveState={saveStates.analysisReview}
@@ -2427,6 +2654,9 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'topics' && (
         <TopicLibraryPage
+          publicMode={!internalMode}
+          busy={running || saveStates.draft.phase === 'saving'}
+          onSimulateTopic={(topic) => void runAudienceSimulation(undefined, 'account', topic)}
           visibleTopics={visibleTopics}
           selectedTopic={selectedTopic}
           topicFilter={topicFilter}
@@ -2441,8 +2671,8 @@ function WorkspaceApp() {
           onTopicFilterChange={setTopicFilter}
           onSelectTopicRow={setSelectedTopic}
           onSelectCurrentTopic={selectTopic}
-          onGenerateBrief={generateBriefForTopic}
-          onGenerateDraft={generateDraftForTopic}
+          onGenerateBrief={(topic) => void generateBriefForTopic(topic).catch(() => undefined)}
+          onGenerateDraft={(topic) => void generateDraftForTopic(topic).catch(() => undefined)}
           onArchiveTopic={archiveTopic}
           onTopicDraftChange={setTopicDraft}
           onSaveTopicEdits={updateSelectedTopic}
@@ -2450,7 +2680,8 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'drafts' && (
         <DraftsPage
-          drafts={drafts}
+          publicMode={!internalMode}
+          drafts={drafts.filter((draft) => internalMode || draft.sourceWorkflow !== 'trend_analysis')}
           selectedDraft={selectedDraft}
           draftEditor={draftEditor}
           draftSaveState={saveStates.draft}
@@ -2460,7 +2691,7 @@ function WorkspaceApp() {
             setSaveState('draft', idleState)
           }}
           onSaveDraftEdits={saveDraftEdits}
-          onGenerateStructureFromBrief={generateStructureFromBrief}
+          onGenerateStructureFromBrief={(draft) => void generateStructureFromBrief(draft).catch(() => undefined)}
           onRunAudienceSimulation={runAudienceSimulation}
           renderDraftStructure={renderDraftStructure}
           draftDisplayTitle={draftDisplayTitle}
@@ -2468,7 +2699,11 @@ function WorkspaceApp() {
         />
       )}
       {!loading && workspace && activePage === 'simulations' && (
+        <>
+        {!internalMode && running && <WorkflowOutputPanel targetTab="account" views={simulationStageViews} outputKind="simulation" runError={runError} renderStageResult={renderStageResult} />}
+        {!internalMode && !running && runError && <p role="alert">{runError}</p>}
         <SimulationHistoryPage
+          publicMode={!internalMode}
           simulationRuns={simulationRuns}
           selectedSimulationRun={selectedSimulationRun}
           simulationReviewDraft={simulationReviewDraft}
@@ -2480,6 +2715,7 @@ function WorkspaceApp() {
           stageSeedFromSimulation={stageSeedFromSimulation}
           renderStageResult={renderStageResult}
         />
+        </>
       )}
       {!loading &&
         workspace &&
@@ -2551,13 +2787,27 @@ function WorkspaceApp() {
   return (
     <WorkspaceShell
       workspace={workspace}
+      workspaces={workspaces}
+      selectedWorkspaceId={selectedWorkspaceId}
       activePage={activePage}
       inputAssetPanel={inputAssetPanel}
       showHelp={showHelp}
       helpContent={helpContent}
+      internalMode={internalMode}
       workflowAssets={workflowAssets}
       onOpenInputAsset={openInputAsset}
       onSetActivePage={setActivePage}
+      onSelectWorkspace={(id) => {
+        selectedWorkspaceRef.current = id
+        setSelectedWorkspaceId(id)
+        setXhsCaptureJob(null)
+        setXhsCaptureError('')
+        setXhsProfileUrl('')
+        setAnalysisScope('recent_10')
+        setCaptureNoteLimit(10)
+      }}
+      busy={running || xhsCaptureSubmitting || saveStates.draft.phase === 'saving' || Boolean(xhsCaptureJob && ['pending', 'waiting_for_login', 'running', 'processing'].includes(xhsCaptureJob.status))}
+      onCreateCreatorProfile={() => void createCreatorProfile()}
       onSetWorkflowTab={setWorkflowTab}
       onToggleHelp={() => setShowHelp((value) => !value)}
     >

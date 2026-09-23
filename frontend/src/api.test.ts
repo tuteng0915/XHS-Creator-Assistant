@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, inputAssetApi, mediaAssetApi } from './api'
+import { ApiError, inputAssetApi, mediaAssetApi, xhsCaptureApi } from './api'
 import type { MediaAsset, TextInputAsset } from './types'
 
 const imageAsset: MediaAsset = {
@@ -227,5 +227,44 @@ describe('inputAssetApi', () => {
     expect((form.get('profile') as File).name).toBe('xhs_creator_profile.json')
     expect((form.get('files') as File).name).toBe('images/n1/0.jpg')
     expect(form.get('relativePaths')).toBe('images/n1/0.jpg')
+  })
+})
+
+describe('xhsCaptureApi', () => {
+  it('creates a bounded backend capture job with a relative API URL', async () => {
+    const job = {
+      id: 'capture-1',
+      workspaceId: 'workspace-1',
+      profileUrl: 'https://www.xiaohongshu.com/user/profile/u1',
+      resolvedUrl: '',
+      status: 'pending',
+      noteLimit: 20,
+      includeComments: true,
+      statusMessage: '正在准备导入任务',
+      error: '',
+      resultInputAssetId: null,
+      createdAt: '2026-09-23T10:00:00Z',
+      startedAt: null,
+      completedAt: null,
+      updatedAt: '2026-09-23T10:00:00Z',
+    }
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(await jsonResponse(job, 202))
+
+    const response = await xhsCaptureApi.create('workspace-1', {
+      profileUrl: job.profileUrl,
+      noteLimit: 20,
+      includeComments: true,
+    })
+
+    expect(response.id).toBe('capture-1')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/workspace-1/xhs-capture-jobs',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
   })
 })

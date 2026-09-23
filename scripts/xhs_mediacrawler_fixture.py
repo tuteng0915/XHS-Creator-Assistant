@@ -25,6 +25,7 @@ class XhsMediaCrawlerNote:
     comment_count: int | None
     share_count: int | None
     cover_path: Path | None
+    published_at: int | str | None = None
 
 
 @dataclass(frozen=True)
@@ -292,6 +293,7 @@ def build_xhs_creator_profile_payload(
                 "title": note.title,
                 "desc": note.desc,
                 "noteUrl": note.note_url,
+                "publishedAt": note.published_at,
                 "tags": note.tag_list,
                 "metrics": {
                     "liked": note.liked_count,
@@ -370,6 +372,7 @@ def _parse_note(row: dict[str, Any], *, xhs_dir: Path) -> XhsMediaCrawlerNote:
         comment_count=_to_int(row.get("comment_count")),
         share_count=_to_int(row.get("share_count")),
         cover_path=_cover_path(xhs_dir, note_id),
+        published_at=row.get("time") or row.get("publish_time"),
     )
 
 

@@ -70,6 +70,7 @@ export function RunReviewEditor({
 }
 
 type AnalysisHistoryPageProps = {
+  publicMode?: boolean
   analysisRuns: AnalysisRunSummary[]
   selectedRun: AnalysisRun | null
   analysisReviewDraft: ReviewDraft
@@ -81,6 +82,7 @@ type AnalysisHistoryPageProps = {
 }
 
 export function AnalysisHistoryPage({
+  publicMode = false,
   analysisRuns,
   selectedRun,
   analysisReviewDraft,
@@ -126,19 +128,20 @@ export function AnalysisHistoryPage({
                 在输出区打开
               </button>
             </div>
-            <RunReviewEditor
+            <details open={!publicMode}><summary>复盘备注</summary><RunReviewEditor
               idPrefix="analysis-run-review"
               draft={analysisReviewDraft}
               onDraftChange={onAnalysisReviewDraftChange}
               onSave={onSaveAnalysisRunReview}
               saveState={analysisReviewSaveState}
               hint="执行输入、阶段结果和模型元数据是不可变历史；这里仅保存人工复盘判断。"
-            />
-            <label>原始输入快照</label>
+            /></details>
+            <details open={!publicMode}><summary>{publicMode ? '本次分析的材料' : '原始输入快照'}</summary>
             <pre className="json-preview">
-              {JSON.stringify(selectedRun.inputSnapshot, null, 2)}
+              {publicMode ? String((selectedRun.inputSnapshot.historicalPosts as {content?: string})?.content || '未保存笔记正文') : JSON.stringify(selectedRun.inputSnapshot, null, 2)}
             </pre>
-            <label>生成结果</label>
+            </details>
+            {!publicMode && <label>生成结果</label>}
             {stageSeedFromRun(selectedRun).map((stage) => (
               <div className="stage compact" key={stage.key}>
                 <div className="stage-h">

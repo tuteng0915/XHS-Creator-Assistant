@@ -3,12 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { WorkspaceShell, type ActivePage } from './WorkspaceShell'
 import type { InputAssetPanel } from '../inputAssets'
-import type { WorkflowAssetSummary, Workspace } from '../types'
-import type { WorkflowTab } from '../workflows'
+import type { Workspace } from '../types'
 
 const workspace: Workspace = {
   id: 'workspace-1',
-  name: '默认工作区',
+  name: 'QSheep',
   accountPositioning: '服务留学生',
   positioningVersion: 1,
   currentTopicId: null,
@@ -16,53 +15,30 @@ const workspace: Workspace = {
   updatedAt: '2026-07-11T10:00:00Z',
 }
 
-const workflowAssets: WorkflowAssetSummary[] = [
-  {
-    id: 'workflow-account',
-    workspaceId: 'workspace-1',
-    workflowId: 'account_diagnosis',
-    displayName: '账号诊断',
-    purpose: '诊断账号',
-    entryAgentIds: [],
-    artifactEffect: 'AnalysisRun',
-    source: 'builtin',
-    status: 'enabled',
-    version: 'v1',
-    callBinding: 'account',
-    updatedAt: '2026-07-11T10:00:00Z',
-  },
-  {
-    id: 'workflow-trend',
-    workspaceId: 'workspace-1',
-    workflowId: 'trend_analysis',
-    displayName: '热点分析',
-    purpose: '分析趋势',
-    entryAgentIds: [],
-    artifactEffect: 'AnalysisRun',
-    source: 'builtin',
-    status: 'enabled',
-    version: 'v1',
-    callBinding: 'trend',
-    updatedAt: '2026-07-11T10:00:00Z',
-  },
-]
+const workspaceTwo: Workspace = {
+  ...workspace,
+  id: 'workspace-2',
+  name: '数字游民账号',
+}
 
 function renderShell(overrides: Partial<Parameters<typeof WorkspaceShell>[0]> = {}) {
   const props = {
     workspace,
-    activePage: 'account-diagnosis' as ActivePage,
-    inputAssetPanel: 'historical_posts' as InputAssetPanel,
+    workspaces: [workspace, workspaceTwo],
+    selectedWorkspaceId: workspace.id,
+    activePage: 'creator-start' as ActivePage,
+    inputAssetPanel: 'xhs_creator_profiles' as InputAssetPanel,
     showHelp: false,
     helpContent: {
       title: '整体帮助',
       description: '这里是帮助内容',
       bullets: ['第一条帮助'],
     },
-    workflowAssets,
     children: <div>页面内容</div>,
     onOpenInputAsset: vi.fn(),
     onSetActivePage: vi.fn(),
-    onSetWorkflowTab: vi.fn(),
+    onSelectWorkspace: vi.fn(),
+    onCreateCreatorProfile: vi.fn(),
     onToggleHelp: vi.fn(),
     ...overrides,
   }
@@ -73,40 +49,42 @@ function renderShell(overrides: Partial<Parameters<typeof WorkspaceShell>[0]> = 
 afterEach(() => cleanup())
 
 describe('WorkspaceShell', () => {
-  it('renders content and capability navigation around the current page', () => {
+  it('renders the creator-focused navigation without developer entries', () => {
     renderShell()
 
-    expect(screen.getByText('创作者工作区')).toBeInTheDocument()
-    expect(screen.getByText('内容资产')).toBeInTheDocument()
-    expect(screen.getAllByText('能力资产').length).toBeGreaterThan(0)
-    expect(screen.getByText('页面内容')).toBeInTheDocument()
+    expect(screen.getByText('创作者诊断助手')).toBeInTheDocument()
+    expect(screen.getByText('导入小红书账号')).toBeInTheDocument()
+    expect(screen.getByText('账号诊断')).toBeInTheDocument()
+    expect(screen.queryByText('热点分析')).not.toBeInTheDocument()
+    expect(screen.queryByText('视频博主质量诊断')).not.toBeInTheDocument()
+    expect(screen.queryByText('Skills')).not.toBeInTheDocument()
+    expect(screen.queryByText('Agents')).not.toBeInTheDocument()
+    expect(screen.queryByText('Workflows')).not.toBeInTheDocument()
   })
 
-  it('routes input asset and workflow navigation through callbacks', () => {
+  it('switches creator profiles and creates a new profile', () => {
     const props = renderShell()
-    const contentNav = screen.getByRole('navigation', { name: '内容资产导航' })
-    const capabilityNav = screen.getByRole('navigation', { name: '能力资产导航' })
 
-    fireEvent.click(within(contentNav).getByRole('button', { name: /创作者档案/ }))
-    expect(props.onOpenInputAsset).toHaveBeenCalledWith('historical_posts')
+    fireEvent.change(screen.getByLabelText('当前账号档案'), {
+      target: { value: workspaceTwo.id },
+    })
+    expect(props.onSelectWorkspace).toHaveBeenCalledWith(workspaceTwo.id)
 
-    fireEvent.click(within(capabilityNav).getByRole('button', { name: /热点分析/ }))
-    expect(props.onSetWorkflowTab).toHaveBeenCalledWith('trend' satisfies WorkflowTab)
-    expect(props.onSetActivePage).toHaveBeenCalledWith('trend-analysis')
+    fireEvent.click(screen.getByRole('button', { name: '＋ 添加账号' }))
+    expect(props.onCreateCreatorProfile).toHaveBeenCalledTimes(1)
   })
 
-  it('routes media asset navigation through the content sidebar', () => {
+  it('routes the public creator journey through the left navigation', () => {
     const props = renderShell()
-    const contentNav = screen.getByRole('navigation', { name: '内容资产导航' })
+    const navigation = screen.getByRole('navigation', {
+      name: '创作者功能导航',
+    })
 
-    fireEvent.click(within(contentNav).getByRole('button', { name: /图文素材/ }))
-    expect(props.onSetActivePage).toHaveBeenCalledWith('image-assets')
+    fireEvent.click(within(navigation).getByRole('button', { name: /我的笔记/ }))
+    expect(props.onOpenInputAsset).toHaveBeenCalledWith('xhs_creator_profiles')
 
-    fireEvent.click(within(contentNav).getByRole('button', { name: /视频素材/ }))
-    expect(props.onSetActivePage).toHaveBeenCalledWith('video-assets')
-
-    fireEvent.click(within(contentNav).getByRole('button', { name: /对话记录/ }))
-    expect(props.onSetActivePage).toHaveBeenCalledWith('conversations')
+    fireEvent.click(within(navigation).getByRole('button', { name: /账号诊断/ }))
+    expect(props.onSetActivePage).toHaveBeenCalledWith('account-diagnosis')
   })
 
   it('toggles and displays help content when requested', () => {
@@ -117,8 +95,6 @@ describe('WorkspaceShell', () => {
       'true',
     )
     expect(screen.getByText('整体帮助')).toBeInTheDocument()
-    expect(screen.getByText('这里是帮助内容')).toBeInTheDocument()
-
     fireEvent.click(screen.getByRole('button', { name: '帮助' }))
     expect(props.onToggleHelp).toHaveBeenCalledTimes(1)
   })
