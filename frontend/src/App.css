@@ -30,7 +30,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   min-height: 100vh; display: grid; grid-template-columns: 252px minmax(0, 1fr) 238px;
 }
 .app-shell.creator-focused-shell {
-  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
 }
 .workspace-sidebar, .capability-sidebar {
   position: sticky; top: 0; height: 100vh; padding: 20px 16px;
@@ -113,6 +113,8 @@ nav a.active, nav button.active { color: var(--blue); background: var(--blue-sof
   width: min(100%, 980px); margin: 0 auto; display: grid; gap: 18px;
 }
 .creator-focused-shell .workspace-main { padding-top: 12px; }
+.creator-focused-shell .workspace-sidebar { width: 220px; padding: 16px 12px; }
+.creator-focused-shell .workspace-sidebar nav .creator-nav-child { padding-left: 30px; font-size: 12px; }
 .creator-focused-shell .topbar { margin-bottom: 8px; }
 .creator-start-hero h1, .creator-page-head h1 { margin: 0; font-size: 26px; }
 .creator-range-row, .creator-diagnosis-controls { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
@@ -125,6 +127,8 @@ nav a.active, nav button.active { color: var(--blue); background: var(--blue-sof
 .creator-materials-page, .creator-diagnosis-page { max-width: 1180px; margin: 0 auto; }
 .creator-page-head { display: flex; justify-content: space-between; gap: 18px; align-items: center; margin: 0 0 24px; }
 .creator-page-head > div { display: flex; gap: 10px; }
+.creator-page-head h1 { flex-shrink: 0; }
+.creator-canvas-page > .creator-page-head > select { width: min(60%, 560px); min-width: 0; }
 .creator-page-head > .primary, .creator-diagnosis-controls > .primary { flex: 0 0 auto; }
 .creator-note-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 20px; }
 .creator-note-card { overflow: hidden; min-width: 0; padding: 0; text-align: left; background: white; border: 1px solid var(--line); border-radius: 14px; }
@@ -148,12 +152,31 @@ nav a.active, nav button.active { color: var(--blue); background: var(--blue-sof
 .creator-diagnosis-controls .primary { margin-left: auto; }
 .creator-draft-field { display: block; margin: 0 0 16px; font-size: 13px; }
 .creator-draft-field textarea { display: block; margin-top: 7px; }
+.audience-history-select { margin: 20px 0; max-width: 100%; }
+.audience-groups { display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 16px; }
+.audience-groups progress { width: 100%; accent-color: var(--blue); }
+.creator-canvas { display: grid; min-height: 65vh; }
+.canvas-editor, .canvas-chat { min-width: 0; background: white; border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+.canvas-editor { display: flex; flex-direction: column; gap: 14px; }
+.canvas-editor > textarea { flex: 1; min-height: 420px; resize: vertical; line-height: 1.8; }
+.canvas-editor > input { font-size: 19px; font-weight: 600; }
+.canvas-divider { cursor: col-resize; touch-action: none; border-radius: 5px; margin: 0 3px; }
+.canvas-divider:hover, .canvas-divider:focus { background: #dbeafe; }
+.canvas-chat { display: flex; flex-direction: column; }
+.canvas-messages { overflow-y: auto; max-height: 58vh; flex: 1; padding: 0 4px; }
+.canvas-message { border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #f8fafc; }
+.canvas-message.user { background: #eff6ff; margin-left: 24px; }
+.canvas-message p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.canvas-message pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.canvas-chat form { display: grid; gap: 8px; margin-top: 16px; }
+.canvas-chat textarea { min-height: 80px; }
+@media(max-width: 800px) { .creator-canvas { grid-template-columns: minmax(0,1fr) !important; gap: 16px; } .canvas-divider { display: none; } }
 .creator-overview-notes { padding-left: 20px; }
 .creator-overview-notes li { margin: 18px 0; padding-left: 6px; }
 .creator-overview-notes p { color: var(--sub); font-size: 13px; margin: 6px 0 0; }
 @media (max-width: 760px) {
   .app-shell.creator-focused-shell { grid-template-columns: 1fr; }
-  .creator-focused-shell .workspace-sidebar { position: static; height: auto; }
+  .creator-focused-shell .workspace-sidebar { position: static; height: auto; width: auto; }
   .creator-focused-shell .creator-sidebar-foot { display: none; }
   .creator-focused-shell nav { flex-direction: row; flex-wrap: wrap; }
   .creator-note-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

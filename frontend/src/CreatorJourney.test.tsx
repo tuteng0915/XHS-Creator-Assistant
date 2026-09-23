@@ -31,6 +31,14 @@ function setup() {
 }
 
 describe('public creator journey', () => {
+  it('opens add-account without creating any database record', async () => {
+    const fetchMock = setup()
+    await screen.findByText('甲的笔记')
+    fireEvent.click(screen.getByRole('button', {name: /添加账号/}))
+    await screen.findByText('导入你的账号')
+    expect(fetchMock.mock.calls.filter(([,init]) => init?.method === 'POST')).toHaveLength(0)
+    expect(screen.queryByText('导入小红书账号')).not.toBeInTheDocument()
+  })
   it('switches accounts without displaying the previous accounts notes', async () => {
     setup()
     await screen.findByText('甲的笔记')

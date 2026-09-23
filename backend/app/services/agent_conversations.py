@@ -17,10 +17,12 @@ from app.models import (
     AgentMessageCreate,
     AgentMessageResponse,
     ModelOperation,
+    TopicUpdate,
 )
 from app.repositories.agent_conversations import AgentConversationRepository
 from app.repositories.agents import AgentRepository
 from app.repositories.asset_proposals import AssetProposalRepository
+from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.common import as_iso, utc_now
 from app.services.context_access import ContextAccessService
@@ -87,8 +89,7 @@ class FakeAgentConversationModelProvider:
                     "type": "workspace.update_profile",
                     "status": "requires_confirmation",
                     "description": (
-                        "用户可能希望调整 Account Profile；当前版本只提出建议，"
-                        "不自动写入。"
+                        "用户可能希望调整 Account Profile；当前版本只提出建议，不自动写入。"
                     ),
                     "payload": {"accountPositioning": content},
                 }
@@ -142,8 +143,7 @@ class FakeAgentConversationModelProvider:
                     "type": "workflow.propose_definition",
                     "status": "requires_confirmation",
                     "description": (
-                        "用户可能希望新增或修改 Workflow；当前版本只生成定义提案，"
-                        "不自动写入。"
+                        "用户可能希望新增或修改 Workflow；当前版本只生成定义提案，不自动写入。"
                     ),
                     "payload": {
                         "definition": self._demo_workflow_definition(content),
@@ -234,6 +234,34 @@ class RealAgentConversationModelProvider:
         context_pack: dict,
         messages: list[dict],
     ) -> AgentConversationReply:
+        if context_pack.get("canvasTopic"):
+            response = await self.model_call_service.call_operation(
+                ModelOperation.CREATOR_EDIT,
+                {
+                    "topic": context_pack["canvasTopic"],
+                    "accountContext": context_pack,
+                    "messages": [
+                        {"role": m["role"], "content": m["content"]} for m in messages[-12:]
+                    ],
+                    "userMessage": user_content,
+                },
+            )
+            update = response.output.get("update")
+            if update is not None:
+                if not isinstance(update.get("title"), str) or not isinstance(
+                    update.get("body"), str
+                ):
+                    raise ValidationError("创作助手必须返回完整标题和正文")
+                if not update["title"].strip():
+                    raise ValidationError("创作标题不能为空")
+                TopicUpdate.model_validate(
+                    {**update, "expectedUpdatedAt": context_pack["canvasTopic"]["updated_at"]}
+                )
+            return AgentConversationReply(
+                reply=response.output["reply"],
+                proposed_actions=[],
+                model_metadata={**response.model_metadata, "canvasUpdate": update},
+            )
         response = await self.model_call_service.call_operation(
             ModelOperation.AGENT_CHAT,
             {
@@ -243,9 +271,7 @@ class RealAgentConversationModelProvider:
                     "purpose": agent["purpose"],
                     "systemPrompt": agent["system_prompt"],
                     "skillIds": json.loads(agent["skill_ids_json"]),
-                    "defaultContextPolicy": json.loads(
-                        agent["default_context_policy_json"]
-                    ),
+                    "defaultContextPolicy": json.loads(agent["default_context_policy_json"]),
                 },
                 "contextPack": context_pack,
                 "messages": [
@@ -265,9 +291,7 @@ class RealAgentConversationModelProvider:
             raise ValidationError("Agent chat response missing reply")
         return AgentConversationReply(
             reply=reply.strip(),
-            proposed_actions=self._validate_proposed_actions(
-                output.get("proposedActions", [])
-            ),
+            proposed_actions=self._validate_proposed_actions(output.get("proposedActions", [])),
             model_metadata=response.model_metadata,
         )
 
@@ -338,6 +362,19 @@ class AgentConversationService:
                 if payload.context_target is not None
                 else {}
             )
+            if context_target.get("assetType") == "topic":
+                topic = TopicRepository().get(connection, context_target["assetId"])
+                if topic["workspace_id"] != workspace_id:
+                    raise ValidationError("选题属于另一个账号")
+                if agent["agent_id"] != "topic_draft_editor":
+                    raise ValidationError("选题画布只能使用创作助手")
+                existing = connection.execute(
+                    "SELECT id FROM agent_conversations WHERE workspace_id=? "
+                    "AND context_target_json=? AND status='active' ORDER BY created_at LIMIT 1",
+                    (workspace_id, json.dumps(context_target, ensure_ascii=False)),
+                ).fetchone()
+                if existing:
+                    return self.get(existing["id"])
             row = self.repository.create(
                 connection,
                 workspace_id=workspace_id,
@@ -353,19 +390,14 @@ class AgentConversationService:
             self.workspace_repository.get(connection, workspace_id)
             rows = self.repository.list(connection, workspace_id)
             messages_by_id = {
-                row["id"]: self.repository.list_messages(connection, row["id"])
-                for row in rows
+                row["id"]: self.repository.list_messages(connection, row["id"]) for row in rows
             }
         return [
             AgentConversationSummary.model_validate(
                 {
                     **row,
-                    "context_target": json.loads(
-                        row.get("context_target_json") or "{}"
-                    ),
-                    "execution_status": self._execution_status(
-                        messages_by_id[row["id"]]
-                    ),
+                    "context_target": json.loads(row.get("context_target_json") or "{}"),
+                    "execution_status": self._execution_status(messages_by_id[row["id"]]),
                 }
             )
             for row in rows
@@ -402,9 +434,7 @@ class AgentConversationService:
     ) -> AgentConversationResponse:
         now = utc_now()
         client_message_key = (
-            payload.client_message_key.strip()
-            if payload.client_message_key is not None
-            else None
+            payload.client_message_key.strip() if payload.client_message_key is not None else None
         )
         with self.database.transaction() as connection:
             conversation = self.repository.get(connection, conversation_id)
@@ -589,9 +619,7 @@ class AgentConversationService:
 
         with self.database.read() as connection:
             conversation = self.repository.get(connection, conversation_id)
-            workspace = self.workspace_repository.get(
-                connection, conversation["workspace_id"]
-            )
+            workspace = self.workspace_repository.get(connection, conversation["workspace_id"])
             agent = self.agent_repository.get(connection, conversation["agent_asset_id"])
             context_target = json.loads(conversation["context_target_json"] or "{}")
             selected_asset_item = (
@@ -600,7 +628,7 @@ class AgentConversationService:
                     workspace_id=conversation["workspace_id"],
                     context_target=context_target,
                 )
-                if context_target
+                if context_target and context_target.get("assetType") != "topic"
                 else None
             )
             context_pack = self.context_access_service.build_workspace_pack(
@@ -627,6 +655,14 @@ class AgentConversationService:
                 deep_items=[selected_asset_item] if selected_asset_item else None,
             )
             asset_refs = context_pack["snapshot"]["sourceRefs"]
+            canvas_topic = None
+            if context_target.get("assetType") == "topic":
+                canvas_topic = TopicRepository().get(connection, context_target["assetId"])
+                if canvas_topic["workspace_id"] != conversation["workspace_id"]:
+                    raise ValidationError("选题属于另一个账号")
+                context_pack["canvasTopic"] = {
+                    k: canvas_topic[k] for k in ("id", "title", "body", "angle", "updated_at")
+                }
             messages = [
                 message
                 for message in self.repository.list_messages(connection, conversation_id)
@@ -664,15 +700,33 @@ class AgentConversationService:
             reply_metadata = reply.model_metadata
 
         with self.database.transaction() as connection:
+            if canvas_topic and reply_metadata.get("status") == "completed":
+                update = reply_metadata.get("canvasUpdate")
+                if update is not None:
+                    try:
+                        validated = TopicUpdate.model_validate(
+                            {**update, "expectedUpdatedAt": canvas_topic["updated_at"]}
+                        )
+                        TopicRepository().update(
+                            connection,
+                            topic_id=canvas_topic["id"],
+                            title=validated.title,
+                            angle=None,
+                            body=validated.body,
+                            expected_updated_at=canvas_topic["updated_at"],
+                            now=utc_now(),
+                        )
+                        reply_metadata["canvasApplyStatus"] = "applied"
+                    except Exception as error:
+                        reply_metadata["canvasApplyStatus"] = "conflict"
+                        reply_metadata["canvasApplyError"] = str(error)
             assistant_message = self.repository.update_message(
                 connection,
                 message_id=assistant_message_id,
                 content=reply.reply,
                 context_pack_json=json.dumps(context_pack, ensure_ascii=False),
                 asset_refs_json=json.dumps(asset_refs, ensure_ascii=False),
-                proposed_actions_json=json.dumps(
-                    reply.proposed_actions, ensure_ascii=False
-                ),
+                proposed_actions_json=json.dumps(reply.proposed_actions, ensure_ascii=False),
                 model_metadata_json=json.dumps(reply_metadata, ensure_ascii=False),
                 now=utc_now(),
             )
@@ -755,9 +809,7 @@ class AgentConversationService:
         }
         return labels.get(action_type, action_type)
 
-    def _to_response(
-        self, row: dict, messages: list[dict]
-    ) -> AgentConversationResponse:
+    def _to_response(self, row: dict, messages: list[dict]) -> AgentConversationResponse:
         return AgentConversationResponse.model_validate(
             {
                 **row,
@@ -769,9 +821,7 @@ class AgentConversationService:
 
     @staticmethod
     def _execution_status(messages: list[dict]) -> str:
-        assistant_messages = [
-            message for message in messages if message.get("role") == "assistant"
-        ]
+        assistant_messages = [message for message in messages if message.get("role") == "assistant"]
         if not assistant_messages:
             return "idle"
         latest = assistant_messages[-1]

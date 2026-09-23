@@ -66,7 +66,7 @@ function GeneratedTopicCard({
       <div className="topic-actions">
         {publicMode ? <>
           <button onClick={() => void ensureSavedAndSelect().catch(() => undefined)}>查看选题</button>
-          <button onClick={() => void ensureSavedAndSelect().then(onGenerateBrief).catch(() => undefined)}>AI 细化选题</button>
+          <button onClick={() => void ensureSavedAndSelect().then(onGenerateBrief).catch(() => undefined)}>AI 创作助手</button>
           <button onClick={() => void ensureSavedAndSelect().then((saved) => onSimulateSavedTopic?.(saved)).catch(() => undefined)}>受众模拟</button>
         </> : <>
         <button onClick={() => onSaveGeneratedTopic(topic, currentRun)}>

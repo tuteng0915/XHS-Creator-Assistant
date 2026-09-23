@@ -22,6 +22,7 @@ export type ActivePage =
   | 'topics'
   | 'drafts'
   | 'simulations'
+  | 'audience-analysis'
   | 'conversations'
   | 'skills'
   | 'agents'
@@ -123,13 +124,7 @@ export function WorkspaceShell({
         <nav aria-label="创作者功能导航">
           <button className={activePage === 'creator-overview' ? 'active' : ''} onClick={() => onSetActivePage('creator-overview')}><span>◉</span> 账号概览</button>
           <button
-            className={activePage === 'creator-start' ? 'active' : ''}
-            onClick={() => onSetActivePage('creator-start')}
-          >
-            <span>＋</span> 导入小红书账号
-          </button>
-          <button
-            className={activePage === 'source-materials' ? 'active' : ''}
+            className={`creator-nav-child ${activePage === 'source-materials' ? 'active' : ''}`}
             onClick={() => onOpenInputAsset('xhs_creator_profiles')}
           >
             <span>📕</span> 我的笔记
@@ -142,7 +137,7 @@ export function WorkspaceShell({
             <span>📊</span> 账号诊断
           </button>
           <button
-            className={activePage === 'history' ? 'active' : ''}
+            className={`creator-nav-child ${activePage === 'history' ? 'active' : ''}`}
             onClick={() => onSetActivePage('history')}
           >
             <span>◷</span> 分析历史
@@ -154,13 +149,14 @@ export function WorkspaceShell({
             <span>◇</span> 选题库
           </button>
           <button
-            className={activePage === 'drafts' ? 'active' : ''}
+            className={`creator-nav-child ${activePage === 'drafts' ? 'active' : ''}`}
             onClick={() => onSetActivePage('drafts')}
           >
-            <span>✦</span> AI 创作
+            <span>✦</span> AI 创作助手
           </button>
+          <button className={activePage === 'audience-analysis' ? 'active' : ''} onClick={() => onSetActivePage('audience-analysis')}><span>◎</span> 受众分析</button>
           <button
-            className={activePage === 'simulations' ? 'active' : ''}
+            className={`creator-nav-child ${activePage === 'simulations' ? 'active' : ''}`}
             onClick={() => onSetActivePage('simulations')}
           >
             <span>👥</span> 受众模拟

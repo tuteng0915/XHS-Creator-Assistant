@@ -50,6 +50,11 @@ from app.services import (
     XhsCaptureJobService,
     XhsOfflineImportService,
 )
+from app.services.audience_analyses import (
+    AudienceAnalysisCreate,
+    AudienceAnalysisResponse,
+    AudienceAnalysisService,
+)
 from app.workflows import (
     AccountDiagnosisWorkflowService,
     AudienceSimulationWorkflowService,
@@ -114,9 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         active_settings,
     )
     qwen_media_service = QwenMediaService(active_settings, media_asset_service)
-    xhs_import_service = XhsOfflineImportService(
-        input_asset_service, media_asset_service
-    )
+    xhs_import_service = XhsOfflineImportService(input_asset_service, media_asset_service)
     xhs_capture_service = XhsCaptureJobService(
         database=database,
         repository=xhs_capture_repository,
@@ -247,16 +250,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI):
+        audience_analysis_service.resume()
         xhs_capture_service.recover_interrupted()
         agent_conversation_service.resume_unfinished()
         await workflow_worker.resume_unfinished()
         try:
             yield
         finally:
+            await audience_analysis_service.shutdown()
             await agent_conversation_service.shutdown()
             await workflow_worker.shutdown()
             xhs_capture_service.shutdown()
 
+    audience_analysis_service = AudienceAnalysisService(database, model_call_service)
     application = FastAPI(
         title="Creator Workspace API",
         version="0.1.0",
@@ -290,9 +296,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.xhs_capture_service = xhs_capture_service
 
     @application.exception_handler(ApplicationError)
-    async def handle_application_error(
-        _request: Request, error: ApplicationError
-    ) -> JSONResponse:
+    async def handle_application_error(_request: Request, error: ApplicationError) -> JSONResponse:
         status_code = 400
         if isinstance(error, NotFoundError):
             status_code = 404
@@ -308,6 +312,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/api/health", response_model=HealthResponse, tags=["health"])
     async def health() -> HealthResponse:
         return HealthResponse(status="ok", service="creator-workspace-backend")
+
+    application.state.audience_analysis_service = audience_analysis_service
+
+    @application.post(
+        "/api/workspaces/{workspace_id}/audience-analyses",
+        response_model=AudienceAnalysisResponse,
+        status_code=202,
+    )
+    async def create_audience_analysis(workspace_id: str, payload: AudienceAnalysisCreate):
+        return audience_analysis_service.create(workspace_id, payload)
+
+    @application.get(
+        "/api/workspaces/{workspace_id}/audience-analyses",
+        response_model=list[AudienceAnalysisResponse],
+    )
+    def list_audience_analyses(workspace_id: str):
+        return audience_analysis_service.list(workspace_id)
+
+    @application.get("/api/audience-analyses/{run_id}", response_model=AudienceAnalysisResponse)
+    def get_audience_analysis(run_id: str):
+        return audience_analysis_service.get(run_id)
 
     application.include_router(
         create_api_router(

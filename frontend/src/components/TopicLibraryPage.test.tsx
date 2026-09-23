@@ -34,7 +34,7 @@ describe('TopicLibraryPage', () => {
       onGenerateDraft={vi.fn()} onArchiveTopic={vi.fn()} onTopicDraftChange={vi.fn()}
       onSaveTopicEdits={vi.fn()}
     />)
-    expect(screen.getByRole('button', { name: 'AI 细化选题' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'AI 创作助手' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '受众模拟' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '＋ 新建选题' }))
     fireEvent.click(screen.getByRole('button', { name: '保存选题' }))

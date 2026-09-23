@@ -56,15 +56,16 @@ class MediaCrawlerXhsCaptureRunner:
     def shutdown(self) -> None:
         self.stopping.set()
 
-    def _capture(
-        self, command: list[str], profile_url: str, progress: ProgressCallback
-    ) -> str:
+    def _capture(self, command: list[str], profile_url: str, progress: ProgressCallback) -> str:
         """Read real crawler progress; keep browser descendants within the job lifetime."""
         lines: list[str] = []
         resolved_line = ""
         process = subprocess.Popen(
-            command, cwd=self.repository_root, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, start_new_session=True,
+            command,
+            cwd=self.repository_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
         deadline = time.monotonic() + 20 * 60
@@ -103,7 +104,8 @@ class MediaCrawlerXhsCaptureRunner:
                         elif "Begin get Xiaohongshu creators" in line:
                             progress(
                                 XhsCaptureJobStatus.RUNNING,
-                                "正在读取笔记和评论。", profile_url,
+                                "正在读取笔记和评论。",
+                                profile_url,
                             )
             code = process.wait(timeout=5)
             if code != 0:
@@ -137,9 +139,7 @@ class MediaCrawlerXhsCaptureRunner:
         mediacrawler_directory = self.settings.xhs_mediacrawler_directory
         capture_root = self.settings.xhs_capture_directory
         if mediacrawler_directory is None or not (mediacrawler_directory / "main.py").is_file():
-            raise ValidationError(
-                "本机尚未配置 MediaCrawler，暂时不能从主页 URL 自动导入。"
-            )
+            raise ValidationError("本机尚未配置 MediaCrawler，暂时不能从主页 URL 自动导入。")
         if capture_root is None:
             raise ValidationError("XHS capture directory is not configured")
 
@@ -241,14 +241,16 @@ class MediaCrawlerXhsCaptureRunner:
             previous = json.loads(row["text_content"])
             previous_url = previous.get("source", {}).get("profileUrl", "")
             same = (
-                urlparse(previous_url).path == incoming_path if previous_url
+                urlparse(previous_url).path == incoming_path
+                if previous_url
                 else previous.get("creator", {}).get("displayName") == incoming_name
             )
             if not same:
                 raise ValidationError("链接属于另一个账号，请先点击“添加账号”再导入。")
             known_ids = {note.get("noteId") for note in incoming.get("notes", [])}
             incoming["notes"].extend(
-                note for note in previous.get("notes", [])
+                note
+                for note in previous.get("notes", [])
                 if isinstance(note, dict) and note.get("noteId") not in known_ids
             )
 
@@ -277,9 +279,7 @@ class XhsCaptureJobService:
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="xhs-capture")
         self.futures: dict[str, Future[None]] = {}
 
-    def create(
-        self, workspace_id: str, payload: XhsCaptureJobCreate
-    ) -> XhsCaptureJobResponse:
+    def create(self, workspace_id: str, payload: XhsCaptureJobCreate) -> XhsCaptureJobResponse:
         profile_url = self._validate_profile_url(payload.profile_url)
         with self.database.transaction() as connection:
             self.workspace_repository.get(connection, workspace_id)
@@ -294,10 +294,45 @@ class XhsCaptureJobService:
                 include_comments=payload.include_comments,
                 now=utc_now(),
             )
-        future = self.executor.submit(self._execute, row["id"])
-        self.futures[row["id"]] = future
-        future.add_done_callback(lambda _: self.futures.pop(row["id"], None))
+        self._schedule(row["id"])
         return XhsCaptureJobResponse.model_validate(row)
+
+    def create_account(self, payload: XhsCaptureJobCreate) -> XhsCaptureJobResponse:
+        profile_url = self._validate_profile_url(payload.profile_url)
+        with self.database.transaction() as connection:
+            # Repeated submission of the same URL reopens its existing import.
+            existing = connection.execute(
+                "SELECT * FROM xhs_capture_jobs WHERE profile_url = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (profile_url,),
+            ).fetchone()
+            if existing and existing["status"] != "failed":
+                return XhsCaptureJobResponse.model_validate(dict(existing))
+            workspace = (
+                self.workspace_repository.get(connection, existing["workspace_id"])
+                if existing
+                else self.workspace_repository.create(
+                    connection,
+                    name="正在导入的账号",
+                    account_positioning="",
+                    now=utc_now(),
+                )
+            )
+            row = self.repository.create(
+                connection,
+                workspace_id=workspace["id"],
+                profile_url=profile_url,
+                note_limit=payload.note_limit,
+                include_comments=payload.include_comments,
+                now=utc_now(),
+            )
+        self._schedule(row["id"])
+        return XhsCaptureJobResponse.model_validate(row)
+
+    def _schedule(self, job_id: str) -> None:
+        future = self.executor.submit(self._execute, job_id)
+        self.futures[job_id] = future
+        future.add_done_callback(lambda _: self.futures.pop(job_id, None))
 
     def get(self, job_id: str) -> XhsCaptureJobResponse:
         with self.database.read() as connection:
@@ -323,9 +358,7 @@ class XhsCaptureJobService:
         try:
             job = self.get(job_id)
 
-            def progress(
-                status: XhsCaptureJobStatus, message: str, resolved_url: str
-            ) -> None:
+            def progress(status: XhsCaptureJobStatus, message: str, resolved_url: str) -> None:
                 with self.database.transaction() as connection:
                     self.repository.transition(
                         connection,

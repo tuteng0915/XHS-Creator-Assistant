@@ -419,6 +419,8 @@ export interface Topic {
   workspaceId: string
   title: string
   angle: string
+  body?: string
+  pinned?: boolean
   associatedPainPoint: string
   whyItFits: string
   generatedSnapshot: Record<string, unknown>
@@ -427,6 +429,17 @@ export interface Topic {
   status: TopicStatus
   createdAt: string
   updatedAt: string
+}
+
+export interface AudienceAnalysis {
+  id: string
+  workspaceId: string
+  sourceMaterialId: string
+  status: string
+  inputSnapshot: { scope: { scope: string; selectedNoteCount: number } }
+  result: { summary?: string; limitations?: string; groups?: Array<{ id: string; name: string; profile: string; coreConcern: string; estimatedPercent: number; evidence: string[] }> }
+  error: string
+  createdAt: string
 }
 
 export type ModelOperation =

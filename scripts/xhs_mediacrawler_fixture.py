@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -44,6 +44,7 @@ class XhsMediaCrawlerExport:
     base_dir: Path
     notes: list[XhsMediaCrawlerNote]
     comments: list[XhsMediaCrawlerComment]
+    creator_metrics: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -66,16 +67,18 @@ def load_mediacrawler_export(base_dir: Path, *, code: str) -> XhsMediaCrawlerExp
     comments_path = _latest_matching_file(
         xhs_dir / "jsonl", "creator_comments_*.jsonl", required=False
     )
-    notes = [
-        _parse_note(row, xhs_dir=xhs_dir)
-        for row in _read_jsonl(notes_path)
-    ]
+    notes = [_parse_note(row, xhs_dir=xhs_dir) for row in _read_jsonl(notes_path)]
     comments = (
         [_parse_comment(row) for row in _read_jsonl(comments_path)]
         if comments_path is not None
         else []
     )
     return XhsMediaCrawlerExport(
+        creator_metrics=json.loads(
+            (base_dir / "creator_metrics.json").read_text(encoding="utf-8")
+        )
+        if (base_dir / "creator_metrics.json").is_file()
+        else {},
         code=code,
         base_dir=xhs_dir,
         notes=[note for note in notes if note.note_id and note.title],
@@ -94,7 +97,9 @@ def export_xhs_import_package(
     overwrite: bool = True,
 ) -> XhsImportPackageSummary:
     if output_dir.exists() and not overwrite and any(output_dir.iterdir()):
-        raise FileExistsError(f"Output directory already exists and is not empty: {output_dir}")
+        raise FileExistsError(
+            f"Output directory already exists and is not empty: {output_dir}"
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     images_dir = output_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -165,7 +170,9 @@ def build_account_profile_markdown(export: XhsMediaCrawlerExport) -> str:
         "- 内容类型：" + _format_counter(type_counts),
     ]
     if tag_counts:
-        lines.append("- 高频标签：" + "、".join(tag for tag, _ in tag_counts.most_common(12)))
+        lines.append(
+            "- 高频标签：" + "、".join(tag for tag, _ in tag_counts.most_common(12))
+        )
     lines.extend(["", "## 高互动笔记", ""])
     for index, note in enumerate(top_notes, start=1):
         engagement = (
@@ -283,6 +290,7 @@ def build_xhs_creator_profile_payload(
             "baseDir": str(export.base_dir),
         },
         "creator": {
+            **export.creator_metrics,
             "displayName": display_name,
             "profileText": build_account_profile_markdown(export),
         },
@@ -329,13 +337,17 @@ def _fixture_cover_relative_path(note: XhsMediaCrawlerNote) -> str:
 
 
 def infer_creator_display_name(export: XhsMediaCrawlerExport) -> str:
+    if export.creator_metrics.get("displayName"):
+        return str(export.creator_metrics["displayName"])
     nicknames = Counter(note.nickname for note in export.notes if note.nickname)
     if nicknames:
         return nicknames.most_common(1)[0][0]
     return export.code
 
 
-def _latest_matching_file(directory: Path, pattern: str, *, required: bool = True) -> Path | None:
+def _latest_matching_file(
+    directory: Path, pattern: str, *, required: bool = True
+) -> Path | None:
     matches = sorted(directory.glob(pattern))
     if matches:
         return matches[-1]

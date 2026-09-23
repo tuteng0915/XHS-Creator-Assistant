@@ -199,7 +199,14 @@ export const inputAssetApi = {
 
 export const sourceMaterialApi = inputAssetApi
 
+export const audienceAnalysisApi = {
+  list: (workspaceId: string) => request<import('./types').AudienceAnalysis[]>(`/api/workspaces/${workspaceId}/audience-analyses`),
+  create: (workspaceId: string, sourceMaterialId: string, scope: import('./creatorNotes').AnalysisScope) => request<import('./types').AudienceAnalysis>(`/api/workspaces/${workspaceId}/audience-analyses`, {method: 'POST', headers: jsonHeaders, body: JSON.stringify({sourceMaterialId, scope})}),
+}
+
 export const xhsCaptureApi = {
+  createAccount: (payload: { profileUrl: string; noteLimit: number; includeComments: boolean }) =>
+    request<XhsCaptureJob>('/api/creator-accounts/import', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload) }),
   list: (workspaceId: string) =>
     request<XhsCaptureJob[]>(
       `/api/workspaces/${workspaceId}/xhs-capture-jobs`,
@@ -402,7 +409,7 @@ export const agentConversationApi = {
     workspaceId: string,
     agentAssetId: string,
     title?: string,
-    contextTarget?: { assetType: 'skill' | 'agent' | 'workflow'; assetId: string },
+    contextTarget?: { assetType: 'skill' | 'agent' | 'workflow' | 'topic'; assetId: string },
   ) =>
     request<AgentConversation>(
       `/api/workspaces/${workspaceId}/agent-conversations`,
@@ -586,6 +593,7 @@ export const simulationRunApi = {
   create: (
     workspaceId: string,
     payload: {
+      audienceAnalysisId?: string
       topicId?: string | null
       draftId?: string | null
       manualTopic?: string
@@ -663,6 +671,7 @@ export const draftApi = {
 }
 
 export const topicApi = {
+  get: (topicId: string) => request<Topic>(`/api/topics/${topicId}`),
   list: (
     workspaceId: string,
     filters?: {
@@ -699,6 +708,8 @@ export const topicApi = {
     payload: {
       title?: string
       angle?: string
+      body?: string
+      pinned?: boolean
       expectedUpdatedAt: string
     },
   ) =>

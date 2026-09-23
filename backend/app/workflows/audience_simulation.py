@@ -591,6 +591,7 @@ class AudienceSimulationWorkflowService:
             "topicId": topic.get("topicId"),
             "title": topic.get("title", ""),
             "angle": topic.get("angle", ""),
+            "body": topic.get("body", ""),
             "associatedPainPoint": topic.get("associatedPainPoint", ""),
             "whyItFits": topic.get("whyItFits", ""),
             "sourceWorkflow": topic.get("sourceWorkflow", "manual"),
@@ -731,9 +732,9 @@ class _AudienceSimulationGraphExecution:
             return AudienceSimulationState(**updated)
         await self.emit("stage.started", "personas", "running", {})
         try:
-            output = await self.provider().personas(
-                positioning=updated["positioning_snapshot"],
-                topic=updated["topic"],
+            saved_personas = self.service.simulation_service.get(self.simulation_id).input_snapshot.get('audiencePersonas')
+            output = {'personas': saved_personas} if saved_personas else await self.provider().personas(
+                positioning=updated["positioning_snapshot"], topic=updated["topic"],
             )
             result = PersonaDefinitionsResult.model_validate(output).model_dump(
                 mode="json"

@@ -17,6 +17,31 @@ def load_runner():
     return module
 
 
+def test_public_account_counter_adapter_keeps_metric_meanings_distinct():
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "xhs_metrics", root / "scripts/xhs_capture_with_metrics.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    result = module.account_metrics(
+        {
+            "basicInfo": {"nickname": "创作者", "ipLocation": "不保留"},
+            "interactions": [
+                {"type": "fans", "count": "1.2万"},
+                {"type": "interaction", "count": "3万"},
+            ],
+        }
+    )
+    assert result == {
+        "displayName": "创作者",
+        "followers": "1.2万",
+        "totalLikes": None,
+        "likesAndCollections": "3万",
+    }
+
+
 def test_xhs_url_classification():
     runner = load_runner()
 
@@ -99,9 +124,13 @@ def test_build_mediacrawler_command_rejects_negative_limit():
 def test_explicit_all_removes_count_limit_but_keeps_one_worker():
     runner = load_runner()
     command = runner.build_mediacrawler_command(
-        python_bin=Path("python"), creator_url="https://www.xiaohongshu.com/user/profile/abc",
-        limit=0, comments=True, sub_comments=False,
-        save_data_option="jsonl", save_data_path="data/output",
+        python_bin=Path("python"),
+        creator_url="https://www.xiaohongshu.com/user/profile/abc",
+        limit=0,
+        comments=True,
+        sub_comments=False,
+        save_data_option="jsonl",
+        save_data_path="data/output",
     )
     assert command[command.index("--crawler_max_notes_count") + 1] == "2147483647"
     assert command[command.index("--max_concurrency_num") + 1] == "1"

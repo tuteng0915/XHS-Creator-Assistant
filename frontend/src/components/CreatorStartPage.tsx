@@ -5,7 +5,7 @@ import { xhsCreatorProfileSummaryFromAsset } from '../xhsCreatorProfile'
 import { CreatorDialog } from './CreatorDialog'
 
 type CreatorStartPageProps = {
-  workspace: Workspace
+  workspace: Workspace | null
   xhsCreatorProfile: TextInputAsset | null
   profileUrl: string
   captureJob: XhsCaptureJob | null
@@ -117,7 +117,7 @@ export function CreatorStartPage({
       {summary && <article className="creator-profile-overview">
         <div className="detail-head compact">
           <div>
-            <h3>{workspace.name}</h3>
+            <h3>{workspace?.name}</h3>
           </div>
         </div>
         {summary ? (

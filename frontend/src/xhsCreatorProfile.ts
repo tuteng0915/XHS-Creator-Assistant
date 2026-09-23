@@ -2,6 +2,9 @@ import type { TextInputAsset } from './types'
 
 export type XhsCreatorProfileSummary = {
   displayName: string
+  followers?: number | null
+  totalLikes?: number | null
+  likesAndCollections?: number | null
   noteCount: number
   videoNoteCount: number
   normalNoteCount: number
@@ -44,7 +47,7 @@ export function summarizeXhsCreatorProfile(
   if (!raw || typeof raw !== 'object') return null
   const profile = raw as {
     schemaVersion?: unknown
-    creator?: { displayName?: unknown }
+    creator?: { displayName?: unknown; followers?: unknown; totalLikes?: unknown; likesAndCollections?: unknown }
     notes?: unknown
     warnings?: unknown
   }
@@ -72,6 +75,9 @@ export function summarizeXhsCreatorProfile(
     .slice(0, 5)
   return {
     displayName,
+    followers: toNumber(profile.creator?.followers),
+    totalLikes: toNumber(profile.creator?.totalLikes),
+    likesAndCollections: toNumber(profile.creator?.likesAndCollections),
     noteCount: notes.length,
     videoNoteCount: notes.filter((note) => cleanText(note.type) === 'video').length,
     normalNoteCount: notes.filter((note) => cleanText(note.type) !== 'video').length,
@@ -193,7 +199,9 @@ async function readFileText(file: File): Promise<string> {
 
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null
-  const numeric = Number(String(value).replace(/,/g, ''))
+  const text = String(value).replace(/,/g, '').replace(/\+$/, '')
+  const unit = text.endsWith('万') ? 10000 : text.endsWith('亿') ? 100000000 : 1
+  const numeric = Number(unit === 1 ? text : text.slice(0,-1)) * unit
   return Number.isFinite(numeric) ? numeric : null
 }
 

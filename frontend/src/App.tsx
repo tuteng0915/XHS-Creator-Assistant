@@ -93,6 +93,9 @@ import { WorkflowRunPage } from './components/WorkflowRunPage'
 import { CreatorMaterialsPage } from './components/CreatorMaterialsPage'
 import { CreatorDiagnosisPage } from './components/CreatorDiagnosisPage'
 import { CreatorOverviewPage } from './components/CreatorOverviewPage'
+import { AudienceAnalysisPage } from './components/AudienceAnalysisPage'
+import { CreatorCanvasPage } from './components/CreatorCanvasPage'
+import { useAudienceAnalyses } from './hooks/useAudienceAnalyses'
 import type { AnalysisScope } from './creatorNotes'
 import {
   WorkflowOutputPanel,
@@ -289,6 +292,8 @@ function WorkspaceApp() {
   const [xhsCreatorProfileContent, setXhsCreatorProfileContent] = useState('')
   const [xhsProfileUrl, setXhsProfileUrl] = useState('')
   const [captureNoteLimit, setCaptureNoteLimit] = useState(10)
+  const [addingCreator, setAddingCreator] = useState(false)
+  const captureFormEpoch = useRef(0)
   const [analysisScope, setAnalysisScope] = useState<AnalysisScope>('recent_10')
   const [xhsCaptureJob, setXhsCaptureJob] = useState<XhsCaptureJob | null>(null)
   const [xhsCaptureSubmitting, setXhsCaptureSubmitting] = useState(false)
@@ -306,7 +311,8 @@ function WorkspaceApp() {
   const [runError, setRunError] = useState('')
   const [manualTopicTitle, setManualTopicTitle] = useState('')
   const [manualTopicAngle, setManualTopicAngle] = useState('')
-  const [topicDraft, setTopicDraft] = useState({ title: '', angle: '' })
+  const [topicDraft, setTopicDraft] = useState<{title:string; angle:string; body?:string}>({ title: '', angle: '', body: '' })
+  const audience = useAudienceAnalyses(selectedWorkspaceId)
   const { saveStates, setSaveState, resetSaveStates, setSaveStates } =
     useSaveStates()
   const [analysisReviewDraft, setAnalysisReviewDraft] = useState<{
@@ -447,6 +453,12 @@ function WorkspaceApp() {
           setSelectedWorkspaceId((current) => current || workspaceId)
           return
         }
+        if (!internalMode) {
+          setAddingCreator(true)
+          setActivePage('creator-start')
+          setLoading(false)
+          return
+        }
         const created = await workspaceApi.create(DEFAULT_WORKSPACE_NAME, '')
         if (!active) return
         setWorkspaces([created])
@@ -461,7 +473,7 @@ function WorkspaceApp() {
     return () => {
       active = false
     }
-  }, [])
+  }, [internalMode])
 
   useEffect(() => {
     if (
@@ -696,31 +708,60 @@ function WorkspaceApp() {
     setXhsCreatorProfileContent(importedProfile?.content || '')
   }
 
-  async function createCreatorProfile() {
+  function createCreatorProfile() {
+    captureFormEpoch.current += 1
+    setAddingCreator(true)
+    setXhsProfileUrl('')
+    setXhsCaptureJob(null)
+    setXhsCaptureError('')
+    setActivePage('creator-start')
+  }
+
+  function openExistingCreatorImport() {
+    const epoch = ++captureFormEpoch.current
+    setAddingCreator(false)
+    setXhsCaptureError('')
+    setActivePage('creator-start')
+    let profileUrl = ''
+    let count = 0
     try {
-      const created = await workspaceApi.create('新账号档案', '')
-      setWorkspaces((current) => [...current, created])
-      setSelectedWorkspaceId(created.id)
-      setXhsProfileUrl('')
-      setXhsCaptureJob(null)
-      setXhsCaptureError('')
-      setActivePage('creator-start')
-    } catch (error: unknown) {
-      setLoadError(errorMessage(error))
+      const parsed = JSON.parse(xhsCreatorProfileMaterial?.content || '{}')
+      profileUrl = String(parsed.source?.profileUrl || '')
+      count = Array.isArray(parsed.notes) ? parsed.notes.length : 0
+    } catch { /* Legacy content may not contain a structured profile URL. */ }
+    setCaptureNoteLimit(count ? [20,50,100].find(limit => limit > count) || 0 : 10)
+    setXhsProfileUrl(profileUrl)
+    if (workspace) {
+      const workspaceId = workspace.id
+      void xhsCaptureApi.list(workspaceId).then(jobs => {
+        if (selectedWorkspaceRef.current !== workspaceId || captureFormEpoch.current !== epoch) return
+        setXhsCaptureJob(jobs[0] || null)
+        if (jobs[0]?.profileUrl) setXhsProfileUrl(jobs[0].profileUrl)
+      }).catch(error => {if(captureFormEpoch.current === epoch) setXhsCaptureError(errorMessage(error))})
     }
   }
 
   async function startXhsCapture(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!workspace) return
+    if (!workspace && !addingCreator) return
     setXhsCaptureSubmitting(true)
     setXhsCaptureError('')
     try {
-      const job = await xhsCaptureApi.create(workspace.id, {
+      const payload = {
         profileUrl: xhsProfileUrl,
         noteLimit: captureNoteLimit,
         includeComments: true,
-      })
+      }
+      const job = addingCreator
+        ? await xhsCaptureApi.createAccount(payload)
+        : await xhsCaptureApi.create(workspace!.id, payload)
+      if (addingCreator) {
+        const loaded = await workspaceApi.list()
+        setWorkspaces(loaded)
+        selectedWorkspaceRef.current = job.workspaceId
+        setSelectedWorkspaceId(job.workspaceId)
+        setAddingCreator(false)
+      }
       setXhsCaptureJob(job)
     } catch (error: unknown) {
       setXhsCaptureError(errorMessage(error))
@@ -1641,6 +1682,7 @@ function WorkspaceApp() {
 
   async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic) {
     if (!workspace) return
+    if (!internalMode && audience.selected?.status !== 'completed') { setActivePage('audience-analysis'); return }
     setWorkflowTab(targetTab)
     setRunError('')
     setRunning(true)
@@ -1662,6 +1704,7 @@ function WorkspaceApp() {
       const useSavedTopic =
         !draft && selectedTopic && topicForSimulation.includes(selectedTopic.title)
       const created = await simulationRunApi.create(workspace.id, {
+        audienceAnalysisId: internalMode ? undefined : audience.selected?.id,
         draftId: draft?.id,
         topicId: topic?.id || (useSavedTopic ? selectedTopic.id : null),
         manualTopic: draft || topic || useSavedTopic ? undefined : topicForSimulation,
@@ -1829,6 +1872,7 @@ function WorkspaceApp() {
       const updated = await topicApi.update(selectedTopic.id, {
         title: topicDraft.title,
         angle: topicDraft.angle,
+        body: topicDraft.body,
         expectedUpdatedAt: selectedTopic.updatedAt,
       })
       setSelectedTopic(updated)
@@ -2505,7 +2549,7 @@ function WorkspaceApp() {
           await selectTopic(topic)
           if (!internalMode) setActivePage('topics')
         }}
-        onGenerateBrief={generateBriefForTopic}
+        onGenerateBrief={internalMode ? generateBriefForTopic : async topic => {setSelectedTopic(topic); setActivePage('drafts'); return null}}
         onGenerateDraft={generateDraftForTopic}
         onFillSimulationTopic={setSimulationTopic}
       />
@@ -2518,9 +2562,9 @@ function WorkspaceApp() {
 
   useEffect(() => {
     if (selectedTopic) {
-      setTopicDraft({ title: selectedTopic.title, angle: selectedTopic.angle })
+      setTopicDraft({ title: selectedTopic.title, angle: selectedTopic.angle, body: selectedTopic.body || '' })
     } else {
-      setTopicDraft({ title: '', angle: '' })
+      setTopicDraft({ title: '', angle: '', body: '' })
     }
   }, [selectedTopic])
 
@@ -2539,17 +2583,17 @@ function WorkspaceApp() {
       {loadError && <div className="error-banner">⚠ {loadError}</div>}
       {loading && <div className="loading-card">正在加载账号档案…</div>}
 
-      {!loading && !workspace && (
+      {!loading && !workspace && !addingCreator && (
         <div className="empty-workspace">
           <h2>账号档案暂不可用</h2>
           <p>请刷新页面，或新建一个账号档案后再开始导入。</p>
         </div>
       )}
 
-      {!loading && workspace && activePage === 'creator-start' && (
+      {!loading && (workspace || addingCreator) && activePage === 'creator-start' && (
         <CreatorStartPage
           workspace={workspace}
-          xhsCreatorProfile={xhsCreatorProfileMaterial || null}
+          xhsCreatorProfile={addingCreator ? null : xhsCreatorProfileMaterial || null}
           profileUrl={xhsProfileUrl}
           captureJob={xhsCaptureJob}
           submitting={xhsCaptureSubmitting}
@@ -2570,7 +2614,7 @@ function WorkspaceApp() {
         profile={xhsCreatorProfileMaterial}
         onNotes={() => openInputAsset('xhs_creator_profiles')}
         onAnalyze={() => { setWorkflowTab('account'); setActivePage('account-diagnosis') }}
-        onImport={() => setActivePage('creator-start')}
+        onImport={openExistingCreatorImport}
       />}
 
       {!loading &&
@@ -2584,7 +2628,7 @@ function WorkspaceApp() {
           key={workspace.id}
           profile={xhsCreatorProfileMaterial}
           mediaAssets={mediaAssets}
-          onImport={() => setActivePage('creator-start')}
+          onImport={openExistingCreatorImport}
           onAnalyze={() => { setWorkflowTab('account'); setActivePage('account-diagnosis') }}
         />)}
       {!loading && workspace && activePage === 'image-assets' && (
@@ -2618,7 +2662,7 @@ function WorkspaceApp() {
           onScopeChange={setAnalysisScope}
           running={running}
           onRun={() => void runDiagnosis('account')}
-          onImport={() => setActivePage('creator-start')}
+          onImport={openExistingCreatorImport}
         >
           {(analysisStageViewsByWorkflow.account.length > 0 || runError) && <WorkflowOutputPanel
             targetTab="account"
@@ -2654,6 +2698,11 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'topics' && (
         <TopicLibraryPage
+          onOpenCanvas={(topic) => {setSelectedTopic(topic); setActivePage('drafts')}}
+          onTogglePinned={async (topic) => {
+            try {const updated = await topicApi.update(topic.id, {pinned: !topic.pinned, expectedUpdatedAt:topic.updatedAt}); setSelectedTopic(updated); await refreshWorkspaceSummary()}
+            catch (error) {setSaveState('topic', {phase:'error',message:errorMessage(error)})}
+          }}
           publicMode={!internalMode}
           busy={running || saveStates.draft.phase === 'saving'}
           onSimulateTopic={(topic) => void runAudienceSimulation(undefined, 'account', topic)}
@@ -2678,7 +2727,12 @@ function WorkspaceApp() {
           onSaveTopicEdits={updateSelectedTopic}
         />
       )}
-      {!loading && workspace && activePage === 'drafts' && (
+      {!loading && workspace && activePage === 'drafts' && !internalMode && <CreatorCanvasPage
+        key={workspace.id} workspaceId={workspace.id} topic={selectedTopic} topics={topics.filter(t => t.sourceWorkflow !== 'trend_analysis')}
+        agentId={agents.find(a => a.agentId === 'topic_draft_editor')?.id}
+        onSelect={setSelectedTopic} onUpdated={topic => {if(selectedWorkspaceRef.current !== topic.workspaceId) return; setSelectedTopic(topic); setTopics(current => current.map(t => t.id === topic.id ? topic : t))}}
+      />}
+      {!loading && workspace && activePage === 'drafts' && internalMode && (
         <DraftsPage
           publicMode={!internalMode}
           drafts={drafts.filter((draft) => internalMode || draft.sourceWorkflow !== 'trend_analysis')}
@@ -2700,6 +2754,13 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'simulations' && (
         <>
+        {!internalMode && <div className="creator-diagnosis-controls">
+          {audience.error && <p role="alert">{audience.error}</p>}
+          <select aria-label="模拟使用的受众分析" value={audience.selected?.id || ''} onChange={e => audience.setSelectedId(e.target.value)}><option value="">先完成受众分析</option>{audience.rows.filter(r => r.status === 'completed').map(r => <option key={r.id} value={r.id}>{new Date(r.createdAt).toLocaleString()} · {r.inputSnapshot.scope.selectedNoteCount} 条笔记</option>)}</select>
+          <select aria-label="模拟选题" value={selectedTopic?.id || ''} onChange={e => setSelectedTopic(topics.find(t => t.id === e.target.value) || null)}><option value="">选择选题</option>{topics.filter(t => t.status !== 'archived').map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select>
+          <button className="primary" disabled={running || audience.selected?.status !== 'completed' || !selectedTopic} onClick={() => void runAudienceSimulation(undefined,'account',selectedTopic || undefined)}>开始模拟</button>
+          {!audience.rows.some(r => r.status === 'completed') && <button onClick={() => setActivePage('audience-analysis')}>先分析受众</button>}
+        </div>}
         {!internalMode && running && <WorkflowOutputPanel targetTab="account" views={simulationStageViews} outputKind="simulation" runError={runError} renderStageResult={renderStageResult} />}
         {!internalMode && !running && runError && <p role="alert">{runError}</p>}
         <SimulationHistoryPage
@@ -2721,6 +2782,11 @@ function WorkspaceApp() {
         workspace &&
         activePage === 'conversations' &&
         renderConversationsPage()}
+      {!loading && workspace && activePage === 'audience-analysis' && <AudienceAnalysisPage
+        key={workspace.id} workspaceId={workspace.id} profile={xhsCreatorProfileMaterial}
+        analyses={audience.rows} selectedId={audience.selectedId} onSelect={audience.setSelectedId}
+        onRefresh={audience.refresh} onSimulate={() => setActivePage('simulations')}
+      />}
       {!loading && workspace && activePage === 'skills' && (
         <SkillsPage
           skills={skills}
@@ -2796,8 +2862,10 @@ function WorkspaceApp() {
       internalMode={internalMode}
       workflowAssets={workflowAssets}
       onOpenInputAsset={openInputAsset}
-      onSetActivePage={setActivePage}
+      onSetActivePage={(page) => {setAddingCreator(false); setActivePage(page)}}
       onSelectWorkspace={(id) => {
+        setAddingCreator(false)
+        if (!internalMode) setActivePage('creator-overview')
         selectedWorkspaceRef.current = id
         setSelectedWorkspaceId(id)
         setXhsCaptureJob(null)

@@ -33,18 +33,24 @@ class SimulationRunService:
         self.topic_repository = topic_repository
         self.draft_repository = draft_repository
 
-    def create(
-        self, workspace_id: str, payload: SimulationRunCreate
-    ) -> SimulationRunResponse:
+    def create(self, workspace_id: str, payload: SimulationRunCreate) -> SimulationRunResponse:
         target_count = sum(
-            1
-            for value in (payload.topic_id, payload.draft_id, payload.manual_topic)
-            if value
+            1 for value in (payload.topic_id, payload.draft_id, payload.manual_topic) if value
         )
         if target_count != 1:
             raise ValidationError("Choose exactly one topic, draft, or manual topic")
         with self.database.transaction() as connection:
             workspace = self.workspace_repository.get(connection, workspace_id)
+            audience = None
+            if payload.audience_analysis_id:
+                row = connection.execute(
+                    "SELECT * FROM audience_analyses WHERE id=? "
+                    "AND workspace_id=? AND status='completed'",
+                    (payload.audience_analysis_id, workspace_id),
+                ).fetchone()
+                if row is None:
+                    raise ValidationError("请选择当前账号已完成的受众分析")
+                audience = json.loads(row["result_json"])
             topic_snapshot: dict | None = None
             draft_snapshot: dict | None = None
             topic_id: str | None = payload.topic_id
@@ -58,6 +64,7 @@ class SimulationRunService:
                     "topicId": topic["id"],
                     "title": topic["title"],
                     "angle": topic["angle"],
+                    "body": topic.get("body", ""),
                     "associatedPainPoint": topic["associated_pain_point"],
                     "whyItFits": topic["why_it_fits"],
                     "sourceWorkflow": topic["source_workflow"],
@@ -78,11 +85,19 @@ class SimulationRunService:
                     "topicId": topic["id"],
                     "title": topic["title"],
                     "angle": topic["angle"],
+                    "body": topic.get("body", ""),
                     "associatedPainPoint": topic["associated_pain_point"],
                     "whyItFits": topic["why_it_fits"],
                     "sourceWorkflow": topic["source_workflow"],
                 }
             snapshot = {
+                "audienceAnalysisId": payload.audience_analysis_id,
+                "audienceAnalysis": audience,
+                "audiencePersonas": sorted(
+                    audience["groups"], key=lambda g: g["estimatedPercent"], reverse=True
+                )[:3]
+                if audience
+                else [],
                 "mode": payload.mode,
                 "workspaceId": workspace_id,
                 "workspaceName": workspace["name"],
@@ -122,13 +137,9 @@ class SimulationRunService:
             row = self.repository.get(connection, simulation_id)
         return self._to_response(row)
 
-    def update_review(
-        self, simulation_id: str, payload: RunReviewUpdate
-    ) -> SimulationRunResponse:
+    def update_review(self, simulation_id: str, payload: RunReviewUpdate) -> SimulationRunResponse:
         current = self.get(simulation_id)
-        user_notes = (
-            payload.user_notes if payload.user_notes is not None else current.user_notes
-        )
+        user_notes = payload.user_notes if payload.user_notes is not None else current.user_notes
         review_status = (
             payload.review_status.value
             if payload.review_status is not None
@@ -174,15 +185,11 @@ class SimulationRunService:
                     ensure_ascii=False,
                 ),
                 reaction_results_json=json.dumps(
-                    reaction_results
-                    if reaction_results is not None
-                    else current.reaction_results,
+                    reaction_results if reaction_results is not None else current.reaction_results,
                     ensure_ascii=False,
                 ),
                 debate_results_json=json.dumps(
-                    debate_results
-                    if debate_results is not None
-                    else current.debate_results,
+                    debate_results if debate_results is not None else current.debate_results,
                     ensure_ascii=False,
                 ),
                 synthesis_json=json.dumps(

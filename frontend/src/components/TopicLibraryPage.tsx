@@ -10,13 +10,15 @@ type TopicFilter = TopicSourceWorkflow | 'all'
 type Props = {
   publicMode?: boolean
   busy?: boolean
+  onOpenCanvas?: (topic: Topic) => void
+  onTogglePinned?: (topic: Topic) => void
   onSimulateTopic?: (topic: Topic) => void
   visibleTopics: Topic[]
   selectedTopic: Topic | null
   topicFilter: TopicFilter
   manualTopicTitle: string
   manualTopicAngle: string
-  topicDraft: { title: string; angle: string }
+  topicDraft: { title: string; angle: string; body?: string }
   manualTopicSaveState: SaveState
   topicSaveState: SaveState
   onManualTopicTitleChange: (value: string) => void
@@ -28,7 +30,7 @@ type Props = {
   onGenerateBrief: (topic: Topic) => void
   onGenerateDraft: (topic: Topic) => void
   onArchiveTopic: (topic: Topic) => void
-  onTopicDraftChange: (draft: { title: string; angle: string }) => void
+  onTopicDraftChange: (draft: { title: string; angle: string; body?: string }) => void
   onSaveTopicEdits: () => void
 }
 
@@ -42,6 +44,8 @@ function topicSourceLabel(source: TopicSourceWorkflow | 'all'): string {
 export function TopicLibraryPage({
   publicMode = false,
   busy = false,
+  onOpenCanvas,
+  onTogglePinned,
   onSimulateTopic,
   visibleTopics,
   selectedTopic,
@@ -64,7 +68,7 @@ export function TopicLibraryPage({
   onSaveTopicEdits,
 }: Props) {
   const [creating, setCreating] = useState(false)
-  const dirty = Boolean(selectedTopic && (topicDraft.title !== selectedTopic.title || topicDraft.angle !== selectedTopic.angle))
+  const dirty = Boolean(selectedTopic && (topicDraft.title !== selectedTopic.title || topicDraft.angle !== selectedTopic.angle || (topicDraft.body || '') !== (selectedTopic.body || '')))
   const actionDisabled = publicMode && (dirty || busy || topicSaveState.phase === 'saving')
   const manualForm = (
     <form className="manual-topic" onSubmit={async (event) => {
@@ -115,13 +119,13 @@ export function TopicLibraryPage({
             ),
           )}
         </div>
-        {visibleTopics.map((topic) => (
+        {[...visibleTopics].sort((a,b) => Number(Boolean(b.pinned))-Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt)).map((topic) => (
           <button
             key={topic.id}
             className={`topic-row ${selectedTopic?.id === topic.id ? 'active' : ''}`}
             onClick={() => onSelectTopicRow(topic)}
           >
-            <span>{topic.title}</span>
+            <span>{topic.pinned ? '📌 ' : ''}{topic.title}</span>
             <b>{topic.status}</b>
             <small>{publicMode ? topicSourceLabel(topic.sourceWorkflow) : topic.sourceWorkflow}</small>
           </button>
@@ -141,12 +145,13 @@ export function TopicLibraryPage({
                 <button disabled={actionDisabled} onClick={() => onSelectCurrentTopic(selectedTopic)}>
                   设为当前
                 </button>
-                <button disabled={actionDisabled} onClick={() => onGenerateBrief(selectedTopic)}>
-                  {publicMode ? 'AI 细化选题' : '生成创作 Brief'}
+                <button disabled={actionDisabled} onClick={() => publicMode ? onOpenCanvas?.(selectedTopic) : onGenerateBrief(selectedTopic)}>
+                  {publicMode ? 'AI 创作助手' : '生成创作 Brief'}
                 </button>
-                <button disabled={actionDisabled} onClick={() => onGenerateDraft(selectedTopic)}>
+                {!publicMode && <button disabled={actionDisabled} onClick={() => onGenerateDraft(selectedTopic)}>
                   生成内容结构
-                </button>
+                </button>}
+                {publicMode && <button disabled={actionDisabled} onClick={() => onTogglePinned?.(selectedTopic)}>{selectedTopic.pinned ? '取消置顶' : '置顶'}</button>}
                 {publicMode && <button disabled={actionDisabled} onClick={() => onSimulateTopic?.(selectedTopic)}>受众模拟</button>}
                 <button onClick={() => onArchiveTopic(selectedTopic)}>归档</button>
               </div>
@@ -179,6 +184,7 @@ export function TopicLibraryPage({
                   })
                 }
               />
+              {publicMode && <><label htmlFor="topic-body">正文</label><textarea id="topic-body" rows={12} value={topicDraft.body || ''} onChange={event => onTopicDraftChange({...topicDraft,body:event.target.value})} /></>}
               <div className="save-row">
                 <button className="save-button" disabled={publicMode && (!dirty || topicSaveState.phase === 'saving')} onClick={onSaveTopicEdits}>
                   {publicMode ? '保存修改' : '保存选题资产'}

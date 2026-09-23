@@ -22,7 +22,7 @@ export function CreatorMaterialsPage({ profile, mediaAssets, onImport, onAnalyze
       <div className="creator-page-head">
         <h1>我的笔记</h1>
         <div>
-          <button type="button" onClick={onImport}>更新笔记</button>
+          <button type="button" onClick={onImport}>抓取更多笔记</button>
           <button type="button" className="primary" disabled={!notes.length} onClick={onAnalyze}>分析账号</button>
         </div>
       </div>

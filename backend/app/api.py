@@ -197,6 +197,10 @@ def create_api_router(
     def list_xhs_capture_jobs(workspace_id: str) -> list[XhsCaptureJobResponse]:
         return xhs_capture_service.list(workspace_id)
 
+    @router.post("/creator-accounts/import", response_model=XhsCaptureJobResponse, status_code=201)
+    def import_creator_account(payload: XhsCaptureJobCreate) -> XhsCaptureJobResponse:
+        return xhs_capture_service.create_account(payload)
+
     @router.get(
         "/xhs-capture-jobs/{job_id}", response_model=XhsCaptureJobResponse
     )

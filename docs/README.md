@@ -1,5 +1,7 @@
 # 文档索引
 
+最新增量以 [creator-experience-iteration.md](creator-experience-iteration.md) 为准：四组导航、提交后创建账号、受众分析与 Top 3 模拟、选题正文/置顶及画布式 AI 创作助手。与首轮 V2 手册不一致的旧创作入口说明，以本次增量为准。
+
 当前产品已经进入“创作者聚焦版 V2”改造。公开产品范围、账号空间模型、URL 导入链路和分阶段验收以 [creator-focused-v2-execution-manual.md](creator-focused-v2-execution-manual.md) 为准；旧的开发者工作台说明只用于理解保留代码和内部调试能力。
 
 顶层只保留当前仍然有效的产品、设计、架构和实现文档。已经完成或明显过时的迁移文档统一放在 `docs/backup/`，作为历史参考，不再作为当前实现依据。

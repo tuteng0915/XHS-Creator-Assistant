@@ -53,7 +53,9 @@ describe('WorkspaceShell', () => {
     renderShell()
 
     expect(screen.getByText('创作者诊断助手')).toBeInTheDocument()
-    expect(screen.getByText('导入小红书账号')).toBeInTheDocument()
+    expect(screen.queryByText('导入小红书账号')).not.toBeInTheDocument()
+    expect(screen.getByText('受众分析')).toBeInTheDocument()
+    expect(screen.getByText('AI 创作助手')).toBeInTheDocument()
     expect(screen.getByText('账号诊断')).toBeInTheDocument()
     expect(screen.queryByText('热点分析')).not.toBeInTheDocument()
     expect(screen.queryByText('视频博主质量诊断')).not.toBeInTheDocument()

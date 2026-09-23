@@ -173,6 +173,8 @@ PROMPT_INCENTIVE_FIT_ANALYSIS = """你是创作者激励计划策略负责人。
 
 
 MAX_TOKENS = {
+    ModelOperation.AUDIENCE_ANALYSIS: 4500,
+    ModelOperation.CREATOR_EDIT: 6000,
     ModelOperation.PROFILE: 1800,
     ModelOperation.PAIN_POINTS: 1000,
     ModelOperation.TOPICS: 2000,
@@ -306,6 +308,18 @@ class ModelCallService:
         self, operation: ModelOperation, context: dict[str, Any]
     ) -> tuple[str, str]:
         positioning = str(context.get("positioning", ""))
+        if operation == ModelOperation.AUDIENCE_ANALYSIS:
+            return ("""你是创作者受众研究员。基于所选时间范围的笔记内容和评论样本，推断有证据支持的受众分群。
+不限定为三种，通常 3~8 组，证据不足时可更少。避免根据单条评论臆测敏感身份。
+为每组给出具体画像、主要诉求、内容偏好和来自输入的原文证据。区分评论直接证据和从内容推断。
+estimatedPercent 为样本下的主观构成估计，合计 100，不是实际粉丝统计。limitations 必须解释样本偏差、缺失信息和不确定性。
+只输出 JSON：{"summary":"","groups":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":"","estimatedPercent":0,"evidence":[""]}],"limitations":""}""", json.dumps(context, ensure_ascii=False))
+        if operation == ModelOperation.CREATOR_EDIT:
+            return ("""你是用户的 AI 创作助手，与用户共同编辑一篇小红书选题。左侧画布是 title 和 body。
+根据账号及分析背景回应用户，保留用户风格，不编造个人经历或事实。
+用户要求写作、润色或修改时，返回完整的更新后 title/body；仅讨论、提问时 update 为 null。
+更新会写入当前选题，不能修改其他资产。回复简洁说明实际改动。
+只输出 JSON：{"reply":"","update":null} 或 {"reply":"","update":{"title":"","body":""}}。""", json.dumps(context, ensure_ascii=False))
         if operation == ModelOperation.PROFILE:
             return (
                 PROMPT_PROFILE,
@@ -462,6 +476,8 @@ class ModelCallService:
         cls, operation: ModelOperation, value: dict[str, Any]
     ) -> dict[str, Any]:
         requirements: dict[ModelOperation, dict[str, type | tuple[type, ...]]] = {
+            ModelOperation.AUDIENCE_ANALYSIS: {"summary": str, "groups": list, "limitations": str},
+            ModelOperation.CREATOR_EDIT: {"reply": str, "update": (dict, type(None))},
             ModelOperation.PROFILE: {"profile": dict},
             ModelOperation.PAIN_POINTS: {"painPoints": list},
             ModelOperation.TOPICS: {"topics": list},

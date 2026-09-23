@@ -488,6 +488,9 @@ class XhsOfflineImportService:
             },
             "creator": {
                 "displayName": self._clean(creator.get("displayName")),
+                "followers": creator.get("followers"),
+                "totalLikes": creator.get("totalLikes"),
+                "likesAndCollections": creator.get("likesAndCollections"),
                 "profileText": self._clean(
                     creator.get("profileText"), max_chars=100_000
                 ),

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run MediaCrawler for a Xiaohongshu creator URL with short-link resolution.
 
-This is intentionally a local/offline utility. It does not run inside the main
-SqsAgent backend and does not make the product server access Xiaohongshu.
+This utility can run independently or as the backend's local capture subprocess.
+It requires a user-controlled browser login on the machine running the crawler.
 
 Typical usage:
 
@@ -52,7 +52,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description="解析小红书短链并调用本地 MediaCrawler 抓取创作者主页。"
     )
     parser.add_argument("url", help="小红书主页 URL 或 xhslink.cn 短链")
-    parser.add_argument("--limit", type=int, default=10, help="最多抓取多少条笔记；0 表示全部可见笔记")
+    parser.add_argument(
+        "--limit", type=int, default=10, help="最多抓取多少条笔记；0 表示全部可见笔记"
+    )
     parser.add_argument(
         "--comments",
         action="store_true",
@@ -170,9 +172,7 @@ def resolve_xhs_profile_url(
         raise XhsUrlResolutionError(f"短链解析失败：{type(exc).__name__}") from exc
 
     if not is_xhs_profile_url(resolved_url):
-        raise XhsUrlResolutionError(
-            f"短链没有解析到小红书用户主页：{resolved_url}"
-        )
+        raise XhsUrlResolutionError(f"短链没有解析到小红书用户主页：{resolved_url}")
 
     return ResolvedXhsUrl(original_url=url, resolved_url=resolved_url)
 
@@ -241,7 +241,15 @@ def run_mediacrawler(
             f"找不到 MediaCrawler 目录：{mediacrawler_dir}. "
             "请先 clone 到 data/external/MediaCrawler。"
         )
-    process = subprocess.run(command, cwd=mediacrawler_dir, check=False)
+    save_path = command[command.index("--save_data_path") + 1]
+    output = (mediacrawler_dir / save_path / "creator_metrics.json").resolve()
+    wrapped = [
+        command[0],
+        str(Path(__file__).with_name("xhs_capture_with_metrics.py")),
+        str(output),
+        *command[2:],
+    ]
+    process = subprocess.run(wrapped, cwd=mediacrawler_dir, check=False)
     return process.returncode
 
 

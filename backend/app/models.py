@@ -326,7 +326,7 @@ class AgentConversationStatus(StrEnum):
 
 
 class ConversationContextTarget(APIModel):
-    asset_type: Literal["skill", "agent", "workflow"]
+    asset_type: Literal["skill", "agent", "workflow", "topic"]
     asset_id: str = Field(min_length=1, max_length=80)
 
 
@@ -496,9 +496,9 @@ class AnalysisRunStatus(StrEnum):
 
 class AnalysisRunCreate(APIModel):
     workflow_type: WorkflowType
-    analysis_scope: Literal[
-        "recent_10", "last_7_days", "last_30_days", "last_90_days", "all"
-    ] = "all"
+    analysis_scope: Literal["recent_10", "last_7_days", "last_30_days", "last_90_days", "all"] = (
+        "all"
+    )
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=120)
     account_profile_input_asset_id: str | None = None
     account_profile_material_id: str | None = None
@@ -657,6 +657,8 @@ class TopicCreate(APIModel):
 class TopicUpdate(APIModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
     angle: str | None = Field(default=None, max_length=2_000)
+    body: str | None = Field(default=None, max_length=50_000)
+    pinned: bool | None = None
     expected_updated_at: datetime
 
 
@@ -665,6 +667,8 @@ class TopicResponse(APIModel):
     workspace_id: str
     title: str
     angle: str
+    body: str = ""
+    pinned: bool = False
     associated_pain_point: str
     why_it_fits: str
     generated_snapshot: dict[str, Any]
@@ -718,6 +722,8 @@ class DraftResponse(DraftSummary):
 
 
 class ModelOperation(StrEnum):
+    AUDIENCE_ANALYSIS = "audience_analysis"
+    CREATOR_EDIT = "creator_edit"
     PROFILE = "profile"
     PAIN_POINTS = "pain_points"
     TOPICS = "topics"
@@ -754,6 +760,7 @@ class SimulationRunStatus(StrEnum):
 
 
 class SimulationRunCreate(APIModel):
+    audience_analysis_id: str | None = None
     topic_id: str | None = None
     draft_id: str | None = None
     manual_topic: str | None = Field(default=None, min_length=1, max_length=1_000)

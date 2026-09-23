@@ -36,9 +36,7 @@ class TopicService:
             self.workspace_repository.get(connection, workspace_id)
             source_workflow = payload.source_workflow
             if payload.source_analysis_run_id:
-                run = self.analysis_repository.get(
-                    connection, payload.source_analysis_run_id
-                )
+                run = self.analysis_repository.get(connection, payload.source_analysis_run_id)
                 if run["workspace_id"] != workspace_id:
                     raise ValidationError("Analysis run belongs to another workspace")
                 source_workflow = TopicSourceWorkflow(run["workflow_type"])
@@ -73,9 +71,7 @@ class TopicService:
                 angle=payload.angle,
                 associated_pain_point=payload.associated_pain_point,
                 why_it_fits=payload.why_it_fits,
-                generated_snapshot_json=json.dumps(
-                    generated_snapshot or {}, ensure_ascii=False
-                ),
+                generated_snapshot_json=json.dumps(generated_snapshot or {}, ensure_ascii=False),
                 source_analysis_run_id=payload.source_analysis_run_id,
                 source_workflow=source_workflow.value,
                 now=utc_now(),
@@ -94,9 +90,7 @@ class TopicService:
             rows = self.repository.list(
                 connection,
                 workspace_id=workspace_id,
-                source_workflow=(
-                    source_workflow.value if source_workflow is not None else None
-                ),
+                source_workflow=(source_workflow.value if source_workflow is not None else None),
                 status=status.value if status is not None else None,
             )
         return [self._to_response(row) for row in rows]
@@ -107,7 +101,9 @@ class TopicService:
         return self._to_response(row)
 
     def update(self, topic_id: str, payload: TopicUpdate) -> TopicResponse:
-        if payload.title is None and payload.angle is None:
+        if all(
+            value is None for value in (payload.title, payload.angle, payload.body, payload.pinned)
+        ):
             raise ValidationError("At least one editable field is required")
         title = payload.title.strip() if payload.title is not None else None
         if title == "":
@@ -118,6 +114,8 @@ class TopicService:
                 topic_id=topic_id,
                 title=title,
                 angle=payload.angle,
+                body=payload.body,
+                pinned=payload.pinned,
                 expected_updated_at=as_iso(payload.expected_updated_at),
                 now=utc_now(),
             )
@@ -138,8 +136,6 @@ class TopicService:
         return TopicResponse.model_validate(
             {
                 **row,
-                "generated_snapshot": json.loads(
-                    row.get("generated_snapshot_json") or "{}"
-                ),
+                "generated_snapshot": json.loads(row.get("generated_snapshot_json") or "{}"),
             }
         )

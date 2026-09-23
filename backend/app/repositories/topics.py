@@ -65,8 +65,8 @@ class TopicRepository:
         rows = connection.execute(
             f"""
             SELECT * FROM topics
-            WHERE {' AND '.join(clauses)}
-            ORDER BY updated_at DESC, id
+            WHERE {" AND ".join(clauses)}
+            ORDER BY pinned DESC, updated_at DESC, id
             """,
             args,
         ).fetchall()
@@ -100,6 +100,8 @@ class TopicRepository:
         angle: str | None,
         expected_updated_at: str,
         now: str,
+        body: str | None = None,
+        pinned: bool | None = None,
     ) -> dict:
         current = self.get(connection, topic_id)
         if current["updated_at"] != expected_updated_at:
@@ -107,12 +109,14 @@ class TopicRepository:
         cursor = connection.execute(
             """
             UPDATE topics
-            SET title = ?, angle = ?, updated_at = ?
+            SET title = ?, angle = ?, body = ?, pinned = ?, updated_at = ?
             WHERE id = ? AND updated_at = ?
             """,
             (
                 current["title"] if title is None else title,
                 current["angle"] if angle is None else angle,
+                current["body"] if body is None else body,
+                current["pinned"] if pinned is None else pinned,
                 now,
                 topic_id,
                 expected_updated_at,
