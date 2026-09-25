@@ -859,7 +859,7 @@ BUILTIN_SKILLS = [
         skill_id="simulation.initial_reactions",
         display_name="Simulate Initial Reactions",
         category="simulation",
-        purpose="Simulate independent first reactions from each audience persona.",
+        purpose="Preview evidence-grounded reader reactions, allowing silence or skipping.",
         required_inputs=["persona", "simulation_target"],
         context_policy={
             "allowed_fields": ["persona", "topic"],
@@ -876,7 +876,7 @@ BUILTIN_SKILLS = [
         skill_id="simulation.debate_responses",
         display_name="Simulate Debate Responses",
         category="simulation",
-        purpose="Simulate second-round persona responses after seeing other reactions.",
+        purpose="Preview optional responses conditional on seeing simulated public comments only.",
         required_inputs=["persona", "simulation_target", "other_reactions"],
         context_policy={
             "allowed_fields": ["persona", "topic", "otherReactions"],
@@ -893,7 +893,7 @@ BUILTIN_SKILLS = [
         skill_id="simulation.synthesize",
         display_name="Synthesize Simulation",
         category="simulation",
-        purpose="Synthesize persona discussion into content strategy guidance.",
+        purpose="Summarize pre-publication questions and edits, not population or traffic counts.",
         required_inputs=[
             "simulation_target",
             "personas",

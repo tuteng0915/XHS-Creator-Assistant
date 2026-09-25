@@ -437,7 +437,15 @@ export interface AudienceAnalysis {
   sourceMaterialId: string
   status: string
   inputSnapshot: { scope: { scope: string; selectedNoteCount: number } }
-  result: { summary?: string; limitations?: string; groups?: Array<{ id: string; name: string; profile: string; coreConcern: string; estimatedPercent: number; evidence: string[] }> }
+  result: {
+    method?: string; summary?: string; limitations?: string;
+    sampling?: { sentNotes: number; sentComments: number; availableComments: number };
+    groups?: Array<{
+      id: string; name: string; profile: string; coreConcern: string;
+      estimatedPercent?: number | null; evidence: string[];
+      evidenceRefs?: Array<{noteId: string; commentId?: string | null; sourceType: 'note' | 'comment'; quote: string}>;
+    }>;
+  }
   error: string
   createdAt: string
 }

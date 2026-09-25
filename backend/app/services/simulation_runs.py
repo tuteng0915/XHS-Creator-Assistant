@@ -15,6 +15,7 @@ from app.repositories.drafts import DraftRepository
 from app.repositories.simulation_runs import SimulationRunRepository
 from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
+from app.services.audience_evidence import select_audience_personas
 from app.services.common import as_iso, utc_now
 
 
@@ -93,9 +94,7 @@ class SimulationRunService:
             snapshot = {
                 "audienceAnalysisId": payload.audience_analysis_id,
                 "audienceAnalysis": audience,
-                "audiencePersonas": sorted(
-                    audience["groups"], key=lambda g: g["estimatedPercent"], reverse=True
-                )[:3]
+                "audiencePersonas": select_audience_personas(audience)
                 if audience
                 else [],
                 "mode": payload.mode,

@@ -107,6 +107,11 @@ def audience_output():
                 "coreConcern": "费用",
                 "estimatedPercent": value,
                 "evidence": ["想了解申请费用"],
+                "evidenceRefs": [
+                    {"noteId": str(j), "commentId": "snapshot-comment-0",
+                     "sourceType": "comment", "quote": "想了解申请费用"}
+                    for j in range(i + 1)
+                ],
             }
             for i, value in enumerate([10, 40, 20, 30])
         ],
@@ -115,9 +120,9 @@ def audience_output():
 
 def test_audience_validation():
     result = AudienceResult.model_validate(audience_output())
-    assert [g.estimated_percent for g in result.groups] == [40, 30, 20, 10]
+    assert len(result.groups) == 4
     bad = audience_output()
-    bad["groups"][0]["estimatedPercent"] = 99
+    bad["groups"][0]["id"] = bad["groups"][1]["id"]
     with pytest.raises(ValueError):
         AudienceResult.model_validate(bad)
 
@@ -158,7 +163,9 @@ def test_audience_persistence_scope_and_simulation_top_three(app):
             topic_id=selected_topic["id"], audience_analysis_id=run_id, mode="live"
         ),
     )
-    assert [p["id"] for p in run.input_snapshot["audiencePersonas"]] == ["1", "3", "2"]
+    assert [p["id"] for p in run.input_snapshot["audiencePersonas"]] == ["3", "2", "1"]
+    assert all(p["estimatedPercent"] is None for p in run.input_snapshot["audiencePersonas"])
+    assert run.input_snapshot["audiencePersonas"][0]["evidenceStatus"] == "verified"
     other = create_workspace(app)["id"]
     with pytest.raises(ValidationError):
         app.state.simulation_service.create(
@@ -179,6 +186,30 @@ def test_audience_restart_marks_interrupted_failed(app):
         )
     service.resume()
     assert service.get("interrupted").status == "failed"
+
+
+def test_invalid_audience_evidence_is_not_saved_as_success(app):
+    wid = create_workspace(app)["id"]
+    source = profile(app, wid)
+    service = app.state.audience_analysis_service
+
+    class Model:
+        async def call_operation(self, operation, context):
+            output = audience_output()
+            output["groups"][0]["evidenceRefs"][0]["commentId"] = "invented"
+            return ModelCallResponse(output=output, model_metadata={})
+
+    service.model_call_service = Model()
+
+    async def exercise():
+        created = service.create(wid, AudienceAnalysisCreate(source_material_id=source["id"]))
+        await asyncio.gather(*list(service.tasks.values()))
+        return service.get(created.id)
+
+    result = asyncio.run(exercise())
+    assert result.status == "failed"
+    assert result.result == {}
+    assert "证据引用" in result.error
 
 
 @pytest.mark.parametrize("conflict", [False, True])

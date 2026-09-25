@@ -17,7 +17,7 @@ export type WorkflowOutputKinds = Record<WorkflowTab, WorkflowOutputKind>
 const SIMULATION_STAGES = [
   { key: 'personas', n: '01', title: '受众角色推导' },
   { key: 'initial_reactions', n: '02', title: '第一轮独立反应' },
-  { key: 'debate_responses', n: '03', title: '第二轮交叉回应' },
+  { key: 'debate_responses', n: '03', title: '看到评论后的情境回应' },
   { key: 'synthesis', n: '04', title: '策略合成' },
 ]
 
@@ -76,6 +76,8 @@ export function stageSeedFromRun(run: AnalysisRun): StageView[] {
 
 export function stageSeedFromSimulation(run: SimulationRun): StageView[] {
   const hasSynthesis = Object.keys(run.synthesis || {}).length > 0
+  const discussionSkipped = (hasSynthesis || ['completed', 'partially_completed', 'failed'].includes(run.status)) && run.reactionResults.length > 0 &&
+    run.reactionResults.filter(r => (!r.action || r.action === 'comment') && (r.quote || r.text)).length < 2
   const resultByStage: Record<string, unknown> = {
     personas: run.personaDefinitions.length
       ? { personas: run.personaDefinitions }
@@ -85,7 +87,7 @@ export function stageSeedFromSimulation(run: SimulationRun): StageView[] {
       : undefined,
     debate_responses: run.debateResults.length
       ? { debateResponses: run.debateResults }
-      : undefined,
+      : discussionSkipped ? { debateResponses: [], skippedReason: '不足两条模拟公开评论，无需交叉回应。' } : undefined,
     synthesis: hasSynthesis ? { synthesis: run.synthesis } : undefined,
   }
   return SIMULATION_STAGES.map((stage) => ({

@@ -339,6 +339,16 @@ export function PersonaListView({ items }: { items: unknown }) {
                 </>
               )}
             </div>
+            {Array.isArray(persona.evidenceRefs) && persona.evidenceRefs.length > 0 && <details>
+              <summary>历史依据</summary>
+              {(persona.evidenceRefs as Array<Record<string, unknown>>).map((ref, i) => <p key={i}>
+                {ref.sourceType === 'comment' ? '评论直接表达' : '从笔记推断'} · 笔记 {String(ref.noteId)}
+                {ref.commentId ? ` / 评论 ${String(ref.commentId)}` : ''}<br />{String(ref.quote)}
+              </p>)}
+            </details>}
+            {persona.evidenceStatus === 'legacy_unverified' && <p className="muted">历史角色，来源引用尚未核验。</p>}
+            {persona.evidenceStatus === 'hypothesis' && <p className="muted">假设性阅读视角，非实际受众观察。</p>}
+            {Boolean(persona.limitations) && <p className="muted">{String(persona.limitations)}</p>}
           </div>
         )
       })}
@@ -363,14 +373,16 @@ export function ReactionListView({
             <>
               <div className="angle">
                 {String(item.stance || item.sentiment || '')} ·{' '}
-                {String(item.quote || item.text || '')}
+                {item.action === 'skip' ? '划走，不评论' : item.action === 'no_comment' ? '读完，不评论' : `模拟评论：${String(item.quote || item.text || '')}`}
               </div>
+              {Boolean(item.understanding) && <p>理解：{String(item.understanding)}</p>}
+              {Boolean(item.triggerQuote) && <p>触发表达：{String(item.triggerQuote)}</p>}
               <ListBlock title="顾虑" items={item.concerns} />
               <ListBlock title="机会" items={item.opportunities} />
             </>
           ) : (
             <>
-              <div className="angle">{String(item.response || item.text || '')}</div>
+              <div className="angle">{String(item.response || item.text || '不追加回应')}</div>
               {item.stance && (
                 <div className="why">
                   <b>立场：</b> {String(item.stance)}
@@ -398,6 +410,7 @@ export function SynthesisView({ data }: { data: Record<string, unknown> }) {
     | undefined
   return (
     <div className="structure-card">
+      <p className="muted">发布前预演 · 模拟反应不是实际评论，也不预测流量。</p>
       <h4>{String(data.verdict || '模拟结论')}</h4>
       {topResonance && Object.keys(topResonance).length > 0 && (
         <div className="why">
@@ -418,6 +431,7 @@ export function SynthesisView({ data }: { data: Record<string, unknown> }) {
       <ListBlock title="风险提醒" items={data.riskWarnings} />
       <ListBlock title="潜在争议点" items={data.controversyPoints} />
       <ListBlock title="优化建议" items={data.suggestions} />
+      {Boolean(data.limitations) && <p className="muted">{String(data.limitations)}</p>}
     </div>
   )
 }

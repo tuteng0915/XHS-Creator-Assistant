@@ -1,11 +1,14 @@
 import asyncio
+import json
 
 from fastapi import FastAPI
 from test_workspace_api import create_workspace, send
 
+from app.models import ModelCallResponse, ModelOperation
 from app.workflows.audience_simulation import (
     AUDIENCE_SIMULATION_NODE_ORDER,
     FakeAudienceSimulationModelProvider,
+    RealAudienceSimulationModelProvider,
 )
 
 
@@ -143,6 +146,71 @@ def test_simulation_history_and_reopen(app: FastAPI) -> None:
     reopened = send(app, "GET", f"/api/simulation-runs/{run['id']}").json()
     assert reopened["id"] == run["id"]
     assert reopened["synthesis"]["strongestAngle"]
+
+
+def test_live_evidence_survives_and_silence_skips_discussion_after_restart(app):
+    run = create_simulation_run(app)
+    snapshot = run["inputSnapshot"]
+    snapshot.update(mode="live", audiencePersonas=[{
+        "id": "reader", "name": "费用视角", "profile": "关心费用",
+        "evidenceStatus": "verified", "limitations": "小样本",
+        "evidenceRefs": [{"noteId": "n", "commentId": "c", "sourceType": "comment",
+                          "quote": "多少钱"}],
+    }])
+    with app.state.simulation_service.database.transaction() as c:
+        c.execute("UPDATE simulation_runs SET input_snapshot_json=? WHERE id=?",
+                  (json.dumps(snapshot, ensure_ascii=False), run["id"]))
+
+    class Model:
+        calls = []
+
+        async def call_operation(self, operation, context):
+            self.calls.append(operation)
+            assert "whyItFits" not in context["topic"]
+            assert "associatedPainPoint" not in context["topic"]
+            if operation == ModelOperation.SIMULATION_REACTION:
+                assert context["persona"]["evidenceRefs"][0]["commentId"] == "c"
+                output = {"reaction": {"personaId": "reader", "stance": "无感",
+                                       "action": "no_comment", "quote": "不应成为评论"}}
+            else:
+                assert operation == ModelOperation.SIMULATION_SYNTHESIS
+                assert context["personas"][0]["limitations"] == "小样本"
+                assert context["reactions"][0]["quote"] == ""
+                assert context["debateResponses"] == []
+                output = {"synthesis": {"verdict": "先补充内容", "limitations": "仅概念预演"}}
+            return ModelCallResponse(output=output, model_metadata={"model": "injected"})
+
+    model = Model()
+    app.state.simulation_workflow_service.live_provider = RealAudienceSimulationModelProvider(model)
+    collect(app, run["id"], stop_after_node="parallel_initial_reactions")
+    assert model.calls == [ModelOperation.SIMULATION_REACTION]
+    events = collect(app, run["id"])
+    assert any(e["data"].get("skippedReason") for e in events)
+    completed = send(app, "GET", f"/api/simulation-runs/{run['id']}").json()
+    assert completed["status"] == "completed"
+    assert completed["personaDefinitions"][0]["evidenceRefs"][0]["noteId"] == "n"
+    assert completed["debateResults"] == []
+    assert model.calls == [ModelOperation.SIMULATION_REACTION, ModelOperation.SIMULATION_SYNTHESIS]
+    replay = send(app, "GET", f"/api/simulation-runs/{run['id']}/events")
+    assert "不足两条模拟公开评论" in replay.text
+
+
+def test_debate_only_receives_public_comments_not_private_reasoning(app):
+    class Provider(FakeAudienceSimulationModelProvider):
+        async def initial_reaction(self, **kwargs):
+            result = await super().initial_reaction(**kwargs)
+            result["reaction"]["understanding"] = "私人推理"
+            return result
+
+        async def debate_response(self, **kwargs):
+            assert all(set(r) == {"personaId", "quote"} for r in kwargs["other_reactions"])
+            assert all(r["personaId"] != kwargs["persona"]["id"] for r in kwargs["other_reactions"])
+            return await super().debate_response(**kwargs)
+
+    run = create_simulation_run(app)
+    app.state.simulation_workflow_service.fake_provider = Provider()
+    collect(app, run["id"])
+    assert send(app, "GET", f"/api/simulation-runs/{run['id']}").json()["status"] == "completed"
 
 
 def test_simulation_run_review_metadata_is_editable_without_mutating_result(

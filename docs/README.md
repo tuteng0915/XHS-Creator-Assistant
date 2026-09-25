@@ -17,6 +17,9 @@
 
 ## 当前有效文档
 
+- `audience-simulation-methods.md` — few-shot 受众发现、行为案例、状态化评论互动的原始文献与候选设计；包含消融实验及代码落点，尚未实施或验证效果。
+- `audience-simulation-research.md` — 受众模拟的文献依据、改动前审计、首轮证据化实现与对照实验提案；真实模型效果实验尚未执行。
+- `local-installation.md` — 从 Git 克隆后的本地安装、固定版本 MediaCrawler、封面补丁、浏览器登录及故障排查。
 - `product-design.md` — 当前产品的主设计说明，集中解释功能全貌、设计思想、内容资产、能力资产、workflow、Context Access Layer、Demo/Live、多模态和设计边界。
 - `product-requirements.md` — 基于当前实现反向整理的产品 PRD，描述产品定位、资产模型、核心流程、非目标和验收清单。
 - `status-and-todo.md` — 当前实现状态、已完成事项、明确限制、部署/API 路径说明和 TODO。

@@ -989,10 +989,21 @@ def create_api_router(
                     "debate_responses": {"debateResponses": run.debate_results},
                     "synthesis": {"synthesis": run.synthesis},
                 }
+                discussion_skipped = bool(run.reaction_results) and sum(
+                    r.get("action", "comment") == "comment"
+                    and bool(r.get("quote") or r.get("text"))
+                    for r in run.reaction_results
+                ) < 2 and (bool(run.synthesis) or run.status.value in {
+                    "completed", "partially_completed", "failed",
+                })
+                if discussion_skipped:
+                    stage_data["debate_responses"]["skippedReason"] = (
+                        "不足两条模拟公开评论，无需交叉回应。"
+                    )
                 stage_has_result = {
                     "personas": bool(run.persona_definitions),
                     "initial_reactions": bool(run.reaction_results),
-                    "debate_responses": bool(run.debate_results),
+                    "debate_responses": bool(run.debate_results) or discussion_skipped,
                     "synthesis": bool(run.synthesis),
                 }
                 for stage_key in SIMULATION_STAGE_ORDER:

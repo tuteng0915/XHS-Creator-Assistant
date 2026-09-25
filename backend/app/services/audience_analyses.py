@@ -9,6 +9,7 @@ from pydantic import Field, model_validator
 
 from app.errors import NotFoundError, ValidationError
 from app.models import APIModel, ModelOperation
+from app.services.audience_evidence import AudienceEvidence, audience_context, validate_evidence
 from app.services.common import utc_now
 from app.services.creator_analysis_scope import scope_creator_profile
 
@@ -24,8 +25,9 @@ class AudienceGroup(APIModel):
     profile: str = Field(min_length=1)
     core_concern: str = ""
     content_preference: str = ""
-    estimated_percent: float = Field(ge=0, le=100)
-    evidence: list[str] = Field(min_length=1)
+    estimated_percent: float | None = Field(default=None, ge=0, le=100)
+    evidence: list[str] = Field(default_factory=list)
+    evidence_refs: list[AudienceEvidence] = Field(default_factory=list)
 
 
 class AudienceResult(APIModel):
@@ -37,10 +39,21 @@ class AudienceResult(APIModel):
     def valid_distribution(self):
         if len({g.id for g in self.groups}) != len(self.groups):
             raise ValueError("受众分群 ID 不可重复")
-        if abs(sum(g.estimated_percent for g in self.groups) - 100) > 1:
-            raise ValueError("受众分群比例合计应为 100%")
-        self.groups.sort(key=lambda g: g.estimated_percent, reverse=True)
         return self
+
+    def grounded_result(self, context: dict) -> dict:
+        for group in self.groups:
+            validate_evidence(group.evidence_refs, context)
+            group.evidence = list(dict.fromkeys(ref.quote for ref in group.evidence_refs))
+            # Never expose uncalibrated model-generated population estimates in new runs.
+            group.estimated_percent = None
+        self.groups.sort(key=lambda g: (
+            len({(r.note_id, r.comment_id) for r in g.evidence_refs if r.source_type == "comment"}),
+            len({r.note_id for r in g.evidence_refs}),
+        ), reverse=True)
+        result = self.model_dump(mode="json", by_alias=True)
+        result.update(method="evidence_grounded_v1", sampling=context["sampling"])
+        return result
 
 
 class AudienceAnalysisResponse(APIModel):
@@ -173,33 +186,12 @@ class AudienceAnalysisService:
             return
         run = self.get(run_id)
         try:
-            notes = run.input_snapshot["notes"]
+            context = audience_context(run.input_snapshot)
             response = await self.model_call_service.call_operation(
                 ModelOperation.AUDIENCE_ANALYSIS,
-                {
-                    "creator": run.input_snapshot["creator"],
-                    "scope": run.input_snapshot["scope"],
-                    "notes": [
-                        {
-                            "noteId": n.get("noteId"),
-                            "title": n.get("title"),
-                            "content": str(n.get("desc", ""))[:4000],
-                            "comments": [
-                                str(c.get("content", ""))[:1000] for c in n.get("comments", [])[:50]
-                            ],
-                        }
-                        for n in notes[:100]
-                    ],
-                    "sampling": {
-                        "availableNotes": len(notes),
-                        "sentNotes": min(len(notes), 100),
-                        "maxCommentsPerNote": 50,
-                    },
-                },
+                context,
             )
-            result = AudienceResult.model_validate(response.output).model_dump(
-                mode="json", by_alias=True
-            )
+            result = AudienceResult.model_validate(response.output).grounded_result(context)
             with self.database.transaction() as c:
                 c.execute(
                     "UPDATE audience_analyses SET status='completed',result_json=?,"

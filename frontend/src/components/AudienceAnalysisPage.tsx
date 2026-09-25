@@ -30,11 +30,15 @@ export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId
     {selected?.error && <p role="alert">{selected.error}</p>}
     {selected?.status === 'completed' && <>
       <p>{selected.result.summary}</p>
-      <p className="muted">受众构成估计 · 非平台真实粉丝统计</p>
+      <p className="muted">有依据的阅读视角，可相互重叠；非平台真实粉丝统计。</p>
+      {selected.result.sampling && <p className="muted">依据 {selected.result.sampling.sentNotes} 条笔记、{selected.result.sampling.sentComments} 条已采集评论。</p>}
       <div className="audience-groups">{selected.result.groups?.map((g,i) => <article className="asset-detail-card" key={g.id}>
-        <div className="creator-page-head"><strong>{g.name}{i < 3 ? ' · 模拟角色' : ''}</strong><span>约 {g.estimatedPercent}%</span></div>
-        <progress max={100} value={g.estimatedPercent} aria-label={`${g.name}估计比例`} />
-        <p>{g.profile}</p><p>{g.coreConcern}</p><details><summary>依据</summary>{g.evidence.map((e,j) => <p key={j}>{e}</p>)}</details>
+        <div className="creator-page-head"><strong>{g.name}{i < 3 ? ' · 模拟角色' : ''}</strong></div>
+        <p>{g.profile}</p><p>{g.coreConcern}</p><details><summary>依据</summary>
+          {g.evidenceRefs?.length ? g.evidenceRefs.map((e,j) => <p key={j}>
+            {e.sourceType === 'comment' ? '评论直接表达' : '从笔记推断'} · 笔记 {e.noteId}{e.commentId ? ` / 评论 ${e.commentId}` : ''}<br />{e.quote}
+          </p>) : <><p className="muted">历史分析依据，尚未核验来源引用。</p>{g.evidence.map((e,j) => <p key={j}>{e}</p>)}</>}
+        </details>
       </article>)}</div>
       <p className="muted">{selected.result.limitations}</p><button onClick={onSimulate}>选择选题进行模拟</button>
     </>}

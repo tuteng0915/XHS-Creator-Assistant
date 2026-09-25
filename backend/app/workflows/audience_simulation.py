@@ -9,7 +9,7 @@ from typing import Any, Literal, Protocol, TypedDict
 from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from app.db.database import SQLiteDatabase
@@ -17,6 +17,7 @@ from app.errors import ConflictError, ValidationError
 from app.models import ModelOperation, SimulationRunStatus
 from app.repositories.graph_checkpoints import GraphCheckpointRepository
 from app.repositories.simulation_runs import SIMULATION_TERMINAL_STATUSES
+from app.services.audience_evidence import AudienceEvidence
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
 from app.services.simulation_runs import SimulationRunService
@@ -75,20 +76,40 @@ class PersonaDefinition(BaseModel):
     personality: str = ""
     concerns: str = ""
     color: str = ""
+    evidence: list[str] = Field(default_factory=list)
+    evidenceRefs: list[AudienceEvidence] = Field(default_factory=list)
+    evidenceStatus: Literal["verified", "legacy_unverified", "hypothesis"] = "hypothesis"
+    limitations: str = ""
 
 
 class PersonaDefinitionsResult(BaseModel):
     personas: list[PersonaDefinition] = Field(min_length=1)
 
+    @model_validator(mode="after")
+    def unique_personas(self):
+        if len({p.id for p in self.personas}) != len(self.personas):
+            raise ValueError("模拟角色 ID 不可重复")
+        return self
+
 
 class PersonaReaction(BaseModel):
     personaId: str
     stance: str
-    quote: str
+    quote: str = ""
     concerns: list[str] = Field(default_factory=list)
     opportunities: list[str] = Field(default_factory=list)
     text: str = ""
     sentiment: str = ""
+    action: Literal["comment", "no_comment", "skip"] = "comment"
+    understanding: str = ""
+    triggerQuote: str = ""
+
+    @model_validator(mode="after")
+    def comment_matches_action(self):
+        if self.action != "comment":
+            self.quote = ""
+            self.text = ""
+        return self
 
 
 class PersonaReactionResult(BaseModel):
@@ -105,6 +126,12 @@ class DebateResponse(BaseModel):
     targetedAt: str = ""
     stance: str = ""
 
+    @model_validator(mode="after")
+    def silence_is_not_a_changed_mind(self):
+        if not (self.response or self.text).strip():
+            self.changedMind = False
+        return self
+
 
 class DebateResponseResult(BaseModel):
     debateResponse: DebateResponse
@@ -119,10 +146,27 @@ class SimulationSynthesis(BaseModel):
     topResonance: dict[str, Any] = Field(default_factory=dict)
     controversyPoints: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
+    limitations: str = ""
 
 
 class SimulationSynthesisResult(BaseModel):
     synthesis: SimulationSynthesis
+
+
+def validate_trigger_quote(quote: str, target: dict) -> None:
+    def texts(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from texts(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from texts(item)
+
+    visible = [target.get("title", ""), target.get("body", ""), target.get("draft", {})]
+    if quote and (not quote.strip() or not any(quote in text for text in texts(visible))):
+        raise ValueError("触发表达不是本次内容的原文")
 
 
 class AudienceSimulationModelProvider(Protocol):
@@ -588,22 +632,34 @@ class AudienceSimulationWorkflowService:
         topic = snapshot["topic"]
         target = {
             "targetType": snapshot.get("targetType", "topic"),
-            "topicId": topic.get("topicId"),
             "title": topic.get("title", ""),
-            "angle": topic.get("angle", ""),
             "body": topic.get("body", ""),
-            "associatedPainPoint": topic.get("associatedPainPoint", ""),
-            "whyItFits": topic.get("whyItFits", ""),
-            "sourceWorkflow": topic.get("sourceWorkflow", "manual"),
+            "previewLevel": "text_draft" if topic.get("body") else "concept",
+            "limitations": "仅预演提供的文字，不评价未提供的图片或真实传播效果。",
         }
         draft = snapshot.get("draft")
         if draft:
+            editable = draft.get("editableContent", {})
+            structure = editable.get("structure") or {}
+            brief = editable.get("brief") or {}
+            visible = {}
+            if isinstance(structure, dict) and structure:
+                visible["structure"] = {
+                    "topicChosen": structure.get("topicChosen", ""),
+                    "outline": [
+                        {"sec": str(section.get("sec", "")), "ct": str(section.get("ct", ""))}
+                        for section in structure.get("outline", []) if isinstance(section, dict)
+                    ],
+                }
+            if isinstance(brief, dict) and brief:
+                visible["brief"] = {
+                    key: brief[key] for key in ("corePoint", "openingHook", "argumentPath", "cta")
+                    if key in brief
+                }
             target["draft"] = {
-                "draftId": draft.get("draftId"),
-                "topicId": draft.get("topicId"),
-                "editableContent": draft.get("editableContent", {}),
-                "sourceWorkflow": draft.get("sourceWorkflow"),
+                "editableContent": visible,
             }
+            target["previewLevel"] = "outline"
         return target
 
     async def stream_events(
@@ -736,8 +792,12 @@ class _AudienceSimulationGraphExecution:
             output = {'personas': saved_personas} if saved_personas else await self.provider().personas(
                 positioning=updated["positioning_snapshot"], topic=updated["topic"],
             )
+            if not saved_personas:
+                for persona in output.get("personas", []):
+                    persona.update(evidence=[], evidenceRefs=[], evidenceStatus="hypothesis",
+                                   limitations="未使用已核验的受众分析，仅为假设性阅读视角。")
             result = PersonaDefinitionsResult.model_validate(output).model_dump(
-                mode="json"
+                mode="json", by_alias=True
             )
             updated["personas"] = result["personas"]
             self.service.simulation_service.save_progress(
@@ -773,6 +833,9 @@ class _AudienceSimulationGraphExecution:
                 result = PersonaReactionResult.model_validate(output).model_dump(
                     mode="json"
                 )
+                if result["reaction"]["personaId"] != persona_id:
+                    raise ValueError("反应角色与请求不一致")
+                validate_trigger_quote(result["reaction"]["triggerQuote"], updated["topic"])
                 return result["reaction"]
             except Exception as error:
                 updated.setdefault("stage_errors", {})[
@@ -813,11 +876,22 @@ class _AudienceSimulationGraphExecution:
         updated = dict(state)
         personas = updated.get("personas") or []
         reactions = updated.get("initial_reactions") or []
-        reacted_ids = {str(item.get("personaId", "")) for item in reactions}
+        public_comments = [
+            {"personaId": r["personaId"], "quote": r.get("quote") or r.get("text", "")}
+            for r in reactions
+            if r.get("action", "comment") == "comment" and (r.get("quote") or r.get("text"))
+        ]
+        reacted_ids = {str(item["personaId"]) for item in public_comments}
         debate_personas = [
             persona for persona in personas if str(persona.get("id", "")) in reacted_ids
         ]
-        if updated.get("debate_responses") or not debate_personas:
+        if updated.get("debate_responses"):
+            await self.save_checkpoint("parallel_debate_responses", updated)
+            return AudienceSimulationState(**updated)
+        if len(public_comments) < 2:
+            await self.emit("stage.succeeded", "debate_responses", "completed", {
+                "debateResponses": [], "skippedReason": "不足两条模拟公开评论，无需交叉回应。",
+            })
             await self.save_checkpoint("parallel_debate_responses", updated)
             return AudienceSimulationState(**updated)
         await self.emit("stage.started", "debate_responses", "running", {})
@@ -826,7 +900,7 @@ class _AudienceSimulationGraphExecution:
             persona_id = str(persona.get("id", "unknown"))
             others = [
                 reaction
-                for reaction in reactions
+                for reaction in public_comments
                 if str(reaction.get("personaId", "")) != persona_id
             ]
             try:
@@ -840,6 +914,8 @@ class _AudienceSimulationGraphExecution:
                 result = DebateResponseResult.model_validate(output).model_dump(
                     mode="json"
                 )
+                if result["debateResponse"]["personaId"] != persona_id:
+                    raise ValueError("回应角色与请求不一致")
                 return result["debateResponse"]
             except Exception as error:
                 updated.setdefault("stage_errors", {})[

@@ -173,7 +173,9 @@ export function getWorkspaceHelpContent({
       title: '受众模拟帮助',
       description: '这里保存围绕某个 Topic、创作 Brief 或内容结构运行的受众模拟结果。',
       bullets: [
-        '模拟会生成产品特定 personas，不是通用可配置 agents。',
+        '这是发布前预演，不是真人调查，也不预测点赞或曝光。角色依据来自已保存的受众分析；缺少分析时仅为假设性视角。',
+        '受众视角可以重叠，不代表粉丝人数比例；依据区分评论直接表达与从笔记推断。',
+        '角色只看提供的内容，可以划走或不评论；第二轮仅预演看到模拟公开评论后的回应。',
         '每个 persona 的反应是独立结果，失败时尽量保留部分反应。',
         '可以重新打开历史 simulation，不会重新执行。',
         '人工复盘状态和备注可以编辑；persona、reaction、debate、synthesis 和 model metadata 保持只读。',

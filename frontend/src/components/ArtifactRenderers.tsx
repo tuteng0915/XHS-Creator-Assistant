@@ -167,6 +167,7 @@ export function StageResultRenderer({
     return <ReactionListView items={result.reactions} type="reaction" />
   }
   if (stage.key === 'debate_responses') {
+    if (result.skippedReason) return <p className="muted">{String(result.skippedReason)}</p>
     return <ReactionListView items={result.debateResponses} type="debate" />
   }
   if (stage.key === 'synthesis' && result.synthesis) {

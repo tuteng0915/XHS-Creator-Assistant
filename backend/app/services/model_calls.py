@@ -65,25 +65,33 @@ PROMPT_CONTENT_BRIEF = """你是创作者内容策划。用户已经从选题库
 只输出 JSON，不要解释。schema:
 {"brief":{"topicTitle":"","refinedAngle":"","targetReader":"","readerPain":"","contentPromise":"","corePoint":"","formatRecommendation":"","openingHook":"","argumentPath":[],"materialNeeds":[],"titleDirections":[],"cta":"","risks":[],"revisionSuggestions":[]}}"""
 
-PROMPT_SIMULATION_PERSONAS = """你是创作者内容策略中的受众研究员。基于账号定位和选题，推导 4 个产品内置的目标受众角色。
-每个 persona 必须具体、有不同决策视角，不要把它们写成可配置 agent。
+PROMPT_SIMULATION_PERSONAS = """你在为发布前预演提出最多 3 个假设性阅读视角，不是在还原真实粉丝。
+基于账号定位和内容，用具体需求区分视角，不虚构年龄、收入等身份，不编造历史评论证据。
+没有受众分析依据时，明确是内容推断。每个 persona 的 evidenceStatus 为 hypothesis，limitations 说明证据缺失。
 只输出 JSON，不要解释。schema:
-{"personas":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":""}]}"""
+{"personas":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":"","evidenceStatus":"hypothesis","limitations":""}]}"""
 
-PROMPT_SIMULATION_REACTION = """你正在模拟一个具体受众角色对选题的第一反应。
-必须基于 persona 的视角，输出真实、简短、可用于判断内容风险和机会的反馈。
+PROMPT_SIMULATION_REACTION = """你正在预演一个阅读视角，不是真实受访者。只对所给的读者可见内容作反应。
+根据 persona 的需求及证据独立阅读，不把引用的历史评论照搬成新评论，不编造未提供的正文或图片。
+分别给出你理解了什么、触发感受的原文短句、疑问，以及是否公开评论。
+允许无感、划走、读完不评论。action 是 comment/no_comment/skip；只有 comment 才填写 quote，其他情况 quote 为空。
+不要为了帮助创作者而迎合，也不要人人都像内容策略师；证据不足时说明不确定。
 只输出 JSON，不要解释。schema:
-{"reaction":{"personaId":"","stance":"喜欢/犹豫/反感","quote":"","concerns":[],"opportunities":[]}}"""
+{"reaction":{"personaId":"","stance":"喜欢/犹豫/反感/无感/不确定","action":"comment/no_comment/skip","quote":"","understanding":"","triggerQuote":"","concerns":[],"opportunities":[]}}"""
 
-PROMPT_SIMULATION_DEBATE = """你正在模拟一个具体受众角色在看到其他人的第一反应后，给出第二轮回应。
-必须接收其他人的反应，并说明自己的观点是否变化。
+PROMPT_SIMULATION_DEBATE = """这是一个条件性情境：假设你看到了给出的模拟公开评论，而非真实评论区。
+只参考给出的评论和内容；不默认所有人都会交流或改变观点。
+可选择不回应，此时 response 为空且 changedMind 为 false。不要推测评论作者未公开的心理。
 只输出 JSON，不要解释。schema:
 {"debateResponse":{"personaId":"","response":"","changedMind":false,"newConcerns":[],"strongerSignals":[]}}"""
 
-PROMPT_SIMULATION_SYNTHESIS = """你是内容策略师。基于完整受众模拟讨论，合成对该选题的判断。
-输出应包含是否值得做、最大阻力、应强化的表达、应避开的表达。
+PROMPT_SIMULATION_SYNTHESIS = """你是发布前预演的评审员，不是流量预测模型。
+区分历史依据、模型假设和模拟反应；模拟评论不是新增的真人证据。
+输出值得验证的机会、可能的误解、需要修改的具体位置，不用角色投票推算人数、点赞、曝光或概率。
+第二轮仅是看到这些评论后的条件性情境，不能覆盖第一轮独立反应。缺失角色或证据时保留局限。
+只有标题时明确是概念预演，没有封面时不评价视觉效果。limitations 写清证据不足与未评估部分。
 只输出 JSON，不要解释。schema:
-{"synthesis":{"verdict":"","mainResistance":"","strongestAngle":"","contentAdjustments":[],"riskWarnings":[]}}"""
+{"synthesis":{"verdict":"","mainResistance":"","strongestAngle":"","contentAdjustments":[],"riskWarnings":[],"limitations":""}}"""
 
 PROMPT_AGENT_CHAT = """你是创作者 workspace 中的产品内 Agent。
 你会收到：
@@ -309,11 +317,14 @@ class ModelCallService:
     ) -> tuple[str, str]:
         positioning = str(context.get("positioning", ""))
         if operation == ModelOperation.AUDIENCE_ANALYSIS:
-            return ("""你是创作者受众研究员。基于所选时间范围的笔记内容和评论样本，推断有证据支持的受众分群。
-不限定为三种，通常 3~8 组，证据不足时可更少。避免根据单条评论臆测敏感身份。
-为每组给出具体画像、主要诉求、内容偏好和来自输入的原文证据。区分评论直接证据和从内容推断。
-estimatedPercent 为样本下的主观构成估计，合计 100，不是实际粉丝统计。limitations 必须解释样本偏差、缺失信息和不确定性。
-只输出 JSON：{"summary":"","groups":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":"","estimatedPercent":0,"evidence":[""]}],"limitations":""}""", json.dumps(context, ensure_ascii=False))
+            return ("""你是创作者受众研究员。根据已提供笔记及评论，提取有原文依据的阅读需求视角。
+视角可以重叠，不是互斥的人口分群；不输出粉丝比例或 estimatedPercent。通常 3~8 组，证据不足时更少。
+不要根据单条评论编造年龄、收入、性别等身份。没有评论时只做内容推断，不能称为真实受众观察。
+每组 evidenceRefs 至少一项，必须使用输入的 noteId；评论证据还必须使用对应 commentId。
+sourceType=comment 表示评论直接表达，sourceType=note 表示从笔记推断（commentId 为 null）。
+quote 必须逐字截取相应来源的非空原文，不能改写，不能引用其他笔记或评论。
+limitations 解释抽样限制、视角重叠和未知读者；范围是笔记发布时间，不代表评论发表时间范围。
+只输出 JSON：{"summary":"","groups":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":"","evidenceRefs":[{"noteId":"","commentId":null,"sourceType":"note","quote":""}]}],"limitations":""}""", json.dumps(context, ensure_ascii=False))
         if operation == ModelOperation.CREATOR_EDIT:
             return ("""你是用户的 AI 创作助手，与用户共同编辑一篇小红书选题。左侧画布是 title 和 body。
 根据账号及分析背景回应用户，保留用户风格，不编造个人经历或事实。

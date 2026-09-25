@@ -8,6 +8,14 @@
 
 这个仓库包含两部分：原始的单文件 HTML 产品原型，以及已经迁移出来的创作者工作区应用。当前主应用使用 React、TypeScript、FastAPI、SQLite、LangGraph 和 Server-Sent Events；原始 `index.html` 只作为行为参考保留。
 
+## 从 Git 安装
+
+首次使用请按 [本地安装与 MediaCrawler 配置](docs/local-installation.md) 操作，包含主应用、模型配置、抓取依赖、浏览器登录和验收步骤。
+
+如果要在另一台受信任电脑上还原**现有账号、笔记、图片及分析历史**，还需按该指南的[恢复现有现场](docs/local-installation.md#4-恢复现有现场而不只是空白安装)备份和恢复数据。Git 只还原代码，不还原这些被忽略的本地内容；模型配置需要安全转交，小红书需要重新登录。
+
+**直接 clone 不会安装 MediaCrawler。** 它是 `data/external/MediaCrawler` 下被忽略的独立仓库，不是 Git 子模块，也不会由后端 pip 自动安装。我们固定上游提交并提供封面下载补丁；依赖环境、登录态、数据库和样本不放进 Git。无需把庞大的本地 `data/` 目录提交进来。
+
 ## 打开原始 HTML 原型
 
 原始产品原型位于 [`index.html`](./index.html)，不需要构建步骤。
@@ -28,11 +36,11 @@ http://localhost:8000/index.html
 
 ## 运行前端工作区
 
-前端需要 Node.js 和 npm。
+前端需要 Node.js 和 npm；建议 Node.js 22.12 或更新的 22.x。
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -96,6 +104,8 @@ source .venv/bin/activate
 python -m pip install '.[dev]'
 uvicorn app.main:app --reload
 ```
+
+以上仅安装主应用。需要主页 URL 导入时，还要按[安装指南](docs/local-installation.md)安装 `xhs` extra、浏览器和独立 MediaCrawler 环境。
 
 后端 health endpoint 和 OpenAPI 文档：
 
@@ -205,9 +215,9 @@ backend/.venv/bin/python scripts/smoke_qwen_media.py image-understand \
 
 建议先读 [`docs/product-design.md`](./docs/product-design.md) 理解产品设计、能力模型和当前功能地图，再读 [`docs/status-and-todo.md`](./docs/status-and-todo.md) 查看当前实现状态和 TODO。如果准备提交 GitHub 或打版本 tag，先按 [`docs/release-checklist.md`](./docs/release-checklist.md) 做发布前检查。
 
-## 本地小红书主页导入 Demo
+## 旧版独立导入脚本（兼容保留）
 
-仓库提供一个独立脚本，用于本地 demo 场景下从用户可见的小红书主页导入有限数量笔记。它不会接入前端，也不会绕过验证码、逆向签名、注入 cookie 或进行批量抓取。
+以下 `xhs_profile_importer.py` 是早期浏览器可见页面导入器，不是现在前端“添加账号”的实现。当前前端已通过后端调用 MediaCrawler，安装方式见上方指南。旧脚本仅供兼容使用，不绕过验证码、注入 cookie 或进行批量抓取。
 
 安装可选依赖：
 
@@ -276,7 +286,7 @@ data/browser-profiles/xhs-importer/
 
 如果需要重新登录，删除这个目录即可。导出的 Markdown 可以人工检查后作为历史笔记、视频创作样本或小红书创作者主页输入资产导入主应用。
 
-主平台不会访问小红书。如果要把离线导入结果放进主应用，可以在内容资产里的“创作者档案 → 小红书主页”页面上传本地 importer 生成的 JSON；旧 `xhs-profile-import/v1` JSON 会转换成 workflow 可直接使用的 `xhs-creator-profile/v1`。兼容路径仍支持把 JSON / Markdown 导入历史笔记或视频创作样本。后端只解析上传文件，并保存为受控 input asset。
+离线文件导入只解析文件，不访问小红书；这与当前的在线 URL 导入是两条路径。内部工作台（`?internal=1`）的“创作者档案 → 小红书主页”页面可上传旧 importer 生成的 JSON；旧 `xhs-profile-import/v1` 会转换成 workflow 可使用的 `xhs-creator-profile/v1`。以下离线资源管理入口均指内部工作台。
 
 如果需要同时导入封面，推荐整理成离线导入包并在“创作者档案 → 小红书主页”页选择整个文件夹：
 
@@ -292,16 +302,7 @@ xhs_import_package/
 
 ### MediaCrawler 本地抓取入口
 
-如果需要更稳定地读取笔记详情、一级评论和封面，可以使用独立的 MediaCrawler 本地克隆。这个入口仍然只作为离线工具存在，不接入主平台后端。
-
-准备 MediaCrawler：
-
-```bash
-git clone https://github.com/NanmiCoder/MediaCrawler.git data/external/MediaCrawler
-cd data/external/MediaCrawler
-python3.11 -m venv .venv313
-.venv313/bin/python -m pip install -r requirements.txt
-```
+MediaCrawler 既供当前后端的主页 URL 导入调用，也可单独用于离线导出。先完成[固定版本及补丁安装](docs/local-installation.md#2-安装抓取依赖)，再从主应用根目录运行下面的命令。不要仅克隆上游最新版：本机曾有未进入主 Git 的封面配置调整，现在已整理为仓库内补丁。
 
 本仓库提供了一个包装脚本，解决 `xhslink.cn` 短链不能被 MediaCrawler 直接解析的问题。它会先用本地浏览器打开短链，拿到最终的小红书用户主页 URL，再调用 MediaCrawler。
 
@@ -333,9 +334,9 @@ data/external/MediaCrawler/<save-data-path>/xhs/jsonl/
 data/external/MediaCrawler/<save-data-path>/xhs/images/
 ```
 
-注意：MediaCrawler 的媒体下载开关在它自己的 `config/base_config.py` 里。demo 场景建议保持低频、低数量，并只抓必要字段。当前推荐配置是并发 1、只抓一级评论、不开二级评论。
+补丁会开启媒体下载，并限定每篇首图、不下载视频。媒体开关仍在上游 `config/base_config.py` 中。保持低频、低数量；当前调用并发 1、只抓一级评论、不开二级评论。
 
-如果要把已经固定的本地样本导入主应用 SQLite：
+以下命令仅在本机已有固定样本时可用；`_tt` 和 QSheep 样本在被忽略的 `data/` 中，不随 Git 分发。若已有样本，可导入主应用 SQLite：
 
 ```bash
 backend/.venv/bin/python scripts/import_xhs_fixture_to_workspace.py _tt
