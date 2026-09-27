@@ -52,7 +52,8 @@ class TopicService:
                     connection, payload.source_analysis_run_id
                 )
                 for existing_topic in existing_topics:
-                    if existing_topic["title"] == title:
+                    original = json.loads(existing_topic["generated_snapshot_json"])
+                    if existing_topic["title"] == title or original.get("title") == title:
                         return self._to_response(existing_topic)
             generated_snapshot = payload.generated_snapshot
             if generated_snapshot is None and source_workflow != TopicSourceWorkflow.MANUAL:

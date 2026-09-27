@@ -75,7 +75,7 @@ type AnalysisHistoryPageProps = {
   selectedRun: AnalysisRun | null
   analysisReviewDraft: ReviewDraft
   analysisReviewSaveState: SaveState
-  renderStageResult: (stage: StageView) => ReactNode
+  renderStageResult: (stage: StageView, run: AnalysisRun) => ReactNode
   onOpenRun: (runId: string, inOutput?: boolean) => void
   onAnalysisReviewDraftChange: (draft: ReviewDraft) => void
   onSaveAnalysisRunReview: () => void
@@ -149,7 +149,7 @@ export function AnalysisHistoryPage({
                   <h3>{stage.title}</h3>
                 </div>
                 {stage.error && <div className="err">{stage.error}</div>}
-                {renderStageResult(stage)}
+                {renderStageResult(stage, selectedRun)}
               </div>
             ))}
           </>

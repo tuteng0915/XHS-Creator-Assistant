@@ -17,6 +17,7 @@
 
 ## 当前有效文档
 
+- `creator-journey-acceptance.md` — 09-27 真实 Qwen 与公开页面链路验收、工程修复及尚未解决的内容质量问题。
 - `audience-simulation-methods.md` — few-shot 受众发现、行为案例、状态化评论互动的文献借鉴与轻量实现记录；当前不要求效果实验。
 - `audience-simulation-research.md` — 受众模拟的文献依据、改动前审计及首轮证据化实现；保留的效果实验提案暂不执行。
 - `local-installation.md` — 从 Git 克隆后的本地安装、固定版本 MediaCrawler、封面补丁、浏览器登录及故障排查。

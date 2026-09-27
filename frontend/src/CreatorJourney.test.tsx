@@ -4,12 +4,17 @@ import App from './App'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState({}, '', '/') })
 
-function setup() {
+function setup(withSimulation = false) {
   window.history.replaceState({}, '', '/')
   const workspaces = ['甲', '乙'].map((name, index) => ({ id: `account-${index}`, name,
     accountPositioning: '', positioningVersion: 1, currentTopicId: null, createdAt: '', updatedAt: '' }))
   const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = String(input)
+    const simulation = { id: 'simulation', workspaceId: 'account-0', status: 'running',
+      userNotes: '', reviewStatus: 'unreviewed', createdAt: '2026-09-27', updatedAt: '2026-09-27',
+      topicId: null, draftId: null, startedAt: null, completedAt: null,
+      inputSnapshot: {}, personaDefinitions: [], reactionResults: [], debateResults: [], synthesis: {}, stageErrors: {}, modelMetadata: {} }
+    if (withSimulation && url === '/api/simulation-runs/simulation') return Response.json({...simulation, status: 'completed'})
     if (init?.method === 'POST' && url.endsWith('/analysis-runs')) {
       return new Response(JSON.stringify({ detail: '测试停止于执行前' }), { status: 422 })
     }
@@ -17,6 +22,7 @@ function setup() {
     const workspace = workspaces.find((item) => url.startsWith(`/api/workspaces/${item.id}`))
     if (!workspace) throw new Error(`Unexpected ${url}`)
     if (url === `/api/workspaces/${workspace.id}`) return Response.json(workspace)
+    if (withSimulation && workspace.id === 'account-0' && url.endsWith('/simulation-runs')) return Response.json([simulation])
     if (url.endsWith('/input-assets')) return Response.json([{
       id: `profile-${workspace.id}`, workspaceId: workspace.id, type: 'xhs_creator_profile',
       name: workspace.name, createdAt: '', updatedAt: '', content: JSON.stringify({
@@ -31,6 +37,14 @@ function setup() {
 }
 
 describe('public creator journey', () => {
+  it('updates the history list status when reopening a simulation completed after refresh', async () => {
+    setup(true)
+    await screen.findByText('甲的笔记')
+    fireEvent.click(screen.getByRole('button', {name: /👥 受众模拟/}))
+    fireEvent.click(screen.getByRole('button', {name: /受众模拟 running/}))
+    await screen.findByRole('button', {name: /受众模拟 completed/})
+    expect(screen.queryByRole('button', {name: /受众模拟 running/})).not.toBeInTheDocument()
+  })
   it('opens add-account without creating any database record', async () => {
     const fetchMock = setup()
     await screen.findByText('甲的笔记')

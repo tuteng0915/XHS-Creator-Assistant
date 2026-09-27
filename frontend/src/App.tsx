@@ -1854,6 +1854,7 @@ function WorkspaceApp() {
     setSelectedTopic(selected)
     setSimulationTopic(`${selected.title}\n切入角度：${selected.angle}`)
     await refreshWorkspaceSummary()
+    return selected
   }
 
   async function archiveTopic(topic: Topic) {
@@ -1988,6 +1989,7 @@ function WorkspaceApp() {
   async function openSimulationRun(simulationId: string, inOutput = false) {
     const run = await simulationRunApi.get(simulationId)
     setSelectedSimulationRun(run)
+    setSimulationRuns((current) => current.map((item) => item.id === run.id ? run : item))
     setSimulationReviewDraft({
       userNotes: run.userNotes,
       reviewStatus: run.reviewStatus,
@@ -2537,17 +2539,18 @@ function WorkspaceApp() {
     }
   }
 
-  function renderStageResult(stage: StageView): ReactNode {
+  function renderStageResult(stage: StageView, sourceRun: AnalysisRun | null = currentRun): ReactNode {
     return (
       <StageResultRenderer
         publicMode={!internalMode}
         onSimulateSavedTopic={(topic) => void runAudienceSimulation(undefined, 'account', topic)}
         stage={stage}
-        currentRun={currentRun}
+        currentRun={sourceRun}
         onSaveGeneratedTopic={saveGeneratedTopic}
         onSelectTopic={async (topic) => {
-          await selectTopic(topic)
+          const selected = await selectTopic(topic)
           if (!internalMode) setActivePage('topics')
+          return selected
         }}
         onGenerateBrief={internalMode ? generateBriefForTopic : async topic => {setSelectedTopic(topic); setActivePage('drafts'); return null}}
         onGenerateDraft={generateDraftForTopic}

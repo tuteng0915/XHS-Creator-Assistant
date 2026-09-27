@@ -45,13 +45,13 @@ function Canvas({workspaceId, topic, agentId, onUpdated}: {workspaceId: string; 
       try {
         const latest = await agentConversationApi.get(conversation!.id)
         if (!active) return
-        setConversation(latest)
         if (latest.executionStatus !== 'running') {
           const updated = await topicApi.get(topic.id)
           if (!active) return
           if (!dirtyRef.current) {setSaved(updated); setTitle(updated.title); setBody(updated.body || ''); onUpdatedRef.current(updated)}
           else setError('AI 已回复。你有未保存的修改，已保留在画布中；保存时若出现冲突，请先对照 AI 建议。')
         } else timer = setTimeout(() => void poll(), 1200)
+        setConversation(latest)
       } catch (e) {if (active) {setError(String(e)); timer = setTimeout(() => void poll(), 3000)}}
     }
     timer = setTimeout(() => void poll(), 800)

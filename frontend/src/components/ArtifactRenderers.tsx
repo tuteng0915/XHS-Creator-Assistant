@@ -25,7 +25,7 @@ type GeneratedTopicCardProps = {
     candidate: TopicCandidate,
     run: AnalysisRun | null,
   ) => Promise<Topic>
-  onSelectTopic: (topic: Topic) => Promise<void>
+  onSelectTopic: (topic: Topic) => Promise<Topic>
   onGenerateBrief: (topic: Topic) => Promise<unknown>
   onGenerateDraft: (topic: Topic) => Promise<unknown>
   onFillSimulationTopic: (value: string) => void
@@ -44,8 +44,7 @@ function GeneratedTopicCard({
 }: GeneratedTopicCardProps) {
   async function ensureSavedAndSelect() {
     const saved = await onSaveGeneratedTopic(topic, currentRun)
-    await onSelectTopic(saved)
-    return saved
+    return onSelectTopic(saved)
   }
 
   return (

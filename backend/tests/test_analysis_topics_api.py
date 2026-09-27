@@ -301,6 +301,20 @@ def test_topic_library_create_select_edit_archive(app: FastAPI) -> None:
     assert edited.json()["angle"] == "按环节配置预算"
     assert edited.json()["generatedSnapshot"] == topic["generatedSnapshot"]
 
+    reopened = send(
+        app,
+        "POST",
+        f"/api/workspaces/{workspace['id']}/topics",
+        json={
+            "title": topic["generatedSnapshot"]["title"],
+            "sourceAnalysisRunId": run["id"],
+        },
+    )
+    assert reopened.status_code == 201
+    assert reopened.json()["id"] == topic["id"]
+    assert reopened.json()["title"] == edited.json()["title"]
+    assert reopened.json()["updatedAt"] == edited.json()["updatedAt"]
+
     archived = send(app, "POST", f"/api/topics/{topic['id']}/archive")
     assert archived.status_code == 200
     assert archived.json()["status"] == "archived"
