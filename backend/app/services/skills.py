@@ -877,9 +877,9 @@ BUILTIN_SKILLS = [
         display_name="Simulate Debate Responses",
         category="simulation",
         purpose="Preview optional responses conditional on seeing simulated public comments only.",
-        required_inputs=["persona", "simulation_target", "other_reactions"],
+        required_inputs=["persona", "simulation_target", "prior_reaction", "other_reactions"],
         context_policy={
-            "allowed_fields": ["persona", "topic", "otherReactions"],
+            "allowed_fields": ["persona", "topic", "priorReaction", "otherReactions"],
             "disallowed_fields": ["full_workspace", "synthesis"],
         },
         output_schema={"root": "debateResponse"},

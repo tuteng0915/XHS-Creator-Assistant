@@ -15,7 +15,7 @@ from app.repositories.drafts import DraftRepository
 from app.repositories.simulation_runs import SimulationRunRepository
 from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
-from app.services.audience_evidence import select_audience_personas
+from app.services.audience_evidence import AUDIENCE_METHOD_VERSION, select_audience_personas
 from app.services.common import as_iso, utc_now
 
 
@@ -43,6 +43,7 @@ class SimulationRunService:
         with self.database.transaction() as connection:
             workspace = self.workspace_repository.get(connection, workspace_id)
             audience = None
+            audience_snapshot = None
             if payload.audience_analysis_id:
                 row = connection.execute(
                     "SELECT * FROM audience_analyses WHERE id=? "
@@ -52,6 +53,7 @@ class SimulationRunService:
                 if row is None:
                     raise ValidationError("请选择当前账号已完成的受众分析")
                 audience = json.loads(row["result_json"])
+                audience_snapshot = json.loads(row["input_snapshot_json"])
             topic_snapshot: dict | None = None
             draft_snapshot: dict | None = None
             topic_id: str | None = payload.topic_id
@@ -92,9 +94,10 @@ class SimulationRunService:
                     "sourceWorkflow": topic["source_workflow"],
                 }
             snapshot = {
+                "simulationMethod": AUDIENCE_METHOD_VERSION,
                 "audienceAnalysisId": payload.audience_analysis_id,
                 "audienceAnalysis": audience,
-                "audiencePersonas": select_audience_personas(audience)
+                "audiencePersonas": select_audience_personas(audience, audience_snapshot)
                 if audience
                 else [],
                 "mode": payload.mode,

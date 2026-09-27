@@ -166,6 +166,18 @@ def test_audience_persistence_scope_and_simulation_top_three(app):
     assert [p["id"] for p in run.input_snapshot["audiencePersonas"]] == ["3", "2", "1"]
     assert all(p["estimatedPercent"] is None for p in run.input_snapshot["audiencePersonas"])
     assert run.input_snapshot["audiencePersonas"][0]["evidenceStatus"] == "verified"
+    assert run.input_snapshot["simulationMethod"] == "audience_methods_v2"
+    episodes = run.input_snapshot["audiencePersonas"][0]["observedEpisodes"]
+    assert episodes[0]["noteExcerpt"] == "真实经历"
+    assert episodes[0]["observedComment"] == "想了解申请费用"
+    saved_analysis = service.get(run_id).result
+    with service.database.transaction() as c:
+        c.execute("UPDATE source_materials SET text_content='{}' WHERE id=?", (source["id"],))
+    another = app.state.simulation_service.create(
+        wid, SimulationRunCreate(topic_id=selected_topic["id"], audience_analysis_id=run_id),
+    )
+    assert another.input_snapshot["audiencePersonas"][0]["observedEpisodes"] == episodes
+    assert service.get(run_id).result == saved_analysis
     other = create_workspace(app)["id"]
     with pytest.raises(ValidationError):
         app.state.simulation_service.create(

@@ -93,6 +93,13 @@ from app.services import (
     XhsCaptureJobService,
     XhsOfflineImportService,
 )
+from app.services.audience_evidence import (
+    AUDIENCE_METHOD_VERSION,
+    DISCUSSION_SKIPPED_REASON,
+)
+from app.services.audience_evidence import (
+    discussion_skipped as is_discussion_skipped,
+)
 from app.services.common import utc_now
 from app.services.xhs_imports import XhsPackageFile
 from app.workflows import (
@@ -989,16 +996,19 @@ def create_api_router(
                     "debate_responses": {"debateResponses": run.debate_results},
                     "synthesis": {"synthesis": run.synthesis},
                 }
-                discussion_skipped = bool(run.reaction_results) and sum(
-                    r.get("action", "comment") == "comment"
-                    and bool(r.get("quote") or r.get("text"))
-                    for r in run.reaction_results
-                ) < 2 and (bool(run.synthesis) or run.status.value in {
-                    "completed", "partially_completed", "failed",
-                })
+                discussion_skipped = (
+                    not run.debate_results and bool(run.reaction_results)
+                    and is_discussion_skipped(
+                        run.reaction_results, run.input_snapshot.get("simulationMethod")
+                    ) and (bool(run.synthesis) or run.status.value in {
+                        "completed", "partially_completed", "failed",
+                    })
+                )
                 if discussion_skipped:
                     stage_data["debate_responses"]["skippedReason"] = (
-                        "不足两条模拟公开评论，无需交叉回应。"
+                        DISCUSSION_SKIPPED_REASON
+                        if run.input_snapshot.get("simulationMethod") == AUDIENCE_METHOD_VERSION
+                        else "不足两条模拟公开评论，无需交叉回应。"
                     )
                 stage_has_result = {
                     "personas": bool(run.persona_definitions),

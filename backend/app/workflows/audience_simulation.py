@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 from collections.abc import AsyncIterator, Awaitable, Callable
+from copy import deepcopy
 from typing import Any, Literal, Protocol, TypedDict
 from uuid import uuid4
 
@@ -17,7 +18,13 @@ from app.errors import ConflictError, ValidationError
 from app.models import ModelOperation, SimulationRunStatus
 from app.repositories.graph_checkpoints import GraphCheckpointRepository
 from app.repositories.simulation_runs import SIMULATION_TERMINAL_STATUSES
-from app.services.audience_evidence import AudienceEvidence
+from app.services.audience_evidence import (
+    DISCUSSION_SKIPPED_REASON,
+    AudienceEvidence,
+    ObservedEpisode,
+    public_reactions,
+    reader_persona_context,
+)
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
 from app.services.simulation_runs import SimulationRunService
@@ -80,6 +87,8 @@ class PersonaDefinition(BaseModel):
     evidenceRefs: list[AudienceEvidence] = Field(default_factory=list)
     evidenceStatus: Literal["verified", "legacy_unverified", "hypothesis"] = "hypothesis"
     limitations: str = ""
+    unknowns: list[str] = Field(default_factory=list)
+    observedEpisodes: list[ObservedEpisode] = Field(default_factory=list)
 
 
 class PersonaDefinitionsResult(BaseModel):
@@ -125,11 +134,16 @@ class DebateResponse(BaseModel):
     text: str = ""
     targetedAt: str = ""
     stance: str = ""
+    replyToId: str | None = None
+    changeReason: str = ""
 
     @model_validator(mode="after")
     def silence_is_not_a_changed_mind(self):
         if not (self.response or self.text).strip():
             self.changedMind = False
+            self.replyToId = None
+            self.changeReason = ""
+            self.targetedAt = ""
         return self
 
 
@@ -184,6 +198,7 @@ class AudienceSimulationModelProvider(Protocol):
         persona: dict[str, Any],
         topic: dict[str, Any],
         other_reactions: list[dict[str, Any]],
+        prior_reaction: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
     async def synthesis(
@@ -466,8 +481,8 @@ def simulation_demo_sample(
         ]
     )
     if "数字游民" in text or topic.get("sourceWorkflow") == "trend_analysis":
-        return SAMPLE_SIMULATION_TREND
-    return SAMPLE_SIMULATION_ACCOUNT
+        return deepcopy(SAMPLE_SIMULATION_TREND)
+    return deepcopy(SAMPLE_SIMULATION_ACCOUNT)
 
 
 class FakeAudienceSimulationModelProvider:
@@ -506,6 +521,7 @@ class FakeAudienceSimulationModelProvider:
         persona: dict[str, Any],
         topic: dict[str, Any],
         other_reactions: list[dict[str, Any]],
+        prior_reaction: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         persona_id = str(persona.get("id", ""))
         self.calls.append(f"debate:{persona_id}")
@@ -515,7 +531,12 @@ class FakeAudienceSimulationModelProvider:
         debate = next(
             item for item in sample["debate"] if item["personaId"] == persona_id
         )
-        return {"debateResponse": debate}
+        target = next((r for r in other_reactions if r["personaId"] == debate.get("targetedAt")),
+                      other_reactions[0] if other_reactions else None)
+        return {"debateResponse": {
+            **debate, "replyToId": target["messageId"] if target else None,
+            "changeReason": "示例中的公开回应补充了可操作的步骤。" if debate.get("changedMind") else "",
+        }}
 
     async def synthesis(
         self,
@@ -563,6 +584,7 @@ class RealAudienceSimulationModelProvider:
         persona: dict[str, Any],
         topic: dict[str, Any],
         other_reactions: list[dict[str, Any]],
+        prior_reaction: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         response = await self.model_call_service.call_operation(
             ModelOperation.SIMULATION_DEBATE,
@@ -570,6 +592,7 @@ class RealAudienceSimulationModelProvider:
                 "persona": persona,
                 "topic": topic,
                 "otherReactions": other_reactions,
+                "priorReaction": prior_reaction,
             },
         )
         return response.output
@@ -794,11 +817,13 @@ class _AudienceSimulationGraphExecution:
             )
             if not saved_personas:
                 for persona in output.get("personas", []):
-                    persona.update(evidence=[], evidenceRefs=[], evidenceStatus="hypothesis",
+                    persona.update(evidence=[], evidenceRefs=[], observedEpisodes=[], evidenceStatus="hypothesis",
                                    limitations="未使用已核验的受众分析，仅为假设性阅读视角。")
             result = PersonaDefinitionsResult.model_validate(output).model_dump(
                 mode="json", by_alias=True
             )
+            result["personas"] = [reader_persona_context(p, updated["topic"])
+                                  for p in result["personas"]]
             updated["personas"] = result["personas"]
             self.service.simulation_service.save_progress(
                 self.simulation_id,
@@ -836,6 +861,7 @@ class _AudienceSimulationGraphExecution:
                 if result["reaction"]["personaId"] != persona_id:
                     raise ValueError("反应角色与请求不一致")
                 validate_trigger_quote(result["reaction"]["triggerQuote"], updated["topic"])
+                result["reaction"].update(messageId=f"initial:{persona_id}", round=1)
                 return result["reaction"]
             except Exception as error:
                 updated.setdefault("stage_errors", {})[
@@ -876,21 +902,19 @@ class _AudienceSimulationGraphExecution:
         updated = dict(state)
         personas = updated.get("personas") or []
         reactions = updated.get("initial_reactions") or []
-        public_comments = [
-            {"personaId": r["personaId"], "quote": r.get("quote") or r.get("text", "")}
-            for r in reactions
-            if r.get("action", "comment") == "comment" and (r.get("quote") or r.get("text"))
-        ]
-        reacted_ids = {str(item["personaId"]) for item in public_comments}
+        public_comments = public_reactions(reactions)
+        prior_by_id = {str(r["personaId"]): r for r in reactions}
         debate_personas = [
-            persona for persona in personas if str(persona.get("id", "")) in reacted_ids
+            persona for persona in personas
+            if str(persona.get("id", "")) in prior_by_id
+            and any(p["personaId"] != persona["id"] for p in public_comments)
         ]
         if updated.get("debate_responses"):
             await self.save_checkpoint("parallel_debate_responses", updated)
             return AudienceSimulationState(**updated)
-        if len(public_comments) < 2:
+        if not debate_personas:
             await self.emit("stage.succeeded", "debate_responses", "completed", {
-                "debateResponses": [], "skippedReason": "不足两条模拟公开评论，无需交叉回应。",
+                "debateResponses": [], "skippedReason": DISCUSSION_SKIPPED_REASON,
             })
             await self.save_checkpoint("parallel_debate_responses", updated)
             return AudienceSimulationState(**updated)
@@ -909,6 +933,7 @@ class _AudienceSimulationGraphExecution:
                         persona=persona,
                         topic=updated["topic"],
                         other_reactions=others,
+                        prior_reaction=prior_by_id[persona_id],
                     )
                 )
                 result = DebateResponseResult.model_validate(output).model_dump(
@@ -916,7 +941,17 @@ class _AudienceSimulationGraphExecution:
                 )
                 if result["debateResponse"]["personaId"] != persona_id:
                     raise ValueError("回应角色与请求不一致")
-                return result["debateResponse"]
+                response = result["debateResponse"]
+                visible = {r["messageId"]: r for r in others}
+                if (response["response"] or response["text"]).strip():
+                    if response["replyToId"] not in visible:
+                        raise ValueError("回应对象不是本轮可见的公开评论")
+                    response["targetedAt"] = visible[response["replyToId"]]["personaId"]
+                    if response["changedMind"] and not response["changeReason"].strip():
+                        raise ValueError("观点改变缺少具体说明")
+                response.update(messageId=f"reply:{persona_id}", round=2,
+                                visibleMessageIds=list(visible))
+                return response
             except Exception as error:
                 updated.setdefault("stage_errors", {})[
                     f"debate_responses.{persona_id}"

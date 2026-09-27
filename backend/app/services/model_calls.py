@@ -11,6 +11,7 @@ import httpx
 from app.config import Settings
 from app.errors import ValidationError
 from app.models import ModelCallRequest, ModelCallResponse, ModelOperation
+from app.services.audience_examples import ANALYSIS_EXAMPLES, REACTION_EXAMPLES
 
 PROMPT_PROFILE = """你是创作者账号分析师。基于历史笔记和账号定位，分析这个账号的爆款基因。
 规则：
@@ -77,13 +78,17 @@ PROMPT_SIMULATION_REACTION = """你正在预演一个阅读视角，不是真实
 允许无感、划走、读完不评论。action 是 comment/no_comment/skip；只有 comment 才填写 quote，其他情况 quote 为空。
 不要为了帮助创作者而迎合，也不要人人都像内容策略师；证据不足时说明不确定。
 只输出 JSON，不要解释。schema:
-{"reaction":{"personaId":"","stance":"喜欢/犹豫/反感/无感/不确定","action":"comment/no_comment/skip","quote":"","understanding":"","triggerQuote":"","concerns":[],"opportunities":[]}}"""
+{"reaction":{"personaId":"","stance":"喜欢/犹豫/反感/无感/不确定","action":"comment/no_comment/skip","quote":"","understanding":"","triggerQuote":"","concerns":[],"opportunities":[]}}""" + REACTION_EXAMPLES
 
 PROMPT_SIMULATION_DEBATE = """这是一个条件性情境：假设你看到了给出的模拟公开评论，而非真实评论区。
 只参考给出的评论和内容；不默认所有人都会交流或改变观点。
+priorReaction 是你自己的第一反应，保留当时的理解、未知与态度；之前不评论不妨碍现在回应。
+otherReactions 仅包含你本轮可见的公开消息；选择其中一条 messageId 作为 replyToId，不能回复自己或看不见的消息。
+回应可以是追问、补充或不同意，不要求达成共识，也不要凭空添加个人经历。
+只有确实改变原先看法才设 changedMind=true，并用 changeReason 简述由被回复消息引起的具体变化；不要输出长推理链。
 可选择不回应，此时 response 为空且 changedMind 为 false。不要推测评论作者未公开的心理。
 只输出 JSON，不要解释。schema:
-{"debateResponse":{"personaId":"","response":"","changedMind":false,"newConcerns":[],"strongerSignals":[]}}"""
+{"debateResponse":{"personaId":"","response":"","replyToId":null,"changedMind":false,"changeReason":"","newConcerns":[],"strongerSignals":[]}}"""
 
 PROMPT_SIMULATION_SYNTHESIS = """你是发布前预演的评审员，不是流量预测模型。
 区分历史依据、模型假设和模拟反应；模拟评论不是新增的真人证据。
@@ -320,11 +325,13 @@ class ModelCallService:
             return ("""你是创作者受众研究员。根据已提供笔记及评论，提取有原文依据的阅读需求视角。
 视角可以重叠，不是互斥的人口分群；不输出粉丝比例或 estimatedPercent。通常 3~8 组，证据不足时更少。
 不要根据单条评论编造年龄、收入、性别等身份。没有评论时只做内容推断，不能称为真实受众观察。
+先辨认评论明确表达的需求、约束与不同态度，再归并为视角，不先编人设后找引文。unknowns 列出不能确定的重要属性。
+同一评论可以支持多个需求，同一需求可以包含不同态度；模糊短评不强行细分。不要输出模型编造的历史案例。
 每组 evidenceRefs 至少一项，必须使用输入的 noteId；评论证据还必须使用对应 commentId。
 sourceType=comment 表示评论直接表达，sourceType=note 表示从笔记推断（commentId 为 null）。
 quote 必须逐字截取相应来源的非空原文，不能改写，不能引用其他笔记或评论。
 limitations 解释抽样限制、视角重叠和未知读者；范围是笔记发布时间，不代表评论发表时间范围。
-只输出 JSON：{"summary":"","groups":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":"","evidenceRefs":[{"noteId":"","commentId":null,"sourceType":"note","quote":""}]}],"limitations":""}""", json.dumps(context, ensure_ascii=False))
+只输出 JSON：{"summary":"","groups":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":"","unknowns":[],"evidenceRefs":[{"noteId":"","commentId":null,"sourceType":"note","quote":""}]}],"limitations":""}""" + ANALYSIS_EXAMPLES, json.dumps(context, ensure_ascii=False))
         if operation == ModelOperation.CREATOR_EDIT:
             return ("""你是用户的 AI 创作助手，与用户共同编辑一篇小红书选题。左侧画布是 title 和 body。
 根据账号及分析背景回应用户，保留用户风格，不编造个人经历或事实。
@@ -401,7 +408,9 @@ limitations 解释抽样限制、视角重叠和未知读者；范围是笔记�
                 f"{json.dumps(context.get('topic'), ensure_ascii=False)}\n\n"
                 "persona：\n"
                 f"{json.dumps(context.get('persona'), ensure_ascii=False)}\n\n"
-                "其他人的第一反应：\n"
+                "priorReaction（自己的第一反应）：\n"
+                f"{json.dumps(context.get('priorReaction'), ensure_ascii=False)}\n\n"
+                "otherReactions（本轮可见的公开评论）：\n"
                 f"{json.dumps(context.get('otherReactions'), ensure_ascii=False)}",
             )
         if operation == ModelOperation.SIMULATION_SYNTHESIS:

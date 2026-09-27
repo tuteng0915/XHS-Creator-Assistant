@@ -76,8 +76,12 @@ export function stageSeedFromRun(run: AnalysisRun): StageView[] {
 
 export function stageSeedFromSimulation(run: SimulationRun): StageView[] {
   const hasSynthesis = Object.keys(run.synthesis || {}).length > 0
-  const discussionSkipped = (hasSynthesis || ['completed', 'partially_completed', 'failed'].includes(run.status)) && run.reactionResults.length > 0 &&
-    run.reactionResults.filter(r => (!r.action || r.action === 'comment') && (r.quote || r.text)).length < 2
+  const statefulDiscussion = run.inputSnapshot?.simulationMethod === 'audience_methods_v2'
+  const publicComments = run.reactionResults.filter(r => (!r.action || r.action === 'comment') && String(r.quote || r.text || '').trim())
+  const noRecipient = statefulDiscussion
+    ? !run.reactionResults.some(r => publicComments.some(p => p.personaId !== r.personaId))
+    : publicComments.length < 2
+  const discussionSkipped = !run.debateResults.length && (hasSynthesis || ['completed', 'partially_completed', 'failed'].includes(run.status)) && run.reactionResults.length > 0 && noRecipient
   const resultByStage: Record<string, unknown> = {
     personas: run.personaDefinitions.length
       ? { personas: run.personaDefinitions }
@@ -87,19 +91,26 @@ export function stageSeedFromSimulation(run: SimulationRun): StageView[] {
       : undefined,
     debate_responses: run.debateResults.length
       ? { debateResponses: run.debateResults }
-      : discussionSkipped ? { debateResponses: [], skippedReason: '不足两条模拟公开评论，无需交叉回应。' } : undefined,
+      : discussionSkipped ? { debateResponses: [], skippedReason: statefulDiscussion
+        ? '没有可供其他读者回应的公开评论，跳过交流。'
+        : '不足两条模拟公开评论，无需交叉回应。' } : undefined,
     synthesis: hasSynthesis ? { synthesis: run.synthesis } : undefined,
   }
-  return SIMULATION_STAGES.map((stage) => ({
-    ...stage,
-    status: run.stageErrors[stage.key]
-      ? 'failed'
-      : resultByStage[stage.key]
-        ? 'completed'
-        : run.status === 'running'
-          ? 'running'
-          : 'waiting',
-    result: resultByStage[stage.key],
-    error: run.stageErrors[stage.key],
-  }))
+  return SIMULATION_STAGES.map((stage) => {
+    const error = Object.entries(run.stageErrors)
+      .filter(([key]) => key === stage.key || key.startsWith(`${stage.key}.`))
+      .map(([, message]) => message).join('; ')
+    return {
+      ...stage,
+      status: error
+        ? 'failed'
+        : resultByStage[stage.key]
+          ? 'completed'
+          : run.status === 'running'
+            ? 'running'
+            : 'waiting',
+      result: resultByStage[stage.key],
+      error: error || undefined,
+    }
+  })
 }

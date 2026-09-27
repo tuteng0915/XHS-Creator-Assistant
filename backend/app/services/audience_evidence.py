@@ -1,10 +1,98 @@
 """Bounded, traceable evidence for audience research (never population estimates)."""
 
+from __future__ import annotations
+
 from typing import Literal
 
 from pydantic import Field
 
 from app.models import APIModel
+
+AUDIENCE_METHOD_VERSION = "audience_methods_v2"
+
+
+class ObservedEpisode(APIModel):
+    """A real stimulus/response pair, never a generated teaching example."""
+
+    note_id: str
+    comment_id: str
+    note_title: str
+    note_excerpt: str
+    observed_comment: str
+    evidence_quote: str
+    context_limit: str = "正文为截取片段；评论具体触发位置未知，不代表完整阅读行为。"
+
+
+def observed_episodes(refs: list[AudienceEvidence], context: dict) -> list[dict]:
+    """Materialize validated pairs with cross-note coverage, bounded to six."""
+    validate_evidence(refs, context)
+    by_note: dict[str, list[dict]] = {}
+    seen: set[tuple[str, str]] = set()
+    for ref in refs:
+        if ref.source_type != "comment" or ref.comment_id is None:
+            continue
+        key = (ref.note_id, ref.comment_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        note = next(n for n in context["notes"] if n["noteId"] == ref.note_id)
+        comment = next(c for c in note["comments"] if c["commentId"] == ref.comment_id)
+        by_note.setdefault(ref.note_id, []).append(ObservedEpisode(
+            note_id=ref.note_id, comment_id=ref.comment_id,
+            note_title=note["title"], note_excerpt=note["content"][:1000],
+            observed_comment=comment["content"], evidence_quote=ref.quote,
+        ).model_dump(by_alias=True))
+    # Round-robin prevents one heavily cited note from consuming the whole budget.
+    result = []
+    while by_note and len(result) < 6:
+        for note_id in list(by_note):
+            result.append(by_note[note_id].pop(0))
+            if not by_note[note_id]:
+                del by_note[note_id]
+            if len(result) == 6:
+                break
+    return result
+
+
+def reader_persona_context(persona: dict, topic: dict) -> dict:
+    """Select up to four saved episodes; no extra source lookup or new facts."""
+    def terms(text: str) -> set[str]:
+        compact = "".join(text.lower().split())
+        return {compact[i:i + 2] for i in range(len(compact) - 1)}
+
+    query = terms(str(topic.get("title", "")) + str(topic.get("body", "")))
+    episodes = list(persona.get("observedEpisodes", []))
+    episodes.sort(key=lambda e: len(query & terms(
+        e["noteTitle"] + e["noteExcerpt"] + e["observedComment"]
+    )), reverse=True)
+    selected, remaining, seen_notes = [], [], set()
+    for episode in episodes:
+        if episode["noteId"] not in seen_notes:
+            selected.append(episode)
+            seen_notes.add(episode["noteId"])
+        else:
+            remaining.append(episode)
+    return {**persona, "observedEpisodes": (selected + remaining)[:4]}
+
+
+def public_reactions(reactions: list[dict]) -> list[dict]:
+    return [
+        {"messageId": f"initial:{r['personaId']}", "personaId": r["personaId"],
+         "quote": r.get("quote") or r.get("text", ""), "round": 1}
+        for r in reactions
+        if r.get("action", "comment") == "comment"
+        and str(r.get("quote") or r.get("text", "")).strip()
+    ]
+
+
+def discussion_skipped(reactions: list[dict], method: str | None) -> bool:
+    public = public_reactions(reactions)
+    if method != AUDIENCE_METHOD_VERSION:
+        return len(public) < 2  # Preserve old history semantics.
+    return not any(r["personaId"] != p["personaId"] for r in reactions for p in public)
+
+
+DISCUSSION_SKIPPED_REASON = "没有可供其他读者回应的公开评论，跳过交流。"
 
 
 class AudienceEvidence(APIModel):
@@ -67,14 +155,24 @@ def validate_evidence(refs: list[AudienceEvidence], context: dict) -> None:
             raise ValueError("受众证据引用与本次输入不符，请重新分析")
 
 
-def select_audience_personas(audience: dict) -> list[dict]:
+def select_audience_personas(audience: dict, snapshot: dict | None = None) -> list[dict]:
     groups = audience.get("groups", [])
     # New results have evidence-ranked order. Keep legacy ordering for old records.
     if audience.get("method") != "evidence_grounded_v1":
         groups = sorted(groups, key=lambda g: g.get("estimatedPercent") or 0, reverse=True)
-    return [
+    selected = [
         {**g, "limitations": audience.get("limitations", ""),
          "evidenceStatus": "verified" if audience.get("method") == "evidence_grounded_v1"
          else "legacy_unverified"}
         for g in groups[:3]
     ]
+    # Older verified analyses have immutable source snapshots but no paired examples.
+    # Enrich this new simulation only; never rewrite the historical analysis.
+    if snapshot and audience.get("method") == "evidence_grounded_v1":
+        context = audience_context(snapshot)
+        for group in selected:
+            group["observedEpisodes"] = observed_episodes(
+                [AudienceEvidence.model_validate(r) for r in group.get("evidenceRefs", [])],
+                context,
+            )
+    return selected

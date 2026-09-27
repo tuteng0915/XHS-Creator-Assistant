@@ -8,13 +8,18 @@ import pytest
 
 from app.services.audience_analyses import AudienceResult
 from app.services.audience_evidence import (
+    AUDIENCE_METHOD_VERSION,
     AudienceEvidence,
     audience_context,
+    discussion_skipped,
+    observed_episodes,
+    reader_persona_context,
     select_audience_personas,
     validate_evidence,
 )
 from app.workflows.audience_simulation import (
     AudienceSimulationWorkflowService,
+    DebateResponse,
     PersonaDefinition,
     PersonaDefinitionsResult,
     PersonaReaction,
@@ -88,6 +93,90 @@ def test_legacy_audience_is_readable_but_not_verified():
     ]})
     assert selected[0]["id"] == "b"
     assert selected[0]["evidenceStatus"] == "legacy_unverified"
+
+
+def test_episodes_preserve_real_pairs_and_ignore_note_only_inference():
+    episodes = observed_episodes([ref(), ref()], context())
+    assert len(episodes) == 1
+    assert episodes[0]["noteExcerpt"] == "真实正文"
+    assert episodes[0]["observedComment"] == "具体费用多少？"
+    assert episodes[0]["evidenceQuote"] == "费用多少"
+    assert "未知" in episodes[0]["contextLimit"]
+    assert observed_episodes([ref(sourceType="note", commentId=None, quote="真实正文")],
+                             context()) == []
+
+
+def test_episodes_are_bounded_deduplicated_and_cover_multiple_notes():
+    data = audience_context({"notes": [
+        {"noteId": nid, "title": nid, "desc": "正文",
+         "comments": [{"commentId": str(i), "content": "费用多少"} for i in range(8)]}
+        for nid in ("a", "b")
+    ]})
+    refs = [ref(noteId=nid, commentId=str(i)) for nid in ("a", "b") for i in range(8)]
+    episodes = observed_episodes(refs + refs, data)
+    assert len(episodes) == 6
+    assert [e["noteId"] for e in episodes] == ["a", "b", "a", "b", "a", "b"]
+    persona = {"observedEpisodes": episodes}
+    selected = reader_persona_context(persona, {"title": "费用", "body": ""})
+    assert len(selected["observedEpisodes"]) == 4
+    assert {e["noteId"] for e in selected["observedEpisodes"][:2]} == {"a", "b"}
+    assert len(persona["observedEpisodes"]) == 6  # no snapshot mutation
+
+
+def test_model_cannot_supply_fake_historical_examples():
+    fake_episode = {**observed_episodes([ref()], context())[0], "observedComment": "伪造"}
+    result = AudienceResult.model_validate({
+        "summary": "费用视角", "limitations": "样本少", "groups": [{
+            "id": "g", "name": "费用", "profile": "关注费用", "unknowns": ["收入未知"],
+            "evidenceRefs": [ref().model_dump(by_alias=True)],
+            "observedEpisodes": [fake_episode],
+        }],
+    }).grounded_result(context())
+    assert result["groups"][0]["observedEpisodes"][0]["observedComment"] == "具体费用多少？"
+    assert result["groups"][0]["unknowns"] == ["收入未知"]
+    assert result["methodVersion"] == AUDIENCE_METHOD_VERSION
+
+
+def test_teaching_example_is_not_valid_account_evidence():
+    with pytest.raises(ValueError):
+        validate_evidence([ref(quote="住宿和保险算进去了吗？")], context())
+
+
+def test_old_analysis_can_enrich_new_run_without_mutation():
+    old = {"method": "evidence_grounded_v1", "groups": [{
+        "id": "p", "evidenceRefs": [ref().model_dump(by_alias=True)],
+    }]}
+    source = {"notes": [{"noteId": "n", "title": "申请经历", "desc": "真实正文",
+                         "comments": [{"commentId": "c", "content": "具体费用多少？"}]}]}
+    selected = select_audience_personas(old, source)
+    assert selected[0]["observedEpisodes"][0]["noteExcerpt"] == "真实正文"
+    assert "observedEpisodes" not in old["groups"][0]
+
+
+def test_discussion_eligibility_distinguishes_old_history_and_silent_reader():
+    reactions = [{"personaId": "a", "quote": "具体费用？"},
+                 {"personaId": "b", "action": "no_comment", "quote": ""}]
+    assert discussion_skipped(reactions, None)
+    assert not discussion_skipped(reactions, AUDIENCE_METHOD_VERSION)
+    assert discussion_skipped(reactions[:1], AUDIENCE_METHOD_VERSION)
+
+
+def test_silent_reply_does_not_claim_persuasion_or_a_reply_target():
+    reply = DebateResponse(personaId="a", response="", changedMind=True,
+                           replyToId="invented", changeReason="不该保留", targetedAt="b")
+    assert not reply.changedMind
+    assert reply.replyToId is None
+    assert reply.changeReason == reply.targetedAt == ""
+
+
+def test_reader_episode_selection_prefers_relevance_without_mutating_snapshot():
+    base = observed_episodes([ref()], context())[0]
+    episodes = [{**base, "noteId": str(i), "noteTitle": "摄影", "noteExcerpt": "拍摄",
+                 "observedComment": "镜头"} for i in range(5)]
+    episodes[-1].update(noteTitle="费用明细", noteExcerpt="住宿保险", observedComment="费用多少")
+    chosen = reader_persona_context({"observedEpisodes": episodes}, {"title": "费用明细"})
+    assert chosen["observedEpisodes"][0]["noteId"] == "4"
+    assert [e["noteId"] for e in episodes] == ["0", "1", "2", "3", "4"]
 
 
 @pytest.mark.parametrize("action", ["no_comment", "skip"])

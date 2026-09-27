@@ -1,6 +1,7 @@
 import asyncio
 import json
 
+import pytest
 from fastapi import FastAPI
 from test_workspace_api import create_workspace, send
 
@@ -192,7 +193,7 @@ def test_live_evidence_survives_and_silence_skips_discussion_after_restart(app):
     assert completed["debateResults"] == []
     assert model.calls == [ModelOperation.SIMULATION_REACTION, ModelOperation.SIMULATION_SYNTHESIS]
     replay = send(app, "GET", f"/api/simulation-runs/{run['id']}/events")
-    assert "不足两条模拟公开评论" in replay.text
+    assert "没有可供其他读者回应的公开评论" in replay.text
 
 
 def test_debate_only_receives_public_comments_not_private_reasoning(app):
@@ -203,14 +204,124 @@ def test_debate_only_receives_public_comments_not_private_reasoning(app):
             return result
 
         async def debate_response(self, **kwargs):
-            assert all(set(r) == {"personaId", "quote"} for r in kwargs["other_reactions"])
+            assert all(set(r) == {"messageId", "personaId", "quote", "round"}
+                       for r in kwargs["other_reactions"])
             assert all(r["personaId"] != kwargs["persona"]["id"] for r in kwargs["other_reactions"])
+            assert kwargs["prior_reaction"]["personaId"] == kwargs["persona"]["id"]
+            assert kwargs["prior_reaction"]["understanding"] == "私人推理"
             return await super().debate_response(**kwargs)
 
     run = create_simulation_run(app)
     app.state.simulation_workflow_service.fake_provider = Provider()
     collect(app, run["id"])
     assert send(app, "GET", f"/api/simulation-runs/{run['id']}").json()["status"] == "completed"
+
+
+def test_silent_readers_join_one_public_comment_after_restart(app):
+    class Provider(FakeAudienceSimulationModelProvider):
+        async def initial_reaction(self, **kwargs):
+            result = await super().initial_reaction(**kwargs)
+            if kwargs["persona"]["id"] != "wannabe":
+                result["reaction"].update(action="no_comment", quote="不公开")
+            return result
+
+        async def debate_response(self, **kwargs):
+            assert kwargs["prior_reaction"]["action"] == "no_comment"
+            assert kwargs["prior_reaction"]["quote"] == ""
+            assert [r["messageId"] for r in kwargs["other_reactions"]] == ["initial:wannabe"]
+            return await super().debate_response(**kwargs)
+
+    run = create_simulation_run(app)
+    provider = Provider()
+    app.state.simulation_workflow_service.fake_provider = provider
+    collect(app, run["id"], stop_after_node="parallel_initial_reactions")
+    initial_calls = list(provider.calls)
+    collect(app, run["id"])
+    completed = send(app, "GET", f"/api/simulation-runs/{run['id']}").json()
+    assert completed["status"] == "completed"
+    assert len(completed["debateResults"]) == 2
+    assert provider.calls[:len(initial_calls)] == initial_calls
+    assert sum(c.startswith("reaction:") for c in provider.calls) == 3
+    assert "debate:wannabe" not in provider.calls
+    for response in completed["debateResults"]:
+        assert response["replyToId"] == "initial:wannabe"
+        assert response["visibleMessageIds"] == ["initial:wannabe"]
+        assert response["round"] == 2
+    replay = send(app, "GET", f"/api/simulation-runs/{run['id']}/events")
+    assert "skippedReason" not in replay.text
+
+
+@pytest.mark.parametrize("invalid", ["self", "future", "no_reason"])
+def test_invalid_reply_is_partial_and_other_readers_survive(app, invalid):
+    class Provider(FakeAudienceSimulationModelProvider):
+        async def debate_response(self, **kwargs):
+            result = await super().debate_response(**kwargs)
+            if kwargs["persona"]["id"] == "wannabe":
+                reply = result["debateResponse"]
+                if invalid == "no_reason":
+                    reply.update(changedMind=True, changeReason="")
+                else:
+                    reply["replyToId"] = "initial:wannabe" if invalid == "self" else "reply:future"
+            return result
+
+    run = create_simulation_run(app)
+    app.state.simulation_workflow_service.fake_provider = Provider()
+    collect(app, run["id"])
+    completed = send(app, "GET", f"/api/simulation-runs/{run['id']}").json()
+    assert completed["status"] == "partially_completed"
+    assert len(completed["reactionResults"]) == 3
+    assert len(completed["debateResults"]) == 2
+    assert "debate_responses.wannabe" in completed["stageErrors"]
+
+
+def test_live_provider_gets_paired_history_and_own_previous_state(app):
+    run = create_simulation_run(app)
+    snapshot = run["inputSnapshot"]
+    episode = {"noteId": "n", "commentId": "c", "noteTitle": "历史笔记",
+               "noteExcerpt": "历史正文", "observedComment": "费用怎么算",
+               "evidenceQuote": "费用怎么算"}
+    snapshot.update(mode="live", audiencePersonas=[{
+        "id": pid, "name": pid, "profile": "费用视角", "unknowns": ["收入未知"],
+        "observedEpisodes": [episode],
+    } for pid in ("a", "b")])
+    with app.state.simulation_service.database.transaction() as c:
+        c.execute("UPDATE simulation_runs SET input_snapshot_json=? WHERE id=?",
+                  (json.dumps(snapshot, ensure_ascii=False), run["id"]))
+
+    class Model:
+        async def call_operation(self, operation, context):
+            if operation == ModelOperation.SIMULATION_REACTION:
+                assert context["persona"]["observedEpisodes"][0]["noteExcerpt"] == "历史正文"
+                assert context["persona"]["unknowns"] == ["收入未知"]
+                pid = context["persona"]["id"]
+                output = {"reaction": {"personaId": pid, "stance": "不确定",
+                                       "action": "comment" if pid == "a" else "no_comment",
+                                       "quote": "是否含住宿？" if pid == "a" else "",
+                                       "understanding": "独立理解"}}
+            elif operation == ModelOperation.SIMULATION_DEBATE:
+                assert context["persona"]["id"] == "b"
+                assert context["priorReaction"]["understanding"] == "独立理解"
+                assert set(context["otherReactions"][0]) == {
+                    "messageId", "personaId", "quote", "round",
+                }
+                output = {"debateResponse": {
+                    "personaId": "b", "response": "我也想知道保险是否包含在内",
+                    "replyToId": "initial:a", "changedMind": False,
+                }}
+            else:
+                assert operation == ModelOperation.SIMULATION_SYNTHESIS
+                assert context["debateResponses"][0]["replyToId"] == "initial:a"
+                output = {"synthesis": {"verdict": "补充费用口径"}}
+            return ModelCallResponse(output=output, model_metadata={"model": "injected"})
+
+    app.state.simulation_workflow_service.live_provider = RealAudienceSimulationModelProvider(
+        Model()
+    )
+    collect(app, run["id"])
+    completed = send(app, "GET", f"/api/simulation-runs/{run['id']}").json()
+    assert completed["status"] == "completed"
+    assert completed["personaDefinitions"][0]["observedEpisodes"][0]["noteId"] == "n"
+    assert completed["debateResults"][0]["targetedAt"] == "a"
 
 
 def test_simulation_run_review_metadata_is_editable_without_mutating_result(

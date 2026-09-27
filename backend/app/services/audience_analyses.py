@@ -9,7 +9,14 @@ from pydantic import Field, model_validator
 
 from app.errors import NotFoundError, ValidationError
 from app.models import APIModel, ModelOperation
-from app.services.audience_evidence import AudienceEvidence, audience_context, validate_evidence
+from app.services.audience_evidence import (
+    AUDIENCE_METHOD_VERSION,
+    AudienceEvidence,
+    ObservedEpisode,
+    audience_context,
+    observed_episodes,
+    validate_evidence,
+)
 from app.services.common import utc_now
 from app.services.creator_analysis_scope import scope_creator_profile
 
@@ -28,6 +35,8 @@ class AudienceGroup(APIModel):
     estimated_percent: float | None = Field(default=None, ge=0, le=100)
     evidence: list[str] = Field(default_factory=list)
     evidence_refs: list[AudienceEvidence] = Field(default_factory=list)
+    unknowns: list[str] = Field(default_factory=list)
+    observed_episodes: list[ObservedEpisode] = Field(default_factory=list)
 
 
 class AudienceResult(APIModel):
@@ -45,6 +54,9 @@ class AudienceResult(APIModel):
         for group in self.groups:
             validate_evidence(group.evidence_refs, context)
             group.evidence = list(dict.fromkeys(ref.quote for ref in group.evidence_refs))
+            # Never accept model-authored historical examples, even when well formed.
+            group.observed_episodes = [ObservedEpisode.model_validate(e)
+                                       for e in observed_episodes(group.evidence_refs, context)]
             # Never expose uncalibrated model-generated population estimates in new runs.
             group.estimated_percent = None
         self.groups.sort(key=lambda g: (
@@ -52,7 +64,8 @@ class AudienceResult(APIModel):
             len({r.note_id for r in g.evidence_refs}),
         ), reverse=True)
         result = self.model_dump(mode="json", by_alias=True)
-        result.update(method="evidence_grounded_v1", sampling=context["sampling"])
+        result.update(method="evidence_grounded_v1", sampling=context["sampling"],
+                      methodVersion=AUDIENCE_METHOD_VERSION)
         return result
 
 

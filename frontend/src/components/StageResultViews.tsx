@@ -383,10 +383,12 @@ export function ReactionListView({
           ) : (
             <>
               <div className="angle">{String(item.response || item.text || '不追加回应')}</div>
+              {Boolean(item.replyToId) && <p>回应：{String(item.targetedAt || item.replyToId)}</p>}
+              {Boolean(item.changedMind && item.changeReason) && <p>看法变化：{String(item.changeReason)}</p>}
               {item.stance && (
                 <div className="why">
                   <b>立场：</b> {String(item.stance)}
-                  {Boolean(item.targetedAt) && (
+                  {Boolean(item.targetedAt && !item.replyToId) && (
                     <>
                       <br />
                       <b>回应对象：</b> {String(item.targetedAt)}

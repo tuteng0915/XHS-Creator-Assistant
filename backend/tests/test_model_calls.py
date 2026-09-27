@@ -45,6 +45,25 @@ def settings(**overrides: Any) -> Settings:
     return Settings(**values)
 
 
+def test_audience_prompts_separate_teaching_examples_from_observations():
+    service = ModelCallService(settings())
+    system, user = service._build_prompt(ModelOperation.AUDIENCE_ANALYSIS,
+                                        {"notes": [{"title": "当前账号唯一材料"}]})
+    assert "教学示例" in system and "unknowns" in system
+    assert "当前账号唯一材料" in user
+    assert "住宿和保险" not in user
+    system, user = service._build_prompt(ModelOperation.SIMULATION_REACTION,
+                                        {"persona": {"id": "p"}, "topic": {"title": "测试"}})
+    assert "observedEpisodes" in system and "教学" not in user
+    system, user = service._build_prompt(ModelOperation.SIMULATION_DEBATE, {
+        "persona": {"id": "p"}, "topic": {"title": "测试"},
+        "priorReaction": {"understanding": "自己的第一理解"},
+        "otherReactions": [{"messageId": "initial:other", "quote": "对方公开的问题"}],
+    })
+    assert "自己的第一理解" in user and "对方公开的问题" in user
+    assert "replyToId" in system and "changeReason" in system
+
+
 def test_qwen_provider_uses_openai_compatible_chat_completions(monkeypatch) -> None:
     FakeAsyncClient.requests = []
     FakeAsyncClient.response_status_code = 200
