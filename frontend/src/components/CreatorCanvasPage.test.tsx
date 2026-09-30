@@ -44,3 +44,21 @@ it('waits for the updated topic before finishing polling and updating the canvas
   expect(screen.getByLabelText('创作正文')).toHaveValue(updated.body)
   expect(onUpdated).toHaveBeenCalledWith(updated)
 })
+
+it('reopens pending suggestions without putting the blocked proposal in the editor', async () => {
+  const pending = '请确认是否有后台交流的经历？'
+  const stored: AgentConversation = {...conversation, messages: [{
+    id: 'reply', conversationId: conversation.id, role: 'assistant', content: '原稿未改动',
+    contextPack: {}, assetRefs: [], proposedActions: [], createdAt: '',
+    modelMetadata: {canvasApplyStatus: 'needs_confirmation', pendingSuggestions: [pending],
+      suggestedCanvasUpdate: {title: '后台故事', body: '我去了后台'}},
+  }]}
+  vi.spyOn(agentConversationApi, 'list').mockResolvedValue([stored])
+  vi.spyOn(agentConversationApi, 'get').mockResolvedValue(stored)
+  const update = vi.spyOn(topicApi, 'update')
+  render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} agentId="a" onSelect={vi.fn()} onUpdated={vi.fn()} />)
+  await screen.findByText(pending)
+  expect(screen.getByLabelText('创作正文')).toHaveValue('原文')
+  expect(screen.queryByText('我去了后台')).not.toBeInTheDocument()
+  expect(update).not.toHaveBeenCalled()
+})

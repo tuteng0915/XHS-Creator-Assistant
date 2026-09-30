@@ -387,6 +387,26 @@ export interface SimulationRun extends SimulationRunSummary {
   modelMetadata: Record<string, unknown>
 }
 
+export interface FanDefinition {
+  name: string
+  profile: string
+  coreConcern: string
+  contentPreference: string
+  expressionStyle: string
+}
+
+export interface SimulatedFan {
+  id: string
+  workspaceId: string
+  sourceAnalysisId: string
+  sourceGroupId: string
+  original: Record<string, unknown>
+  editable: FanDefinition
+  status: 'active' | 'archived'
+  createdAt: string
+  updatedAt: string
+}
+
 export type DraftStatus = 'pending' | 'running' | 'completed' | 'failed'
 export type DraftKind = 'content_brief' | 'content_structure'
 
@@ -436,9 +456,14 @@ export interface AudienceAnalysis {
   workspaceId: string
   sourceMaterialId: string
   status: string
+  diagnostics?: {
+    acceptedGroups?: number;
+    rejectedGroups?: Array<{groupIndex: number; groupId?: string; groupName?: string;
+      issues: Array<{code: string; message: string; referenceIndex?: number}>}>;
+  }
   inputSnapshot: { scope: { scope: string; selectedNoteCount: number } }
   result: {
-    method?: string; summary?: string; limitations?: string;
+    method?: string; origin?: string; summary?: string; limitations?: string;
     sampling?: { sentNotes: number; sentComments: number; availableComments: number };
     groups?: Array<{
       id: string; name: string; profile: string; coreConcern: string;

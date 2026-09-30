@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { agentConversationApi, topicApi } from '../api'
 import type { AgentConversation, Topic } from '../types'
+import { PendingSuggestions } from './PendingSuggestions'
 
 export function CreatorCanvasPage({workspaceId, topic, topics, agentId, onSelect, onUpdated}: {
   workspaceId: string; topic: Topic | null; topics: Topic[]; agentId?: string;
@@ -85,6 +86,7 @@ function Canvas({workspaceId, topic, agentId, onUpdated}: {workspaceId: string; 
     {error && <p role="alert">{error}</p>}
     <div className="creator-canvas" style={{gridTemplateColumns:`minmax(0, ${split}fr) 12px minmax(0, ${100-split}fr)`}}>
       <section className="canvas-editor">
+        <PendingSuggestions value={topic.generatedSnapshot.pendingSuggestions} />
         <input aria-label="创作标题" value={title} onChange={e => setTitle(e.target.value)} />
         <textarea aria-label="创作正文" value={body} placeholder="写下你的想法，或请右侧 AI 帮你开始。" onChange={e => setBody(e.target.value)} />
         <div className="save-row"><button disabled={!dirty || saving || sending || !title.trim()} onClick={() => {setError(''); void save().catch(e => setError(String(e)))}}>保存</button><small>{saving ? '保存中…' : dirty ? '有未保存修改' : '已保存'}</small></div>
@@ -97,6 +99,8 @@ function Canvas({workspaceId, topic, agentId, onUpdated}: {workspaceId: string; 
       <section className="canvas-chat">
         <div className="canvas-messages" aria-label="创作对话" aria-live="polite">{conversation?.messages.map(m => <article key={m.id} className={`canvas-message ${m.role}`}><small>{m.role === 'user' ? '你' : 'AI 创作助手'}</small><p>{m.content}</p>
           {m.modelMetadata.canvasApplyStatus === 'applied' && <small>已更新画布</small>}
+          <PendingSuggestions value={m.modelMetadata.pendingSuggestions} />
+          {m.modelMetadata.canvasApplyStatus === 'needs_confirmation' && <small>原稿未改动 · 请在对话中补充真实素材</small>}
           {m.modelMetadata.canvasApplyStatus === 'conflict' && <details><summary>画布有新修改，AI 建议未覆盖</summary><h3>{String((m.modelMetadata.canvasUpdate as Record<string,unknown>)?.title || '')}</h3><p>{String((m.modelMetadata.canvasUpdate as Record<string,unknown>)?.body || '')}</p></details>}
         </article>)}{!conversation?.messages.length && <p className="muted">可以讨论角度，也可以直接要求修改标题和正文。</p>}</div>
         <form onSubmit={e => {e.preventDefault(); void send()}}><textarea aria-label="给创作助手的消息" value={message} onChange={e=>setMessage(e.target.value)} placeholder="例如：开头更像我的口吻，少一点说教。" /><button className="primary" disabled={!ready || !agentId || sending || running || !message.trim() || !title.trim()}>{sending || running ? '正在回复…' : '发送'}</button></form>

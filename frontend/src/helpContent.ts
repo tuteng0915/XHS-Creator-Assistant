@@ -22,6 +22,15 @@ export function getWorkspaceHelpContent({
   workflowTab: WorkflowTab
   publicMode?: boolean
 }): HelpContent {
+  if (activePage === 'simulated-fans') return {
+    title: '模拟粉丝', description: '可复用的阅读视角，属于当前账号，不是平台真实粉丝。',
+    bullets: [
+      '账号尚无模拟粉丝时，一次成功的受众分析会自动保存前三个视角；其他视角可从分析结果按需加入。',
+      '名称、阅读视角、关注点、偏好和表达习惯可以编辑；原始引用与未知项保持只读。',
+      '修改属于人工设定，不会变成真实受众证据；新分析不会覆盖已有档案。',
+      '模拟最多选择三位，运行保存当时快照。归档只影响后续选择，不改变历史结果。',
+    ],
+  }
   if (publicMode && activePage !== 'creator-start') {
     return {
       title: activePage === 'source-materials' ? '浏览笔记' : '使用帮助',
@@ -29,6 +38,7 @@ export function getWorkspaceHelpContent({
       bullets: [
         '从账号概览查看已读取的内容；点击笔记封面可查看正文和对应评论。',
         '默认分析最近 10 条已导入笔记，也可以调整为最近 7、30、90 天或全部。缺少发布时间的旧笔记不纳入日期筛选。',
+        '账号诊断可在“调整范围”中逐条勾选笔记，点卡片查看正文和评论；点“完成”应用，“取消”不改变原范围。',
         '诊断生成的推荐会自动保存到选题库；选择选题后可以编辑、用 AI 细化或进行受众模拟。',
         '受众模拟是方向性参考，不代表真实用户的评论或实际流量。',
         '保存修改后再进入下一步；原始生成内容会保留以供对照。',

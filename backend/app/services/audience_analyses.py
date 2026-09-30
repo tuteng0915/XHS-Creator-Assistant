@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import Field, model_validator
+from pydantic import ValidationError as SchemaError
 
 from app.errors import NotFoundError, ValidationError
 from app.models import APIModel, ModelOperation
@@ -14,11 +15,13 @@ from app.services.audience_evidence import (
     AudienceEvidence,
     ObservedEpisode,
     audience_context,
+    evidence_issues,
     observed_episodes,
     validate_evidence,
 )
 from app.services.common import utc_now
 from app.services.creator_analysis_scope import scope_creator_profile
+from app.services.simulated_fans import FanDefinition, SimulatedFanService
 
 
 class AudienceAnalysisCreate(APIModel):
@@ -26,12 +29,8 @@ class AudienceAnalysisCreate(APIModel):
     scope: Literal["recent_10", "last_7_days", "last_30_days", "last_90_days", "all"] = "recent_10"
 
 
-class AudienceGroup(APIModel):
+class AudienceGroup(FanDefinition):
     id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    profile: str = Field(min_length=1)
-    core_concern: str = ""
-    content_preference: str = ""
     estimated_percent: float | None = Field(default=None, ge=0, le=100)
     evidence: list[str] = Field(default_factory=list)
     evidence_refs: list[AudienceEvidence] = Field(default_factory=list)
@@ -77,9 +76,53 @@ class AudienceAnalysisResponse(APIModel):
     input_snapshot: dict
     result: dict
     model_metadata: dict
+    diagnostics: dict = Field(default_factory=dict)
     error: str
     created_at: str
     completed_at: str | None
+
+
+class AudienceEnvelope(APIModel):
+    summary: str
+    limitations: str = Field(min_length=1)
+    groups: list[Any] = Field(min_length=1, max_length=12)
+
+
+def validate_audience_output(output: dict, context: dict) -> tuple[dict, dict]:
+    """Reject whole ungrounded groups, retaining independently valid groups only."""
+    envelope = AudienceEnvelope.model_validate(output)
+    accepted, rejected = [], []
+    ids = [group.get("id") for group in envelope.groups if isinstance(group, dict)]
+    for index, raw in enumerate(envelope.groups):
+        try:
+            group = AudienceGroup.model_validate(raw)
+            issues = evidence_issues(group.evidence_refs, context)
+            if ids.count(group.id) > 1:
+                issues.append({"code": "duplicate_group_id", "message": "分组 ID 重复"})
+        except SchemaError as error:
+            issues = [{"code": "invalid_group_schema", "message": "分组格式不正确",
+                       "fields": [".".join(map(str, e["loc"])) for e in error.errors()]}]
+        if issues:
+            raw = raw if isinstance(raw, dict) else {}
+            rejected.append({
+                "groupIndex": index,
+                "groupId": raw.get("id") if isinstance(raw.get("id"), str) else None,
+                "groupName": raw.get("name") if isinstance(raw.get("name"), str) else None,
+                "issues": issues,
+            })
+        else:
+            accepted.append(group)
+    diagnostics = {"phase": "evidence_validation", "acceptedGroups": len(accepted),
+                   "rejectedGroups": rejected}
+    if not accepted:
+        return {}, diagnostics
+    summary = (envelope.summary if not rejected
+               else f"已保留 {len(accepted)} 个通过原文核验的阅读视角。")
+    limitations = envelope.limitations
+    if rejected:
+        limitations += f" 另有 {len(rejected)} 个分组未通过核验，未用于模拟粉丝或模拟。"
+    result = AudienceResult(summary=summary, groups=accepted, limitations=limitations)
+    return result.grounded_result(context), diagnostics
 
 
 class AudienceAnalysisService:
@@ -163,7 +206,8 @@ class AudienceAnalysisService:
         if row is None:
             raise NotFoundError("受众分析不存在")
         data = dict(row)
-        for field in ["input_snapshot", "result", "model_metadata"]:
+        data.pop("model_output_json")  # Raw provider output stays in local execution history.
+        for field in ["input_snapshot", "result", "model_metadata", "diagnostics"]:
             data[field] = json.loads(data.pop(field + "_json"))
         return AudienceAnalysisResponse.model_validate(data)
 
@@ -198,20 +242,43 @@ class AudienceAnalysisService:
         if not claimed:
             return
         run = self.get(run_id)
+        phase = "model_call"
         try:
             context = audience_context(run.input_snapshot)
             response = await self.model_call_service.call_operation(
                 ModelOperation.AUDIENCE_ANALYSIS,
                 context,
             )
-            result = AudienceResult.model_validate(response.output).grounded_result(context)
+            # Save the response before validation so rejected output remains debuggable.
             with self.database.transaction() as c:
                 c.execute(
-                    "UPDATE audience_analyses SET status='completed',result_json=?,"
-                    "model_metadata_json=?,completed_at=? WHERE id=?",
+                    "UPDATE audience_analyses SET model_output_json=?,model_metadata_json=? "
+                    "WHERE id=?",
+                    (json.dumps(response.output, ensure_ascii=False),
+                     json.dumps(response.model_metadata), run_id),
+                )
+            phase = "structured_validation"
+            result, diagnostics = validate_audience_output(response.output, context)
+            rejected = len(diagnostics["rejectedGroups"])
+            status = "partially_completed" if rejected else "completed"
+            error_message = ""
+            if not result:
+                status = "failed"
+                error_message = "所有分组的受众证据引用均未通过核验；具体原因已保存。"
+            phase = "saving_result"
+            with self.database.transaction() as c:
+                if result:
+                    SimulatedFanService(self.database).seed_initial(
+                        c, run.workspace_id, run.id, result, run.input_snapshot,
+                    )
+                c.execute(
+                    "UPDATE audience_analyses SET status=?,result_json=?,"
+                    "diagnostics_json=?,error=?,completed_at=? WHERE id=?",
                     (
+                        status,
                         json.dumps(result, ensure_ascii=False),
-                        json.dumps(response.model_metadata),
+                        json.dumps(diagnostics, ensure_ascii=False),
+                        error_message,
                         utc_now(),
                         run_id,
                     ),
@@ -221,7 +288,8 @@ class AudienceAnalysisService:
         except Exception as error:
             with self.database.transaction() as c:
                 c.execute(
-                    "UPDATE audience_analyses SET status='failed',error=?,"
+                    "UPDATE audience_analyses SET status='failed',error=?,diagnostics_json=?,"
                     "completed_at=? WHERE id=?",
-                    (str(error), utc_now(), run_id),
+                    (str(error), json.dumps({"phase": phase, "errorType": type(error).__name__}),
+                     utc_now(), run_id),
                 )

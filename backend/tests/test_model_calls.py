@@ -64,6 +64,20 @@ def test_audience_prompts_separate_teaching_examples_from_observations():
     assert "replyToId" in system and "changeReason" in system
 
 
+def test_creation_prompts_distinguish_evidence_from_generated_suggestions():
+    service = ModelCallService(settings())
+    for operation in [ModelOperation.TOPICS, ModelOperation.TREND_TOPICS]:
+        system, _ = service._build_prompt(operation, {})
+        assert "pendingSuggestions" in system and "亲历" in system
+    system, user = service._build_prompt(ModelOperation.CREATOR_EDIT, {
+        "topic": {"angle": "旧 AI 建议的虚构意象"},
+        "factSources": [{"id": "current-user-message", "text": "我没有去过后台"}],
+    })
+    assert "不是作者亲历证据" in system
+    assert "sourceQuote" in system and "supportedClaims" in system
+    assert "我没有去过后台" in user
+
+
 def test_qwen_provider_uses_openai_compatible_chat_completions(monkeypatch) -> None:
     FakeAsyncClient.requests = []
     FakeAsyncClient.response_status_code = 200

@@ -55,6 +55,7 @@ from app.services.audience_analyses import (
     AudienceAnalysisResponse,
     AudienceAnalysisService,
 )
+from app.services.simulated_fans import FanCreate, FanResponse, FanUpdate, SimulatedFanService
 from app.workflows import (
     AccountDiagnosisWorkflowService,
     AudienceSimulationWorkflowService,
@@ -263,6 +264,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             xhs_capture_service.shutdown()
 
     audience_analysis_service = AudienceAnalysisService(database, model_call_service)
+    simulated_fan_service = SimulatedFanService(database)
     application = FastAPI(
         title="Creator Workspace API",
         version="0.1.0",
@@ -314,6 +316,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return HealthResponse(status="ok", service="creator-workspace-backend")
 
     application.state.audience_analysis_service = audience_analysis_service
+    application.state.simulated_fan_service = simulated_fan_service
+
+    @application.get("/api/workspaces/{workspace_id}/simulated-fans",
+                     response_model=list[FanResponse])
+    def list_simulated_fans(workspace_id: str):
+        return simulated_fan_service.list(workspace_id)
+
+    @application.post("/api/workspaces/{workspace_id}/simulated-fans", response_model=FanResponse,
+                      status_code=201)
+    def create_simulated_fan(workspace_id: str, payload: FanCreate):
+        return simulated_fan_service.create(workspace_id, payload)
+
+    @application.get("/api/simulated-fans/{fan_id}", response_model=FanResponse)
+    def get_simulated_fan(fan_id: str):
+        return simulated_fan_service.get(fan_id)
+
+    @application.patch("/api/simulated-fans/{fan_id}", response_model=FanResponse)
+    def update_simulated_fan(fan_id: str, payload: FanUpdate):
+        return simulated_fan_service.update(fan_id, payload)
 
     @application.post(
         "/api/workspaces/{workspace_id}/audience-analyses",

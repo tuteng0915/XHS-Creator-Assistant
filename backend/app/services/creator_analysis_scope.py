@@ -19,13 +19,26 @@ def note_published_at(note: dict) -> datetime | None:
 
 
 def scope_creator_profile(
-    profile: dict, scope: str, *, now: datetime | None = None
+    profile: dict, scope: str, *, now: datetime | None = None,
+    selected_note_ids: list[str] | None = None,
 ) -> tuple[dict, dict]:
     now = now or datetime.now(UTC)
     notes = [note for note in profile.get("notes", []) if isinstance(note, dict)]
     selected = notes
     cutoff = None
-    if scope == "recent_10":
+    if selected_note_ids is not None:
+        # Match the browser's stable fallback for legacy imports without note IDs.
+        notes = [{**note, "noteId": str(note.get("noteId") or index)}
+                 for index, note in enumerate(notes)]
+        requested = set(selected_note_ids)
+        available = [note["noteId"] for note in notes]
+        if (not requested or len(requested) != len(selected_note_ids)
+                or not requested.issubset(available)
+                or any(available.count(note_id) != 1 for note_id in requested)):
+            raise ValidationError("所选笔记无效或已变更，请重新选择当前账号的笔记。")
+        selected = [note for note in notes if note["noteId"] in requested]
+        scope = "custom"
+    elif scope == "recent_10":
         selected = sorted(
             notes, key=lambda note: note_published_at(note) or datetime.min.replace(tzinfo=UTC),
             reverse=True,

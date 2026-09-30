@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import json
 from collections.abc import AsyncIterator
 from typing import Any, Literal, Protocol, TypedDict
 from uuid import uuid4
@@ -21,6 +22,7 @@ from app.models import (
 )
 from app.repositories.analysis_runs import TERMINAL_STATUSES, AnalysisRunRepository
 from app.repositories.graph_checkpoints import GraphCheckpointRepository
+from app.services.account_diagnosis_evidence import build_account_observations, verified_portrait
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
@@ -72,6 +74,7 @@ class ViralStructure(BaseModel):
 
 
 class ProfileData(BaseModel):
+    accountPortrait: dict[str, Any] | None = None
     pillars: list[str] = Field(default_factory=list)
     titleFormulas: list[TitleFormula] = Field(default_factory=list)
     hookStyles: list[str] = Field(default_factory=list)
@@ -101,6 +104,7 @@ class TopicItem(BaseModel):
     pain: str = ""
     whyFit: str = ""
     whyTrending: str | None = None
+    pendingSuggestions: list[str] = Field(default_factory=list)
 
 
 class TitleVariants(BaseModel):
@@ -448,13 +452,27 @@ class _AccountDiagnosisGraphExecution:
                 return
             await self.emit("stage.started", "profile", "running", {})
             try:
+                run = self.service.analysis_service.get(self.run_id)
+                observations = build_account_observations(snapshot, run.created_at.isoformat())
+                historical_posts = str(snapshot["historicalPosts"]["content"])
+                chronology = (observations or {}).get("chronology", {})
+                if chronology.get("status") == "comparable":
+                    historical_posts += (
+                        "\n\n可比较的前后发布时间组（只比较内容方向，不比较累计互动）：\n"
+                        + json.dumps(chronology, ensure_ascii=False)
+                    )
                 output = await provider.profile(
                     positioning=str(snapshot["accountPositioning"]),
-                    historical_posts=str(snapshot["historicalPosts"]["content"]),
+                    historical_posts=historical_posts,
                 )
                 result = ProfileStageResult.model_validate(output).model_dump(
                     mode="json"
                 )
+                result["profile"]["accountPortrait"] = verified_portrait(
+                    result["profile"].get("accountPortrait"), snapshot, chronology
+                )
+                if observations is not None:
+                    result["observations"] = observations
                 self.service.analysis_service.update_stage(
                     self.run_id,
                     "profile",

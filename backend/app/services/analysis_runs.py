@@ -28,7 +28,7 @@ from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.common import as_iso, utc_now
 from app.services.context_access import ContextAccessService
-from app.services.creator_analysis_scope import scope_creator_profile
+from app.services.creator_analysis_scope import note_published_at, scope_creator_profile
 
 STAGE_KEYS = {
     WorkflowType.ACCOUNT_DIAGNOSIS.value: {
@@ -385,6 +385,10 @@ class AnalysisRunService:
             payload.xhs_creator_profile_input_asset_id
             or payload.xhs_creator_profile_material_id
         )
+        if payload.selected_note_ids is not None and (
+            payload.workflow_type != WorkflowType.ACCOUNT_DIAGNOSIS or not xhs_asset_id
+        ):
+            raise ValidationError("逐条选择笔记仅适用于创作者档案的账号诊断。")
         if payload.workflow_type == WorkflowType.ACCOUNT_DIAGNOSIS and xhs_asset_id:
             return self._build_xhs_account_diagnosis_snapshot(
                 connection, workspace, payload, xhs_asset_id
@@ -1156,7 +1160,9 @@ class AnalysisRunService:
             "XHS creator profile input asset is required",
         )
         xhs_profile = self._parse_xhs_creator_profile(xhs_asset["text_content"] or "")
-        xhs_profile, analysis_range = scope_creator_profile(xhs_profile, payload.analysis_scope)
+        xhs_profile, analysis_range = scope_creator_profile(
+            xhs_profile, payload.analysis_scope, selected_note_ids=payload.selected_note_ids,
+        )
         account_positioning = self._derive_xhs_account_positioning(xhs_profile)
         historical_text = self._derive_xhs_historical_posts_text(xhs_profile)
         comments_text = self._derive_xhs_comments_text(xhs_profile)
@@ -1218,7 +1224,8 @@ class AnalysisRunService:
                     "skillId": "analysis.account_diagnosis",
                 },
                 purpose="create_account_diagnosis_analysis_run_from_xhs_creator_profile",
-                selected_evidence_only=payload.analysis_scope != "all",
+                selected_evidence_only=(payload.analysis_scope != "all"
+                                        or payload.selected_note_ids is not None),
                 selectors=[
                     "account_positioning",
                     "xhs_creator_profile",
@@ -1306,11 +1313,13 @@ class AnalysisRunService:
                 continue
             metrics = note.get("metrics") if isinstance(note.get("metrics"), dict) else {}
             tags = note.get("tags") if isinstance(note.get("tags"), list) else []
+            published_at = note_published_at(note)
             lines.extend(
                 [
                     f"## {index}. {note.get('title') or '未命名笔记'}",
                     "",
                     f"- note_id：{note.get('noteId') or '未知'}",
+                    f"- 发布时间：{published_at.date().isoformat() if published_at else '未知'}",
                     f"- 类型：{note.get('type') or 'normal'}",
                     f"- 链接：{note.get('noteUrl') or '未知'}",
                     (

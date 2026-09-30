@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { CreatorDialog } from './CreatorDialog'
+import { PendingSuggestions } from './PendingSuggestions'
 
 import { EmptyState, JsonPreview } from './CommonUi'
 import { SaveIndicator, type SaveState } from './StageResultViews'
@@ -222,6 +223,7 @@ export function TopicLibraryPage({
               </div>
               <label>为什么适合</label>
               <div className="readonly-box">{selectedTopic.whyItFits || '无'}</div>
+              <PendingSuggestions value={selectedTopic.generatedSnapshot.pendingSuggestions} />
               {!publicMode && <details className="asset-json-details">
                 <summary>Generated Snapshot</summary>
                 <JsonPreview value={selectedTopic.generatedSnapshot} />

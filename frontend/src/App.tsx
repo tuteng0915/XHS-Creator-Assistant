@@ -96,6 +96,8 @@ import { CreatorOverviewPage } from './components/CreatorOverviewPage'
 import { AudienceAnalysisPage } from './components/AudienceAnalysisPage'
 import { CreatorCanvasPage } from './components/CreatorCanvasPage'
 import { useAudienceAnalyses } from './hooks/useAudienceAnalyses'
+import { useSimulatedFans } from './hooks/useSimulatedFans'
+import { SimulatedFanPicker, SimulatedFansPage } from './components/SimulatedFansPage'
 import type { AnalysisScope } from './creatorNotes'
 import {
   WorkflowOutputPanel,
@@ -295,6 +297,7 @@ function WorkspaceApp() {
   const [addingCreator, setAddingCreator] = useState(false)
   const captureFormEpoch = useRef(0)
   const [analysisScope, setAnalysisScope] = useState<AnalysisScope>('recent_10')
+  const [analysisNoteSelection, setAnalysisNoteSelection] = useState<{profileId: string; noteIds: string[]} | null>(null)
   const [xhsCaptureJob, setXhsCaptureJob] = useState<XhsCaptureJob | null>(null)
   const [xhsCaptureSubmitting, setXhsCaptureSubmitting] = useState(false)
   const [xhsCaptureError, setXhsCaptureError] = useState('')
@@ -313,6 +316,7 @@ function WorkspaceApp() {
   const [manualTopicAngle, setManualTopicAngle] = useState('')
   const [topicDraft, setTopicDraft] = useState<{title:string; angle:string; body?:string}>({ title: '', angle: '', body: '' })
   const audience = useAudienceAnalyses(selectedWorkspaceId)
+  const fans = useSimulatedFans(selectedWorkspaceId, audience.rows.filter(r => ['completed', 'partially_completed'].includes(r.status)).map(r => r.id).join(','))
   const { saveStates, setSaveState, resetSaveStates, setSaveStates } =
     useSaveStates()
   const [analysisReviewDraft, setAnalysisReviewDraft] = useState<{
@@ -1560,6 +1564,8 @@ function WorkspaceApp() {
         videoCreatorSamplesInputAssetId: savedInputs.video?.id,
         xhsCreatorProfileInputAssetId: savedInputs.xhsCreatorProfile?.id,
         analysisScope: !internalMode && targetTab === 'account' ? analysisScope : undefined,
+        selectedNoteIds: !internalMode && targetTab === 'account' && analysisNoteSelection?.profileId === savedInputs.xhsCreatorProfile?.id
+          ? analysisNoteSelection?.noteIds : undefined,
         mediaAssetIds:
           targetTab === 'video' ? selectedVideoWorkflowMediaAssetIds : undefined,
         mode,
@@ -1682,7 +1688,7 @@ function WorkspaceApp() {
 
   async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic) {
     if (!workspace) return
-    if (!internalMode && audience.selected?.status !== 'completed') { setActivePage('audience-analysis'); return }
+    if (!internalMode && !fans.ids.length) { setActivePage('simulated-fans'); return }
     setWorkflowTab(targetTab)
     setRunError('')
     setRunning(true)
@@ -1704,7 +1710,7 @@ function WorkspaceApp() {
       const useSavedTopic =
         !draft && selectedTopic && topicForSimulation.includes(selectedTopic.title)
       const created = await simulationRunApi.create(workspace.id, {
-        audienceAnalysisId: internalMode ? undefined : audience.selected?.id,
+        simulatedFanIds: internalMode ? undefined : fans.ids,
         draftId: draft?.id,
         topicId: topic?.id || (useSavedTopic ? selectedTopic.id : null),
         manualTopic: draft || topic || useSavedTopic ? undefined : topicForSimulation,
@@ -1822,6 +1828,7 @@ function WorkspaceApp() {
       whyItFits: [candidate.whyFit, candidate.whyTrending].filter(Boolean).join('\n'),
       sourceAnalysisRunId: run?.id || null,
       sourceWorkflow: run ? undefined : 'manual',
+      generatedSnapshot: { ...candidate },
     })
     await refreshWorkspaceSummary()
     return created
@@ -2546,6 +2553,7 @@ function WorkspaceApp() {
         onSimulateSavedTopic={(topic) => void runAudienceSimulation(undefined, 'account', topic)}
         stage={stage}
         currentRun={sourceRun}
+        mediaAssets={mediaAssets}
         onSaveGeneratedTopic={saveGeneratedTopic}
         onSelectTopic={async (topic) => {
           const selected = await selectTopic(topic)
@@ -2660,9 +2668,15 @@ function WorkspaceApp() {
         workspace &&
         activePage === 'account-diagnosis' &&
         (internalMode ? renderWorkflowRunPage('account') : <CreatorDiagnosisPage
+          key={xhsCreatorProfileMaterial?.id}
           profile={xhsCreatorProfileMaterial}
+          mediaAssets={mediaAssets}
           scope={analysisScope}
-          onScopeChange={setAnalysisScope}
+          selectedNoteIds={analysisNoteSelection?.profileId === xhsCreatorProfileMaterial?.id ? analysisNoteSelection?.noteIds : undefined}
+          onScopeChange={(scope, ids) => {
+            setAnalysisScope(scope)
+            setAnalysisNoteSelection(ids && xhsCreatorProfileMaterial ? {profileId: xhsCreatorProfileMaterial.id, noteIds: ids} : null)
+          }}
           running={running}
           onRun={() => void runDiagnosis('account')}
           onImport={openExistingCreatorImport}
@@ -2758,11 +2772,11 @@ function WorkspaceApp() {
       {!loading && workspace && activePage === 'simulations' && (
         <>
         {!internalMode && <div className="creator-diagnosis-controls">
-          {audience.error && <p role="alert">{audience.error}</p>}
-          <select aria-label="模拟使用的受众分析" value={audience.selected?.id || ''} onChange={e => audience.setSelectedId(e.target.value)}><option value="">先完成受众分析</option>{audience.rows.filter(r => r.status === 'completed').map(r => <option key={r.id} value={r.id}>{new Date(r.createdAt).toLocaleString()} · {r.inputSnapshot.scope.selectedNoteCount} 条笔记</option>)}</select>
+          {fans.error && <p role="alert">{fans.error}</p>}
+          <SimulatedFanPicker rows={fans.rows} ids={fans.ids} onToggle={fans.toggle} />
           <select aria-label="模拟选题" value={selectedTopic?.id || ''} onChange={e => setSelectedTopic(topics.find(t => t.id === e.target.value) || null)}><option value="">选择选题</option>{topics.filter(t => t.status !== 'archived').map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select>
-          <button className="primary" disabled={running || audience.selected?.status !== 'completed' || !selectedTopic} onClick={() => void runAudienceSimulation(undefined,'account',selectedTopic || undefined)}>开始模拟</button>
-          {!audience.rows.some(r => r.status === 'completed') && <button onClick={() => setActivePage('audience-analysis')}>先分析受众</button>}
+          <button className="primary" disabled={running || !fans.ids.length || !selectedTopic} onClick={() => void runAudienceSimulation(undefined,'account',selectedTopic || undefined)}>开始模拟</button>
+          {!fans.rows.some(r => r.status === 'active') && <button onClick={() => setActivePage('audience-analysis')}>从受众分析添加模拟粉丝</button>}
         </div>}
         {!internalMode && running && <WorkflowOutputPanel targetTab="account" views={simulationStageViews} outputKind="simulation" runError={runError} renderStageResult={renderStageResult} />}
         {!internalMode && !running && runError && <p role="alert">{runError}</p>}
@@ -2788,8 +2802,12 @@ function WorkspaceApp() {
       {!loading && workspace && activePage === 'audience-analysis' && <AudienceAnalysisPage
         key={workspace.id} workspaceId={workspace.id} profile={xhsCreatorProfileMaterial}
         analyses={audience.rows} selectedId={audience.selectedId} onSelect={audience.setSelectedId}
+        loadError={audience.error}
         onRefresh={audience.refresh} onSimulate={() => setActivePage('simulations')}
+        savedFanKeys={fans.rows.map(f => `${f.sourceAnalysisId}:${f.sourceGroupId}`)} onFansChanged={fans.refresh}
       />}
+      {!loading && workspace && activePage === 'simulated-fans' && <SimulatedFansPage key={workspace.id}
+        rows={fans.rows} error={fans.error} onRefresh={fans.refresh} onAnalyze={() => setActivePage('audience-analysis')} />}
       {!loading && workspace && activePage === 'skills' && (
         <SkillsPage
           skills={skills}
@@ -2875,6 +2893,7 @@ function WorkspaceApp() {
         setXhsCaptureError('')
         setXhsProfileUrl('')
         setAnalysisScope('recent_10')
+        setAnalysisNoteSelection(null)
         setCaptureNoteLimit(10)
       }}
       busy={running || xhsCaptureSubmitting || saveStates.draft.phase === 'saving' || Boolean(xhsCaptureJob && ['pending', 'waiting_for_login', 'running', 'processing'].includes(xhsCaptureJob.status))}

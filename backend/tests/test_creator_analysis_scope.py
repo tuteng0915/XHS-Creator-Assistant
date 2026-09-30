@@ -72,3 +72,55 @@ def test_scope_does_not_allow_another_accounts_material(app: FastAPI):
         "analysisScope": "recent_10",
     })
     assert response.status_code == 422
+
+
+def test_manual_selection_uses_exact_notes_and_does_not_mutate_source():
+    raw = profile()
+    scoped, metadata = scope_creator_profile(raw, "all", selected_note_ids=["14", "2"])
+    assert metadata["scope"] == "custom"
+    assert metadata["selectedNoteIds"] == ["2", "14"]
+    assert [n["title"] for n in scoped["notes"]] == ["笔记2", "笔记14"]
+    assert "profileText" not in scoped["creator"]
+    assert len(raw["notes"]) == 15
+    assert "profileText" in raw["creator"]
+
+
+@pytest.mark.parametrize("ids", [[], ["missing"], ["1", "1"], ["1", "other-account-note"]])
+def test_invalid_manual_selection_rejected(ids):
+    with pytest.raises(ValidationError, match="所选笔记无效"):
+        scope_creator_profile(profile(), "all", selected_note_ids=ids)
+
+
+def test_legacy_missing_ids_match_browser_fallback_and_duplicate_source_ids_rejected():
+    raw = profile()
+    raw["notes"][2].pop("noteId")
+    scoped, metadata = scope_creator_profile(raw, "all", selected_note_ids=["2"])
+    assert metadata["selectedNoteIds"] == ["2"]
+    assert scoped["notes"][0]["title"] == "笔记2"
+    raw["notes"][3]["noteId"] = "2"
+    with pytest.raises(ValidationError):
+        scope_creator_profile(raw, "all", selected_note_ids=["2"])
+
+
+def test_manual_api_selection_persists_only_selected_evidence(app):
+    wid = create_workspace(app)["id"]
+    source = create_text_material(app, wid, "xhs_creator_profile", json.dumps(profile()))
+    payload = {"workflowType": "account_diagnosis", "xhsCreatorProfileInputAssetId": source["id"],
+               "analysisScope": "all", "selectedNoteIds": ["2", "14"], "mode": "demo"}
+    response = send(app, "POST", f"/api/workspaces/{wid}/analysis-runs", json=payload)
+    assert response.status_code == 201
+    run = response.json()
+    snapshot = run["inputSnapshot"]
+    assert snapshot["analysisRange"]["scope"] == "custom"
+    assert snapshot["analysisRange"]["selectedNoteIds"] == ["2", "14"]
+    assert snapshot["contextPack"]["scope"] == "selected_evidence"
+    serialized = json.dumps(snapshot, ensure_ascii=False)
+    assert "正文14" in serialized and "评论14" in serialized
+    assert "正文0" not in serialized and "评论0" not in serialized
+    assert "全量总结" not in serialized
+    reopened = send(app, "GET", f"/api/analysis-runs/{run['id']}").json()
+    assert reopened["inputSnapshot"] == snapshot
+    for ids in [[], ["foreign"], ["2", "2"]]:
+        assert send(app, "POST", f"/api/workspaces/{wid}/analysis-runs", json={
+            **payload, "selectedNoteIds": ids,
+        }).status_code == 422

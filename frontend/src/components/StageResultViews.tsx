@@ -1,4 +1,6 @@
-import type { SavePhase } from '../types'
+import type { MediaAsset, SavePhase } from '../types'
+import type { CreatorNote } from '../creatorNotes'
+import { AccountPortraitView, type Observations, type Portrait } from './AccountPortraitView'
 
 export type SaveState = { phase: SavePhase; message?: string }
 
@@ -93,7 +95,25 @@ function EvidenceBoundaryPanel({ data }: { data: Record<string, unknown> }) {
   )
 }
 
-export function ProfileView({ data }: { data: Record<string, unknown> }) {
+export function ProfileView({ data, observations, notes = [], mediaAssets = [] }: {
+  data: Record<string, unknown>
+  observations?: Observations | null
+  notes?: CreatorNote[]
+  mediaAssets?: MediaAsset[]
+}) {
+  if (observations?.schemaVersion === 'xhs-account-observations/v1') {
+    return <>
+      <AccountPortraitView portrait={data.accountPortrait as Portrait | null} observations={observations} notes={notes} mediaAssets={mediaAssets} />
+      <details className="account-legacy-profile">
+        <summary>查看其他模型归纳（未逐条核验）</summary>
+        <LegacyProfileView data={data} />
+      </details>
+    </>
+  }
+  return <LegacyProfileView data={data} />
+}
+
+function LegacyProfileView({ data }: { data: Record<string, unknown> }) {
   const pillars = Array.isArray(data.pillars) ? data.pillars : []
   const formulas = Array.isArray(data.titleFormulas) ? data.titleFormulas : []
   const hooks = Array.isArray(data.hookStyles) ? data.hookStyles : []

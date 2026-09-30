@@ -7,12 +7,13 @@ export interface TopicCandidate {
   pain?: string
   whyFit?: string
   whyTrending?: string
+  pendingSuggestions?: string[]
 }
 
 export const ACCOUNT_STAGES = [
-  { key: 'profile', n: '①', title: '主页诊断 · 数据对比 + 爆款结构' },
-  { key: 'pain_points', n: '②', title: '痛点归类' },
-  { key: 'topics', n: '③', title: '选题生成' },
+  { key: 'profile', n: '①', title: '账号画像' },
+  { key: 'pain_points', n: '②', title: '读者反馈' },
+  { key: 'topics', n: '③', title: '下一步 · 选题建议' },
 ] as const
 
 export const TREND_STAGES = [

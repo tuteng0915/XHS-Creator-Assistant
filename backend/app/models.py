@@ -496,6 +496,7 @@ class AnalysisRunStatus(StrEnum):
 
 class AnalysisRunCreate(APIModel):
     workflow_type: WorkflowType
+    selected_note_ids: list[str] | None = Field(default=None, min_length=1, max_length=10000)
     analysis_scope: Literal["recent_10", "last_7_days", "last_30_days", "last_90_days", "all"] = (
         "all"
     )
@@ -760,6 +761,7 @@ class SimulationRunStatus(StrEnum):
 
 
 class SimulationRunCreate(APIModel):
+    simulated_fan_ids: list[str] | None = Field(default=None, min_length=1, max_length=3)
     audience_analysis_id: str | None = None
     topic_id: str | None = None
     draft_id: str | None = None

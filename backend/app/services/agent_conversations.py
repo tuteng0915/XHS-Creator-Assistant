@@ -26,6 +26,7 @@ from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.common import as_iso, utc_now
 from app.services.context_access import ContextAccessService
+from app.services.creator_grounding import validate_creator_edit
 from app.services.model_calls import ModelCallService
 
 
@@ -235,18 +236,38 @@ class RealAgentConversationModelProvider:
         messages: list[dict],
     ) -> AgentConversationReply:
         if context_pack.get("canvasTopic"):
+            fact_sources = [
+                *context_pack.get("creatorFactSources", []),
+                *[{"id": f"user-message-{m['id']}", "text": m["content"]}
+                  for m in messages[-12:] if m["role"] == "user"],
+                {"id": "current-user-message", "text": user_content},
+            ]
             response = await self.model_call_service.call_operation(
                 ModelOperation.CREATOR_EDIT,
                 {
                     "topic": context_pack["canvasTopic"],
                     "accountContext": context_pack,
+                    "factSources": fact_sources,
                     "messages": [
                         {"role": m["role"], "content": m["content"]} for m in messages[-12:]
                     ],
                     "userMessage": user_content,
                 },
             )
-            update = response.output.get("update")
+            try:
+                checked = validate_creator_edit(response.output, fact_sources)
+            except (ValueError, ValidationError) as error:
+                return AgentConversationReply(
+                    reply="本次建议未通过事实核验，原稿未改动。请补充或确认相关素材后再修改。",
+                    proposed_actions=[],
+                    model_metadata={
+                        **response.model_metadata, "canvasApplyStatus": "needs_confirmation",
+                        "suggestedCanvasUpdate": response.output.get("update"),
+                        "pendingSuggestions": response.output.get("pendingSuggestions", []),
+                        "factCheckError": str(error),
+                    },
+                )
+            update = checked["update"]
             if update is not None:
                 if not isinstance(update.get("title"), str) or not isinstance(
                     update.get("body"), str
@@ -258,9 +279,11 @@ class RealAgentConversationModelProvider:
                     {**update, "expectedUpdatedAt": context_pack["canvasTopic"]["updated_at"]}
                 )
             return AgentConversationReply(
-                reply=response.output["reply"],
+                reply=checked["reply"],
                 proposed_actions=[],
-                model_metadata={**response.model_metadata, "canvasUpdate": update},
+                model_metadata={**response.model_metadata, "canvasUpdate": update,
+                                "pendingSuggestions": checked["pendingSuggestions"],
+                                "factCheck": checked["factCheck"]},
             )
         response = await self.model_call_service.call_operation(
             ModelOperation.AGENT_CHAT,
@@ -663,6 +686,23 @@ class AgentConversationService:
                 context_pack["canvasTopic"] = {
                     k: canvas_topic[k] for k in ("id", "title", "body", "angle", "updated_at")
                 }
+                context_pack["canvasTopic"]["pendingSuggestions"] = json.loads(
+                    canvas_topic["generated_snapshot_json"]
+                ).get("pendingSuggestions", [])
+                context_pack["creatorFactSources"] = []
+                if canvas_topic["source_analysis_run_id"]:
+                    source_run = connection.execute(
+                        "SELECT input_snapshot_json FROM analysis_runs "
+                        "WHERE id=? AND workspace_id=?",
+                        (canvas_topic["source_analysis_run_id"], conversation["workspace_id"]),
+                    ).fetchone()
+                    if source_run:
+                        snapshot = json.loads(source_run["input_snapshot_json"])
+                        original_posts = snapshot.get("historicalPosts", {}).get("content", "")
+                        if original_posts:
+                            context_pack["creatorFactSources"].append({
+                                "id": "analysis-original-posts", "text": original_posts,
+                            })
             messages = [
                 message
                 for message in self.repository.list_messages(connection, conversation_id)

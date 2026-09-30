@@ -13,8 +13,11 @@ import {
 } from './StageResultViews'
 import type { StageView } from './WorkflowOutputPanel'
 import { getTopicsFromStage } from '../appUtils'
-import type { AnalysisRun, Topic } from '../types'
+import type { AnalysisRun, MediaAsset, Topic } from '../types'
 import type { TopicCandidate } from '../workflows'
+import { PendingSuggestions } from './PendingSuggestions'
+import { creatorNotesFromPayload } from '../creatorNotes'
+import type { Observations } from './AccountPortraitView'
 
 type GeneratedTopicCardProps = {
   publicMode?: boolean
@@ -62,6 +65,7 @@ function GeneratedTopicCard({
           </>
         )}
       </div>
+      <PendingSuggestions value={topic.pendingSuggestions} />
       <div className="topic-actions">
         {publicMode ? <>
           <button onClick={() => void ensureSavedAndSelect().catch(() => undefined)}>查看选题</button>
@@ -113,12 +117,14 @@ type StageResultRendererProps = Omit<
   'topic'
 > & {
   stage: StageView
+  mediaAssets?: MediaAsset[]
 }
 
 export function StageResultRenderer({
   publicMode = false,
   onSimulateSavedTopic,
   stage,
+  mediaAssets = [],
   currentRun,
   onSaveGeneratedTopic,
   onSelectTopic,
@@ -129,7 +135,10 @@ export function StageResultRenderer({
   if (!stage.result) return null
   const result = stage.result as Record<string, unknown>
   if (stage.key === 'profile' && result.profile) {
-    return <ProfileView data={result.profile as Record<string, unknown>} />
+    return <ProfileView data={result.profile as Record<string, unknown>}
+      observations={result.observations as Observations | undefined}
+      notes={creatorNotesFromPayload(currentRun?.inputSnapshot.xhsCreatorProfile)}
+      mediaAssets={mediaAssets} />
   }
   if (stage.key === 'trend_analysis' && result.trendAnalysis) {
     return (

@@ -78,6 +78,11 @@ class PersonaDefinition(BaseModel):
     profile: str
     coreConcern: str = ""
     contentPreference: str = ""
+    expressionStyle: str = ""
+    fanAssetId: str | None = None
+    sourceAnalysisId: str | None = None
+    updatedAt: str | None = None
+    userAdjusted: bool = False
     archetype: str = ""
     background: str = ""
     personality: str = ""

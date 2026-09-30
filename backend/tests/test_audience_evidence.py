@@ -12,6 +12,7 @@ from app.services.audience_evidence import (
     AudienceEvidence,
     audience_context,
     discussion_skipped,
+    evidence_issues,
     observed_episodes,
     reader_persona_context,
     select_audience_personas,
@@ -62,6 +63,19 @@ def test_evidence_rejects_invented_or_mismatched_source(changes):
 def test_missing_evidence_rejected():
     with pytest.raises(ValueError):
         validate_evidence([], context())
+
+
+@pytest.mark.parametrize("duplicate", ["note", "comment"])
+def test_ambiguous_evidence_cannot_be_attached_to_the_wrong_historical_episode(duplicate):
+    data = context()
+    if duplicate == "comment":
+        data["notes"][0]["comments"].insert(0, {"commentId": "c", "content": "不同的原文"})
+    else:
+        data["notes"].insert(0, {"noteId": "n", "title": "重复 ID 的笔记", "content": "不同正文",
+                                 "comments": [{"commentId": "other", "content": "无关评论"}]})
+    assert evidence_issues([ref()], data)[0]["code"] == "ambiguous_source"
+    with pytest.raises(ValueError):
+        observed_episodes([ref()], data)
 
 
 def test_content_inference_without_comments_is_explicit():

@@ -27,7 +27,8 @@ function setup(withSimulation = false) {
       id: `profile-${workspace.id}`, workspaceId: workspace.id, type: 'xhs_creator_profile',
       name: workspace.name, createdAt: '', updatedAt: '', content: JSON.stringify({
         schemaVersion: 'xhs-creator-profile/v1', creator: { displayName: workspace.name },
-        notes: [{ noteId: `note-${workspace.id}`, title: `${workspace.name}的笔记`, desc: `${workspace.name}的正文`, comments: [] }],
+        notes: [{ noteId: `note-${workspace.id}`, title: `${workspace.name}的笔记`, desc: `${workspace.name}的正文`, comments: [] },
+          {noteId:`second-${workspace.id}`,title:`${workspace.name}的第二条笔记`,desc:'第二条正文',comments:[]}],
       }),
     }])
     return Response.json([])
@@ -37,6 +38,27 @@ function setup(withSimulation = false) {
 }
 
 describe('public creator journey', () => {
+  it('sends manual note IDs and clears the selection when switching accounts', async () => {
+    const fetchMock = setup()
+    await screen.findByText('甲的笔记')
+    fireEvent.click(screen.getByRole('button', {name:/账号诊断/}))
+    fireEvent.click(screen.getByRole('button', {name:'调整范围'}))
+    fireEvent.click(screen.getByRole('button', {name:'清空'}))
+    fireEvent.click(screen.getByRole('checkbox', {name:'选择笔记：甲的第二条笔记'}))
+    fireEvent.click(screen.getByRole('button', {name:'完成'}))
+    expect(screen.getByText('手动选择 · 1 条笔记')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name:'开始分析'}))
+    await screen.findByText(/测试停止于执行前/)
+    const requests = () => fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith('/analysis-runs') && init?.method === 'POST')
+    expect(JSON.parse(String(requests()[0][1]?.body)).selectedNoteIds).toEqual(['second-account-0'])
+    fireEvent.change(screen.getByLabelText('当前账号档案'), {target:{value:'account-1'}})
+    await screen.findByText('乙的笔记')
+    fireEvent.click(screen.getByRole('button', {name:/账号诊断/}))
+    expect(screen.getByText('最近 10 条 · 2 条笔记')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name:'开始分析'}))
+    await waitFor(() => expect(requests()).toHaveLength(2))
+    expect(JSON.parse(String(requests()[1][1]?.body)).selectedNoteIds).toBeUndefined()
+  })
   it('updates the history list status when reopening a simulation completed after refresh', async () => {
     setup(true)
     await screen.findByText('甲的笔记')

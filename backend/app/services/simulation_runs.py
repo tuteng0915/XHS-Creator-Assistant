@@ -17,6 +17,7 @@ from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.audience_evidence import AUDIENCE_METHOD_VERSION, select_audience_personas
 from app.services.common import as_iso, utc_now
+from app.services.simulated_fans import SimulatedFanService
 
 
 class SimulationRunService:
@@ -40,6 +41,8 @@ class SimulationRunService:
         )
         if target_count != 1:
             raise ValidationError("Choose exactly one topic, draft, or manual topic")
+        if payload.simulated_fan_ids is not None and payload.audience_analysis_id:
+            raise ValidationError("模拟粉丝与旧受众分析来源不能同时选择")
         with self.database.transaction() as connection:
             workspace = self.workspace_repository.get(connection, workspace_id)
             audience = None
@@ -47,7 +50,7 @@ class SimulationRunService:
             if payload.audience_analysis_id:
                 row = connection.execute(
                     "SELECT * FROM audience_analyses WHERE id=? "
-                    "AND workspace_id=? AND status='completed'",
+                    "AND workspace_id=? AND status IN ('completed','partially_completed')",
                     (payload.audience_analysis_id, workspace_id),
                 ).fetchone()
                 if row is None:
@@ -97,7 +100,11 @@ class SimulationRunService:
                 "simulationMethod": AUDIENCE_METHOD_VERSION,
                 "audienceAnalysisId": payload.audience_analysis_id,
                 "audienceAnalysis": audience,
-                "audiencePersonas": select_audience_personas(audience, audience_snapshot)
+                "simulatedFanIds": payload.simulated_fan_ids,
+                "audiencePersonas": SimulatedFanService(self.database).snapshots(
+                    connection, workspace_id, payload.simulated_fan_ids,
+                ) if payload.simulated_fan_ids is not None
+                else select_audience_personas(audience, audience_snapshot)
                 if audience
                 else [],
                 "mode": payload.mode,

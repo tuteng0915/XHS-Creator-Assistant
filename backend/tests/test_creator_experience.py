@@ -200,7 +200,7 @@ def test_audience_restart_marks_interrupted_failed(app):
     assert service.get("interrupted").status == "failed"
 
 
-def test_invalid_audience_evidence_is_not_saved_as_success(app):
+def test_invalid_audience_group_does_not_discard_valid_groups(app):
     wid = create_workspace(app)["id"]
     source = profile(app, wid)
     service = app.state.audience_analysis_service
@@ -219,9 +219,11 @@ def test_invalid_audience_evidence_is_not_saved_as_success(app):
         return service.get(created.id)
 
     result = asyncio.run(exercise())
-    assert result.status == "failed"
-    assert result.result == {}
-    assert "证据引用" in result.error
+    assert result.status == "partially_completed"
+    assert len(result.result["groups"]) == 3
+    assert result.diagnostics["rejectedGroups"][0]["issues"][0]["code"] == "source_not_found"
+    fans = send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()
+    assert {fan["sourceGroupId"] for fan in fans} == {"1", "2", "3"}
 
 
 @pytest.mark.parametrize("conflict", [False, True])
@@ -253,7 +255,9 @@ def test_canvas_live_context_persistence_and_conflict(app, conflict):
                     ),
                 )
             return ModelCallResponse(
-                output={"reply": "已调整开头", "update": {"title": "新标题", "body": "AI 正文"}},
+                output={"reply": "已调整开头", "update": {"title": "新标题", "body": "AI 正文"},
+                        "pendingSuggestions": [],
+                        "factCheck": {"safeToApply": True, "supportedClaims": []}},
                 model_metadata={},
             )
 

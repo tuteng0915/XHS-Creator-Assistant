@@ -23,6 +23,7 @@ export type ActivePage =
   | 'drafts'
   | 'simulations'
   | 'audience-analysis'
+  | 'simulated-fans'
   | 'conversations'
   | 'skills'
   | 'agents'
@@ -155,6 +156,7 @@ export function WorkspaceShell({
             <span>✦</span> AI 创作助手
           </button>
           <button className={activePage === 'audience-analysis' ? 'active' : ''} onClick={() => onSetActivePage('audience-analysis')}><span>◎</span> 受众分析</button>
+          <button className={`creator-nav-child ${activePage === 'simulated-fans' ? 'active' : ''}`} onClick={() => onSetActivePage('simulated-fans')}><span>♧</span> 模拟粉丝</button>
           <button
             className={`creator-nav-child ${activePage === 'simulations' ? 'active' : ''}`}
             onClick={() => onSetActivePage('simulations')}

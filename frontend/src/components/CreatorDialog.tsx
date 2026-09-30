@@ -1,9 +1,10 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 
-export function CreatorDialog({ title, onClose, children }: {
+export function CreatorDialog({ title, onClose, children, wide = false }: {
   title: string
   onClose: () => void
   children: ReactNode
+  wide?: boolean
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
@@ -17,7 +18,7 @@ export function CreatorDialog({ title, onClose, children }: {
     }
   }, [])
   return (
-    <dialog ref={ref} className="creator-dialog" aria-label={title}
+    <dialog ref={ref} className={`creator-dialog${wide ? ' creator-dialog-wide' : ''}`} aria-label={title}
       onCancel={(event) => { event.preventDefault(); onClose() }}>
       <div className="creator-dialog-head">
         <h2>{title}</h2>

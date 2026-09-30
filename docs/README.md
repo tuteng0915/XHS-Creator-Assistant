@@ -18,7 +18,9 @@
 ## 当前有效文档
 
 - `creator-journey-acceptance.md` — 09-27 真实 Qwen 与公开页面链路验收、工程修复及尚未解决的内容质量问题。
+- `account-diagnosis-design.md` — 账号诊断的设计与首轮实施记录：先帮助创作者认识账号，再进入选题；明确字段、证据边界和后续验证方法。
 - `audience-simulation-methods.md` — few-shot 受众发现、行为案例、状态化评论互动的文献借鉴与轻量实现记录；当前不要求效果实验。
+- `simulated-fan-model-design.md` — 待评审的模拟粉丝多维画像设计，明确字段、证据等级、界面及验证方法；尚未实施。
 - `audience-simulation-research.md` — 受众模拟的文献依据、改动前审计及首轮证据化实现；保留的效果实验提案暂不执行。
 - `local-installation.md` — 从 Git 克隆后的本地安装、固定版本 MediaCrawler、封面补丁、浏览器登录及故障排查。
 - `product-design.md` — 当前产品的主设计说明，集中解释功能全貌、设计思想、内容资产、能力资产、workflow、Context Access Layer、Demo/Live、多模态和设计边界。

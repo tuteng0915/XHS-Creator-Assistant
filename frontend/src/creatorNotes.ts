@@ -13,17 +13,20 @@ export type CreatorNote = {
 export function creatorNotes(profile?: TextInputAsset): CreatorNote[] {
   if (!profile) return []
   try {
-    const payload = JSON.parse(profile.content)
-    if (!Array.isArray(payload.notes)) return []
-    return payload.notes.filter((note: unknown) => note && typeof note === 'object').map((note: CreatorNote, index: number) => ({
-      ...note,
-      noteId: String(note.noteId || index),
-      title: String(note.title || '未命名笔记'),
-      desc: String(note.desc || ''),
-      metrics: note.metrics || {},
-      comments: Array.isArray(note.comments) ? note.comments.filter((comment) => comment && typeof comment === 'object') : [],
-    }))
+    return creatorNotesFromPayload(JSON.parse(profile.content))
   } catch { return [] }
+}
+
+export function creatorNotesFromPayload(payload: unknown): CreatorNote[] {
+  if (!payload || typeof payload !== 'object' || !Array.isArray((payload as {notes?: unknown}).notes)) return []
+  return (payload as {notes: CreatorNote[]}).notes.filter((note: unknown) => note && typeof note === 'object').map((note: CreatorNote, index: number) => ({
+    ...note,
+    noteId: String(note.noteId || index),
+    title: String(note.title || '未命名笔记'),
+    desc: String(note.desc || ''),
+    metrics: note.metrics || {},
+    comments: Array.isArray(note.comments) ? note.comments.filter((comment) => comment && typeof comment === 'object') : [],
+  }))
 }
 
 export function notePublishedAt(note: CreatorNote): number | null {

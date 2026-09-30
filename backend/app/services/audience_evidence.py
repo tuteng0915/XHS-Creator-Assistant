@@ -136,23 +136,46 @@ def audience_context(snapshot: dict) -> dict:
     }
 
 
-def validate_evidence(refs: list[AudienceEvidence], context: dict) -> None:
-    """Only exact excerpts from the actual model input can count as evidence."""
+def evidence_issues(refs: list[AudienceEvidence], context: dict) -> list[dict]:
+    """Explain failed references without accepting paraphrases or guessing sources."""
     if not refs:
-        raise ValueError("受众视角缺少可核验的原文引用")
+        return [{"code": "missing_evidence", "message": "缺少可核验的原文引用"}]
     sources: dict[tuple, list[str]] = {}
+    occurrences: dict[tuple, int] = {}
     for note in context["notes"]:
+        note_key = (note["noteId"], None, "note")
+        occurrences[note_key] = occurrences.get(note_key, 0) + 1
         sources.setdefault((note["noteId"], None, "note"), []).extend(
             [note["title"], note["content"]]
         )
         for comment in note["comments"]:
+            comment_key = (note["noteId"], comment["commentId"], "comment")
+            occurrences[comment_key] = occurrences.get(comment_key, 0) + 1
             sources.setdefault((note["noteId"], comment["commentId"], "comment"), []).append(
                 comment["content"]
             )
-    for ref in refs:
-        candidates = sources.get((ref.note_id, ref.comment_id, ref.source_type), [])
-        if not ref.quote.strip() or not any(ref.quote in text for text in candidates):
-            raise ValueError("受众证据引用与本次输入不符，请重新分析")
+    issues = []
+    for index, ref in enumerate(refs):
+        key = (ref.note_id, ref.comment_id, ref.source_type)
+        candidates = sources.get(key, [])
+        ambiguous = (occurrences.get(key, 0) > 1
+                     or occurrences.get((ref.note_id, None, "note"), 0) > 1)
+        if ambiguous or not ref.quote.strip() or not any(ref.quote in text for text in candidates):
+            issues.append({
+                "referenceIndex": index,
+                "code": "ambiguous_source" if ambiguous
+                else "source_not_found" if not candidates else "quote_not_exact",
+                "message": "引用来源 ID 重复，无法唯一定位" if ambiguous
+                else "引用来源 ID 不匹配" if not candidates else "引文不是来源中的连续原文",
+                "reference": ref.model_dump(mode="json", by_alias=True),
+            })
+    return issues
+
+
+def validate_evidence(refs: list[AudienceEvidence], context: dict) -> None:
+    """Only exact excerpts from the actual model input can count as evidence."""
+    if evidence_issues(refs, context):
+        raise ValueError("受众证据引用与本次输入不符，请重新分析")
 
 
 def select_audience_personas(audience: dict, snapshot: dict | None = None) -> list[dict]:
@@ -162,10 +185,14 @@ def select_audience_personas(audience: dict, snapshot: dict | None = None) -> li
         groups = sorted(groups, key=lambda g: g.get("estimatedPercent") or 0, reverse=True)
     selected = [
         {**g, "limitations": audience.get("limitations", ""),
-         "evidenceStatus": "verified" if audience.get("method") == "evidence_grounded_v1"
+         "evidenceStatus": "hypothesis" if audience.get("origin") == "curated_preset"
+         else "verified" if audience.get("method") == "evidence_grounded_v1"
          else "legacy_unverified"}
         for g in groups[:3]
     ]
+    if audience.get("origin") == "curated_preset":
+        for group in selected:
+            group["origin"] = "curated_preset"
     # Older verified analyses have immutable source snapshots but no paired examples.
     # Enrich this new simulation only; never rewrite the historical analysis.
     if snapshot and audience.get("method") == "evidence_grounded_v1":

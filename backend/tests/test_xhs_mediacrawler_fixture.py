@@ -44,6 +44,7 @@ def test_load_mediacrawler_export_preserves_notes_comments_and_cover(tmp_path: P
                 "collected_count": "349",
                 "comment_count": "66",
                 "share_count": "253",
+                "time": 1720559566000,
             }
         ],
     )
@@ -74,6 +75,10 @@ def test_load_mediacrawler_export_preserves_notes_comments_and_cover(tmp_path: P
     assert export.notes[0].tag_list == ["留学", "申请"]
     assert export.notes[0].liked_count == 1454
     assert export.notes[0].cover_path == cover
+    assert export.notes[0].published_at == 1720559566000
+    assert module.build_xhs_creator_profile_payload(export)["notes"][0][
+        "publishedAt"
+    ] == 1720559566000
     assert len(export.comments) == 1
     assert export.comments[0].content == "真诚有勇气。"
 

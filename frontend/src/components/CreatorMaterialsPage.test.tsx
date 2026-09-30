@@ -31,7 +31,9 @@ describe('creator materials and diagnosis', () => {
     fireEvent.click(screen.getByRole('button', { name: '调整范围' }))
     expect(screen.getByText('1 条笔记没有发布时间，未纳入此范围。')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('从已导入笔记中选择'), { target: { value: 'all' } })
-    expect(onScopeChange).toHaveBeenCalledWith('all')
+    expect(onScopeChange).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '完成' }))
+    expect(onScopeChange).toHaveBeenCalledWith('all', undefined)
   })
 
   it('keeps old undated imports usable with the recent-count default', () => {

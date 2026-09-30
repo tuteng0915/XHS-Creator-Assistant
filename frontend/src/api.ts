@@ -204,6 +204,12 @@ export const audienceAnalysisApi = {
   create: (workspaceId: string, sourceMaterialId: string, scope: import('./creatorNotes').AnalysisScope) => request<import('./types').AudienceAnalysis>(`/api/workspaces/${workspaceId}/audience-analyses`, {method: 'POST', headers: jsonHeaders, body: JSON.stringify({sourceMaterialId, scope})}),
 }
 
+export const simulatedFanApi = {
+  list: (workspaceId: string) => request<import('./types').SimulatedFan[]>(`/api/workspaces/${workspaceId}/simulated-fans`),
+  create: (workspaceId: string, sourceAnalysisId: string, sourceGroupId: string) => request<import('./types').SimulatedFan>(`/api/workspaces/${workspaceId}/simulated-fans`, {method:'POST', headers:jsonHeaders, body:JSON.stringify({sourceAnalysisId,sourceGroupId})}),
+  update: (id: string, payload: import('./types').FanDefinition & {status:'active' | 'archived'; expectedUpdatedAt:string}) => request<import('./types').SimulatedFan>(`/api/simulated-fans/${id}`, {method:'PATCH', headers:jsonHeaders, body:JSON.stringify(payload)}),
+}
+
 export const xhsCaptureApi = {
   createAccount: (payload: { profileUrl: string; noteLimit: number; includeComments: boolean }) =>
     request<XhsCaptureJob>('/api/creator-accounts/import', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload) }),
@@ -551,6 +557,7 @@ export const analysisRunApi = {
       videoCreatorSamplesInputAssetId?: string
       xhsCreatorProfileInputAssetId?: string
       analysisScope?: import('./creatorNotes').AnalysisScope
+      selectedNoteIds?: string[]
       mediaAssetIds?: string[]
       mode: 'demo' | 'live'
       idempotencyKey?: string
@@ -594,6 +601,7 @@ export const simulationRunApi = {
     workspaceId: string,
     payload: {
       audienceAnalysisId?: string
+      simulatedFanIds?: string[]
       topicId?: string | null
       draftId?: string | null
       manualTopic?: string
@@ -695,6 +703,7 @@ export const topicApi = {
       whyItFits?: string
       sourceAnalysisRunId?: string | null
       sourceWorkflow?: TopicSourceWorkflow
+      generatedSnapshot?: Record<string, unknown>
     },
   ) =>
     request<Topic>(`/api/workspaces/${workspaceId}/topics`, {
