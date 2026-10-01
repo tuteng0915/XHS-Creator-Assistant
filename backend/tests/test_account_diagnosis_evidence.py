@@ -89,6 +89,35 @@ def test_portrait_keeps_only_quotes_from_selected_note():
     )
 
 
+def test_portrait_keeps_grounded_keywords_strengths_and_encouragement():
+    portrait = {
+        "keywords": [
+            {"statement": "中文分享", "evidence": [{"noteId": "n1", "quote": "中文正文甲"}]},
+            {"statement": "中文分享", "evidence": [{"noteId": "n2", "quote": "中文正文乙"}]},
+            {"statement": "未经支持", "evidence": [{"noteId": "n2", "quote": "中文正文甲"}]},
+        ],
+        "strengths": [
+            {
+                "statement": "用具体内容帮助读者",
+                "evidence": [{"noteId": "n1", "quote": "中文正文甲"}],
+            },
+            {"statement": "凭空夸奖", "evidence": [{"noteId": "missing", "quote": "不存在"}]},
+        ],
+        "encouragement": {
+            "statement": "这份分享值得继续做下去",
+            "evidence": [{"noteId": "n2", "quote": "中文正文乙"}],
+        },
+    }
+    result = verified_portrait(portrait, selected_snapshot())
+    assert [item["statement"] for item in result["keywords"]] == ["中文分享"]
+    assert [item["statement"] for item in result["strengths"]] == ["用具体内容帮助读者"]
+    assert result["encouragement"]["statement"] == "这份分享值得继续做下去"
+    assert "keywords" not in verified_portrait(
+        {"summary": {"statement": "旧画像", "evidence": [{"noteId": "n1", "quote": "第一条"}]}},
+        selected_snapshot(),
+    )
+
+
 def test_chronology_and_counterexamples_require_selected_original_evidence():
     notes = [
         {
@@ -202,6 +231,22 @@ def test_xhs_account_run_persists_facts_and_filters_unsupported_claims(app):
                         "statement": "有中文正文",
                         "evidence": [{"noteId": "n1", "quote": "中文正文甲"}],
                     },
+                    "keywords": [
+                        {
+                            "statement": "中文分享",
+                            "evidence": [{"noteId": "n1", "quote": "中文正文甲"}],
+                        }
+                    ],
+                    "strengths": [
+                        {
+                            "statement": "能把经验写具体",
+                            "evidence": [{"noteId": "n1", "quote": "中文正文甲"}],
+                        }
+                    ],
+                    "encouragement": {
+                        "statement": "这份分享值得继续做下去",
+                        "evidence": [{"noteId": "n1", "quote": "中文正文甲"}],
+                    },
                     "recurringThemes": [
                         {
                             "statement": "错误引用",
@@ -218,4 +263,10 @@ def test_xhs_account_run_persists_facts_and_filters_unsupported_claims(app):
     assert result["observations"]["coverage"]["selectedNoteIds"] == ["n1"]
     assert result["observations"]["notes"][0]["publishedAt"].startswith("2026-09-01")
     assert result["profile"]["accountPortrait"]["summary"]["statement"] == "有中文正文"
+    assert result["profile"]["accountPortrait"]["keywords"][0]["statement"] == "中文分享"
+    assert result["profile"]["accountPortrait"]["strengths"][0]["statement"] == "能把经验写具体"
+    assert (
+        result["profile"]["accountPortrait"]["encouragement"]["statement"]
+        == "这份分享值得继续做下去"
+    )
     assert result["profile"]["accountPortrait"]["recurringThemes"] == []

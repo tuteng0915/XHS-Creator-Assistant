@@ -7,6 +7,9 @@ type Evidence = { noteId: string; quote: string }
 type Claim = { statement: string; evidence: Evidence[]; counterexamples?: Evidence[] }
 type Portrait = {
   summary?: Claim | null
+  keywords?: Claim[]
+  strengths?: Claim[]
+  encouragement?: Claim | null
   recurringThemes?: Claim[]
   readerValue?: Claim[]
   expressionPatterns?: Claim[]
@@ -62,7 +65,10 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
   const validSections = sections.map(([title, claims]) => [title, claims.filter(claim =>
     claimHasEvidence(claim) && (title !== '主要内容方向' || new Set(claim.evidence.map(ref => ref.noteId)).size >= 2)
   )] as const)
-  const hasPortrait = claimHasEvidence(portrait?.summary) || validSections.some(([, claims]) => claims.length)
+  const keywords = (portrait?.keywords || []).filter(claimHasEvidence)
+  const strengths = (portrait?.strengths || []).filter(claimHasEvidence)
+  const hasPortrait = claimHasEvidence(portrait?.summary) || keywords.length > 0 || strengths.length > 0 ||
+    claimHasEvidence(portrait?.encouragement) || validSections.some(([, claims]) => claims.length)
   const withLikes = observations.notes.filter(note => typeof note.metrics.liked === 'number')
     .sort((a, b) => (b.metrics.liked || 0) - (a.metrics.liked || 0))
   const upper = withLikes.slice(0, Math.min(2, withLikes.length))
@@ -73,7 +79,7 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
     const linkedNotes = claim.evidence.map(ref => selectable.get(ref.noteId)).filter((note): note is CreatorNote => Boolean(note))
     const exceptionNotes = (claim.counterexamples || []).map(ref => selectable.get(ref.noteId)).filter((note): note is CreatorNote => Boolean(note))
     if (!linkedNotes.length) return null
-    return <div className="account-portrait-claim" key={key}>
+    return <div className={`account-portrait-claim${key.startsWith('keyword-') ? ' account-portrait-keyword' : ''}`} key={key}>
       <p>{claim.statement}</p>
       <button type="button" onClick={() => setOpenClaim(openClaim === key ? null : key)}
         aria-expanded={openClaim === key}>查看依据 · {linkedNotes.length} 条笔记</button>
@@ -108,6 +114,17 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
   }
 
   return <div className="account-portrait-view">
+    {hasPortrait ? <>
+      <div className="account-portrait-intro">
+        {claimHasEvidence(portrait?.summary) && <div className="account-portrait-summary">{renderClaim(portrait.summary, 'summary')}</div>}
+        {keywords.length > 0 && <div className="account-portrait-keywords">{keywords.map((claim, index) => renderClaim(claim, `keyword-${index}`))}</div>}
+        {claimHasEvidence(portrait?.encouragement) && <div className="account-portrait-encouragement">{renderClaim(portrait.encouragement, 'encouragement')}</div>}
+      </div>
+      {strengths.length > 0 && <section>
+        <h4>这个账号已经做得好的地方</h4>
+        <div className="account-portrait-claims">{strengths.map((claim, index) => renderClaim(claim, `strength-${index}`))}</div>
+      </section>}
+    </> : null}
     <div className="account-portrait-coverage">
       <span>本次分析 {coverage.selectedCount}{coverage.availableCount ? ` / 已导入 ${coverage.availableCount}` : ''} 条笔记</span>
       <span>已抓取一级评论 {coverage.capturedCommentCount} 条</span>
@@ -117,30 +134,25 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
       {coverage.missingDateCount > 0 && <span>{coverage.missingDateCount} 条缺少发布时间</span>}
       {missingLikes > 0 && <span>{missingLikes} 条缺少点赞数据</span>}
     </div>
-    <p className="muted">以下画像是基于笔记的模型归纳。引用可以回看，解释是否成立仍需结合你的实际情况判断。</p>
     {hasPortrait ? <>
-      {claimHasEvidence(portrait?.summary) && <div className="account-portrait-summary">{renderClaim(portrait.summary, 'summary')}</div>}
       {validSections.map(([title, claims]) => claims.length > 0 && <section key={title}>
         <h4>{title}</h4>
         <div className="account-portrait-claims">{claims.map((claim, index) => renderClaim(claim, `${title}-${index}`))}</div>
       </section>)}
-    </> : <p className="muted">目前没有可回溯到所选笔记原文的账号画像结论；可以查看下方的旧版归纳。</p>}
-    <section className="account-portrait-change">
-      <h4>前后内容方向</h4>
-      {observations.chronology?.status === 'comparable' ? <>
-        <p className="muted">前期 {observations.chronology.earlier?.start}—{observations.chronology.earlier?.end} · 后期 {observations.chronology.later?.start}—{observations.chronology.later?.end}。仅比较内容，不比较累计互动。</p>
-        {claimHasEvidence(portrait?.recentChange)
-          ? renderClaim(portrait.recentChange, 'recent-change')
-          : <p className="muted">目前没有足够依据说明内容方向发生了变化。</p>}
-      </> : <p className="muted">{observations.chronology?.reason || '发布时间资料不足，暂时无法比较前后内容方向。'}</p>}
-    </section>
+    </> : <p className="muted">先看看这次的内容归纳与笔记表现；选择更多笔记后，还可以得到更完整的账号关键词和特色。</p>}
+    {observations.chronology?.status === 'comparable' && claimHasEvidence(portrait?.recentChange) && <section className="account-portrait-change">
+      <h4>内容方向的新变化</h4>
+      {renderClaim(portrait.recentChange, 'recent-change')}
+    </section>}
     {withLikes.length > 0 && <section className="account-performance">
       <h4>笔记表现</h4>
-      <p className="muted">仅按本次所选笔记抓取时的累计点赞数展示。发布日期和累计时间可能不同，不能据此判断点击率、内容质量或变化趋势。</p>
       <div className="account-performance-grid">
         {renderPerformance('所选笔记中点赞较高', upper)}
         {renderPerformance('所选笔记中点赞较低', lower)}
       </div>
+      <details className="account-performance-method"><summary>数据说明</summary>
+        <p className="muted">这里展示所选笔记抓取时的累计点赞。发布日期和累计时间可能不同，不能据此判断点击率、内容质量或变化趋势。</p>
+      </details>
     </section>}
   </div>
 }

@@ -2779,7 +2779,7 @@ function WorkspaceApp() {
         <>
         {!internalMode && <div className="creator-diagnosis-controls">
           {fans.error && <p role="alert">{fans.error}</p>}
-          <SimulatedFanPicker rows={fans.rows} ids={fans.ids} onToggle={fans.toggle} />
+          <SimulatedFanPicker rows={fans.rows} slots={fans.slots} onSlotChange={fans.setSlot} onAddSlot={fans.addSlot} onRemoveSlot={fans.removeSlot} />
           <select aria-label="模拟选题" value={selectedTopic?.id || ''} onChange={e => setSelectedTopic(topics.find(t => t.id === e.target.value) || null)}><option value="">选择选题</option>{topics.filter(t => t.status !== 'archived').map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select>
           <button className="primary" disabled={running || !fans.ids.length || !selectedTopic} onClick={() => void runAudienceSimulation(undefined,'account',selectedTopic || undefined)}>开始模拟</button>
           {!fans.rows.some(r => r.status === 'active') && <button onClick={() => setActivePage('audience-analysis')}>从受众分析添加模拟粉丝</button>}

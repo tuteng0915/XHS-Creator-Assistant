@@ -137,6 +137,20 @@ def validate_reading_need_candidates(raw: list[dict], context: dict) -> list[dic
         validate_evidence(candidate.evidence_refs, context)
         if candidate.counter_evidence_refs:
             validate_evidence(candidate.counter_evidence_refs, context)
+        support_keys = {
+            (ref.note_id, ref.comment_id, ref.source_type, ref.quote)
+            for ref in candidate.evidence_refs
+        }
+        counter_keys = {
+            (ref.note_id, ref.comment_id, ref.source_type, ref.quote)
+            for ref in candidate.counter_evidence_refs
+        }
+        if len(support_keys) != len(candidate.evidence_refs) or len(counter_keys) != len(
+            candidate.counter_evidence_refs
+        ):
+            raise ValueError("阅读需求候选中的同一引文不可重复")
+        if support_keys & counter_keys:
+            raise ValueError("同一引文不能同时作为支持和反证")
         prototype = catalog[candidate.prototype_id]
         cited_types = {ref.source_type for ref in candidate.evidence_refs}
         citation_basis = (

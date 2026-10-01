@@ -7,17 +7,24 @@ import { useSimulatedFans } from './useSimulatedFans'
 afterEach(() => {cleanup();vi.restoreAllMocks()})
 const fan = (workspaceId:string,id:string):SimulatedFan => ({id,workspaceId,sourceAnalysisId:'a',sourceGroupId:id,original:{},editable:{name:id,profile:'关注点',coreConcern:'',contentPreference:'',expressionStyle:''},status:'active',createdAt:'',updatedAt:''})
 
-it('defaults to three, retains explicit deselection and removes archived selections', async () => {
+it('starts with three slots, can add more, and clears archived selections', async () => {
   const rows = ['1','2','3','4'].map(id=>fan('w',id))
   const list = vi.spyOn(simulatedFanApi,'list').mockResolvedValue(rows)
   const {result} = renderHook(() => useSimulatedFans('w','analysis'))
+  await waitFor(() => expect(result.current.slots).toEqual(['1','2','3']))
   await waitFor(() => expect(result.current.ids).toEqual(['1','2','3']))
-  act(() => result.current.toggle('2'))
+  act(() => {result.current.addSlot(); result.current.setSlot(1,'')})
+  act(() => result.current.setSlot(3,'4'))
+  expect(result.current.slots).toEqual(['1','','3','4'])
+  act(() => result.current.setSlot(1,'4'))
+  expect(result.current.slots).toEqual(['1','','3','4'])
   await act(async () => result.current.refresh())
-  expect(result.current.ids).toEqual(['1','3'])
+  expect(result.current.ids).toEqual(['1','3','4'])
   list.mockResolvedValue(rows.map(row => row.id === '1' ? {...row,status:'archived'} : row))
   await act(async () => result.current.refresh())
-  expect(result.current.ids).toEqual(['3'])
+  expect(result.current.slots).toEqual(['','','3','4'])
+  act(() => result.current.removeSlot(3))
+  expect(result.current.slots).toEqual(['','','3'])
 })
 
 it('does not show the previous account or accept its late response after switching', async () => {
@@ -49,6 +56,6 @@ it('keeps the latest refresh and rejects unknown or archived selections', async 
   act(() => {refreshed = result.current.refresh()})
   await act(async () => {pending[1]([fan('a','fresh'), {...fan('a','archived'),status:'archived'}]); await refreshed})
   await act(async () => pending[0]([fan('a','stale')]))
-  act(() => {result.current.toggle('unknown'); result.current.toggle('archived')})
+  act(() => {result.current.setSlot(0,'unknown'); result.current.setSlot(0,'archived')})
   expect(result.current.ids).toEqual(['fresh'])
 })

@@ -104,8 +104,8 @@ export function ProfileView({ data, observations, notes = [], mediaAssets = [] }
   if (observations?.schemaVersion === 'xhs-account-observations/v1') {
     return <>
       <AccountPortraitView portrait={data.accountPortrait as Portrait | null} observations={observations} notes={notes} mediaAssets={mediaAssets} />
-      <details className="account-legacy-profile">
-        <summary>查看其他模型归纳（未逐条核验）</summary>
+      <details className="account-legacy-profile" open={!data.accountPortrait}>
+        <summary>更多内容归纳</summary>
         <LegacyProfileView data={data} />
       </details>
     </>

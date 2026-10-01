@@ -190,6 +190,22 @@ def verified_portrait(
         }
 
     summary = verified_claim(portrait.get("summary"))
+    keywords = []
+    seen_keywords: set[str] = set()
+    keyword_values = portrait.get("keywords")
+    for value in keyword_values[:20] if isinstance(keyword_values, list) else []:
+        claim = verified_claim(value)
+        if claim and len(claim["statement"]) <= 12 and claim["statement"] not in seen_keywords:
+            keywords.append(claim)
+            seen_keywords.add(claim["statement"])
+        if len(keywords) >= 6:
+            break
+    strengths = (
+        [claim for value in portrait["strengths"][:12] if (claim := verified_claim(value))][:3]
+        if isinstance(portrait.get("strengths"), list)
+        else []
+    )
+    encouragement = verified_claim(portrait.get("encouragement"))
     sections = {}
     for key in ("recurringThemes", "readerValue", "expressionPatterns"):
         values = portrait.get(key)
@@ -219,6 +235,15 @@ def verified_portrait(
             or RECENT_CHANGE_PERFORMANCE_TERMS.search(recent_change["statement"])
         ):
             recent_change = None
-    if summary is None and not any(sections.values()) and recent_change is None:
+    if not any(
+        (summary, any(sections.values()), recent_change, keywords, strengths, encouragement)
+    ):
         return None
-    return {"summary": summary, **sections, "recentChange": recent_change}
+    result = {"summary": summary, **sections, "recentChange": recent_change}
+    if "keywords" in portrait:
+        result["keywords"] = keywords
+    if "strengths" in portrait:
+        result["strengths"] = strengths
+    if "encouragement" in portrait:
+        result["encouragement"] = encouragement
+    return result

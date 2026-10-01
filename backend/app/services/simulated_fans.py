@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from datetime import datetime
 from typing import Literal
@@ -10,6 +12,7 @@ from app.repositories.simulated_fans import SimulatedFanRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.audience_evidence import select_audience_personas
 from app.services.common import as_iso
+from app.services.fan_voice_templates import fan_voice_template
 
 
 class FanDefinition(APIModel):
@@ -30,6 +33,10 @@ class FanDefinition(APIModel):
 class FanCreate(APIModel):
     source_analysis_id: str
     source_group_id: str
+
+
+class FanVariantsCreate(APIModel):
+    template_ids: list[str] = Field(min_length=1)
 
 
 class FanUpdate(FanDefinition):
@@ -93,13 +100,69 @@ class SimulatedFanService:
             if row is None:
                 raise ValidationError("请选择当前账号已完成的受众分析")
             result = json.loads(row["result_json"])
-            group = next((g for g in result.get("groups", [])
-                          if g["id"] == payload.source_group_id), None)
+            group = next(
+                (g for g in result.get("groups", []) if g["id"] == payload.source_group_id), None
+            )
             if group is None:
                 raise ValidationError("该受众视角不存在")
-            return self.response(self._save_group(
-                c, workspace_id, row["id"], group, result, json.loads(row["input_snapshot_json"]),
-            ))
+            return self.response(
+                self._save_group(
+                    c,
+                    workspace_id,
+                    row["id"],
+                    group,
+                    result,
+                    json.loads(row["input_snapshot_json"]),
+                )
+            )
+
+    def create_variants(self, fan_id: str, payload: FanVariantsCreate) -> list[FanResponse]:
+        if len(set(payload.template_ids)) != len(payload.template_ids):
+            raise ValidationError("请勿重复选择同一种人物声音")
+        templates = [fan_voice_template(template_id) for template_id in payload.template_ids]
+        if any(template is None for template in templates):
+            raise ValidationError("人物声音模板不存在")
+        with self.database.transaction() as c:
+            selected = self.response(self.repository.get(c, fan_id))
+            root_id = selected.original.get("variantOfFanId")
+            root = self.response(self.repository.get(c, root_id)) if root_id else selected
+            if root.workspace_id != selected.workspace_id:
+                raise ValidationError("人物来源不属于当前账号")
+            results = []
+            for template in templates:
+                assert template is not None
+                original = {
+                    **root.original,
+                    "origin": "voice_template",
+                    "sourceOrigin": root.original.get("origin", "audience_analysis"),
+                    "variantOfFanId": root.id,
+                    "voiceTemplateId": template.id,
+                    "name": f"{template.name} · {root.editable.name}"[:200],
+                    "profile": (
+                        f"{root.editable.profile[:2500]}\n人物设定：{template.outlook} "
+                        f"判断方式：{template.decision_style} "
+                        f"参与方式：{template.participation_style}"
+                    )[:4000],
+                    "coreConcern": root.editable.core_concern,
+                    "contentPreference": (
+                        f"{root.editable.content_preference[:1400]} {template.decision_style}"
+                    ).strip()[:2000],
+                    "expressionStyle": (
+                        f"{template.expression_style} {template.participation_style}"
+                    )[:2000],
+                    "evidenceStatus": "hypothesis",
+                }
+                editable = FanDefinition.model_validate(original).model_dump(by_alias=True)
+                row = self.repository.create(
+                    c,
+                    root.workspace_id,
+                    root.source_analysis_id,
+                    f"{root.source_group_id}::voice:{template.id}",
+                    original,
+                    editable,
+                )
+                results.append(self.response(row))
+            return results
 
     def update(self, fan_id, payload):
         if not payload.name.strip() or not payload.profile.strip():
@@ -107,13 +170,19 @@ class SimulatedFanService:
         editable = FanDefinition.model_validate(payload.model_dump()).model_dump(by_alias=True)
         with self.database.transaction() as c:
             self.repository.get(c, fan_id)
-            return self.response(self.repository.update(
-                c, fan_id, editable, payload.status, as_iso(payload.expected_updated_at),
-            ))
+            return self.response(
+                self.repository.update(
+                    c,
+                    fan_id,
+                    editable,
+                    payload.status,
+                    as_iso(payload.expected_updated_at),
+                )
+            )
 
     def snapshots(self, c, workspace_id, fan_ids):
-        if not fan_ids or len(fan_ids) > 3 or len(set(fan_ids)) != len(fan_ids):
-            raise ValidationError("请选择 1 至 3 位不同的模拟粉丝")
+        if not fan_ids or len(set(fan_ids)) != len(fan_ids):
+            raise ValidationError("请至少选择一位模拟粉丝，且不要重复选择")
         results = []
         for fan_id in fan_ids:
             fan = self.response(self.repository.get(c, fan_id))
@@ -122,12 +191,19 @@ class SimulatedFanService:
             editable = fan.editable.model_dump(by_alias=True)
             original_editable = FanDefinition.model_validate(fan.original).model_dump(by_alias=True)
             adjusted = editable != original_editable
-            results.append({
-                **fan.original, **editable, "id": fan.id, "fanAssetId": fan.id,
-                "sourceAnalysisId": fan.source_analysis_id, "updatedAt": fan.updated_at,
-                "userAdjusted": adjusted, "originalDefinition": fan.original,
-                "evidenceStatus": "hypothesis" if adjusted else fan.original["evidenceStatus"],
-                "limitations": fan.original.get("limitations", "")
-                + ("；含人工设定，设定不等于真实受众证据。" if adjusted else ""),
-            })
+            results.append(
+                {
+                    **fan.original,
+                    **editable,
+                    "id": fan.id,
+                    "fanAssetId": fan.id,
+                    "sourceAnalysisId": fan.source_analysis_id,
+                    "updatedAt": fan.updated_at,
+                    "userAdjusted": adjusted,
+                    "originalDefinition": fan.original,
+                    "evidenceStatus": "hypothesis" if adjusted else fan.original["evidenceStatus"],
+                    "limitations": fan.original.get("limitations", "")
+                    + ("；含人工设定，设定不等于真实受众证据。" if adjusted else ""),
+                }
+            )
         return results

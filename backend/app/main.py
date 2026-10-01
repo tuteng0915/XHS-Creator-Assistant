@@ -55,7 +55,14 @@ from app.services.audience_analyses import (
     AudienceAnalysisResponse,
     AudienceAnalysisService,
 )
-from app.services.simulated_fans import FanCreate, FanResponse, FanUpdate, SimulatedFanService
+from app.services.fan_voice_templates import FanVoiceTemplateResponse, list_fan_voice_templates
+from app.services.simulated_fans import (
+    FanCreate,
+    FanResponse,
+    FanUpdate,
+    FanVariantsCreate,
+    SimulatedFanService,
+)
 from app.workflows import (
     AccountDiagnosisWorkflowService,
     AudienceSimulationWorkflowService,
@@ -318,15 +325,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.audience_analysis_service = audience_analysis_service
     application.state.simulated_fan_service = simulated_fan_service
 
-    @application.get("/api/workspaces/{workspace_id}/simulated-fans",
-                     response_model=list[FanResponse])
+    @application.get(
+        "/api/workspaces/{workspace_id}/simulated-fans", response_model=list[FanResponse]
+    )
     def list_simulated_fans(workspace_id: str):
         return simulated_fan_service.list(workspace_id)
 
-    @application.post("/api/workspaces/{workspace_id}/simulated-fans", response_model=FanResponse,
-                      status_code=201)
+    @application.post(
+        "/api/workspaces/{workspace_id}/simulated-fans", response_model=FanResponse, status_code=201
+    )
     def create_simulated_fan(workspace_id: str, payload: FanCreate):
         return simulated_fan_service.create(workspace_id, payload)
+
+    @application.get("/api/simulated-fan-voices", response_model=list[FanVoiceTemplateResponse])
+    def list_simulated_fan_voices():
+        return list_fan_voice_templates()
+
+    @application.post(
+        "/api/simulated-fans/{fan_id}/variants", response_model=list[FanResponse], status_code=201
+    )
+    def create_simulated_fan_variants(fan_id: str, payload: FanVariantsCreate):
+        return simulated_fan_service.create_variants(fan_id, payload)
 
     @application.get("/api/simulated-fans/{fan_id}", response_model=FanResponse)
     def get_simulated_fan(fan_id: str):

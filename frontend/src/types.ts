@@ -417,6 +417,15 @@ export interface SimulatedFan {
   updatedAt: string
 }
 
+export interface FanVoiceTemplate {
+  id: string
+  name: string
+  outlook: string
+  decisionStyle: string
+  expressionStyle: string
+  participationStyle: string
+}
+
 export type DraftStatus = 'pending' | 'running' | 'completed' | 'failed'
 export type DraftKind = 'content_brief' | 'content_structure'
 

@@ -773,7 +773,7 @@ class SimulationRunStatus(StrEnum):
 
 
 class SimulationRunCreate(APIModel):
-    simulated_fan_ids: list[str] | None = Field(default=None, min_length=1, max_length=3)
+    simulated_fan_ids: list[str] | None = Field(default=None, min_length=1)
     audience_analysis_id: str | None = None
     topic_id: str | None = None
     draft_id: str | None = None

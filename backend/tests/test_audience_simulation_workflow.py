@@ -8,6 +8,7 @@ from test_workspace_api import create_workspace, send
 from app.models import ModelCallResponse, ModelOperation
 from app.workflows.audience_simulation import (
     AUDIENCE_SIMULATION_NODE_ORDER,
+    MAX_CONCURRENT_PERSONA_CALLS,
     FakeAudienceSimulationModelProvider,
     RealAudienceSimulationModelProvider,
 )
@@ -194,6 +195,43 @@ def test_live_evidence_survives_and_silence_skips_discussion_after_restart(app):
     assert model.calls == [ModelOperation.SIMULATION_REACTION, ModelOperation.SIMULATION_SYNTHESIS]
     replay = send(app, "GET", f"/api/simulation-runs/{run['id']}/events")
     assert "没有可供其他读者回应的公开评论" in replay.text
+
+
+def test_many_saved_personas_run_without_unbounded_provider_burst(app):
+    run = create_simulation_run(app)
+    snapshot = run["inputSnapshot"]
+    snapshot.update(mode="live", audiencePersonas=[
+        {"id": f"reader-{index}", "name": f"人物 {index}", "profile": "不同阅读方式"}
+        for index in range(8)
+    ])
+    with app.state.simulation_service.database.transaction() as c:
+        c.execute("UPDATE simulation_runs SET input_snapshot_json=? WHERE id=?",
+                  (json.dumps(snapshot, ensure_ascii=False), run["id"]))
+
+    class Model:
+        active = 0
+        peak = 0
+
+        async def call_operation(self, operation, context):
+            if operation == ModelOperation.SIMULATION_REACTION:
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                await asyncio.sleep(0.01)
+                self.active -= 1
+                output = {"reaction": {"personaId": context["persona"]["id"],
+                                       "stance": "无感", "action": "no_comment"}}
+            else:
+                assert operation == ModelOperation.SIMULATION_SYNTHESIS
+                output = {"synthesis": {"verdict": "仅模拟参考"}}
+            return ModelCallResponse(output=output, model_metadata={})
+
+    model = Model()
+    app.state.simulation_workflow_service.live_provider = RealAudienceSimulationModelProvider(model)
+    collect(app, run["id"])
+    completed = app.state.simulation_service.get(run["id"])
+    assert completed.status.value == "completed", completed.stage_errors
+    assert len(completed.reaction_results) == 8
+    assert model.peak == MAX_CONCURRENT_PERSONA_CALLS
 
 
 def test_debate_only_receives_public_comments_not_private_reasoning(app):

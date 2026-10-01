@@ -13,14 +13,14 @@ from app.errors import ValidationError
 from app.models import ModelCallRequest, ModelCallResponse, ModelOperation
 from app.services.audience_examples import ANALYSIS_EXAMPLES, REACTION_EXAMPLES
 
-PROMPT_PROFILE = """你是创作者账号分析师。先帮助创作者认识现有账号，再把可能的创作方向留给后续选题步骤。
+PROMPT_PROFILE = """你是懂内容传播的创作者顾问。先帮助创作者看见自己账号已经形成的特色、长处与价值，再把可能的创作方向留给后续选题步骤。语气真诚、积极、有鼓励感，先说具体做对了什么；不要把报告写成审稿意见，不要用空泛的夸奖或不必要的防御性提醒。
 原始笔记是证据；账号定位摘要是背景，不是作者经历的证据。只分析输入中的笔记，不引用未选中的笔记，不把评论者经历当作作者经历。
-accountPortrait 是面向用户的证据化画像：summary 是一句话定位；recurringThemes 是反复出现的内容方向，每项至少引用两条不同笔记，否则不要写；readerValue 是笔记为读者提供的价值；expressionPatterns 是表达习惯。每条 statement 必须有 evidence，填写输入中真实的 note_id 和从该笔记标题或正文逐字截取的短句。引用要真正支持 statement，不能用无关原文凑数。证据不足时减少结论；没有 note_id 时 accountPortrait 返回 null。
-主动寻找例外：若某条画像并不适用于另一条已选笔记，在该 claim 的 counterexamples 中引用那条笔记的 note_id 和原文短句；不要为了凑反例而虚构或引用未选笔记。没有明确例外时返回空数组。反例不推翻所有观察，但要帮助创作者看见账号并非只有一种方向。
+accountPortrait 是面向创作者的账号画像：summary 是一句话定位；keywords 给出 3～6 个短标签，兼顾内容主题、读者价值和表达风格，避免全是话题词；strengths 给出 2～3 条具体优势，说清这些笔记哪里做得好；encouragement 用一两句话肯定创作者已形成的独特价值，并指出值得继续放大的方向，不保证流量。recurringThemes 是反复出现的内容方向，每项至少引用两条不同笔记，否则不要写；readerValue 是笔记为读者提供的价值；expressionPatterns 是表达习惯。每条 statement 必须有 evidence，填写输入中真实的 note_id 和从该笔记标题或正文逐字截取的短句。引用要真正支持 statement，不能用无关原文凑数。证据不足时减少结论；没有 note_id 时 accountPortrait 返回 null。
+如果有明显的其他风格笔记，可在 claim 的 counterexamples 中引用其 note_id 和原文短句，让画像更丰富；没有就返回空数组，不必刻意寻找反例。
 只有输入明确提供“可比较的前后发布时间组”时才填写 recentChange，否则设为 null。recentChange 只比较前后两组的选题或表达方式，evidence 至少各引用一条前期和后期笔记。日期缺失、跨度太短或组别不足时不要猜；累计互动数不能用来证明账号在增长或退步。
 保留原有字段供下游选题使用：pillars 每条不超过 10 字；titleFormulas 的 examples 尽量使用真实标题；voiceFingerprint 不要虚构作者人格。contrast 只描述所选笔记的可见互动差异；缺少可比笔记时返回空对象。赞、藏、评、分享不是曝光率，不得据此推断点击率、搜索流量或推荐原因。winFactors、loseFactors 是待验证解释，不能写成已证实的因果规律；小样本时允许留空。
 只输出 JSON，不要解释或 markdown 代码块。schema:
-{"profile":{"accountPortrait":{"summary":{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[]},"recurringThemes":[{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[{"noteId":"","quote":""}]}],"readerValue":[{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[]}],"expressionPatterns":[{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[]}],"recentChange":{"statement":"","evidence":[{"noteId":"","quote":""},{"noteId":"","quote":""}],"counterexamples":[]}},"pillars":[],"titleFormulas":[{"formula":"","examples":[]}],"hookStyles":[],"viralStructure":{"name":"","steps":[]},"voiceFingerprint":[],"contrast":{"winners":[{"title":"","metric":""}],"losers":[{"title":"","metric":""}],"winFactors":[],"loseFactors":[],"takeaways":[]}}}"""
+{"profile":{"accountPortrait":{"summary":{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[]},"keywords":[{"statement":"","evidence":[{"noteId":"","quote":""}]}],"strengths":[{"statement":"","evidence":[{"noteId":"","quote":""}]}],"encouragement":{"statement":"","evidence":[{"noteId":"","quote":""}]},"recurringThemes":[{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[{"noteId":"","quote":""}]}],"readerValue":[{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[]}],"expressionPatterns":[{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[]}],"recentChange":{"statement":"","evidence":[{"noteId":"","quote":""},{"noteId":"","quote":""}],"counterexamples":[]}},"pillars":[],"titleFormulas":[{"formula":"","examples":[]}],"hookStyles":[],"viralStructure":{"name":"","steps":[]},"voiceFingerprint":[],"contrast":{"winners":[{"title":"","metric":""}],"losers":[{"title":"","metric":""}],"winFactors":[],"loseFactors":[],"takeaways":[]}}}"""
 
 PROMPT_PAIN_POINTS = """你是评论区分析师。聚合评论区原文，提炼 3~5 个读者痛点主题，每个带原文证据。
 排序规则：intensity 高→中，同级按 count 降序。
@@ -78,6 +78,7 @@ PROMPT_SIMULATION_PERSONAS = """你在为发布前预演提出最多 3 个假设
 
 PROMPT_SIMULATION_REACTION = """你正在预演一个阅读视角，不是真实受访者。只对所给的读者可见内容作反应。
 根据 persona 的需求及证据独立阅读，不把引用的历史评论照搬成新评论，不编造未提供的正文或图片。
+persona 中的 profile、contentPreference 和 expressionStyle 共同决定其判断与说话方式；同一话题下不同角色不必持相同态度，不要把所有人写成只会提建议的内容策划。人物设定用于生动预演，但不能凭空补充具体亲历事实。
 分别给出你理解了什么、触发感受的原文短句、疑问，以及是否公开评论。
 允许无感、划走、读完不评论。action 是 comment/no_comment/skip；只有 comment 才填写 quote，其他情况 quote 为空。
 不要为了帮助创作者而迎合，也不要人人都像内容策略师；证据不足时说明不确定。
@@ -86,6 +87,7 @@ PROMPT_SIMULATION_REACTION = """你正在预演一个阅读视角，不是真实
 
 PROMPT_SIMULATION_DEBATE = """这是一个条件性情境：假设你看到了给出的模拟公开评论，而非真实评论区。
 只参考给出的评论和内容；不默认所有人都会交流或改变观点。
+回应保留 persona 自己的性格与 expressionStyle；可以认同、反问、补充或继续沉默，不要让所有人突然变成同一种客气的分析员。
 priorReaction 是你自己的第一反应，保留当时的理解、未知与态度；之前不评论不妨碍现在回应。
 otherReactions 仅包含你本轮可见的公开消息；选择其中一条 messageId 作为 replyToId，不能回复自己或看不见的消息。
 回应可以是追问、补充或不同意，不要求达成共识，也不要凭空添加个人经历。

@@ -153,6 +153,33 @@ def test_model_cannot_self_report_citation_basis():
         )
 
 
+def test_candidate_rejects_duplicate_or_contradictory_citations():
+    candidate = _candidate()
+    candidate["evidenceRefs"] *= 2
+    with pytest.raises(ValueError, match="同一引文不可重复"):
+        validate_reading_need_candidates([candidate], _context())
+
+    candidate = _candidate()
+    candidate["counterEvidenceRefs"] *= 2
+    with pytest.raises(ValueError, match="同一引文不可重复"):
+        validate_reading_need_candidates([candidate], _context())
+
+    candidate = _candidate()
+    candidate["counterEvidenceRefs"] = list(candidate["evidenceRefs"])
+    with pytest.raises(ValueError, match="同时作为支持和反证"):
+        validate_reading_need_candidates([candidate], _context())
+
+
+def test_candidate_accepts_distinct_passages_from_the_same_note():
+    candidate = _candidate()
+    candidate["evidenceRefs"] = [
+        {"noteId": "n1", "sourceType": "note", "quote": "先准备材料"},
+        {"noteId": "n1", "sourceType": "note", "quote": "再核对费用"},
+    ]
+    candidate["counterEvidenceRefs"] = []
+    assert len(validate_reading_need_candidates([candidate], _context())[0]["evidenceRefs"]) == 2
+
+
 @pytest.mark.parametrize("items, error", [
     ([_candidate("made_up")], "未知阅读需求原型"),
     ([_candidate(), _candidate()], "阅读需求原型不可重复"),

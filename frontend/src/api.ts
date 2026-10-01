@@ -207,6 +207,8 @@ export const audienceAnalysisApi = {
 export const simulatedFanApi = {
   list: (workspaceId: string) => request<import('./types').SimulatedFan[]>(`/api/workspaces/${workspaceId}/simulated-fans`),
   create: (workspaceId: string, sourceAnalysisId: string, sourceGroupId: string) => request<import('./types').SimulatedFan>(`/api/workspaces/${workspaceId}/simulated-fans`, {method:'POST', headers:jsonHeaders, body:JSON.stringify({sourceAnalysisId,sourceGroupId})}),
+  voices: () => request<import('./types').FanVoiceTemplate[]>('/api/simulated-fan-voices'),
+  createVariants: (id: string, templateIds: string[]) => request<import('./types').SimulatedFan[]>(`/api/simulated-fans/${id}/variants`, {method:'POST', headers:jsonHeaders, body:JSON.stringify({templateIds})}),
   update: (id: string, payload: import('./types').FanDefinition & {status:'active' | 'archived'; expectedUpdatedAt:string}) => request<import('./types').SimulatedFan>(`/api/simulated-fans/${id}`, {method:'PATCH', headers:jsonHeaders, body:JSON.stringify(payload)}),
 }
 

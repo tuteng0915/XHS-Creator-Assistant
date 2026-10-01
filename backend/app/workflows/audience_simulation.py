@@ -43,6 +43,7 @@ SIMULATION_STAGE_ORDER = [
     "debate_responses",
     "synthesis",
 ]
+MAX_CONCURRENT_PERSONA_CALLS = 4
 ACTIVE_SIMULATION_EXECUTION: contextvars.ContextVar[
     _AudienceSimulationGraphExecution | None
 ] = contextvars.ContextVar("audience_simulation_execution", default=None)
@@ -852,15 +853,17 @@ class _AudienceSimulationGraphExecution:
             await self.save_checkpoint("parallel_initial_reactions", updated)
             return AudienceSimulationState(**updated)
         await self.emit("stage.started", "initial_reactions", "running", {})
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_PERSONA_CALLS)
 
         async def run_one(persona: dict[str, Any]) -> dict[str, Any] | None:
             persona_id = str(persona.get("id", "unknown"))
             try:
-                output = await self.retry(
-                    lambda: self.provider().initial_reaction(
-                        persona=persona, topic=updated["topic"]
+                async with semaphore:
+                    output = await self.retry(
+                        lambda: self.provider().initial_reaction(
+                            persona=persona, topic=updated["topic"]
+                        )
                     )
-                )
                 result = PersonaReactionResult.model_validate(output).model_dump(
                     mode="json"
                 )
@@ -925,6 +928,7 @@ class _AudienceSimulationGraphExecution:
             await self.save_checkpoint("parallel_debate_responses", updated)
             return AudienceSimulationState(**updated)
         await self.emit("stage.started", "debate_responses", "running", {})
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_PERSONA_CALLS)
 
         async def run_one(persona: dict[str, Any]) -> dict[str, Any] | None:
             persona_id = str(persona.get("id", "unknown"))
@@ -934,14 +938,15 @@ class _AudienceSimulationGraphExecution:
                 if str(reaction.get("personaId", "")) != persona_id
             ]
             try:
-                output = await self.retry(
-                    lambda: self.provider().debate_response(
-                        persona=persona,
-                        topic=updated["topic"],
-                        other_reactions=others,
-                        prior_reaction=prior_by_id[persona_id],
+                async with semaphore:
+                    output = await self.retry(
+                        lambda: self.provider().debate_response(
+                            persona=persona,
+                            topic=updated["topic"],
+                            other_reactions=others,
+                            prior_reaction=prior_by_id[persona_id],
+                        )
                     )
-                )
                 result = DebateResponseResult.model_validate(output).model_dump(
                     mode="json"
                 )

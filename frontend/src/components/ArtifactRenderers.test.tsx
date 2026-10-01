@@ -68,6 +68,27 @@ it('shows snapshot-backed account evidence and opens the cited note', () => {
   expect(screen.getByText('来自本次快照的正文')).toBeInTheDocument()
 })
 
+it('shows grounded account keywords and creator strengths without adding them to old runs', () => {
+  const snapshotRun: AnalysisRun = { ...run, inputSnapshot: { xhsCreatorProfile: { notes: [
+    { noteId: 'n1', title: '经验分享', desc: '我把准备步骤写出来', metrics: { liked: 12 }, comments: [] },
+  ] } } }
+  render(<StageResultRenderer stage={{key:'profile', n:'1', title:'账号画像', status:'completed', result:{
+    profile:{accountPortrait:{
+      summary:{statement:'分享可操作的经验',evidence:[{noteId:'n1',quote:'我把准备步骤写出来'}]},
+      keywords:[{statement:'实用经验',evidence:[{noteId:'n1',quote:'经验分享'}]}],
+      strengths:[{statement:'把准备过程讲得具体',evidence:[{noteId:'n1',quote:'我把准备步骤写出来'}]}],
+      encouragement:{statement:'这份细致值得继续发挥',evidence:[{noteId:'n1',quote:'我把准备步骤写出来'}]},
+    }},
+    observations:{schemaVersion:'xhs-account-observations/v1',coverage:{selectedCount:1,missingDateCount:1,capturedCommentCount:0,missingMetricCounts:{}},notes:[{noteId:'n1',title:'经验分享',metrics:{liked:12}}]},
+  }}} currentRun={snapshotRun} onSaveGeneratedTopic={vi.fn()} onSelectTopic={vi.fn()}
+    onGenerateBrief={vi.fn()} onGenerateDraft={vi.fn()} onFillSimulationTopic={vi.fn()} />)
+  expect(screen.getByText('实用经验')).toBeInTheDocument()
+  expect(screen.getByText('把准备过程讲得具体')).toBeInTheDocument()
+  expect(screen.getByText('这份细致值得继续发挥')).toBeInTheDocument()
+  expect(screen.getByText('这个账号已经做得好的地方')).toBeInTheDocument()
+  expect(screen.queryByText(/解释是否成立仍需结合/)).not.toBeInTheDocument()
+})
+
 it('separates possible exceptions and dated content changes from performance claims', () => {
   const snapshotRun: AnalysisRun = { ...run, inputSnapshot: { xhsCreatorProfile: { notes: [
     { noteId: 'early', title: '前期笔记', desc: '分享申请经历', metrics: { liked: 12 }, comments: [] },
@@ -100,6 +121,7 @@ it('does not present a single cited note as a recurring account theme in reopene
   }}} currentRun={snapshotRun} onSaveGeneratedTopic={vi.fn()} onSelectTopic={vi.fn()}
     onGenerateBrief={vi.fn()} onGenerateDraft={vi.fn()} onFillSimulationTopic={vi.fn()} />)
   expect(screen.queryByText('经常讲这个方向')).not.toBeInTheDocument()
-  expect(screen.getByText(/没有可回溯到所选笔记原文的账号画像结论/)).toBeInTheDocument()
+  expect(screen.getByText(/选择更多笔记后/)).toBeInTheDocument()
+  fireEvent.click(screen.getByText('数据说明'))
   expect(screen.getByText(/发布日期和累计时间可能不同/)).toBeInTheDocument()
 })
