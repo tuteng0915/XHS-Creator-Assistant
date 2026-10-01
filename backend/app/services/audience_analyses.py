@@ -281,7 +281,7 @@ class AudienceAnalysisService:
             phase = "saving_result"
             with self.database.transaction() as c:
                 if result:
-                    SimulatedFanService(self.database).seed_initial(
+                    SimulatedFanService(self.database).save_generated(
                         c, run.workspace_id, run.id, result, run.input_snapshot,
                     )
                 c.execute(

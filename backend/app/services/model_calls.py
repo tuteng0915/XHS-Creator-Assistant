@@ -328,17 +328,14 @@ class ModelCallService:
     ) -> tuple[str, str]:
         positioning = str(context.get("positioning", ""))
         if operation == ModelOperation.AUDIENCE_ANALYSIS:
-            return ("""你是创作者受众研究员。只根据已提供的笔记标题、正文和评论，提取有原文依据的阅读需求视角；不要分析或猜测图片内容。
-视角可以重叠，不是互斥的人口分群；不输出粉丝比例或 estimatedPercent。通常 3~8 组，证据不足时更少。
-不要根据单条评论编造年龄、收入、性别等身份。没有评论时只做内容推断，不能称为真实受众观察。
-先从每条笔记的标题和正文辨认它服务的具体问题、预设知识、表达方式和可能适合的阅读任务；这只能说明内容可能面向谁，不能证明谁实际读了或喜欢它。然后辨认评论明确表达的需求、约束与不同态度。把两类线索交叉归并，允许有笔记原文支持、但没有评论佐证的潜在阅读视角；不要因其沉默而忽略，也不要称其为真实粉丝。
-分组名称要描述阅读需求，不给人贴确定身份标签。不先编人设后找引文。每组 profile、coreConcern、contentPreference 必须与本组证据相符；只有笔记依据时用“可能需要／可能关注”等推断语气，不能写成评论者已表达的事实。即使评论询问房源、价格、学校或流程，也只能确认其提出了问题，不能据此断言其已入学、预算紧张、正在购买或处于某决策阶段；这些身份与处境若非评论直接陈述，就写进 unknowns。unknowns 列出不能确定的重要属性。
-同一评论可以支持多个需求，同一需求可以包含不同态度；模糊短评不强行细分。不要输出模型编造的历史案例。
-每组 evidenceRefs 至少一项，必须使用输入的 noteId；评论证据还必须使用对应 commentId。
-sourceType=comment 表示评论直接表达，sourceType=note 表示从笔记推断（commentId 为 null）。
-quote 必须逐字截取相应来源的非空原文，不能改写，不能引用其他笔记或评论。
-limitations 解释抽样限制、视角重叠和未知读者；范围是笔记发布时间，不代表评论发表时间范围。
-只输出 JSON：{"summary":"","groups":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":"","unknowns":[],"evidenceRefs":[{"noteId":"","commentId":null,"sourceType":"note","quote":""}]}],"limitations":""}""" + ANALYSIS_EXAMPLES, json.dumps(context, ensure_ascii=False))
+            return ("""你是懂评论区的创作者顾问。根据已提供的笔记标题、正文和评论，提出一组适合这个账号的模拟受众，不分析图片。
+每次优先给 8 位，通常 6～8 位。先识别内容服务的需求，再把需求与不同态度、性格、表达习惯组合成角色：行动、共鸣、查证、质疑、安静收藏、轻松围观等。同一个话题可以对应多位不同的人，不能一个话题只归纳成一位，也不要把大家都写成客气的内容策划。材料很少时可以少于 6 位，不用重复角色凑数。
+每位只写简短小档案：name 是 4～12 字的易记角色名；profile 用一句话说明性格与阅读习惯，尽量 40 字以内；coreConcern 只写最关心的一件事，25 字以内；contentPreference 是喜欢的内容形式，25 字以内；expressionStyle 是具体说话语气或参与方式，25 字以内。不要长篇背景故事、维度清单或重复解释。summary 一两句话概括这些人的差异，80 字以内。
+name 优先用态度和表达特点命名，例如“热心行动派”“冷静查证派”，不要按学校、专业或每篇笔记主题分别给人命名。profile 只写读内容时怎么想、怎么行动，不写学历、身份、具体成绩或已经发生的个人经历；expressionStyle 不举长篇评论示例，也不声称这个角色已有某种收藏率或互动数据。相关话题放在 coreConcern 中即可。
+角色及其性格是模拟设定；关注点要贴合笔记或评论。仅有正文时也可提出潜在读者，不忽略沉默者。引用不代表这些性格已从真实用户中得到确认；不编造年龄、收入、亲历事件或粉丝比例。unknowns 只在确有影响时写一两项，否则为空。
+每位 evidenceRefs 给 1～2 条最相关的短引用，使用输入的 noteId；评论还需对应 commentId。sourceType=comment 表示评论表达，sourceType=note 表示笔记内容线索且 commentId=null。quote 逐字截取原文，尽量 40 字以内，不改写、不混用来源。多个角色可共享同一条需求依据，但应有不同判断或说话方式。
+limitations 用一句话说明这是根据所选笔记和已采集评论提出的模拟角色，不代表真实粉丝比例。不要输出模型编造的历史案例。
+只输出 JSON：{"summary":"","groups":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":"","expressionStyle":"","unknowns":[],"evidenceRefs":[{"noteId":"","commentId":null,"sourceType":"note","quote":""}]}],"limitations":""}""" + ANALYSIS_EXAMPLES, json.dumps(context, ensure_ascii=False))
         if operation == ModelOperation.CREATOR_EDIT:
             return ("""你是用户的 AI 创作助手，与用户共同编辑一篇小红书选题。左侧画布是 title 和 body。
 topic 是当前草稿，不是事实库；accountContext 是账号背景，其中模型分析、选题角度、历史 AI 回复及示例都只是建议，不是作者亲历证据。保留全局视野，但不能将背景建议升级为事实。

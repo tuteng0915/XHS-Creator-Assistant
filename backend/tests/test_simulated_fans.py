@@ -10,10 +10,10 @@ from app.services.audience_analyses import AudienceAnalysisCreate
 from app.workflows.audience_simulation import RealAudienceSimulationModelProvider
 
 
-def analyze(app, wid, source_id):
+def analyze(app, wid, source_id, output=None):
     class Model:
         async def call_operation(self, operation, context):
-            return ModelCallResponse(output=audience_output(), model_metadata={})
+            return ModelCallResponse(output=output or audience_output(), model_metadata={})
 
     service = app.state.audience_analysis_service
     service.model_call_service = Model()
@@ -33,8 +33,8 @@ def seeded(app):
     source = profile(app, wid)
     analysis = analyze(app, wid, source["id"])
     fans = send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()
-    assert len(fans) == 3
-    assert [f["sourceGroupId"] for f in fans] == ["3", "2", "1"]
+    assert len(fans) == 4
+    assert [f["sourceGroupId"] for f in fans] == ["3", "2", "1", "0"]
     return wid, source, analysis, fans
 
 
@@ -78,7 +78,7 @@ def test_fan_edit_original_idempotency_and_new_analysis(app, seeded):
     ).json()
     assert duplicate == updated
     analyze(app, wid, source["id"])
-    assert len(send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()) == 3
+    assert len(send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()) == 8
     assert send(app, "GET", f"/api/simulated-fans/{fan['id']}").json() == updated
     added = send(
         app,
@@ -90,7 +90,41 @@ def test_fan_edit_original_idempotency_and_new_analysis(app, seeded):
         },
     )
     assert added.status_code == 201
+    assert added.json()["id"] == fans[3]["id"]
     assert added.json()["original"]["evidenceRefs"]
+
+
+def test_eight_compact_personas_are_saved_and_selectable_without_truncation(app):
+    wid = create_workspace(app)["id"]
+    source = profile(app, wid)
+    output = audience_output()
+    original_group = output["groups"][0]
+    styles = ["直说", "温柔", "查证", "质疑", "沉默", "幽默", "热情", "慢条斯理"]
+    output["groups"] = [
+        {**original_group, "id": f"person-{i}", "name": f"{style}读者",
+         "profile": "关心准备过程，有自己的判断", "contentPreference": "清单",
+         "expressionStyle": style}
+        for i, style in enumerate(styles)
+    ]
+    analysis_id = analyze(app, wid, source["id"], output)
+    fans = send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()
+    assert len(fans) == 8
+    assert {fan["editable"]["expressionStyle"] for fan in fans} == set(styles)
+    service = app.state.audience_analysis_service
+    analysis = service.get(analysis_id)
+    assert len(analysis.result["groups"]) == 8
+    from app.services.simulated_fans import SimulatedFanService
+
+    with service.database.transaction() as connection:
+        SimulatedFanService(service.database).save_generated(
+            connection, wid, analysis_id, analysis.result, analysis.input_snapshot,
+        )
+    assert len(send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()) == 8
+    run = app.state.simulation_service.create(wid, SimulationRunCreate(
+        manual_topic="申请准备", simulated_fan_ids=[fan["id"] for fan in fans],
+    ))
+    assert len(run.input_snapshot["audiencePersonas"]) == 8
+    assert {p["expressionStyle"] for p in run.input_snapshot["audiencePersonas"]} == set(styles)
 
 
 def test_fan_snapshot_survives_edit_archive_and_restart(app, settings, seeded):
@@ -294,7 +328,7 @@ def test_voice_templates_expand_one_fan_into_distinct_editable_variants(app, see
         item["original"]["evidenceRefs"] == source["original"]["evidenceRefs"] for item in variants
     )
     assert all(item["original"]["evidenceStatus"] == "hypothesis" for item in variants)
-    assert len(send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()) == 15
+    assert len(send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()) == 16
 
     run = send(app, "POST", f"/api/workspaces/{wid}/simulation-runs", json={
         "manualTopic": "测试选题", "simulatedFanIds": [variants[0]["id"], variants[1]["id"]],

@@ -12,9 +12,33 @@
 
 首次使用请按 [本地安装与 MediaCrawler 配置](docs/local-installation.md) 操作，包含主应用、模型配置、抓取依赖、浏览器登录和验收步骤。
 
-如果要在另一台受信任电脑上还原**现有账号、笔记、图片及分析历史**，还需按该指南的[恢复现有现场](docs/local-installation.md#4-恢复现有现场而不只是空白安装)备份和恢复数据。Git 只还原代码，不还原这些被忽略的本地内容；模型配置需要安全转交，小红书需要重新登录。
+如果要在另一台受信任电脑上还原**现有账号、笔记、图片及分析历史**，按下面的“把现有数据交给协作者”操作。Git 只还原代码，不还原这些被忽略的本地内容；模型配置要单独处理，小红书登录态不迁移。
 
 **直接 clone 不会安装 MediaCrawler。** 它是 `data/external/MediaCrawler` 下被忽略的独立仓库，不是 Git 子模块，也不会由后端 pip 自动安装。我们固定上游提交并提供封面下载补丁；依赖环境、登录态、数据库和样本不放进 Git。无需把庞大的本地 `data/` 目录提交进来。
+
+## 把现有数据交给协作者（推荐）
+
+**代码走 Git，数据包私下发送。** 当前 `data/app.sqlite3` 是账号、笔记正文、选题、分析及对话等记录；`data/uploads/` 是已导入的封面、其他媒体及上传文件。两者要一起传：只传数据库会出现“文字在、图片打不开”。此方案不包含约 1 GB 的 MediaCrawler 环境、浏览器登录态、抓取原始缓存或旧备份。协作者只是浏览和继续使用现有资产时，**不必先安装 MediaCrawler，也不必重新爬这几个账号**；只有想从主页 URL 继续抓取时，才按[安装指南](docs/local-installation.md#2-安装抓取依赖)另行安装并在自己的电脑扫码。
+
+原电脑先等正在进行的抓取、分析和生成完成，**停止后端**，再在仓库根目录执行：
+
+```bash
+tar -czf ../SqsAgent-creator-data.tar.gz data/app.sqlite3 data/uploads
+tar -tzf ../SqsAgent-creator-data.tar.gz | head
+```
+
+将仓库上一级目录的 `SqsAgent-creator-data.tar.gz` 通过仅对协作者开放的渠道发送；微信传文件或私密网盘都可以，不要发到公开链接、Git 或聊天群。压缩包含笔记、评论及创作历史等私人数据，请按敏感资料对待。代码版本也告诉对方，可在仓库根目录用 `git rev-parse HEAD` 查看。
+
+协作者按[本地安装指南](docs/local-installation.md#1-获取主应用)克隆并安装**主应用**后，先不要启动后端。将收到的压缩包放在仓库上一级目录，在新仓库根目录执行：
+
+```bash
+tar -tzf ../SqsAgent-creator-data.tar.gz | head
+tar -xzf ../SqsAgent-creator-data.tar.gz
+```
+
+然后按上文分别启动后端和前端，检查账号列表、笔记正文与封面、分析历史是否能打开。解压会写入 `data/app.sqlite3` 和 `data/uploads/`；**如果对方已经有自己的数据，先备份，不能直接覆盖，也不能靠解压合并两个数据库。** 接收方的程序版本应与打包时相同或更新，后端启动时会应用缺失的数据库迁移。
+
+上述命令默认不包含模型 API key，协作者可配置自己的 `.env.local`。双方明确约定共用密钥时，也可以将原电脑实际使用的 `.env.local` 或 `backend/.env.local` 按原相对位置加入私下交付包；接收方解压后程序会自动读取，整个包仅交给约定的可信协作者。若原电脑在 `.env.local` 里自定义了 `DATABASE_PATH`、`UPLOAD_DIRECTORY` 或 `DEFAULT_USER_ID`，默认命令不够用：需按[完整恢复说明](docs/local-installation.md#4-恢复现有现场而不只是空白安装)核对路径，并在新机器保持同一 `DEFAULT_USER_ID`。浏览器 Cookie 不随包转移，新的抓取登录要在协作者电脑上重新完成。
 
 ## 打开原始 HTML 原型
 

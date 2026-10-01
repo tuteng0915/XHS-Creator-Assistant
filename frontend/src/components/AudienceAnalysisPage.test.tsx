@@ -23,7 +23,7 @@ it('shows all audience groups as saveable fan candidates without population esti
   render(<AudienceAnalysisPage workspaceId="w" analyses={[result]} selectedId="a" onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={simulate} />)
   expect(screen.getAllByRole('button', {name:'保存为模拟粉丝'})).toHaveLength(4)
   expect(screen.getByText('受众3')).toBeInTheDocument()
-  expect(screen.getByText(/不等于已确认的个人身份或真实粉丝构成/)).toBeInTheDocument()
+  expect(screen.getByText('这些角色用于模拟不同声音，并非真实粉丝的个人档案。')).toBeInTheDocument()
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   expect(screen.queryByText('约 40%')).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button',{name:'选择选题进行模拟'}))
@@ -43,4 +43,20 @@ it('marks note-only views as content inference rather than observed commenters',
   render(<AudienceAnalysisPage workspaceId="w" analyses={[result]} selectedId="note-only" onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} />)
   expect(screen.getByText('从笔记内容推断')).toBeInTheDocument()
   expect(screen.queryByText('评论表达')).not.toBeInTheDocument()
+})
+
+it('shows eight concise voices and keeps supporting details collapsed', () => {
+  const result: AudienceAnalysis = {id:'voices',workspaceId:'w',sourceMaterialId:'p',status:'completed',error:'',createdAt:'2026-10-01',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:10}},result:{summary:'八种不同声音',limitations:'角色为模拟设定',sampling:{sentNotes:10,sentComments:20,availableComments:20},groups:Array.from({length:8},(_,i) => ({id:String(i),name:`声音${i+1}`,profile:`人物简介${i+1}`,coreConcern:`关注点${i+1}`,expressionStyle:`说话风格${i+1}`,evidence:['原文依据']}))}}
+  render(<AudienceAnalysisPage workspaceId="w" analyses={[result]} selectedId="voices" onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} />)
+  expect(screen.getAllByRole('heading', {level:2})).toHaveLength(8)
+  expect(screen.getAllByRole('button', {name:'保存为模拟粉丝'})).toHaveLength(8)
+  expect(screen.getByText('人物简介8')).toBeVisible()
+  expect(screen.getByText('说话风格8')).toBeVisible()
+  for (const label of screen.getAllByText('依据', {selector:'summary'})) {
+    expect(label.closest('details')).not.toHaveAttribute('open')
+  }
+  const notes = screen.getByText('分析说明', {selector:'summary'})
+  expect(notes.closest('details')).not.toHaveAttribute('open')
+  fireEvent.click(notes)
+  expect(notes.closest('details')).toHaveAttribute('open')
 })

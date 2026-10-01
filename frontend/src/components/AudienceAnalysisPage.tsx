@@ -53,18 +53,25 @@ export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId
     </details>}
     {selected && ['completed', 'partially_completed'].includes(selected.status) && <>
       <p>{selected.result.summary}</p>
-      <p className="muted">这些是按阅读需求归纳的视角，不等于已确认的个人身份或真实粉丝构成；视角可以重叠。</p>
-      {selected.result.sampling && <p className="muted">依据 {selected.result.sampling.sentNotes} 条笔记、{selected.result.sampling.sentComments} 条已采集评论。</p>}
-      <div className="audience-groups">{selected.result.groups?.map(g => <article className="asset-detail-card" key={g.id}>
-        <div className="creator-page-head"><strong>{g.name}</strong><span className="muted">{EVIDENCE_BASIS_LABELS[g.evidenceBasis || ''] || (g.evidenceRefs?.some(ref => ref.sourceType === 'comment') ? '评论表达' : g.evidenceRefs?.length ? '从笔记内容推断' : '历史结果')}</span></div>
-        <p>{g.profile}</p><p>{g.coreConcern}</p><details><summary>依据</summary>
+      <p className="muted">这些角色用于模拟不同声音，并非真实粉丝的个人档案。</p>
+      <div className="audience-groups">{selected.result.groups?.map(g => <article className="asset-detail-card audience-group-card" key={g.id}>
+        <h2>{g.name}</h2>
+        <p>{g.profile}</p>
+        <p><span className="muted">关注点：</span>{g.coreConcern}</p>
+        {g.expressionStyle && <p><span className="muted">说话风格：</span>{g.expressionStyle}</p>}
+        <details><summary>依据</summary>
+          <p className="muted">{EVIDENCE_BASIS_LABELS[g.evidenceBasis || ''] || (g.evidenceRefs?.some(ref => ref.sourceType === 'comment') ? '评论表达' : g.evidenceRefs?.length ? '从笔记内容推断' : '历史结果')}</p>
           {g.evidenceRefs?.length ? g.evidenceRefs.map((e,j) => <p key={j}>
             {e.sourceType === 'comment' ? '评论直接表达' : '从笔记推断'} · 笔记 {e.noteId}{e.commentId ? ` / 评论 ${e.commentId}` : ''}<br />{e.quote}
           </p>) : <><p className="muted">历史分析依据，尚未核验来源引用。</p>{g.evidence.map((e,j) => <p key={j}>{e}</p>)}</>}
         </details>
         <button disabled={Boolean(savingGroup) || savedFanKeys.includes(`${selected.id}:${g.id}`)} onClick={() => void saveFan(g.id)}>{savedFanKeys.includes(`${selected.id}:${g.id}`) ? '已保存为模拟粉丝' : savingGroup === g.id ? '保存中…' : '保存为模拟粉丝'}</button>
       </article>)}</div>
-      <p className="muted">{selected.result.limitations}</p><button onClick={onSimulate}>选择选题进行模拟</button>
+      {(selected.result.sampling || selected.result.limitations) && <details className="audience-analysis-notes"><summary>分析说明</summary>
+        {selected.result.sampling && <p className="muted">依据 {selected.result.sampling.sentNotes} 条笔记、{selected.result.sampling.sentComments} 条已采集评论。</p>}
+        {selected.result.limitations && <p className="muted">{selected.result.limitations}</p>}
+      </details>}
+      <button onClick={onSimulate}>选择选题进行模拟</button>
     </>}
   </section>
 }

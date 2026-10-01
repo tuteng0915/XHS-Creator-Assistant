@@ -178,6 +178,12 @@ nav a.active, nav button.active { color: var(--blue); background: var(--blue-sof
 .audience-history-select { margin: 20px 0; max-width: 100%; }
 .audience-groups { display: grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap: 16px; }
 .audience-groups progress { width: 100%; accent-color: var(--blue); }
+.audience-groups > .audience-group-card { min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; overflow-wrap: anywhere; }
+.audience-group-card h2 { margin: 0; font-size: 17px; }
+.audience-group-card p { margin: 0; line-height: 1.6; }
+.audience-group-card details p { margin-top: 8px; }
+.audience-group-card > button { margin-top: auto; align-self: flex-start; }
+.audience-analysis-notes { margin: 18px 0; }
 .creator-canvas { display: grid; min-height: 65vh; }
 .canvas-editor, .canvas-chat { min-width: 0; background: white; border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
 .canvas-editor { display: flex; flex-direction: column; gap: 14px; }

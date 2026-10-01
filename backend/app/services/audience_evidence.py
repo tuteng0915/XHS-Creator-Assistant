@@ -178,7 +178,9 @@ def validate_evidence(refs: list[AudienceEvidence], context: dict) -> None:
         raise ValueError("受众证据引用与本次输入不符，请重新分析")
 
 
-def select_audience_personas(audience: dict, snapshot: dict | None = None) -> list[dict]:
+def select_audience_personas(
+    audience: dict, snapshot: dict | None = None, *, limit: int | None = 3,
+) -> list[dict]:
     groups = audience.get("groups", [])
     # New results have evidence-ranked order. Keep legacy ordering for old records.
     if audience.get("method") != "evidence_grounded_v1":
@@ -196,7 +198,7 @@ def select_audience_personas(audience: dict, snapshot: dict | None = None) -> li
          )
          else "verified" if audience.get("method") == "evidence_grounded_v1"
          else "legacy_unverified"}
-        for g in groups[:3]
+        for g in groups[:limit]
     ]
     if audience.get("origin") == "curated_preset":
         for group in selected:

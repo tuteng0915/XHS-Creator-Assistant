@@ -83,11 +83,9 @@ class SimulatedFanService:
         editable = FanDefinition.model_validate(original).model_dump(by_alias=True)
         return self.repository.create(c, workspace_id, analysis_id, group["id"], original, editable)
 
-    def seed_initial(self, c, workspace_id, analysis_id, result, snapshot):
-        # Archived or manually adjusted profiles still count: never silently reseed/overwrite.
-        if self.repository.list(c, workspace_id):
-            return
-        for group in select_audience_personas(result, snapshot):
+    def save_generated(self, c, workspace_id, analysis_id, result, snapshot):
+        # Each analysis contributes its own roles; repository keys preserve edits on replay.
+        for group in select_audience_personas(result, snapshot, limit=None):
             self._save_group(c, workspace_id, analysis_id, group, result, snapshot)
 
     def create(self, workspace_id, payload):

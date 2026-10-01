@@ -486,6 +486,7 @@ export interface AudienceAnalysis {
     sampling?: { sentNotes: number; sentComments: number; availableComments: number };
     groups?: Array<{
       id: string; name: string; profile: string; coreConcern: string;
+      expressionStyle?: string;
       evidenceBasis?: 'comment_observed' | 'content_inferred' | 'mixed' | null;
       estimatedPercent?: number | null; evidence: string[];
       evidenceRefs?: Array<{noteId: string; commentId?: string | null; sourceType: 'note' | 'comment'; quote: string}>;
