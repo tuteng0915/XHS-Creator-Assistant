@@ -164,6 +164,7 @@ import {
 } from './workflowStageViews'
 import {
   previewXhsImportPackage,
+  xhsCreatorProfileUrlFromAsset,
   xhsPackageRelativePaths,
   type XhsImportPackagePreview,
 } from './xhsCreatorProfile'
@@ -355,6 +356,8 @@ function WorkspaceApp() {
     selectedVideoWorkflowMediaAssetIds,
     xhsPackagePreview,
   })
+  const savedXhsProfileUrl = workspace?.profileUrl || xhsCreatorProfileUrlFromAsset(xhsCreatorProfileMaterial)
+  const captureProfileUrl = addingCreator ? xhsProfileUrl : savedXhsProfileUrl || xhsProfileUrl
   const agentChatComposerRef = useRef<HTMLTextAreaElement | null>(null)
   const selectedAgentConversationId = selectedAgentConversation?.id
 
@@ -416,6 +419,7 @@ function WorkspaceApp() {
     setXhsCreatorProfileContent('')
     setXhsCaptureJob(null)
     setXhsCaptureError('')
+    setXhsProfileUrl('')
     setTrendKeyword('')
     setCurrentRun(null)
     setSelectedSimulationRun(null)
@@ -647,7 +651,8 @@ function WorkspaceApp() {
       .then((jobs) => {
         if (active) {
           setXhsCaptureJob(jobs[0] || null)
-          setXhsProfileUrl(jobs[0]?.profileUrl || '')
+          const completed = jobs.find((job) => job.status === 'completed')
+          setXhsProfileUrl(completed?.resolvedUrl || completed?.profileUrl || '')
         }
       })
       .catch(() => {
@@ -726,21 +731,22 @@ function WorkspaceApp() {
     setAddingCreator(false)
     setXhsCaptureError('')
     setActivePage('creator-start')
-    let profileUrl = ''
     let count = 0
     try {
       const parsed = JSON.parse(xhsCreatorProfileMaterial?.content || '{}')
-      profileUrl = String(parsed.source?.profileUrl || '')
       count = Array.isArray(parsed.notes) ? parsed.notes.length : 0
     } catch { /* Legacy content may not contain a structured profile URL. */ }
     setCaptureNoteLimit(count ? [20,50,100].find(limit => limit > count) || 0 : 10)
-    setXhsProfileUrl(profileUrl)
+    setXhsProfileUrl(savedXhsProfileUrl)
     if (workspace) {
       const workspaceId = workspace.id
       void xhsCaptureApi.list(workspaceId).then(jobs => {
         if (selectedWorkspaceRef.current !== workspaceId || captureFormEpoch.current !== epoch) return
         setXhsCaptureJob(jobs[0] || null)
-        if (jobs[0]?.profileUrl) setXhsProfileUrl(jobs[0].profileUrl)
+        const completed = jobs.find((job) => job.status === 'completed')
+        if (!savedXhsProfileUrl && completed) {
+          setXhsProfileUrl(completed.resolvedUrl || completed.profileUrl)
+        }
       }).catch(error => {if(captureFormEpoch.current === epoch) setXhsCaptureError(errorMessage(error))})
     }
   }
@@ -752,7 +758,7 @@ function WorkspaceApp() {
     setXhsCaptureError('')
     try {
       const payload = {
-        profileUrl: xhsProfileUrl,
+        profileUrl: captureProfileUrl,
         noteLimit: captureNoteLimit,
         includeComments: true,
       }
@@ -2605,7 +2611,7 @@ function WorkspaceApp() {
         <CreatorStartPage
           workspace={workspace}
           xhsCreatorProfile={addingCreator ? null : xhsCreatorProfileMaterial || null}
-          profileUrl={xhsProfileUrl}
+          profileUrl={captureProfileUrl}
           captureJob={xhsCaptureJob}
           submitting={xhsCaptureSubmitting}
           error={xhsCaptureError}

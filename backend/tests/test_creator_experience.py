@@ -93,6 +93,8 @@ def test_account_creation_requires_valid_submission_and_reuses_job(app, monkeypa
     assert repeated.json()["id"] == created.json()["id"]
     assert len(scheduled) == 1
     assert len(send(app, "GET", "/api/workspaces").json()) == before + 1
+    workspace = send(app, "GET", f"/api/workspaces/{created.json()['workspaceId']}")
+    assert workspace.json()["profileUrl"] == payload["profileUrl"]
 
 
 def audience_output():

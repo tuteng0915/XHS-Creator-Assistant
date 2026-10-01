@@ -9,6 +9,7 @@ class WorkspaceRepository:
         SELECT
             workspace.id,
             workspace.name,
+            workspace.profile_url,
             positioning.positioning_text AS account_positioning,
             positioning.version_number AS positioning_version,
             current_topic.topic_id AS current_topic_id,
@@ -29,15 +30,16 @@ class WorkspaceRepository:
         name: str,
         account_positioning: str,
         now: str,
+        profile_url: str | None = None,
     ) -> dict:
         workspace_id = str(uuid4())
         positioning_id = str(uuid4())
         connection.execute(
             """
-            INSERT INTO creator_workspaces(id, name, created_at, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO creator_workspaces(id, name, profile_url, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (workspace_id, name, now, now),
+            (workspace_id, name, profile_url, now, now),
         )
         connection.execute(
             """
@@ -122,6 +124,21 @@ class WorkspaceRepository:
         if row is None:
             raise NotFoundError("Workspace not found")
         return dict(row)
+
+    def set_profile_url(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        workspace_id: str,
+        profile_url: str,
+        now: str,
+    ) -> None:
+        cursor = connection.execute(
+            "UPDATE creator_workspaces SET profile_url = ?, updated_at = ? WHERE id = ?",
+            (profile_url, now, workspace_id),
+        )
+        if cursor.rowcount != 1:
+            raise NotFoundError("Workspace not found")
 
     def update(
         self,

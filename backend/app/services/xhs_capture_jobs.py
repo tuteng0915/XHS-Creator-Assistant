@@ -354,23 +354,47 @@ class MediaCrawlerXhsCaptureRunner:
                 (workspace_id,),
             ).fetchall()
         incoming_name = incoming.get("creator", {}).get("displayName")
-        incoming_path = urlparse(incoming.get("source", {}).get("profileUrl", "")).path
+        incoming_url = incoming.get("source", {}).get("profileUrl", "")
+        incoming_path = self._creator_profile_path(incoming_url)
+        incoming_ids = {
+            note.get("noteId") for note in incoming.get("notes", [])
+            if isinstance(note, dict) and note.get("noteId")
+        }
         for row in rows:
             previous = json.loads(row["text_content"])
             previous_url = previous.get("source", {}).get("profileUrl", "")
-            same = (
-                urlparse(previous_url).path == incoming_path
-                if previous_url
-                else previous.get("creator", {}).get("displayName") == incoming_name
-            )
+            previous_path = self._creator_profile_path(previous_url)
+            previous_ids = {
+                note.get("noteId") for note in previous.get("notes", [])
+                if isinstance(note, dict) and note.get("noteId")
+            }
+            if previous_path and incoming_path:
+                same = previous_path == incoming_path
+            else:
+                # Older offline packages have no canonical profile URL, and
+                # Xiaohongshu can mask nicknames. Shared note IDs are stronger
+                # evidence than the display name in that case.
+                same = bool(previous_ids & incoming_ids) or (
+                    previous.get("creator", {}).get("displayName") == incoming_name
+                )
             if not same:
                 raise ValidationError("链接属于另一个账号，请先点击“添加账号”再导入。")
-            known_ids = {note.get("noteId") for note in incoming.get("notes", [])}
             incoming["notes"].extend(
                 note
                 for note in previous.get("notes", [])
-                if isinstance(note, dict) and note.get("noteId") not in known_ids
+                if isinstance(note, dict) and note.get("noteId") not in incoming_ids
             )
+
+    @staticmethod
+    def _creator_profile_path(value: str) -> str:
+        if not isinstance(value, str):
+            return ""
+        parsed = urlparse(value)
+        if parsed.hostname == "www.xiaohongshu.com" and parsed.path.startswith(
+            "/user/profile/"
+        ):
+            return parsed.path.rstrip("/")
+        return ""
 
     @staticmethod
     def _resolved_url(output: str, fallback: str) -> str:
@@ -434,6 +458,7 @@ class XhsCaptureJobService:
                     name="正在导入的账号",
                     account_positioning="",
                     now=utc_now(),
+                    profile_url=profile_url,
                 )
             )
             row = self.repository.create(
@@ -507,6 +532,12 @@ class XhsCaptureJobService:
             )
             self._rename_workspace(job.workspace_id, result.display_name)
             with self.database.transaction() as connection:
+                self.workspace_repository.set_profile_url(
+                    connection,
+                    workspace_id=job.workspace_id,
+                    profile_url=result.resolved_url,
+                    now=utc_now(),
+                )
                 previous = self.repository.get(connection, job_id)
                 completed_progress = XhsCaptureProgress.model_validate(
                     previous["progress"]

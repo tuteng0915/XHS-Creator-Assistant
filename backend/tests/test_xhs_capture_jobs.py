@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.errors import ValidationError
 from app.models import (
     SourceMaterialType,
     TextSourceMaterialCreate,
@@ -150,6 +151,7 @@ def test_xhs_capture_is_single_flight_and_persists_result(app: FastAPI) -> None:
     assert completed["resultInputAssetId"]
     renamed = send(app, "GET", f"/api/workspaces/{workspace['id']}")
     assert renamed.json()["name"] == "QSheep 的工作区"
+    assert renamed.json()["profileUrl"] == url
 
 
 def test_capture_default_name_does_not_replace_custom_workspace_name(app: FastAPI) -> None:
@@ -170,6 +172,66 @@ def test_capture_default_name_does_not_replace_custom_workspace_name(app: FastAP
         )
     service._rename_workspace(workspace["id"], "Ag")
     assert send(app, "GET", f"/api/workspaces/{workspace['id']}").json()["name"] == "Ag 的工作区"
+
+
+def test_legacy_masked_nickname_matches_by_shared_note_ids(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    app.state.input_asset_service.create_text(
+        workspace["id"],
+        TextSourceMaterialCreate(
+            type=SourceMaterialType.XHS_CREATOR_PROFILE,
+            name="旧主页",
+            content=json.dumps({
+                "schemaVersion": "xhs-creator-profile/v1",
+                "creator": {"displayName": "秀***冰"},
+                "notes": [{"noteId": "same-note"}, {"noteId": "old-note"}],
+            }, ensure_ascii=False),
+        ),
+    )
+    incoming = {
+        "source": {"profileUrl": "https://www.xiaohongshu.com/user/profile/creator-a"},
+        "creator": {"displayName": "秀才加点冰"},
+        "notes": [{"noteId": "same-note"}, {"noteId": "new-note"}],
+    }
+    runner = app.state.xhs_capture_service.runner
+    runner._check_account_identity(workspace["id"], incoming)
+    assert [note["noteId"] for note in incoming["notes"]] == [
+        "same-note", "new-note", "old-note",
+    ]
+
+    unrelated = {
+        "source": {"profileUrl": "https://www.xiaohongshu.com/user/profile/creator-b"},
+        "creator": {"displayName": "另一个账号"},
+        "notes": [{"noteId": "unrelated-note"}],
+    }
+    with pytest.raises(ValidationError, match="另一个账号"):
+        runner._check_account_identity(workspace["id"], unrelated)
+
+
+def test_different_recorded_creator_urls_reject_even_shared_note_ids(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    app.state.input_asset_service.create_text(
+        workspace["id"],
+        TextSourceMaterialCreate(
+            type=SourceMaterialType.XHS_CREATOR_PROFILE,
+            name="旧主页",
+            content=json.dumps({
+                "schemaVersion": "xhs-creator-profile/v1",
+                "source": {"profileUrl": "https://www.xiaohongshu.com/user/profile/creator-a"},
+                "creator": {"displayName": "同名账号"},
+                "notes": [{"noteId": "shared-note"}],
+            }, ensure_ascii=False),
+        ),
+    )
+    incoming = {
+        "source": {"profileUrl": "https://www.xiaohongshu.com/user/profile/creator-b"},
+        "creator": {"displayName": "同名账号"},
+        "notes": [{"noteId": "shared-note"}],
+    }
+    with pytest.raises(ValidationError, match="另一个账号"):
+        app.state.xhs_capture_service.runner._check_account_identity(
+            workspace["id"], incoming,
+        )
 
 
 def test_workspace_list_is_scoped_to_default_user(app: FastAPI) -> None:

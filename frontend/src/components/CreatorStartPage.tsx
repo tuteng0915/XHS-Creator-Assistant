@@ -42,6 +42,15 @@ export function CreatorStartPage({
 }: CreatorStartPageProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const summary = xhsCreatorProfileSummaryFromAsset(xhsCreatorProfile || undefined)
+  const hasSavedProfileUrl = Boolean(xhsCreatorProfile && profileUrl)
+  const visibleProfileUrl = (() => {
+    try {
+      const parsed = new URL(profileUrl)
+      return `${parsed.origin}${parsed.pathname}`
+    } catch {
+      return profileUrl
+    }
+  })()
   const isActive = captureJob ? ACTIVE_CAPTURE_STATUSES.has(captureJob.status) : false
   const completed = captureJob?.status === 'completed'
   const captureProgress = captureJob?.progress
@@ -55,21 +64,25 @@ export function CreatorStartPage({
   return (
     <section className="creator-start-page">
       <div className="creator-start-hero">
-        <h1>导入你的账号</h1>
+        <h1>{xhsCreatorProfile ? '更新账号笔记' : '导入你的账号'}</h1>
         <form className="creator-url-form" onSubmit={onSubmit}>
-          <label htmlFor="xhs-profile-url">小红书用户主页 URL</label>
+          {hasSavedProfileUrl
+            ? <label>已记录的小红书主页</label>
+            : <label htmlFor="xhs-profile-url">{xhsCreatorProfile ? '补充小红书用户主页 URL' : '小红书用户主页 URL'}</label>}
           <div>
-            <input
-              id="xhs-profile-url"
-              type="url"
-              value={profileUrl}
-              placeholder="https://www.xiaohongshu.com/user/profile/..."
-              onChange={(event) => onProfileUrlChange(event.target.value)}
-              disabled={submitting || isActive}
-              required
-            />
+            {hasSavedProfileUrl
+              ? <span className="creator-linked-url" title={visibleProfileUrl}>{visibleProfileUrl}</span>
+              : <input
+                  id="xhs-profile-url"
+                  type="url"
+                  value={profileUrl}
+                  placeholder="https://www.xiaohongshu.com/user/profile/..."
+                  onChange={(event) => onProfileUrlChange(event.target.value)}
+                  disabled={submitting || isActive}
+                  required
+                />}
             <button type="submit" className="primary" disabled={submitting || isActive}>
-              {isActive ? '正在导入' : '开始导入'}
+              {isActive ? '正在导入' : hasSavedProfileUrl ? '继续读取' : '开始导入'}
             </button>
           </div>
         </form>

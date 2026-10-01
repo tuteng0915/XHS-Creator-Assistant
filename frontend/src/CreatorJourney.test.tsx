@@ -4,9 +4,10 @@ import App from './App'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState({}, '', '/') })
 
-function setup(withSimulation = false) {
+function setup(withSimulation = false, withSavedUrl = false) {
   window.history.replaceState({}, '', '/')
   const workspaces = ['甲', '乙'].map((name, index) => ({ id: `account-${index}`, name,
+    profileUrl: withSavedUrl && index === 0 ? 'https://xhslink.cn/m/saved-profile' : null,
     accountPositioning: '', positioningVersion: 1, currentTopicId: null, createdAt: '', updatedAt: '' }))
   const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const url = String(input)
@@ -17,6 +18,11 @@ function setup(withSimulation = false) {
     if (withSimulation && url === '/api/simulation-runs/simulation') return Response.json({...simulation, status: 'completed'})
     if (init?.method === 'POST' && url.endsWith('/analysis-runs')) {
       return new Response(JSON.stringify({ detail: '测试停止于执行前' }), { status: 422 })
+    }
+    if (init?.method === 'POST' && url.endsWith('/xhs-capture-jobs')) {
+      return Response.json({ id: 'capture-job', workspaceId: 'account-0', status: 'completed',
+        profileUrl: 'https://xhslink.cn/m/saved-profile', resolvedUrl: '',
+        noteLimit: 20, includeComments: true, statusMessage: '读取完成', error: '' })
     }
     if (url === '/api/workspaces') return Response.json(workspaces)
     const workspace = workspaces.find((item) => url.startsWith(`/api/workspaces/${item.id}`))
@@ -38,6 +44,18 @@ function setup(withSimulation = false) {
 }
 
 describe('public creator journey', () => {
+  it('uses the recorded account URL when reading more notes', async () => {
+    const fetchMock = setup(false, true)
+    await screen.findByText('甲的笔记')
+    fireEvent.click(screen.getByRole('button', { name: '抓取更多笔记' }))
+    expect(screen.queryByRole('textbox', { name: /小红书用户主页 URL/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '继续读取' }))
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/xhs-capture-jobs') && init?.method === 'POST')
+      expect(JSON.parse(String(call?.[1]?.body)).profileUrl).toBe('https://xhslink.cn/m/saved-profile')
+    })
+  })
   it('sends manual note IDs and clears the selection when switching accounts', async () => {
     const fetchMock = setup()
     await screen.findByText('甲的笔记')

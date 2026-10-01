@@ -11,6 +11,7 @@ export type SourceMaterialType = InputAssetType
 export interface Workspace {
   id: string
   name: string
+  profileUrl?: string | null
   accountPositioning: string
   positioningVersion: number
   currentTopicId: string | null

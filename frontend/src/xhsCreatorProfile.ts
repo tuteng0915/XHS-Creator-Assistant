@@ -31,6 +31,21 @@ export type XhsImportPackagePreview = XhsCreatorProfileSummary & {
 
 const IMAGE_FILE_PATTERN = /\.(jpe?g|png|webp)$/i
 
+export function xhsCreatorProfileUrlFromAsset(asset?: TextInputAsset | null): string {
+  if (!asset) return ''
+  try {
+    const source = JSON.parse(asset.content).source
+    const value = typeof source?.profileUrl === 'string' ? source.profileUrl.trim() : ''
+    const url = new URL(value)
+    if (url.protocol !== 'https:') return ''
+    if (url.hostname === 'xhslink.cn' ||
+      (url.hostname === 'www.xiaohongshu.com' && url.pathname.startsWith('/user/profile/'))) {
+      return value
+    }
+  } catch { /* Older offline profiles may not have a saved URL. */ }
+  return ''
+}
+
 export function summarizeXhsCreatorProfileContent(
   content: string,
 ): XhsCreatorProfileSummary | null {

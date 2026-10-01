@@ -211,6 +211,10 @@ nav a.active, nav button.active { color: var(--blue); background: var(--blue-sof
 .creator-url-form { margin-top: 24px; }
 .creator-url-form label { display: block; margin-bottom: 7px; font-size: 12.5px; font-weight: 800; }
 .creator-url-form > div { display: grid; grid-template-columns: minmax(0, 1fr) 132px; gap: 10px; }
+.creator-linked-url {
+  min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px;
+  background: #fff; color: var(--sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .creator-url-form .primary { min-height: 42px; }
 .creator-import-note { margin-bottom: 0; font-size: 11.5px; }
 .creator-import-error { color: #b91c1c !important; }

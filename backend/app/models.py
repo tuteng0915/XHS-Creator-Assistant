@@ -37,6 +37,7 @@ class WorkspaceUpdate(APIModel):
 class WorkspaceResponse(APIModel):
     id: str
     name: str
+    profile_url: str | None = None
     account_positioning: str
     positioning_version: int
     current_topic_id: str | None = None

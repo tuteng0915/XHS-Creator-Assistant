@@ -1,8 +1,10 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CreatorStartPage } from './CreatorStartPage'
 import type { TextInputAsset, Workspace, XhsCaptureJob } from '../types'
+
+afterEach(cleanup)
 
 const workspace: Workspace = {
   id: 'workspace-1',
@@ -35,13 +37,17 @@ const profile: TextInputAsset = {
   updatedAt: '2026-09-23T10:00:00Z',
 }
 
-function renderPage(captureJob: XhsCaptureJob | null = null) {
+function renderPage(
+  captureJob: XhsCaptureJob | null = null,
+  currentProfile: TextInputAsset | null = profile,
+  profileUrl = 'https://www.xiaohongshu.com/user/profile/test-user',
+) {
   const onSubmit = vi.fn((event) => event.preventDefault())
   const { container } = render(
     <CreatorStartPage
       workspace={workspace}
-      xhsCreatorProfile={profile}
-      profileUrl="https://www.xiaohongshu.com/user/profile/test-user"
+      xhsCreatorProfile={currentProfile}
+      profileUrl={profileUrl}
       captureJob={captureJob}
       submitting={false}
       error=""
@@ -55,13 +61,25 @@ function renderPage(captureJob: XhsCaptureJob | null = null) {
 }
 
 describe('CreatorStartPage', () => {
-  it('submits a creator profile URL and summarizes existing material', () => {
+  it('reuses the saved URL without asking for it again', () => {
     const { onSubmit } = renderPage()
 
     expect(screen.getByText('账号：QSheep')).toBeInTheDocument()
     expect(screen.getByText('笔记：1')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '开始导入' }))
+    expect(screen.queryByRole('textbox', { name: /小红书用户主页 URL/ })).not.toBeInTheDocument()
+    expect(screen.getByText('https://www.xiaohongshu.com/user/profile/test-user')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '继续读取' }))
     expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks for a URL only when no account URL was recorded', () => {
+    renderPage(null, profile, '')
+    expect(screen.getByRole('textbox', { name: '补充小红书用户主页 URL' })).toBeRequired()
+  })
+
+  it('keeps the URL field for a newly added account', () => {
+    renderPage(null, null, '')
+    expect(screen.getByRole('textbox', { name: '小红书用户主页 URL' })).toBeRequired()
   })
 
   it('shows the browser login instruction for a waiting job', () => {
