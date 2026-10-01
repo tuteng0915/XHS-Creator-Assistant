@@ -15,7 +15,7 @@ from app.services.audience_examples import ANALYSIS_EXAMPLES, REACTION_EXAMPLES
 
 PROMPT_PROFILE = """你是创作者账号分析师。先帮助创作者认识现有账号，再把可能的创作方向留给后续选题步骤。
 原始笔记是证据；账号定位摘要是背景，不是作者经历的证据。只分析输入中的笔记，不引用未选中的笔记，不把评论者经历当作作者经历。
-accountPortrait 是面向用户的证据化画像：summary 是一句话定位；recurringThemes 是反复出现的内容方向；readerValue 是笔记为读者提供的价值；expressionPatterns 是表达习惯。每条 statement 必须有 evidence，填写输入中真实的 note_id 和从该笔记标题或正文逐字截取的短句。引用要真正支持 statement，不能用无关原文凑数。证据不足时减少结论；没有 note_id 时 accountPortrait 返回 null。
+accountPortrait 是面向用户的证据化画像：summary 是一句话定位；recurringThemes 是反复出现的内容方向，每项至少引用两条不同笔记，否则不要写；readerValue 是笔记为读者提供的价值；expressionPatterns 是表达习惯。每条 statement 必须有 evidence，填写输入中真实的 note_id 和从该笔记标题或正文逐字截取的短句。引用要真正支持 statement，不能用无关原文凑数。证据不足时减少结论；没有 note_id 时 accountPortrait 返回 null。
 主动寻找例外：若某条画像并不适用于另一条已选笔记，在该 claim 的 counterexamples 中引用那条笔记的 note_id 和原文短句；不要为了凑反例而虚构或引用未选笔记。没有明确例外时返回空数组。反例不推翻所有观察，但要帮助创作者看见账号并非只有一种方向。
 只有输入明确提供“可比较的前后发布时间组”时才填写 recentChange，否则设为 null。recentChange 只比较前后两组的选题或表达方式，evidence 至少各引用一条前期和后期笔记。日期缺失、跨度太短或组别不足时不要猜；累计互动数不能用来证明账号在增长或退步。
 保留原有字段供下游选题使用：pillars 每条不超过 10 字；titleFormulas 的 examples 尽量使用真实标题；voiceFingerprint 不要虚构作者人格。contrast 只描述所选笔记的可见互动差异；缺少可比笔记时返回空对象。赞、藏、评、分享不是曝光率，不得据此推断点击率、搜索流量或推荐原因。winFactors、loseFactors 是待验证解释，不能写成已证实的因果规律；小样本时允许留空。
@@ -326,10 +326,11 @@ class ModelCallService:
     ) -> tuple[str, str]:
         positioning = str(context.get("positioning", ""))
         if operation == ModelOperation.AUDIENCE_ANALYSIS:
-            return ("""你是创作者受众研究员。根据已提供笔记及评论，提取有原文依据的阅读需求视角。
+            return ("""你是创作者受众研究员。只根据已提供的笔记标题、正文和评论，提取有原文依据的阅读需求视角；不要分析或猜测图片内容。
 视角可以重叠，不是互斥的人口分群；不输出粉丝比例或 estimatedPercent。通常 3~8 组，证据不足时更少。
 不要根据单条评论编造年龄、收入、性别等身份。没有评论时只做内容推断，不能称为真实受众观察。
-先辨认评论明确表达的需求、约束与不同态度，再归并为视角，不先编人设后找引文。unknowns 列出不能确定的重要属性。
+先从每条笔记的标题和正文辨认它服务的具体问题、预设知识、表达方式和可能适合的阅读任务；这只能说明内容可能面向谁，不能证明谁实际读了或喜欢它。然后辨认评论明确表达的需求、约束与不同态度。把两类线索交叉归并，允许有笔记原文支持、但没有评论佐证的潜在阅读视角；不要因其沉默而忽略，也不要称其为真实粉丝。
+分组名称要描述阅读需求，不给人贴确定身份标签。不先编人设后找引文。每组 profile、coreConcern、contentPreference 必须与本组证据相符；只有笔记依据时用“可能需要／可能关注”等推断语气，不能写成评论者已表达的事实。即使评论询问房源、价格、学校或流程，也只能确认其提出了问题，不能据此断言其已入学、预算紧张、正在购买或处于某决策阶段；这些身份与处境若非评论直接陈述，就写进 unknowns。unknowns 列出不能确定的重要属性。
 同一评论可以支持多个需求，同一需求可以包含不同态度；模糊短评不强行细分。不要输出模型编造的历史案例。
 每组 evidenceRefs 至少一项，必须使用输入的 noteId；评论证据还必须使用对应 commentId。
 sourceType=comment 表示评论直接表达，sourceType=note 表示从笔记推断（commentId 为 null）。

@@ -83,6 +83,41 @@ def test_load_mediacrawler_export_preserves_notes_comments_and_cover(tmp_path: P
     assert export.comments[0].content == "真诚有勇气。"
 
 
+def test_load_mediacrawler_export_deduplicates_repeated_notes_and_comments(
+    tmp_path: Path,
+):
+    module = load_fixture_module()
+    base = tmp_path / "creator" / "xhs"
+    write_jsonl(
+        base / "jsonl" / "creator_contents_2026-10-01.jsonl",
+        [
+            {"note_id": "n1", "title": "第一篇", "desc": "原始正文"},
+            {"note_id": "n2", "title": "第二篇", "desc": "另一段正文"},
+            {"note_id": "n1", "title": "第一篇", "desc": "重复行不应覆盖原文"},
+        ],
+    )
+    write_jsonl(
+        base / "jsonl" / "creator_comments_2026-10-01.jsonl",
+        [
+            {"note_id": "n1", "comment_id": "c1", "content": "请解释一下"},
+            {"note_id": "n1", "comment_id": "c1", "content": "重复评论不应覆盖原文"},
+            {"note_id": "n2", "comment_id": "c1", "content": "另一篇下的评论"},
+        ],
+    )
+
+    export = module.load_mediacrawler_export(tmp_path / "creator", code="creator")
+    payload = module.build_xhs_creator_profile_payload(export)
+
+    assert [note.note_id for note in export.notes] == ["n1", "n2"]
+    assert [comment.content for comment in export.comments] == [
+        "请解释一下", "另一篇下的评论",
+    ]
+    assert len(payload["notes"]) == 2
+    assert [note["comments"][0]["content"] for note in payload["notes"]] == [
+        "请解释一下", "另一篇下的评论",
+    ]
+
+
 def test_fixture_markdown_outputs_agent_readable_context(tmp_path: Path):
     module = load_fixture_module()
     base = tmp_path / "_tt" / "xhs"

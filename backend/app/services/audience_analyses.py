@@ -31,6 +31,7 @@ class AudienceAnalysisCreate(APIModel):
 
 class AudienceGroup(FanDefinition):
     id: str = Field(min_length=1)
+    evidence_basis: Literal["comment_observed", "content_inferred", "mixed"] | None = None
     estimated_percent: float | None = Field(default=None, ge=0, le=100)
     evidence: list[str] = Field(default_factory=list)
     evidence_refs: list[AudienceEvidence] = Field(default_factory=list)
@@ -52,6 +53,12 @@ class AudienceResult(APIModel):
     def grounded_result(self, context: dict) -> dict:
         for group in self.groups:
             validate_evidence(group.evidence_refs, context)
+            source_types = {ref.source_type for ref in group.evidence_refs}
+            group.evidence_basis = (
+                "mixed" if source_types == {"note", "comment"}
+                else "comment_observed" if "comment" in source_types
+                else "content_inferred"
+            )
             group.evidence = list(dict.fromkeys(ref.quote for ref in group.evidence_refs))
             # Never accept model-authored historical examples, even when well formed.
             group.observed_episodes = [ObservedEpisode.model_validate(e)
@@ -59,10 +66,16 @@ class AudienceResult(APIModel):
             # Never expose uncalibrated model-generated population estimates in new runs.
             group.estimated_percent = None
         self.groups.sort(key=lambda g: (
-            len({(r.note_id, r.comment_id) for r in g.evidence_refs if r.source_type == "comment"}),
+            g.evidence_basis == "mixed",
             len({r.note_id for r in g.evidence_refs}),
+            len({(r.note_id, r.comment_id) for r in g.evidence_refs if r.source_type == "comment"}),
         ), reverse=True)
         result = self.model_dump(mode="json", by_alias=True)
+        if not any(g.evidence_basis != "content_inferred" for g in self.groups):
+            result["summary"] = (
+                f"从笔记内容推断出 {len(self.groups)} 个潜在阅读视角，尚无评论直接佐证。"
+            )
+            result["limitations"] += " 这些视角反映内容可能面向的读者，不代表实际粉丝构成。"
         result.update(method="evidence_grounded_v1", sampling=context["sampling"],
                       methodVersion=AUDIENCE_METHOD_VERSION)
         return result

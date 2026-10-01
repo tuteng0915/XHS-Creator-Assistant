@@ -241,6 +241,10 @@ describe('xhsCaptureApi', () => {
       noteLimit: 20,
       includeComments: true,
       statusMessage: '正在准备导入任务',
+      progress: {
+        phase: 'starting', capturedNotes: 0, capturedComments: 0,
+        commentNotesCompleted: 0, commentNotesTotal: null,
+      },
       error: '',
       resultInputAssetId: null,
       createdAt: '2026-09-23T10:00:00Z',

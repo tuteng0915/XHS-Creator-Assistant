@@ -73,6 +73,26 @@ def load_mediacrawler_export(base_dir: Path, *, code: str) -> XhsMediaCrawlerExp
         if comments_path is not None
         else []
     )
+    unique_notes: list[XhsMediaCrawlerNote] = []
+    seen_note_ids: set[str] = set()
+    for note in notes:
+        if not note.note_id or not note.title or note.note_id in seen_note_ids:
+            continue
+        seen_note_ids.add(note.note_id)
+        unique_notes.append(note)
+
+    unique_comments: list[XhsMediaCrawlerComment] = []
+    seen_comment_ids: set[tuple[str, str]] = set()
+    for comment in comments:
+        if not comment.note_id or not (comment.content or comment.comment_id):
+            continue
+        if comment.comment_id:
+            key = (comment.note_id, comment.comment_id)
+            if key in seen_comment_ids:
+                continue
+            seen_comment_ids.add(key)
+        unique_comments.append(comment)
+
     return XhsMediaCrawlerExport(
         creator_metrics=json.loads(
             (base_dir / "creator_metrics.json").read_text(encoding="utf-8")
@@ -81,12 +101,8 @@ def load_mediacrawler_export(base_dir: Path, *, code: str) -> XhsMediaCrawlerExp
         else {},
         code=code,
         base_dir=xhs_dir,
-        notes=[note for note in notes if note.note_id and note.title],
-        comments=[
-            comment
-            for comment in comments
-            if comment.note_id and (comment.content or comment.comment_id)
-        ],
+        notes=unique_notes,
+        comments=unique_comments,
     )
 
 

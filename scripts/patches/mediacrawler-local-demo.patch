@@ -41,10 +41,83 @@ index 28a852e..089e414 100644
  # 是否禁用 SSL 证书验证。仅在使用企业代理、Burp Suite、mitmproxy 等会注入自签名证书的中间人代理时设为 True。
  # 警告：禁用 SSL 验证将使所有流量暴露于中间人攻击风险，请勿在生产环境中开启。
 diff --git a/media_platform/xhs/core.py b/media_platform/xhs/core.py
-index 2dc64e9..8265313 100644
+index 2dc64e9..9624c1d 100644
 --- a/media_platform/xhs/core.py
 +++ b/media_platform/xhs/core.py
-@@ -485,7 +485,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
+@@ -48,6 +48,7 @@ from .exception import (
+     NoteNotFoundError,
+     PlatformAccessError,
+ )
++from .extractor import CreatorStateParseError
+ from .field import SearchSortType
+ from .help import parse_note_info_from_note_url, parse_creator_info_from_url, get_search_id
+ from .login import XiaoHongShuLogin
+@@ -193,31 +194,38 @@ class XiaoHongShuCrawler(AbstractCrawler):
+     async def get_creators_and_notes(self) -> None:
+         """Get creator's notes and retrieve their comment information."""
+         utils.logger.info("[XiaoHongShuCrawler.get_creators_and_notes] Begin get Xiaohongshu creators")
++        processed_creators = 0
+         for creator_url in config.XHS_CREATOR_ID_LIST:
+             try:
+                 # Parse creator URL to get user_id and security tokens
+                 creator_info: CreatorUrlInfo = parse_creator_info_from_url(creator_url)
+-                utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Parse creator URL info: {creator_info}")
+-                user_id = creator_info.user_id
+-
++            except ValueError:
++                utils.logger.error("[XiaoHongShuCrawler.get_creators_and_notes] Invalid creator URL")
++                continue
++            user_id = creator_info.user_id
++            utils.logger.info(f"[XiaoHongShuCrawler.get_creators_and_notes] Parsed creator user ID: {user_id}")
++            try:
+                 # get creator detail info from web html content
+                 createor_info: Dict = await self.xhs_client.get_creator_info(
+                     user_id=user_id,
+                     xsec_token=creator_info.xsec_token,
+                     xsec_source=creator_info.xsec_source
+                 )
+-                if createor_info:
+-                    await xhs_store.save_creator(user_id, creator=createor_info)
+-            except ValueError as e:
+-                utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Failed to parse creator URL: {e}")
++            except CreatorStateParseError as e:
++                utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] Creator homepage state parse failed: {e}")
+                 continue
+             except (IPBlockError, PlatformAccessError) as e:
+                 # Access restricted on the creator homepage, skip this creator instead of crashing the run.
+                 utils.logger.error(
+-                    f"[XiaoHongShuCrawler.get_creators_and_notes] Access restricted for creator {creator_url}: {e}. "
++                    f"[XiaoHongShuCrawler.get_creators_and_notes] Access restricted for creator {user_id}: {type(e).__name__}. "
+                     f"建议降低采集频率、更换 IP 或检查账号状态"
+                 )
+                 continue
++            if not createor_info:
++                utils.logger.error(f"[XiaoHongShuCrawler.get_creators_and_notes] No creator data for {user_id}")
++                continue
++            await xhs_store.save_creator(user_id, creator=createor_info)
++            processed_creators += 1
+ 
+             # Use fixed crawling interval
+             crawl_interval = config.CRAWLER_MAX_SLEEP_SEC
+@@ -236,6 +244,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
+                 note_ids.append(note_item.get("note_id"))
+                 xsec_tokens.append(note_item.get("xsec_token"))
+             await self.batch_get_note_comments(note_ids, xsec_tokens)
++        if not processed_creators:
++            raise RuntimeError("No creator homepage was processed successfully")
+ 
+     async def fetch_creator_notes_detail(self, note_list: List[Dict]):
+         """Concurrently obtain the specified post list and save the data"""
+@@ -243,7 +253,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
+         task_list = [
+             self.get_note_detail_async_task(
+                 note_id=post_item.get("note_id"),
+-                xsec_source=post_item.get("xsec_source"),
++                xsec_source=post_item.get("xsec_source") or "pc_user",
+                 xsec_token=post_item.get("xsec_token"),
+                 semaphore=semaphore,
+             ) for post_item in note_list
+@@ -485,7 +495,6 @@ class XiaoHongShuCrawler(AbstractCrawler):
              utils.logger.info(f"[XiaoHongShuCrawler.get_notice_media] Crawling image mode is not enabled")
              return
          await self.get_note_images(note_detail)
@@ -52,7 +125,7 @@ index 2dc64e9..8265313 100644
  
      async def get_note_images(self, note_item: Dict):
          """Get note images. Please use get_notice_media
-@@ -505,7 +504,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
+@@ -505,7 +514,7 @@ class XiaoHongShuCrawler(AbstractCrawler):
          if not image_list:
              return
          picNum = 0
@@ -61,3 +134,226 @@ index 2dc64e9..8265313 100644
              url = pic.get("url")
              if not url:
                  continue
+diff --git a/media_platform/xhs/extractor.py b/media_platform/xhs/extractor.py
+index 044baf5..d755a8d 100644
+--- a/media_platform/xhs/extractor.py
++++ b/media_platform/xhs/extractor.py
+@@ -24,6 +24,54 @@ from typing import Dict, Optional
+ import humps
+ 
+ 
++class CreatorStateParseError(ValueError):
++    """The homepage loaded, but its embedded creator state was not usable."""
++
++
++def _replace_non_json_values(source: str) -> str:
++    """Convert known JS-only empty values without touching quoted text."""
++    output = []
++    quote = None
++    escaped = False
++    previous = ""
++    index = 0
++    while index < len(source):
++        char = source[index]
++        if quote:
++            output.append(char)
++            if escaped:
++                escaped = False
++            elif char == "\\":
++                escaped = True
++            elif char == quote:
++                quote = None
++        elif char in ('"', "'"):
++            quote = char
++            output.append(char)
++        elif (
++            previous and previous in ":[,"
++            and source.startswith("undefined", index)
++            and (index + 9 == len(source) or not (source[index + 9].isalnum() or source[index + 9] == "_"))
++        ):
++            output.append("null")
++            previous = "l"
++            index += 9
++            continue
++        elif previous and previous in ":[," and (match := re.match(
++            r"new\s+Set\s*\(\s*\[\s*\]\s*\)", source[index:]
++        )):
++            output.append("[]")
++            previous = "]"
++            index += match.end()
++            continue
++        else:
++            output.append(char)
++        if not char.isspace():
++            previous = char
++        index += 1
++    return "".join(output)
++
++
+ class XiaoHongShuExtractor:
+     def __init__(self):
+         pass
+@@ -59,11 +107,22 @@ class XiaoHongShuExtractor:
+             Dict: User information dictionary
+         """
+         match = re.search(
+-            r"<script>window.__INITIAL_STATE__=(.+)<\/script>", html, re.M
++            r"<script\b[^>]*>\s*window\.__INITIAL_STATE__\s*=\s*(.*?)</script\s*>",
++            html,
++            re.I | re.S,
+         )
+         if match is None:
+             return None
+-        info = json.loads(match.group(1).replace(":undefined", ":null"), strict=False)
+-        if info is None:
+-            return None
+-        return info.get("user").get("userPageData")
++        state = match.group(1).strip().removesuffix(";").strip()
++        try:
++            info = json.loads(_replace_non_json_values(state), strict=False)
++        except json.JSONDecodeError as exc:
++            raise CreatorStateParseError(
++                f"homepage state JSON is invalid at position {exc.pos}"
++            ) from exc
++        if not isinstance(info, dict) or not isinstance(info.get("user"), dict):
++            raise CreatorStateParseError("homepage state has no user object")
++        creator = info["user"].get("userPageData")
++        if not isinstance(creator, dict):
++            raise CreatorStateParseError("homepage state has no creator data")
++        return creator
+diff --git a/store/xhs/__init__.py b/store/xhs/__init__.py
+index 5ef8e3c..5e9c784 100644
+--- a/store/xhs/__init__.py
++++ b/store/xhs/__init__.py
+@@ -95,6 +95,7 @@ async def update_xhs_note(note_item: Dict):
+ 
+     """
+     note_id = note_item.get("note_id")
++    note_xsec_source = note_item.get("xsec_source") or "pc_search"
+     user_info = note_item.get("user", {})
+     interact_info = note_item.get("interact_info", {})
+     image_list: List[Dict] = note_item.get("image_list", [])
+@@ -123,7 +124,7 @@ async def update_xhs_note(note_item: Dict):
+         "image_list": ','.join([img.get('url', '') for img in image_list]),  # Image URLs
+         "tag_list": ','.join([tag.get('name', '') for tag in tag_list if tag.get('type') == 'topic']),  # Tags
+         "last_modify_ts": utils.get_current_timestamp(),  # Last modification timestamp (Generated by MediaCrawler, mainly used to record the latest update time of a record in DB storage)
+-        "note_url": f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={note_item.get('xsec_token')}&xsec_source=pc_search",  # Note URL
++        "note_url": f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={note_item.get('xsec_token')}&xsec_source={note_xsec_source}",  # Note URL
+         "source_keyword": source_keyword_var.get(),  # Search keyword
+         "xsec_token": note_item.get("xsec_token"),  # xsec_token
+     }
+diff --git a/tools/cdp_browser.py b/tools/cdp_browser.py
+index bc5a76c..4ae4002 100644
+--- a/tools/cdp_browser.py
++++ b/tools/cdp_browser.py
+@@ -290,7 +290,9 @@ class CDPBrowserManager:
+         Get browser WebSocket connection URL
+         """
+         try:
+-            async with httpx.AsyncClient() as client:
++            # CDP is a loopback control channel, never an external HTTP request.
++            # Ambient proxy settings can otherwise return 502 for localhost.
++            async with httpx.AsyncClient(trust_env=False) as client:
+                 response = await client.get(
+                     f"http://localhost:{debug_port}/json/version", timeout=10
+                 )
+diff --git a/tests/test_xhs_creator_state_parser.py b/tests/test_xhs_creator_state_parser.py
+new file mode 100644
+index 0000000..b06d494
+--- /dev/null
++++ b/tests/test_xhs_creator_state_parser.py
+@@ -0,0 +1,94 @@
++"""Offline regression checks for the creator homepage HTML adapter."""
++
++from unittest.mock import AsyncMock
++
++import pytest
++
++import config
++from media_platform.xhs.core import XiaoHongShuCrawler
++from media_platform.xhs.extractor import CreatorStateParseError, XiaoHongShuExtractor
++from store import xhs as xhs_store
++
++
++def test_creator_state_accepts_bare_undefined_without_changing_strings():
++    html = (
++        '<script>window.__INITIAL_STATE__={"user":{"userPageData":'
++        '{"basicInfo":{"nickname":"中文账号"}}},"extras":'
++        '[undefined, {"value": undefined, "literal":"undefined",'
++        '"emptySet":new Set([]),"setLiteral":"new Set([])"}]};</script>'
++        '<script>window.other={"secret":"not part of creator state"}</script>'
++    )
++
++    creator = XiaoHongShuExtractor().extract_creator_info_from_html(html)
++
++    assert creator["basicInfo"]["nickname"] == "中文账号"
++
++
++def test_creator_state_does_not_guess_how_to_convert_nonempty_sets():
++    html = (
++        '<script>window.__INITIAL_STATE__={"user":{"userPageData":'
++        '{"items":new Set(["private-value"])}}}</script>'
++    )
++
++    with pytest.raises(CreatorStateParseError, match="position") as error:
++        XiaoHongShuExtractor().extract_creator_info_from_html(html)
++
++    assert "private-value" not in str(error.value)
++
++
++def test_creator_state_failure_reports_position_without_response_content():
++    html = (
++        '<script>window.__INITIAL_STATE__={"user":{"userPageData":'
++        '{"secret":"private-session", "bad": broken}}}</script>'
++    )
++
++    with pytest.raises(CreatorStateParseError, match="position") as error:
++        XiaoHongShuExtractor().extract_creator_info_from_html(html)
++
++    assert "private-session" not in str(error.value)
++    assert "broken" not in str(error.value)
++
++
++@pytest.mark.asyncio
++async def test_creator_note_detail_uses_profile_source_when_list_omits_it():
++    crawler = XiaoHongShuCrawler()
++    crawler.get_note_detail_async_task = AsyncMock(return_value=None)
++
++    await crawler.fetch_creator_notes_detail([{"note_id": "n1", "xsec_token": "token"}])
++
++    assert crawler.get_note_detail_async_task.await_args.kwargs["xsec_source"] == "pc_user"
++
++
++@pytest.mark.asyncio
++async def test_saved_note_url_keeps_its_actual_source(monkeypatch):
++    store = AsyncMock()
++    monkeypatch.setattr(xhs_store.XhsStoreFactory, "create_store", lambda: store)
++
++    await xhs_store.update_xhs_note({
++        "note_id": "n1", "desc": "测试正文", "xsec_token": "token",
++        "xsec_source": "pc_user", "user": {}, "interact_info": {},
++    })
++
++    saved = store.store_content.await_args.args[0]
++    assert saved["note_url"].endswith("xsec_source=pc_user")
++
++
++@pytest.mark.asyncio
++async def test_unusable_creator_state_is_not_a_successful_crawl(monkeypatch, caplog):
++    monkeypatch.setattr(
++        config,
++        "XHS_CREATOR_ID_LIST",
++        ["https://www.xiaohongshu.com/user/profile/test?xsec_token=private-token&xsec_source=app_share"],
++    )
++    crawler = XiaoHongShuCrawler()
++    crawler.xhs_client = AsyncMock()
++    crawler.xhs_client.get_creator_info.side_effect = CreatorStateParseError(
++        "homepage state JSON is invalid at position 42"
++    )
++
++    with pytest.raises(RuntimeError, match="No creator homepage was processed"):
++        await crawler.get_creators_and_notes()
++
++    crawler.xhs_client.get_all_notes_by_creator.assert_not_called()
++    assert "Creator homepage state parse failed" in caplog.text
++    assert "private-token" not in caplog.text

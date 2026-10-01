@@ -90,6 +90,7 @@ class PersonaDefinition(BaseModel):
     color: str = ""
     evidence: list[str] = Field(default_factory=list)
     evidenceRefs: list[AudienceEvidence] = Field(default_factory=list)
+    evidenceBasis: Literal["comment_observed", "content_inferred", "mixed"] | None = None
     evidenceStatus: Literal["verified", "legacy_unverified", "hypothesis"] = "hypothesis"
     limitations: str = ""
     unknowns: list[str] = Field(default_factory=list)

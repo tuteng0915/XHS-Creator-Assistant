@@ -15,6 +15,8 @@ type Portrait = {
 type Observation = {
   noteId: string
   title: string
+  publishedAt?: string | null
+  likesRankInSelection?: number | null
   metrics: { liked?: number | null; collected?: number | null; comments?: number | null; shares?: number | null }
 }
 type Observations = {
@@ -57,7 +59,9 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
     ['给读者的价值', portrait?.readerValue || []],
     ['表达特点', portrait?.expressionPatterns || []],
   ]
-  const validSections = sections.map(([title, claims]) => [title, claims.filter(claimHasEvidence)] as const)
+  const validSections = sections.map(([title, claims]) => [title, claims.filter(claim =>
+    claimHasEvidence(claim) && (title !== '主要内容方向' || new Set(claim.evidence.map(ref => ref.noteId)).size >= 2)
+  )] as const)
   const hasPortrait = claimHasEvidence(portrait?.summary) || validSections.some(([, claims]) => claims.length)
   const withLikes = observations.notes.filter(note => typeof note.metrics.liked === 'number')
     .sort((a, b) => (b.metrics.liked || 0) - (a.metrics.liked || 0))
@@ -93,7 +97,9 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
       {entries.map(note => <div key={note.noteId} className="account-performance-row">
         <button type="button" onClick={() => setOpenPerformanceNote(openPerformanceNote === note.noteId ? null : note.noteId)}
           aria-expanded={openPerformanceNote === note.noteId}>{note.title}</button>
-        <small>赞 {note.metrics.liked ?? '—'} · 藏 {note.metrics.collected ?? '—'} · 评 {note.metrics.comments ?? '—'}</small>
+        <small>{note.publishedAt ? `${new Date(note.publishedAt).toLocaleDateString('zh-CN')} · ` : '发布时间未知 · '}
+          赞 {note.metrics.liked ?? '—'} · 藏 {note.metrics.collected ?? '—'} · 评 {note.metrics.comments ?? '—'}
+          {note.likesRankInSelection ? ` · 本次点赞第 ${note.likesRankInSelection}` : ''}</small>
         {openPerformanceNote === note.noteId && selectable.has(note.noteId) && <div className="account-performance-note">
           <CreatorNoteBrowser notes={[selectable.get(note.noteId)!]} mediaAssets={mediaAssets} />
         </div>}
@@ -130,7 +136,7 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
     </section>
     {withLikes.length > 0 && <section className="account-performance">
       <h4>笔记表现</h4>
-      <p className="muted">仅按本次所选笔记的点赞数展示，不代表点击率或内容质量。</p>
+      <p className="muted">仅按本次所选笔记抓取时的累计点赞数展示。发布日期和累计时间可能不同，不能据此判断点击率、内容质量或变化趋势。</p>
       <div className="account-performance-grid">
         {renderPerformance('所选笔记中点赞较高', upper)}
         {renderPerformance('所选笔记中点赞较低', lower)}

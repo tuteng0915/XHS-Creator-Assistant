@@ -88,3 +88,18 @@ it('separates possible exceptions and dated content changes from performance cla
   expect(screen.getByText('可能的例外')).toBeInTheDocument()
   expect(screen.getByText('“分享申请方法”')).toBeInTheDocument()
 })
+
+it('does not present a single cited note as a recurring account theme in reopened results', () => {
+  const snapshotRun: AnalysisRun = { ...run, inputSnapshot: { xhsCreatorProfile: { notes: [
+    { noteId: 'n1', title: '唯一笔记', desc: '唯一正文', metrics: { liked: 5 }, comments: [] },
+  ] } } }
+  render(<StageResultRenderer stage={{key:'profile', n:'1', title:'账号画像', status:'completed', result:{
+    profile:{accountPortrait:{recurringThemes:[{statement:'经常讲这个方向',evidence:[{noteId:'n1',quote:'唯一正文'}]}]}},
+    observations:{schemaVersion:'xhs-account-observations/v1',coverage:{selectedCount:1,missingDateCount:1,capturedCommentCount:0,missingMetricCounts:{}},
+      notes:[{noteId:'n1',title:'唯一笔记',publishedAt:null,metrics:{liked:5}}]},
+  }}} currentRun={snapshotRun} onSaveGeneratedTopic={vi.fn()} onSelectTopic={vi.fn()}
+    onGenerateBrief={vi.fn()} onGenerateDraft={vi.fn()} onFillSimulationTopic={vi.fn()} />)
+  expect(screen.queryByText('经常讲这个方向')).not.toBeInTheDocument()
+  expect(screen.getByText(/没有可回溯到所选笔记原文的账号画像结论/)).toBeInTheDocument()
+  expect(screen.getByText(/发布日期和累计时间可能不同/)).toBeInTheDocument()
+})

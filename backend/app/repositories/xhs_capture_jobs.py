@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from uuid import uuid4
 
@@ -83,6 +84,7 @@ class XhsCaptureJobRepository:
         resolved_url: str | None = None,
         error: str | None = None,
         result_input_asset_id: str | None = None,
+        progress: dict | None = None,
         started: bool = False,
         completed: bool = False,
     ) -> dict:
@@ -95,6 +97,7 @@ class XhsCaptureJobRepository:
                 resolved_url = ?,
                 error = ?,
                 result_input_asset_id = ?,
+                progress_json = ?,
                 started_at = ?,
                 completed_at = ?,
                 updated_at = ?
@@ -110,6 +113,7 @@ class XhsCaptureJobRepository:
                     if result_input_asset_id is None
                     else result_input_asset_id
                 ),
+                current["progress_json"] if progress is None else json.dumps(progress),
                 current["started_at"] or (now if started else None),
                 now if completed else current["completed_at"],
                 now,
@@ -137,4 +141,5 @@ class XhsCaptureJobRepository:
     def _as_dict(row: sqlite3.Row) -> dict:
         result = dict(row)
         result["include_comments"] = bool(result["include_comments"])
+        result["progress"] = json.loads(result["progress_json"])
         return result

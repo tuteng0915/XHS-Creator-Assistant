@@ -23,7 +23,7 @@ it('shows all audience groups as saveable fan candidates without population esti
   render(<AudienceAnalysisPage workspaceId="w" analyses={[result]} selectedId="a" onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={simulate} />)
   expect(screen.getAllByRole('button', {name:'保存为模拟粉丝'})).toHaveLength(4)
   expect(screen.getByText('受众3')).toBeInTheDocument()
-  expect(screen.getByText(/非平台真实粉丝统计/)).toBeInTheDocument()
+  expect(screen.getByText(/不等于已确认的个人身份或真实粉丝构成/)).toBeInTheDocument()
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   expect(screen.queryByText('约 40%')).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button',{name:'选择选题进行模拟'}))
@@ -36,4 +36,11 @@ it('shows verified source references without population percentages', () => {
   expect(screen.getByText(/评论直接表达 · 笔记 n/)).toBeInTheDocument()
   expect(screen.getByText(/1 条笔记、1 条已采集评论/)).toBeInTheDocument()
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+})
+
+it('marks note-only views as content inference rather than observed commenters', () => {
+  const result: AudienceAnalysis = {id:'note-only',workspaceId:'w',sourceMaterialId:'p',status:'completed',error:'',createdAt:'2026-10-01',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:1}},result:{method:'evidence_grounded_v1',summary:'潜在阅读视角',groups:[{id:'g',name:'步骤阅读视角',profile:'可能需要步骤',coreConcern:'步骤',evidence:['申请步骤'],evidenceBasis:'content_inferred',evidenceRefs:[{noteId:'n',commentId:null,sourceType:'note',quote:'申请步骤'}]}]}}
+  render(<AudienceAnalysisPage workspaceId="w" analyses={[result]} selectedId="note-only" onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} />)
+  expect(screen.getByText('从笔记内容推断')).toBeInTheDocument()
+  expect(screen.queryByText('评论表达')).not.toBeInTheDocument()
 })

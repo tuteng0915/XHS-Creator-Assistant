@@ -218,6 +218,22 @@ nav a.active, nav button.active { color: var(--blue); background: var(--blue-sof
 .creator-capture-status > div:first-child { display: flex; flex-direction: column; gap: 4px; }
 .creator-capture-status span, .creator-capture-status small { color: var(--sub); font-size: 11.5px; }
 .creator-capture-status strong { font-size: 14px; }
+.creator-capture-progress {
+  position: relative; overflow: hidden; height: 8px; border-radius: 999px;
+  background: #dbeafe;
+}
+.creator-capture-progress > span {
+  display: block; height: 100%; border-radius: inherit; background: #2563eb;
+  transition: width 250ms ease;
+}
+.creator-capture-progress.indeterminate > span {
+  width: 34%; animation: creator-capture-scan 1.5s ease-in-out infinite alternate;
+}
+.creator-capture-counts { margin: 0; color: #475569; font-size: 12px; }
+@keyframes creator-capture-scan { from { transform: translateX(0); } to { transform: translateX(195%); } }
+@media (prefers-reduced-motion: reduce) {
+  .creator-capture-progress.indeterminate > span { animation: none; }
+}
 .creator-capture-status.completed { border-color: #bbf7d0; background: #f0fdf4; }
 .creator-capture-status.failed { border-color: #fecaca; background: #fef2f2; }
 .creator-capture-status pre {

@@ -194,11 +194,19 @@ def verified_portrait(
     for key in ("recurringThemes", "readerValue", "expressionPatterns"):
         values = portrait.get(key)
         limit = 4 if key == "recurringThemes" else 3
-        sections[key] = (
-            [claim for value in values[:limit] if (claim := verified_claim(value))]
+        claims = (
+            [claim for value in values[:20] if (claim := verified_claim(value))]
             if isinstance(values, list)
             else []
         )
+        if key == "recurringThemes":
+            # A single cited note is an example, not a recurring account direction.
+            claims = [
+                claim
+                for claim in claims
+                if len({ref["noteId"] for ref in claim["evidence"]}) >= 2
+            ]
+        sections[key] = claims[:limit]
     recent_change = verified_claim(portrait.get("recentChange"))
     if recent_change:
         earlier_ids = set((chronology or {}).get("earlier", {}).get("noteIds", []))

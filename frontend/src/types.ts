@@ -72,6 +72,14 @@ export type XhsCaptureJobStatus =
   | 'completed'
   | 'failed'
 
+export interface XhsCaptureProgress {
+  phase: 'starting' | 'login' | 'notes' | 'comments' | 'processing' | 'completed'
+  capturedNotes: number
+  capturedComments: number
+  commentNotesCompleted: number
+  commentNotesTotal: number | null
+}
+
 export interface XhsCaptureJob {
   id: string
   workspaceId: string
@@ -81,6 +89,7 @@ export interface XhsCaptureJob {
   noteLimit: number
   includeComments: boolean
   statusMessage: string
+  progress: XhsCaptureProgress
   error: string
   resultInputAssetId: string | null
   createdAt: string
@@ -467,6 +476,7 @@ export interface AudienceAnalysis {
     sampling?: { sentNotes: number; sentComments: number; availableComments: number };
     groups?: Array<{
       id: string; name: string; profile: string; coreConcern: string;
+      evidenceBasis?: 'comment_observed' | 'content_inferred' | 'mixed' | null;
       estimatedPercent?: number | null; evidence: string[];
       evidenceRefs?: Array<{noteId: string; commentId?: string | null; sourceType: 'note' | 'comment'; quote: string}>;
     }>;

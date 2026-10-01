@@ -184,8 +184,16 @@ def select_audience_personas(audience: dict, snapshot: dict | None = None) -> li
     if audience.get("method") != "evidence_grounded_v1":
         groups = sorted(groups, key=lambda g: g.get("estimatedPercent") or 0, reverse=True)
     selected = [
-        {**g, "limitations": audience.get("limitations", ""),
-         "evidenceStatus": "hypothesis" if audience.get("origin") == "curated_preset"
+        {**g, "limitations": audience.get("limitations", "")
+         + (" 引用仅核验原文存在，阅读视角和个人处境仍是待核对的模型推断。"
+            if g.get("evidenceBasis") else ""),
+         "evidenceStatus": "hypothesis" if (
+             audience.get("origin") == "curated_preset"
+             or bool(g.get("evidenceBasis"))
+             or (audience.get("method") == "evidence_grounded_v1"
+                 and g.get("evidenceRefs")
+                 and all(r.get("sourceType") == "note" for r in g["evidenceRefs"]))
+         )
          else "verified" if audience.get("method") == "evidence_grounded_v1"
          else "legacy_unverified"}
         for g in groups[:3]

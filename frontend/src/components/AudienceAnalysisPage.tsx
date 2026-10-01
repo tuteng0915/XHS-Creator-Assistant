@@ -4,6 +4,12 @@ import { ANALYSIS_SCOPE_LABELS, type AnalysisScope } from '../creatorNotes'
 import type { AudienceAnalysis, TextInputAsset } from '../types'
 import { CreatorDialog } from './CreatorDialog'
 
+const EVIDENCE_BASIS_LABELS: Record<string, string> = {
+  mixed: '笔记与评论',
+  comment_observed: '评论表达',
+  content_inferred: '从笔记内容推断',
+}
+
 export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId, onSelect, onRefresh, onSimulate, savedFanKeys = [], onFansChanged, loadError = ''}: {
   workspaceId: string; profile?: TextInputAsset; analyses: AudienceAnalysis[]; selectedId: string;
   onSelect: (id: string) => void; onRefresh: () => Promise<void>; onSimulate: () => void;
@@ -47,10 +53,10 @@ export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId
     </details>}
     {selected && ['completed', 'partially_completed'].includes(selected.status) && <>
       <p>{selected.result.summary}</p>
-      <p className="muted">有依据的阅读视角，可相互重叠；非平台真实粉丝统计。</p>
+      <p className="muted">这些是按阅读需求归纳的视角，不等于已确认的个人身份或真实粉丝构成；视角可以重叠。</p>
       {selected.result.sampling && <p className="muted">依据 {selected.result.sampling.sentNotes} 条笔记、{selected.result.sampling.sentComments} 条已采集评论。</p>}
       <div className="audience-groups">{selected.result.groups?.map(g => <article className="asset-detail-card" key={g.id}>
-        <div className="creator-page-head"><strong>{g.name}</strong></div>
+        <div className="creator-page-head"><strong>{g.name}</strong><span className="muted">{EVIDENCE_BASIS_LABELS[g.evidenceBasis || ''] || (g.evidenceRefs?.some(ref => ref.sourceType === 'comment') ? '评论表达' : g.evidenceRefs?.length ? '从笔记内容推断' : '历史结果')}</span></div>
         <p>{g.profile}</p><p>{g.coreConcern}</p><details><summary>依据</summary>
           {g.evidenceRefs?.length ? g.evidenceRefs.map((e,j) => <p key={j}>
             {e.sourceType === 'comment' ? '评论直接表达' : '从笔记推断'} · 笔记 {e.noteId}{e.commentId ? ` / 评论 ${e.commentId}` : ''}<br />{e.quote}

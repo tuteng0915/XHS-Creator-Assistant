@@ -9,6 +9,56 @@ from app.models import ModelCallResponse, SimulationRunCreate
 from app.services.audience_analyses import AudienceAnalysisCreate, AudienceAnalysisService
 
 
+def test_note_only_reader_view_persists_as_hypothesis_without_image_context(app):
+    wid = create_workspace(app)["id"]
+    source = send(app, "POST", f"/api/workspaces/{wid}/source-materials", json={
+        "type": "xhs_creator_profile", "name": "图文账号",
+        "content": json.dumps({
+            "schemaVersion": "xhs-creator-profile/v1",
+            "creator": {"displayName": "测试创作者"},
+            "notes": [{"noteId": "note-1", "title": "非应届申请步骤",
+                       "desc": "逐项核对材料和时间线", "coverMediaAssetId": "cover-1",
+                       "comments": []}],
+        }, ensure_ascii=False),
+    }).json()
+
+    class Model:
+        async def call_operation(self, operation, context):
+            assert context["notes"][0]["title"] == "非应届申请步骤"
+            assert context["notes"][0]["content"] == "逐项核对材料和时间线"
+            assert context["sampling"]["sentComments"] == 0
+            assert "coverMediaAssetId" not in context["notes"][0]
+            return ModelCallResponse(output={
+                "summary": "潜在阅读视角", "limitations": "没有评论样本",
+                "groups": [{"id": "steps", "name": "步骤需求", "profile": "可能需要申请步骤",
+                            "coreConcern": "时间线", "evidenceRefs": [
+                                {"noteId": "note-1", "commentId": None,
+                                 "sourceType": "note", "quote": "逐项核对材料和时间线"},
+                            ]}],
+            }, model_metadata={"model": "fake"})
+
+    service = app.state.audience_analysis_service
+    service.model_call_service = Model()
+
+    async def run():
+        created = service.create(wid, AudienceAnalysisCreate(source_material_id=source["id"]))
+        await asyncio.gather(*list(service.tasks.values()))
+        return created.id
+
+    run_id = asyncio.run(run())
+    saved = AudienceAnalysisService(service.database, Model()).get(run_id)
+    assert saved.status == "completed"
+    assert saved.result["groups"][0]["evidenceBasis"] == "content_inferred"
+    assert "尚无评论直接佐证" in saved.result["summary"]
+    fans = send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()
+    assert len(fans) == 1
+    assert fans[0]["original"]["evidenceStatus"] == "hypothesis"
+    simulation = app.state.simulation_service.create(wid, SimulationRunCreate(
+        manual_topic="申请材料怎么整理", simulated_fan_ids=[fans[0]["id"]],
+    ))
+    assert simulation.input_snapshot["audiencePersonas"][0]["evidenceStatus"] == "hypothesis"
+
+
 @pytest.mark.parametrize(
     "failure", ["quote", "source", "schema", "duplicate", "envelope", "provider"],
 )

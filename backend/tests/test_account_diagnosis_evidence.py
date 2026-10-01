@@ -67,14 +67,22 @@ def test_portrait_keeps_only_quotes_from_selected_note():
         "recurringThemes": [
             {"statement": "不相关引用", "evidence": [{"noteId": "n2", "quote": "中文正文甲"}]},
             {"statement": "未选中", "evidence": [{"noteId": "n3", "quote": "标题"}]},
-            {"statement": "有原文支持", "evidence": [{"noteId": "n2", "quote": "第二条"}]},
+            {"statement": "仅一条例子", "evidence": [{"noteId": "n2", "quote": "第二条"}]},
+            {"statement": "重复引用同一篇", "evidence": [
+                {"noteId": "n1", "quote": "第一条"},
+                {"noteId": "n1", "quote": "中文正文甲"},
+            ]},
+            {"statement": "有跨笔记依据", "evidence": [
+                {"noteId": "n1", "quote": "第一条"},
+                {"noteId": "n2", "quote": "第二条"},
+            ]},
         ],
         "readerValue": [],
         "expressionPatterns": [],
     }
     result = verified_portrait(portrait, selected_snapshot())
     assert result["summary"]["evidence"] == [{"noteId": "n1", "quote": "中文正文甲"}]
-    assert [claim["statement"] for claim in result["recurringThemes"]] == ["有原文支持"]
+    assert [claim["statement"] for claim in result["recurringThemes"]] == ["有跨笔记依据"]
     assert (
         verified_portrait({"summary": {"statement": "无依据", "evidence": []}}, selected_snapshot())
         is None

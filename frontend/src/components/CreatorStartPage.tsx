@@ -44,6 +44,13 @@ export function CreatorStartPage({
   const summary = xhsCreatorProfileSummaryFromAsset(xhsCreatorProfile || undefined)
   const isActive = captureJob ? ACTIVE_CAPTURE_STATUSES.has(captureJob.status) : false
   const completed = captureJob?.status === 'completed'
+  const captureProgress = captureJob?.progress
+  const commentTotal = captureProgress?.commentNotesTotal
+  const progressPercent = completed
+    ? 100
+    : captureProgress?.phase === 'comments' && commentTotal != null && commentTotal > 0
+      ? Math.min(100, Math.round(100 * captureProgress.commentNotesCompleted / commentTotal))
+      : null
 
   return (
     <section className="creator-start-page">
@@ -97,6 +104,27 @@ export function CreatorStartPage({
             {captureJob.noteLimit === 0 ? '读取全部可见笔记' : `最多读取 ${captureJob.noteLimit} 条笔记`}
             {captureJob.includeComments ? '，包含一级评论' : '，不读取评论'}
           </small>
+          <div
+            className={`creator-capture-progress ${progressPercent === null && isActive ? 'indeterminate' : ''}`}
+            role="progressbar"
+            aria-label={captureProgress?.phase === 'comments' ? '评论读取进度' : '账号导入进度'}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent ?? undefined}
+            aria-valuetext={captureProgress?.phase === 'comments' && commentTotal != null
+              ? `已完成 ${captureProgress.commentNotesCompleted}/${commentTotal} 个评论读取任务`
+              : progressPercent === null ? '正在读取，当前阶段总量未知' : `${progressPercent}%`}
+          >
+            <span style={progressPercent === null ? undefined : { width: `${progressPercent}%` }} />
+          </div>
+          {captureProgress && (captureProgress.capturedNotes > 0 || captureProgress.capturedComments > 0) && (
+            <p className="creator-capture-counts">
+              已读取 {captureProgress.capturedNotes} 条笔记
+              {captureJob.includeComments && ` · ${captureProgress.capturedComments} 条评论`}
+              {captureProgress.phase === 'comments' && commentTotal != null && commentTotal > 0 &&
+                ` · 已完成 ${captureProgress.commentNotesCompleted}/${commentTotal} 个评论读取任务`}
+            </p>
+          )}
           {captureJob.error && <details><summary>查看失败原因</summary><pre>{captureJob.error}</pre></details>}
           {captureJob.status === 'waiting_for_login' && (
             <p>请查看本机新打开的浏览器窗口，并使用小红书扫码完成登录。</p>

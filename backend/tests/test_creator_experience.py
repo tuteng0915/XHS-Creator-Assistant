@@ -165,7 +165,7 @@ def test_audience_persistence_scope_and_simulation_top_three(app):
     )
     assert [p["id"] for p in run.input_snapshot["audiencePersonas"]] == ["3", "2", "1"]
     assert all(p["estimatedPercent"] is None for p in run.input_snapshot["audiencePersonas"])
-    assert run.input_snapshot["audiencePersonas"][0]["evidenceStatus"] == "verified"
+    assert run.input_snapshot["audiencePersonas"][0]["evidenceStatus"] == "hypothesis"
     assert run.input_snapshot["simulationMethod"] == "audience_methods_v2"
     episodes = run.input_snapshot["audiencePersonas"][0]["observedEpisodes"]
     assert episodes[0]["noteExcerpt"] == "真实经历"

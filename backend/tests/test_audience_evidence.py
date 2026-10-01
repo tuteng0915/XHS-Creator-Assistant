@@ -32,6 +32,7 @@ def context():
     return audience_context({
         "creator": {"displayName": "甲", "profileText": "范围外的全局摘要"},
         "notes": [{"noteId": "n", "title": "申请经历", "desc": "真实正文",
+                   "coverMediaAssetId": "image-asset", "imageUrls": ["https://example.test/cover"],
                    "comments": [{"commentId": "c", "content": "具体费用多少？"}]}],
     })
 
@@ -46,6 +47,8 @@ def ref(**changes):
 def test_context_keeps_ids_and_sampling_not_unscoped_summary():
     data = context()
     assert "profileText" not in data["creator"]
+    assert "coverMediaAssetId" not in data["notes"][0]
+    assert "imageUrls" not in data["notes"][0]
     assert data["notes"][0]["comments"][0]["commentId"] == "c"
     assert data["sampling"]["sentComments"] == 1
     validate_evidence([ref()], data)
@@ -94,11 +97,46 @@ def test_grounded_result_clears_estimates_and_preserves_verified_refs():
     }).grounded_result(context())
     assert result["method"] == "evidence_grounded_v1"
     assert result["groups"][0]["estimatedPercent"] is None
+    assert result["groups"][0]["evidenceBasis"] == "comment_observed"
     assert result["groups"][0]["evidence"] == ["费用多少"]
     selected = select_audience_personas(result)[0]
     persona = PersonaDefinition.model_validate(selected).model_dump(by_alias=True)
     assert persona["evidenceRefs"][0]["commentId"] == "c"
-    assert persona["limitations"] == "样本少"
+    assert persona["evidenceStatus"] == "hypothesis"
+    assert "样本少" in persona["limitations"]
+    assert "待核对的模型推断" in persona["limitations"]
+
+
+def test_note_content_alone_can_form_an_explicitly_inferred_reader_view():
+    data = context()
+    data["notes"][0]["comments"] = []
+    result = AudienceResult.model_validate({
+        "summary": "真实粉丝都关注申请步骤", "limitations": "评论未采集",
+        "groups": [{
+            "id": "potential", "name": "申请步骤阅读视角",
+            "profile": "可能需要申请步骤", "coreConcern": "步骤是否完整",
+            "evidenceRefs": [{"noteId": "n", "commentId": None,
+                              "sourceType": "note", "quote": "申请经历"}],
+        }],
+    }).grounded_result(data)
+    assert result["groups"][0]["evidenceBasis"] == "content_inferred"
+    assert "潜在阅读视角" in result["summary"]
+    assert "实际粉丝构成" in result["limitations"]
+    assert select_audience_personas(result)[0]["evidenceStatus"] == "hypothesis"
+
+
+def test_mixed_note_and_comment_evidence_is_distinguished():
+    result = AudienceResult.model_validate({
+        "summary": "有两类证据", "limitations": "样本有限",
+        "groups": [{
+            "id": "mixed", "name": "步骤与费用", "profile": "关注步骤与费用",
+            "evidenceRefs": [ref().model_dump(by_alias=True),
+                             {"noteId": "n", "commentId": None,
+                              "sourceType": "note", "quote": "申请经历"}],
+        }],
+    }).grounded_result(context())
+    assert result["groups"][0]["evidenceBasis"] == "mixed"
+    assert select_audience_personas(result)[0]["evidenceStatus"] == "hypothesis"
 
 
 def test_legacy_audience_is_readable_but_not_verified():

@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from threading import Event
 
+import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
@@ -15,6 +16,7 @@ from app.models import (
     TextSourceMaterialCreate,
     XhsCaptureJobCreate,
     XhsCaptureJobStatus,
+    XhsCaptureProgress,
     XhsOfflineImportPackageResponse,
 )
 from app.repositories.workspaces import WorkspaceRepository
@@ -57,10 +59,14 @@ class BlockingCaptureRunner:
             XhsCaptureJobStatus.WAITING_FOR_LOGIN,
             "请扫码登录",
             profile_url,
+            XhsCaptureProgress(phase="login"),
         )
         self.started.set()
         assert self.release.wait(timeout=3)
-        progress(XhsCaptureJobStatus.PROCESSING, "正在整理", profile_url)
+        progress(
+            XhsCaptureJobStatus.PROCESSING, "正在整理", profile_url,
+            XhsCaptureProgress(phase="processing", captured_notes=1),
+        )
         material = self.app.state.input_asset_service.create_text(
             kwargs["workspace_id"],
             TextSourceMaterialCreate(
@@ -123,6 +129,8 @@ def test_xhs_capture_is_single_flight_and_persists_result(app: FastAPI) -> None:
     assert duplicate.status_code == 202
     assert duplicate.json()["id"] == first.json()["id"]
     assert runner.calls == 1
+    active = send(app, "GET", f"/api/xhs-capture-jobs/{first.json()['id']}")
+    assert active.json()["progress"]["phase"] == "login"
 
     runner.release.set()
     completed = None
@@ -135,9 +143,33 @@ def test_xhs_capture_is_single_flight_and_persists_result(app: FastAPI) -> None:
 
     assert completed is not None
     assert completed["status"] == "completed"
+    assert completed["progress"] == {
+        "phase": "completed", "capturedNotes": 1, "capturedComments": 0,
+        "commentNotesCompleted": 0, "commentNotesTotal": None,
+    }
     assert completed["resultInputAssetId"]
     renamed = send(app, "GET", f"/api/workspaces/{workspace['id']}")
-    assert renamed.json()["name"] == "QSheep"
+    assert renamed.json()["name"] == "QSheep 的工作区"
+
+
+def test_capture_default_name_does_not_replace_custom_workspace_name(app: FastAPI) -> None:
+    workspace = create_workspace(app)
+    service = app.state.xhs_capture_service
+    with app.state.database.transaction() as connection:
+        connection.execute(
+            "UPDATE creator_workspaces SET name = ? WHERE id = ?",
+            ("自定义名称", workspace["id"]),
+        )
+    service._rename_workspace(workspace["id"], "Ag")
+    assert send(app, "GET", f"/api/workspaces/{workspace['id']}").json()["name"] == "自定义名称"
+
+    with app.state.database.transaction() as connection:
+        connection.execute(
+            "UPDATE creator_workspaces SET name = ? WHERE id = ?",
+            ("正在导入的账号", workspace["id"]),
+        )
+    service._rename_workspace(workspace["id"], "Ag")
+    assert send(app, "GET", f"/api/workspaces/{workspace['id']}").json()["name"] == "Ag 的工作区"
 
 
 def test_workspace_list_is_scoped_to_default_user(app: FastAPI) -> None:
@@ -176,10 +208,86 @@ def test_runner_reports_observed_login_and_reading_states(app, settings):
         [sys.executable, "-c", "print('waiting for scan code'); "
          "print('Begin get Xiaohongshu creators')"],
         "https://xhslink.cn/m/test",
-        lambda state, message, url: events.append(state),
+        lambda state, message, url, details: events.append(state),
     )
     assert events == [XhsCaptureJobStatus.WAITING_FOR_LOGIN, XhsCaptureJobStatus.RUNNING]
     assert "Begin get Xiaohongshu creators" in output
+
+
+def test_runner_counts_unique_saved_rows_and_comment_note_progress(
+    app, settings, tmp_path: Path,
+):
+    runner = MediaCrawlerXhsCaptureRunner(
+        settings, app.state.xhs_capture_service.runner.import_service
+    )
+    jsonl = tmp_path / "xhs" / "jsonl"
+    jsonl.mkdir(parents=True)
+    (jsonl / "creator_contents_2026-10-01.jsonl").write_text(
+        '\n'.join([json.dumps({"note_id": "n1"}), json.dumps({"note_id": "n1"}),
+                   json.dumps({"note_id": "n2"}), '{']) + '\n', encoding="utf-8"
+    )
+    (jsonl / "creator_comments_2026-10-01.jsonl").write_text(
+        '\n'.join([json.dumps({"comment_id": "c1"}), json.dumps({"comment_id": "c1"}),
+                   json.dumps({"comment_id": "c2"})]) + '\n', encoding="utf-8"
+    )
+    events = []
+    runner._capture(
+        [sys.executable, "-c", "print('Begin get Xiaohongshu creators'); "
+         "print(\"Begin batch get note comments, note list: ['n1', 'n2']\"); "
+         "print('Sleeping for 1 seconds after fetching comments for note n1')"],
+        "https://xhslink.cn/m/test",
+        lambda state, message, url, details: events.append(details.model_dump()),
+        tmp_path,
+    )
+    assert events[-1] == {
+        "phase": "comments", "captured_notes": 2, "captured_comments": 2,
+        "comment_notes_completed": 1, "comment_notes_total": 2,
+    }
+
+
+def test_runner_reports_sanitized_browser_timeout(app, settings):
+    runner = MediaCrawlerXhsCaptureRunner(
+        settings, app.state.xhs_capture_service.runner.import_service
+    )
+    secret = "xsec_token=private-session-value"
+    with pytest.raises(RuntimeError, match="抓取浏览器打开小红书页面超时") as error:
+        runner._capture(
+            [sys.executable, "-c", "import sys; "
+             f"print('Page.goto: Timeout 30000ms exceeded {secret}'); sys.exit(1)"],
+            "https://www.xiaohongshu.com/user/profile/test-account",
+            lambda *_: None,
+        )
+    assert secret not in str(error.value)
+
+
+def test_runner_reports_sanitized_browser_network_error(app, settings):
+    runner = MediaCrawlerXhsCaptureRunner(
+        settings, app.state.xhs_capture_service.runner.import_service
+    )
+    with pytest.raises(RuntimeError, match="ERR_CONNECTION_TIMED_OUT") as error:
+        runner._capture(
+            [sys.executable, "-c", "import sys; "
+             "print('Page.goto: net::ERR_CONNECTION_TIMED_OUT "
+             "xsec_token=private-session-value'); sys.exit(1)"],
+            "https://www.xiaohongshu.com/user/profile/test-account",
+            lambda *_: None,
+        )
+    assert "private-session-value" not in str(error.value)
+
+
+def test_runner_reports_sanitized_creator_state_parse_failure(app, settings):
+    runner = MediaCrawlerXhsCaptureRunner(
+        settings, app.state.xhs_capture_service.runner.import_service
+    )
+    with pytest.raises(RuntimeError, match="主页已打开，但页面数据格式暂无法解析") as error:
+        runner._capture(
+            [sys.executable, "-c", "import sys; "
+             "print('Creator homepage state parse failed: position 62376 "
+             "xsec_token=private-session-value'); sys.exit(1)"],
+            "https://www.xiaohongshu.com/user/profile/test-account",
+            lambda *_: None,
+        )
+    assert "private-session-value" not in str(error.value)
 
 
 def test_capture_restart_marks_job_failed_without_reexecuting(app: FastAPI):

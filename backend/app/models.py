@@ -572,6 +572,16 @@ class XhsCaptureJobCreate(APIModel):
     include_comments: bool = True
 
 
+class XhsCaptureProgress(APIModel):
+    phase: Literal["starting", "login", "notes", "comments", "processing", "completed"] = (
+        "starting"
+    )
+    captured_notes: int = Field(default=0, ge=0)
+    captured_comments: int = Field(default=0, ge=0)
+    comment_notes_completed: int = Field(default=0, ge=0)
+    comment_notes_total: int | None = Field(default=None, ge=0)
+
+
 class XhsCaptureJobResponse(APIModel):
     id: str
     workspace_id: str
@@ -581,6 +591,7 @@ class XhsCaptureJobResponse(APIModel):
     note_limit: int
     include_comments: bool
     status_message: str = ""
+    progress: XhsCaptureProgress = Field(default_factory=XhsCaptureProgress)
     error: str = ""
     result_input_asset_id: str | None = None
     created_at: datetime
