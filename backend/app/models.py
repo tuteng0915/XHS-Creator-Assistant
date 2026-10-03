@@ -735,6 +735,7 @@ class DraftResponse(DraftSummary):
 
 
 class ModelOperation(StrEnum):
+    READER_SELECTION = "reader_selection"
     AUDIENCE_ANALYSIS = "audience_analysis"
     CREATOR_EDIT = "creator_edit"
     PROFILE = "profile"
@@ -773,6 +774,8 @@ class SimulationRunStatus(StrEnum):
 
 
 class SimulationRunCreate(APIModel):
+    reader_selection_id: str | None = Field(default=None, min_length=1)
+    reader_selection_input_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     simulated_fan_ids: list[str] | None = Field(default=None, min_length=1)
     audience_analysis_id: str | None = None
     topic_id: str | None = None

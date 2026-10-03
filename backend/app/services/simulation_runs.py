@@ -17,6 +17,7 @@ from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.audience_evidence import AUDIENCE_METHOD_VERSION, select_audience_personas
 from app.services.common import as_iso, utc_now
+from app.services.reader_selection_adoption import selection_adoption_snapshot
 from app.services.simulated_fans import SimulatedFanService
 
 
@@ -45,6 +46,9 @@ class SimulationRunService:
             raise ValidationError("模拟粉丝与旧受众分析来源不能同时选择")
         with self.database.transaction() as connection:
             workspace = self.workspace_repository.get(connection, workspace_id)
+            selection_snapshot = selection_adoption_snapshot(
+                connection, self.database, workspace_id, payload,
+            )
             audience = None
             audience_snapshot = None
             if payload.audience_analysis_id:
@@ -125,6 +129,8 @@ class SimulationRunService:
                     "sourceWorkflow": "manual",
                 },
             }
+            if selection_snapshot is not None:
+                snapshot["readerSelection"] = selection_snapshot
             row = self.repository.create(
                 connection,
                 workspace_id=workspace_id,

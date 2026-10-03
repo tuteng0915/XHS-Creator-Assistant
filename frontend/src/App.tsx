@@ -97,7 +97,9 @@ import { AudienceAnalysisPage } from './components/AudienceAnalysisPage'
 import { CreatorCanvasPage } from './components/CreatorCanvasPage'
 import { useAudienceAnalyses } from './hooks/useAudienceAnalyses'
 import { useSimulatedFans } from './hooks/useSimulatedFans'
-import { SimulatedFanPicker, SimulatedFansPage } from './components/SimulatedFansPage'
+import { SimulatedFansPage } from './components/SimulatedFansPage'
+import { CreatorSimulationSetup } from './components/CreatorSimulationSetup'
+import type { ReaderSelectionLink } from './readerSelection'
 import type { AnalysisScope } from './creatorNotes'
 import {
   WorkflowOutputPanel,
@@ -153,6 +155,7 @@ import {
 } from './workflows'
 import {
   activePageForWorkflowTab,
+  applySimulationStageEvent,
   defaultWorkflowOutputKinds,
   emptyWorkflowStageViews,
   simulationStageSeed,
@@ -1537,12 +1540,6 @@ function WorkspaceApp() {
     )
   }
 
-  function setSimulationStageStatus(key: string, patch: Partial<StageView>) {
-    setSimulationStageViews((current) =>
-      current.map((stage) => (stage.key === key ? { ...stage, ...patch } : stage)),
-    )
-  }
-
   function setWorkflowOutputKind(targetTab: WorkflowTab, kind: WorkflowOutputKind) {
     setWorkflowOutputKindByWorkflow((current) => ({
       ...current,
@@ -1692,7 +1689,15 @@ function WorkspaceApp() {
     })
   }
 
-  async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic) {
+  function prepareAudienceSimulation(topic: Topic) {
+    if (!workspace || topic.workspaceId !== workspace.id || topic.workspaceId !== selectedWorkspaceRef.current || running) return
+    if (internalMode) { void runAudienceSimulation(undefined, 'account', topic); return }
+    setSelectedTopic(topic)
+    setRunError('')
+    setActivePage('simulations')
+  }
+
+  async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic, recommendation?: ReaderSelectionLink) {
     if (!workspace) return
     if (!internalMode && !fans.ids.length) { setActivePage('simulated-fans'); return }
     setWorkflowTab(targetTab)
@@ -1716,6 +1721,7 @@ function WorkspaceApp() {
       const useSavedTopic =
         !draft && selectedTopic && topicForSimulation.includes(selectedTopic.title)
       const created = await simulationRunApi.create(workspace.id, {
+        ...recommendation,
         simulatedFanIds: internalMode ? undefined : fans.ids,
         draftId: draft?.id,
         topicId: topic?.id || (useSavedTopic ? selectedTopic.id : null),
@@ -1777,25 +1783,8 @@ function WorkspaceApp() {
       const handleMessage = (message: MessageEvent<string>) => {
         const activity = JSON.parse(message.data) as ActivityEvent
         const eventType = activity.data.eventType
-        if (eventType === 'stage.started' && activity.stageKey) {
-          setSimulationStageStatus(activity.stageKey, { status: 'running' })
-          return
-        }
-        if (eventType === 'stage.succeeded' && activity.stageKey) {
-          const result = { ...activity.data }
-          delete result.eventType
-          setSimulationStageStatus(activity.stageKey, {
-            status: 'completed',
-            result,
-            error: undefined,
-          })
-          return
-        }
-        if (eventType === 'stage.failed' && activity.stageKey) {
-          setSimulationStageStatus(activity.stageKey, {
-            status: 'failed',
-            error: String(activity.data.error || '阶段执行失败'),
-          })
+        if (['stage.started', 'stage.succeeded', 'stage.failed'].includes(String(eventType)) && activity.stageKey) {
+          setSimulationStageViews(current => applySimulationStageEvent(current, activity))
           return
         }
         if (
@@ -2556,7 +2545,7 @@ function WorkspaceApp() {
     return (
       <StageResultRenderer
         publicMode={!internalMode}
-        onSimulateSavedTopic={(topic) => void runAudienceSimulation(undefined, 'account', topic)}
+        onSimulateSavedTopic={prepareAudienceSimulation}
         stage={stage}
         currentRun={sourceRun}
         mediaAssets={mediaAssets}
@@ -2728,7 +2717,7 @@ function WorkspaceApp() {
           }}
           publicMode={!internalMode}
           busy={running || saveStates.draft.phase === 'saving'}
-          onSimulateTopic={(topic) => void runAudienceSimulation(undefined, 'account', topic)}
+          onSimulateTopic={prepareAudienceSimulation}
           visibleTopics={visibleTopics}
           selectedTopic={selectedTopic}
           topicFilter={topicFilter}
@@ -2752,6 +2741,7 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'drafts' && !internalMode && <CreatorCanvasPage
         key={workspace.id} workspaceId={workspace.id} topic={selectedTopic} topics={topics.filter(t => t.sourceWorkflow !== 'trend_analysis')}
+        onSimulate={prepareAudienceSimulation}
         agentId={agents.find(a => a.agentId === 'topic_draft_editor')?.id}
         onSelect={setSelectedTopic} onUpdated={topic => {if(selectedWorkspaceRef.current !== topic.workspaceId) return; setSelectedTopic(topic); setTopics(current => current.map(t => t.id === topic.id ? topic : t))}}
       />}
@@ -2777,13 +2767,11 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'simulations' && (
         <>
-        {!internalMode && <div className="creator-diagnosis-controls">
-          {fans.error && <p role="alert">{fans.error}</p>}
-          <SimulatedFanPicker rows={fans.rows} slots={fans.slots} onSlotChange={fans.setSlot} onAddSlot={fans.addSlot} onRemoveSlot={fans.removeSlot} />
-          <select aria-label="模拟选题" value={selectedTopic?.id || ''} onChange={e => setSelectedTopic(topics.find(t => t.id === e.target.value) || null)}><option value="">选择选题</option>{topics.filter(t => t.status !== 'archived').map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select>
-          <button className="primary" disabled={running || !fans.ids.length || !selectedTopic} onClick={() => void runAudienceSimulation(undefined,'account',selectedTopic || undefined)}>开始模拟</button>
-          {!fans.rows.some(r => r.status === 'active') && <button onClick={() => setActivePage('audience-analysis')}>从受众分析添加模拟粉丝</button>}
-        </div>}
+        {!internalMode && <CreatorSimulationSetup key={workspace.id} workspaceId={workspace.id}
+          positioning={workspace.accountPositioning} topic={selectedTopic} topics={topics} fans={fans}
+          running={running} onSelect={setSelectedTopic}
+          onRun={(topic, recommendation) => void runAudienceSimulation(undefined, 'account', topic, recommendation)}
+          onAddFans={() => setActivePage('audience-analysis')} />}
         {!internalMode && running && <WorkflowOutputPanel targetTab="account" views={simulationStageViews} outputKind="simulation" runError={runError} renderStageResult={renderStageResult} />}
         {!internalMode && !running && runError && <p role="alert">{runError}</p>}
         <SimulationHistoryPage
@@ -2813,7 +2801,7 @@ function WorkspaceApp() {
         savedFanKeys={fans.rows.map(f => `${f.sourceAnalysisId}:${f.sourceGroupId}`)} onFansChanged={fans.refresh}
       />}
       {!loading && workspace && activePage === 'simulated-fans' && <SimulatedFansPage key={workspace.id}
-        rows={fans.rows} error={fans.error} onRefresh={fans.refresh} onAnalyze={() => setActivePage('audience-analysis')} />}
+        rows={fans.rows} error={fans.error} onRefresh={fans.refreshAfterSave} onAnalyze={() => setActivePage('audience-analysis')} />}
       {!loading && workspace && activePage === 'skills' && (
         <SkillsPage
           skills={skills}

@@ -1,3 +1,4 @@
+import type { ReaderSelection, ReaderSelectionLink } from './readerSelection'
 import type {
   Agent,
   AgentConversation,
@@ -200,6 +201,7 @@ export const inputAssetApi = {
 export const sourceMaterialApi = inputAssetApi
 
 export const audienceAnalysisApi = {
+  get: (id: string) => request<import('./types').AudienceAnalysis>(`/api/audience-analyses/${encodeURIComponent(id)}`),
   list: (workspaceId: string) => request<import('./types').AudienceAnalysis[]>(`/api/workspaces/${workspaceId}/audience-analyses`),
   create: (workspaceId: string, sourceMaterialId: string, scope: import('./creatorNotes').AnalysisScope) => request<import('./types').AudienceAnalysis>(`/api/workspaces/${workspaceId}/audience-analyses`, {method: 'POST', headers: jsonHeaders, body: JSON.stringify({sourceMaterialId, scope})}),
 }
@@ -598,10 +600,19 @@ export const analysisRunApi = {
   },
 }
 
+export const readerSelectionApi = {
+  create: (workspaceId: string, payload: {requestKey: string; topicId: string; desiredCount: number}) =>
+    request<ReaderSelection>(`/api/workspaces/${workspaceId}/reader-selections`, {
+      method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload),
+    }),
+  get: (workspaceId: string, id: string) =>
+    request<ReaderSelection>(`/api/workspaces/${workspaceId}/reader-selections/${id}`),
+}
+
 export const simulationRunApi = {
   create: (
     workspaceId: string,
-    payload: {
+    payload: Partial<ReaderSelectionLink> & {
       audienceAnalysisId?: string
       simulatedFanIds?: string[]
       topicId?: string | null

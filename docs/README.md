@@ -1,6 +1,6 @@
 # 文档索引
 
-最新增量以 [creator-experience-iteration.md](creator-experience-iteration.md) 为准：四组导航、提交后创建账号、受众分析与 Top 3 模拟、选题正文/置顶及画布式 AI 创作助手。与首轮 V2 手册不一致的旧创作入口说明，以本次增量为准。
+最新实施进展与限制先读 [status-and-todo.md](status-and-todo.md)，功能口径读 [product-requirements.md](product-requirements.md)。[creator-experience-iteration.md](creator-experience-iteration.md) 保留四组导航、账号创建、选题与创作助手的阶段设计；其中早期 Top 3 不是当前人数上限：现在默认三个槽位、可继续增加。按选题推荐读者已接通后端、真实 Qwen、过期／采用校验及公开入口的统一确认页；历史推荐摘要展示仍待完成。公开创作助手编辑 Topic 正文，独立 Draft 仍是内部兼容功能，不在本轮重新开放。
 
 当前产品已经进入“创作者聚焦版 V2”改造。公开产品范围、账号空间模型、URL 导入链路和分阶段验收以 [creator-focused-v2-execution-manual.md](creator-focused-v2-execution-manual.md) 为准；旧的开发者工作台说明只用于理解保留代码和内部调试能力。
 
@@ -17,10 +17,11 @@
 
 ## 当前有效文档
 
+- `creator-writing-collaboration-design.md` — 账号复盘如何用于人机共创的待实施设计，涵盖外部 Skill 借鉴、经验与偏好、改稿确认、字段及分阶段验收；不代表当前功能已上线。
 - `creator-journey-acceptance.md` — 09-27 真实 Qwen 与公开页面链路验收、工程修复及尚未解决的内容质量问题。
 - `account-diagnosis-design.md` — 账号诊断的设计与首轮实施记录：先帮助创作者认识账号，再进入选题；明确字段、证据边界和后续验证方法。
 - `audience-simulation-methods.md` — few-shot 受众发现、行为案例、状态化评论互动的文献借鉴与轻量实现记录；当前不要求效果实验。
-- `simulated-fan-model-design.md` — 待评审的模拟粉丝多维画像设计，明确字段、证据等级、界面及验证方法；尚未实施。
+- `simulated-fan-model-design.md` — 当前简短人物字段、资产编辑、模拟快照和按选题推荐读者的实现及剩余切片；后半部分保留未启用的原型匹配和多维画像备选设计。
 - `audience-simulation-research.md` — 受众模拟的文献依据、改动前审计及首轮证据化实现；保留的效果实验提案暂不执行。
 - `local-installation.md` — 从 Git 克隆后的本地安装、固定版本 MediaCrawler、封面补丁、浏览器登录及故障排查。
 - `product-design.md` — 当前产品的主设计说明，集中解释功能全貌、设计思想、内容资产、能力资产、workflow、Context Access Layer、Demo/Live、多模态和设计边界。

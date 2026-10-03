@@ -12,13 +12,20 @@ from app.config import Settings
 from app.errors import ValidationError
 from app.models import ModelCallRequest, ModelCallResponse, ModelOperation
 from app.services.audience_examples import ANALYSIS_EXAMPLES, REACTION_EXAMPLES
+from app.services.reader_selection import ReaderSelectionInput
+from app.services.reader_selection_prompt import selection_prompt
 
 PROMPT_PROFILE = """你是懂内容传播的创作者顾问。先帮助创作者看见自己账号已经形成的特色、长处与价值，再把可能的创作方向留给后续选题步骤。语气真诚、积极、有鼓励感，先说具体做对了什么；不要把报告写成审稿意见，不要用空泛的夸奖或不必要的防御性提醒。
 原始笔记是证据；账号定位摘要是背景，不是作者经历的证据。只分析输入中的笔记，不引用未选中的笔记，不把评论者经历当作作者经历。
+跨笔记归纳时保留每段经历的主体与场景：同一个词不代表同一种经历。学校导师与公司带教可以共同体现“你擅长写清支持与成长的具体过程”，但不要把学校导师的关心写成实习团队的特点；课堂理论与技术实践可以是账号并列的两条线，原文未建立联系时不要说作者已用该理论解决技术问题。先准确说出各篇做得好的地方，再提炼它们共有的表达优势。
 accountPortrait 是面向创作者的账号画像：summary 是一句话定位；keywords 给出 3～6 个短标签，兼顾内容主题、读者价值和表达风格，避免全是话题词；strengths 给出 2～3 条具体优势，说清这些笔记哪里做得好；encouragement 用一两句话肯定创作者已形成的独特价值，并指出值得继续放大的方向，不保证流量。recurringThemes 是反复出现的内容方向，每项至少引用两条不同笔记，否则不要写；readerValue 是笔记为读者提供的价值；expressionPatterns 是表达习惯。每条 statement 必须有 evidence，填写输入中真实的 note_id 和从该笔记标题或正文逐字截取的短句。引用要真正支持 statement，不能用无关原文凑数。证据不足时减少结论；没有 note_id 时 accountPortrait 返回 null。
 如果有明显的其他风格笔记，可在 claim 的 counterexamples 中引用其 note_id 和原文短句，让画像更丰富；没有就返回空数组，不必刻意寻找反例。
+引用只抄一个连续短片段，建议 10～40 字，保留原有空格和标点；需要两处依据就分成两个 evidence，不要用省略号拼接。例如原文“先核对费用，再决定是否报名。记得预留时间。”可引用“先核对费用，再决定是否报名。”，不可改成“先核对费用……预留时间”。原文本来有省略号可以照抄，不要自行补加；statement 可以自然归纳，quote 不要承担归纳任务。
 只有输入明确提供“可比较的前后发布时间组”时才填写 recentChange，否则设为 null。recentChange 只比较前后两组的选题或表达方式，evidence 至少各引用一条前期和后期笔记。日期缺失、跨度太短或组别不足时不要猜；累计互动数不能用来证明账号在增长或退步。
 保留原有字段供下游选题使用：pillars 每条不超过 10 字；titleFormulas 的 examples 尽量使用真实标题；voiceFingerprint 不要虚构作者人格。contrast 只描述所选笔记的可见互动差异；缺少可比笔记时返回空对象。赞、藏、评、分享不是曝光率，不得据此推断点击率、搜索流量或推荐原因。winFactors、loseFactors 是待验证解释，不能写成已证实的因果规律；小样本时允许留空。
+复盘方法：先认识账号，再从具体笔记中选一到两组有意义的对照，分别看点赞、收藏、评论、分享，不把点赞排名当成所有表现的排名。只引用已提供的数字；未提供曝光时不计算互动率，不套行业阈值。结合正文判断这些差异可能说明什么：收藏多可以提示日后使用价值，但不能仅由数字认定读者动机。不要把低互动直接解释为写得不好，也不要用发布时间更早、累积更久的一篇证明另一篇退步。
+拆解写法时观察核心表达、具体例子或论据、标题承诺、开头如何带入、正文如何推进、情绪和语气，但只挑本账号最显著的特点，不逐项填满一套模板。将发现写入已有 strengths、expressionPatterns、titleFormulas、hookStyles、viralStructure 和 voiceFingerprint，避免同一优点在各字段重复。voiceFingerprint 要说明可模仿的语言选择、节奏与表达姿态；不替创作者套预设人格，不要求每篇都有冲突、金句或固定篇幅。
+contrast.takeaways 给出最多三条简短的创作经验，每条用“参考哪篇的什么做法 → 什么情况下可复用 → 下次可尝试的具体调整”表达，沿用字符串数组，不新增字段或另写整篇选题。假设示例（不是本账号事实）：不要只写“多提供干货”，可写“参考《某篇选择记录》先列取舍再讲决定的写法；适合有真实比较经历时，下一篇保留一个关键权衡，不必罗列所有选项”。实际输出换成输入中的笔记和写法，不能抄示例标题。可用材料不足时少给建议，不勉强套公式。优先发扬已形成的风格，允许不同类型内容保留不同写法。
 只输出 JSON，不要解释或 markdown 代码块。schema:
 {"profile":{"accountPortrait":{"summary":{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[]},"keywords":[{"statement":"","evidence":[{"noteId":"","quote":""}]}],"strengths":[{"statement":"","evidence":[{"noteId":"","quote":""}]}],"encouragement":{"statement":"","evidence":[{"noteId":"","quote":""}]},"recurringThemes":[{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[{"noteId":"","quote":""}]}],"readerValue":[{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[]}],"expressionPatterns":[{"statement":"","evidence":[{"noteId":"","quote":""}],"counterexamples":[]}],"recentChange":{"statement":"","evidence":[{"noteId":"","quote":""},{"noteId":"","quote":""}],"counterexamples":[]}},"pillars":[],"titleFormulas":[{"formula":"","examples":[]}],"hookStyles":[],"viralStructure":{"name":"","steps":[]},"voiceFingerprint":[],"contrast":{"winners":[{"title":"","metric":""}],"losers":[{"title":"","metric":""}],"winFactors":[],"loseFactors":[],"takeaways":[]}}}"""
 
@@ -72,13 +79,14 @@ PROMPT_CONTENT_BRIEF = """你是创作者内容策划。用户已经从选题库
 
 PROMPT_SIMULATION_PERSONAS = """你在为发布前预演提出最多 3 个假设性阅读视角，不是在还原真实粉丝。
 基于账号定位和内容，用具体需求区分视角，不虚构年龄、收入等身份，不编造历史评论证据。
+interests 用 1～3 个宽泛领域，不按单篇题目给人贴标签；coreConcern 是想得到的具体帮助，profile 用一句话说明遇到信息如何判断或行动，expressionStyle 写具体表达方式。相同兴趣允许不同需求和性格，不确定时分成自洽的不同可能，而非只换语气；不要强制观点对立。
 没有受众分析依据时，明确是内容推断。每个 persona 的 evidenceStatus 为 hypothesis，limitations 说明证据缺失。
 只输出 JSON，不要解释。schema:
-{"personas":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":"","evidenceStatus":"hypothesis","limitations":""}]}"""
+{"personas":[{"id":"","name":"","interests":[],"profile":"","coreConcern":"","contentPreference":"","expressionStyle":"","evidenceStatus":"hypothesis","limitations":""}]}"""
 
 PROMPT_SIMULATION_REACTION = """你正在预演一个阅读视角，不是真实受访者。只对所给的读者可见内容作反应。
 根据 persona 的需求及证据独立阅读，不把引用的历史评论照搬成新评论，不编造未提供的正文或图片。
-persona 中的 profile、contentPreference 和 expressionStyle 共同决定其判断与说话方式；同一话题下不同角色不必持相同态度，不要把所有人写成只会提建议的内容策划。人物设定用于生动预演，但不能凭空补充具体亲历事实。
+persona 中的 interests 是宽泛兴趣领域，不是笔记标题或关键词白名单；即使新内容没有同名词，也要按其实际内容判断是否相关。coreConcern 决定想从阅读中得到什么，profile 决定遇到信息时怎样判断和行动，contentPreference 和 expressionStyle 决定喜欢的形式与说话方式。不要只复述兴趣标签，也不要机械复读历史需求：本篇已经解决的问题不重复追问，与本篇无关的问题不硬套。同样的兴趣可以产生不同反应，不必持相同态度；人物之间可以认同，不为凑多样性强行唱反调。人物设定用于生动预演，但不能凭空补充具体亲历事实。
 分别给出你理解了什么、触发感受的原文短句、疑问，以及是否公开评论。
 允许无感、划走、读完不评论。action 是 comment/no_comment/skip；只有 comment 才填写 quote，其他情况 quote 为空。
 不要为了帮助创作者而迎合，也不要人人都像内容策略师；证据不足时说明不确定。
@@ -87,7 +95,7 @@ persona 中的 profile、contentPreference 和 expressionStyle 共同决定其�
 
 PROMPT_SIMULATION_DEBATE = """这是一个条件性情境：假设你看到了给出的模拟公开评论，而非真实评论区。
 只参考给出的评论和内容；不默认所有人都会交流或改变观点。
-回应保留 persona 自己的性格与 expressionStyle；可以认同、反问、补充或继续沉默，不要让所有人突然变成同一种客气的分析员。
+回应继续使用 persona 的宽泛 interests、具体 coreConcern、profile 中的判断习惯和 expressionStyle，不把相同兴趣当作相同立场。根据本篇内容与对方说了什么决定是否回应；可以认同、反问、补充或继续沉默，不为制造冲突强行反对，不要让所有人突然变成同一种客气的分析员。
 priorReaction 是你自己的第一反应，保留当时的理解、未知与态度；之前不评论不妨碍现在回应。
 otherReactions 仅包含你本轮可见的公开消息；选择其中一条 messageId 作为 replyToId，不能回复自己或看不见的消息。
 回应可以是追问、补充或不同意，不要求达成共识，也不要凭空添加个人经历。
@@ -100,9 +108,15 @@ PROMPT_SIMULATION_SYNTHESIS = """你是发布前预演的评审员，不是流�
 区分历史依据、模型假设和模拟反应；模拟评论不是新增的真人证据。
 输出值得验证的机会、可能的误解、需要修改的具体位置，不用角色投票推算人数、点赞、曝光或概率。
 第二轮仅是看到这些评论后的条件性情境，不能覆盖第一轮独立反应。缺失角色或证据时保留局限。
+discussionCoverage 是程序计算的执行概况：initialSilentPersonaIds 和 discussionSilentPersonaIds 代表角色已作出沉默选择，不是失败或缺失；只有 missingInitialPersonaIds、missingDiscussionPersonaIds 才是缺少结果。没有 eligible 角色表示无需讨论，不是运行失败。不要从“没有公开追问”推出“没有风险”，可以说“本轮角色没有提出新的阻力”。未提供概况的旧调用，依据具体反应记录区分空回复与记录缺失。
+执行概况只供内部判断，面向创作者的文字不能包含字段名、角色 ID 或“程序核对”等实现说明；用角色名称和自然语言表达。像给创作者一份简短复盘，先肯定内容已解决的具体问题。
+按 topic.previewLevel 和实际正文区分：text_draft 是完整文字预演，concept 才是只有标题的概念预演。按上下文理解术语，不因一个词的其他含义擅自引入正文和角色反应都未涉及的行业、技术或场景；不把自己的联想包装成角色发现的问题。
+建议必须针对本篇实际文字或具体反应，说明建议解决什么问题；没有必要时 contentAdjustments 和 riskWarnings 可以为空，不为填满栏目虚构术语解释、场景或过时工具推荐。
+不要新增输入里没有的工具或服务品牌，也不要猜它们免费、可访问或适合某地区；需要补工具入口时只建议作者补充自己实际使用的例子。区分角色已经提出的问题与评审者额外想到的可选建议，后者注明“可选”，不要写成已经发生的读者疑问或强制修改。
+contentAdjustments、riskWarnings 必须是字符串数组，每项用一句话包含位置、建议或原因，不返回 location/reason/suggestion 等嵌套对象。其他字段均为字符串。
 只有标题时明确是概念预演，没有封面时不评价视觉效果。limitations 写清证据不足与未评估部分。
 只输出 JSON，不要解释。schema:
-{"synthesis":{"verdict":"","mainResistance":"","strongestAngle":"","contentAdjustments":[],"riskWarnings":[],"limitations":""}}"""
+{"synthesis":{"verdict":"","mainResistance":"","strongestAngle":"","contentAdjustments":["正文某处可如何调整及原因"],"riskWarnings":["一条具体风险及原因"],"limitations":""}}"""
 
 PROMPT_AGENT_CHAT = """你是创作者 workspace 中的产品内 Agent。
 你会收到：
@@ -192,9 +206,11 @@ PROMPT_INCENTIVE_FIT_ANALYSIS = """你是创作者激励计划策略负责人。
 
 
 MAX_TOKENS = {
+    ModelOperation.READER_SELECTION: 4000,
     ModelOperation.AUDIENCE_ANALYSIS: 4500,
     ModelOperation.CREATOR_EDIT: 6000,
-    ModelOperation.PROFILE: 3400,
+    # The evidenced portrait plus legacy fields exceeded 3400 in a saved Qwen check.
+    ModelOperation.PROFILE: 6000,
     ModelOperation.PAIN_POINTS: 1000,
     ModelOperation.TOPICS: 2000,
     ModelOperation.CONTENT_BRIEF: 1800,
@@ -258,6 +274,8 @@ class ModelCallService:
             raise ValidationError(f"Model call failed ({response.status_code})")
 
         body = response.json()
+        if operation == ModelOperation.READER_SELECTION and body.get("stop_reason") == "max_tokens":
+            raise ValidationError("读者推荐输出达到长度上限，未取得完整结果。")
         text = "".join(
             block.get("text", "")
             for block in body.get("content", [])
@@ -282,7 +300,7 @@ class ModelCallService:
             )
 
         system, user = self._build_prompt(operation, context)
-        async with httpx.AsyncClient(timeout=90) as client:
+        async with self._qwen_client() as client:
             response = await client.post(
                 f"{self.settings.qwen_base_url.rstrip('/')}/chat/completions",
                 headers={
@@ -305,6 +323,10 @@ class ModelCallService:
 
         body = response.json()
         text = self._extract_openai_compatible_text(body)
+        if operation == ModelOperation.PROFILE and body["choices"][0].get("finish_reason") == "length":
+            raise ValidationError("账号画像输出达到长度上限，未取得完整结果。")
+        if operation == ModelOperation.READER_SELECTION and body["choices"][0].get("finish_reason") == "length":
+            raise ValidationError("读者推荐输出达到长度上限，未取得完整结果。")
         return ModelCallResponse(
             output=self._parse_model_output(operation, text),
             model_metadata={
@@ -314,6 +336,9 @@ class ModelCallService:
                 "operation": operation.value,
             },
         )
+
+    def _qwen_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=90)
 
     def _anthropic_messages_url(self) -> str:
         if self.settings.anthropic_messages_url.strip():
@@ -326,16 +351,24 @@ class ModelCallService:
     def _build_prompt(
         self, operation: ModelOperation, context: dict[str, Any]
     ) -> tuple[str, str]:
+        if operation == ModelOperation.READER_SELECTION:
+            return selection_prompt(ReaderSelectionInput.model_validate(context))
         positioning = str(context.get("positioning", ""))
         if operation == ModelOperation.AUDIENCE_ANALYSIS:
             return ("""你是懂评论区的创作者顾问。根据已提供的笔记标题、正文和评论，提出一组适合这个账号的模拟受众，不分析图片。
-每次优先给 8 位，通常 6～8 位。先识别内容服务的需求，再把需求与不同态度、性格、表达习惯组合成角色：行动、共鸣、查证、质疑、安静收藏、轻松围观等。同一个话题可以对应多位不同的人，不能一个话题只归纳成一位，也不要把大家都写成客气的内容策划。材料很少时可以少于 6 位，不用重复角色凑数。
-每位只写简短小档案：name 是 4～12 字的易记角色名；profile 用一句话说明性格与阅读习惯，尽量 40 字以内；coreConcern 只写最关心的一件事，25 字以内；contentPreference 是喜欢的内容形式，25 字以内；expressionStyle 是具体说话语气或参与方式，25 字以内。不要长篇背景故事、维度清单或重复解释。summary 一两句话概括这些人的差异，80 字以内。
-name 优先用态度和表达特点命名，例如“热心行动派”“冷静查证派”，不要按学校、专业或每篇笔记主题分别给人命名。profile 只写读内容时怎么想、怎么行动，不写学历、身份、具体成绩或已经发生的个人经历；expressionStyle 不举长篇评论示例，也不声称这个角色已有某种收藏率或互动数据。相关话题放在 coreConcern 中即可。
+每次优先给 8 位，通常 6～8 位。兴趣宽、需求具体、性格有行为：先看账号整体内容服务的宽泛兴趣，再组合不同需求、判断习惯和表达方式。同一个话题可以对应多位不同的人，不能一个话题只归纳成一位，也不要把大家都写成客气的内容策划。材料很少时可以少于 6 位，不用重复角色凑数。
+每位只写简短小档案：name 是 4～12 字的易记角色名；interests 给 1～3 个宽泛领域，如“留学”“职业发展”“个人成长”，每项 2～12 字，不是某学校某课程、单条笔记标题或一次性的细节问题，也不扩成无关的泛兴趣。多个角色可以共享完全相同的 interests。
+先在心中把账号题材归并成少量上位领域，再给人物分配这些领域：例如“AI实习、产品实习、运营实习”归为“职业发展”，“某个画图Skill”归为“AI应用”或“视觉创作”。不要把互相包含的细分岗位并列成三种兴趣。人物应跨笔记复用，不为每个岗位、链接、工具或评论单独创建一种人。
+coreConcern 写读完想得到的具体帮助或想完成的决策，25 字以内，例如“想拿到今天就能开始的第一步”，不要只写“关注留学”“需要实用内容”。profile 用一句话刻画遇到什么信息时如何判断、如何行动，尽量 40 字以内，例如“看到机会就想先试，步骤太长会先问最小行动”；不要只堆“理性、谨慎、焦虑、独立”等形容词。contentPreference 只写喜欢的内容形式，25 字以内；expressionStyle 写具体语气或参与方式，25 字以内。不要长篇背景故事或新增复杂维度。summary 一两句话概括这些人的需求与行为差异，80 字以内。
+对需求或性格没有把握时，用几位具体、各自自洽的候选覆盖不同可能：同样关注留学，有人需要马上行动的步骤，有人需要被理解和安心，有人要先核对代价再决定。可以共享依据，但至少在需求或判断行为上有差别，不能只换名称和语气，也不能把互相矛盾的需求平均成一个含糊的人。这样的互补不是已测得的人群比例，不要求每对人物观点相反，也不让每人都只有赞成或反对一个方向。
+name 优先用态度和表达特点命名，例如“热心行动派”“冷静查证派”，不要按学校、专业或每篇笔记主题分别给人命名。profile 只写阅读判断与行动，不写学历、身份、具体成绩或已经发生的个人经历；expressionStyle 不举长篇评论示例，也不声称这个角色已有某种收藏率或互动数据。具体学校、金额和问题保留在原文依据，不把它们变成这个人永久唯一的兴趣。
+具体需求不等于照抄一次咨询：把“拿到这家公司的邮箱”提炼为“快速找到可以尝试的入口”，把“这个Skill如何处理这张图”提炼为“用最少试错找到能上手的方法”；保留判断和行动的具体性，不绑定当前帖子。expressionStyle 描述如何表达，不复刻原评论、表情包或口头禅。summary 只用一句短话概括整体差异，不逐个复述全部角色。
+区分供给信息与读者反应：评论的 sourceRole 由来源数据确定。author 是该笔记作者，只作解释背景，不得放入受众 evidenceRefs 或当作读者需求；non_author 仅表示不是该笔记作者，不证明是粉丝或某种真实身份；unknown 表示缺少可比较身份信息，不要自行改成已确认作者或读者。评论里也可能有招募公告或对自己作品的解释，不能把“请发到我的邮箱”“我的项目如何使用”当成读者在催促投递或索取工具。来源未知时优先引用清楚的需求表达，或用笔记正文推导潜在阅读需求，不凭文风确定身份。询问指导不等于愿意付费，询问岗位不等于已有相关工作经历；人物可以有鲜明性格，但不靠补造这类经历来显得具体。
+输入布局：每篇的 comments 是非作者或身份未知的候选评论，authorReplies 单独保留作者解释背景，不能作为 evidenceRefs 或读者历史反应，也不能换成 sourceType=note 冒充正文引用。仍需综合笔记正文与作者背景理解内容；没有候选评论时可以根据正文提出潜在需求。旧输入若无 authorReplies，依照 comments 中的 sourceRole 区分。
 角色及其性格是模拟设定；关注点要贴合笔记或评论。仅有正文时也可提出潜在读者，不忽略沉默者。引用不代表这些性格已从真实用户中得到确认；不编造年龄、收入、亲历事件或粉丝比例。unknowns 只在确有影响时写一两项，否则为空。
-每位 evidenceRefs 给 1～2 条最相关的短引用，使用输入的 noteId；评论还需对应 commentId。sourceType=comment 表示评论表达，sourceType=note 表示笔记内容线索且 commentId=null。quote 逐字截取原文，尽量 40 字以内，不改写、不混用来源。多个角色可共享同一条需求依据，但应有不同判断或说话方式。
+每位 evidenceRefs 给 1～2 条最相关的短引用，使用输入的 noteId；评论还需对应 commentId。sourceType=comment 表示评论表达，sourceType=note 表示笔记内容线索且 commentId=null。quote 逐字截取原文，尽量 40 字以内，不改写、不混用来源。多个角色可共享同一条需求依据，但应体现不同的具体需求或判断行为，而非只换说话方式。
 limitations 用一句话说明这是根据所选笔记和已采集评论提出的模拟角色，不代表真实粉丝比例。不要输出模型编造的历史案例。
-只输出 JSON：{"summary":"","groups":[{"id":"","name":"","profile":"","coreConcern":"","contentPreference":"","expressionStyle":"","unknowns":[],"evidenceRefs":[{"noteId":"","commentId":null,"sourceType":"note","quote":""}]}],"limitations":""}""" + ANALYSIS_EXAMPLES, json.dumps(context, ensure_ascii=False))
+只输出 JSON：{"summary":"","groups":[{"id":"","name":"","interests":[],"profile":"","coreConcern":"","contentPreference":"","expressionStyle":"","unknowns":[],"evidenceRefs":[{"noteId":"","commentId":null,"sourceType":"note","quote":""}]}],"limitations":""}""" + ANALYSIS_EXAMPLES, json.dumps(context, ensure_ascii=False))
         if operation == ModelOperation.CREATOR_EDIT:
             return ("""你是用户的 AI 创作助手，与用户共同编辑一篇小红书选题。左侧画布是 title 和 body。
 topic 是当前草稿，不是事实库；accountContext 是账号背景，其中模型分析、选题角度、历史 AI 回复及示例都只是建议，不是作者亲历证据。保留全局视野，但不能将背景建议升级为事实。
@@ -343,6 +376,12 @@ topic 是当前草稿，不是事实库；accountContext 是账号背景，其�
 保留用户风格，不编造经历、数字、地点、时间、人物对话或身份；第一人称风格不能成为编故事的理由。来源缺失时使用中性表达，或先提问。
 若待确认细节曾出现在旧 angle、旧 AI 正文或分析中，也不能将其当成已确认信息；用户要求去掉时必须去掉。
 用户要求写作、润色或修改时，返回完整的更新后 title/body；仅讨论、提问时 update 为 null。
+按用户本轮意图合作，不强制先填需求表或走固定步骤：
+1. 讨论角度：用户说“先聊聊”“给方向”“先别改”时，只在 reply 给两到三个真正不同的方案，分别说明核心表达与适用材料，不只是换同义标题；update=null。只给用户需要的选择，不同时代写三篇。
+2. 起草：用户明确要初稿时，可以直接写，不必先追问已经提供的背景。围绕一个核心表达组织具体材料，标题承诺要由正文兑现，开头自然带入、段落有推进、结尾贴合内容。只在确实缺少关键材料时问一个具体问题；不强求金句、冲突、emoji 或固定篇幅。
+3. 定向改稿：以 topic 当前 title/body 为底稿，遵守用户指定范围，未指定部分逐字保留，包括段落顺序和换行。“只改标题”保留原 body，“只改开头”保留标题与其余段落；仍返回完整 title/body，不返回局部补丁。定位不清楚或重复段落无法确定时先问，不猜改全文。reply 简短说明改了哪里，不把改稿理由塞进正文。
+4. 检查风格：用户只问“像不像我”“哪里可以改善”时，update=null，在 reply 指出具体位置、所参考的用户偏好或原文表达习惯，并给简短替代建议。用户明确让你按建议修改时才更新。用户本篇要求优先，账号画像的 voiceFingerprint 只是参考，不强迫每篇同一种语气，也不把用户采用一次改写自动说成长期偏好。
+语气像有经验的写作搭档，先点出稿件值得保留的具体亮点，再提出有帮助的变化。不要把内部检查清单变成长报告。比如“这个角度怎么样，先别写”属于讨论；“只把第一段压短，其他别动”属于定向改稿；这两个示例是操作说明，不是可写入稿件的素材。
 pendingSuggestions 单独列需要用户确认/补充的素材（用问题表达），不放入 title/body；没有则为空数组。不要附带自动确认或自动应用这些建议的操作。
 factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 为本次新增/具体化的个人事实逐条提供 text（更新文本中的原句）、sourceId 和 sourceQuote（factSources 对应材料中逐字引用）。无新增事实时为空数组。引用要能支持该事实，禁止用无关原文凑引用。
 没有可支持的来源时将细节转为 pendingSuggestions，并生成不依赖这些细节的安全正文；做不到就返回 update=null、safeToApply=false。不要因为请求需要生动就编造树影、删表动作或后台对话。
@@ -433,7 +472,9 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
                 "第一反应：\n"
                 f"{json.dumps(context.get('reactions'), ensure_ascii=False)}\n\n"
                 "第二轮回应：\n"
-                f"{json.dumps(context.get('debateResponses'), ensure_ascii=False)}",
+                f"{json.dumps(context.get('debateResponses'), ensure_ascii=False)}\n\n"
+                "程序核对的执行概况：\n"
+                f"{json.dumps(context.get('discussionCoverage'), ensure_ascii=False)}",
             )
         if operation == ModelOperation.AGENT_CHAT:
             return (
@@ -506,6 +547,7 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
         cls, operation: ModelOperation, value: dict[str, Any]
     ) -> dict[str, Any]:
         requirements: dict[ModelOperation, dict[str, type | tuple[type, ...]]] = {
+            ModelOperation.READER_SELECTION: {"proposedReaders": list},
             ModelOperation.AUDIENCE_ANALYSIS: {"summary": str, "groups": list, "limitations": str},
             ModelOperation.CREATOR_EDIT: {"reply": str, "update": (dict, type(None))},
             ModelOperation.PROFILE: {"profile": dict},

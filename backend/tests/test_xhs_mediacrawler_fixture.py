@@ -35,6 +35,7 @@ def test_load_mediacrawler_export_preserves_notes_comments_and_cover(tmp_path: P
             {
                 "note_id": "n1",
                 "type": "normal",
+                "creator_hash": "1234567890abcdef",
                 "nickname": "秀***冰",
                 "title": "中传大三|专业第一，我为什么放弃保研",
                 "desc": "中文正文完整保留。",
@@ -54,6 +55,7 @@ def test_load_mediacrawler_export_preserves_notes_comments_and_cover(tmp_path: P
             {
                 "comment_id": "c1",
                 "note_id": "n1",
+                "creator_hash": "1234567890abcdef",
                 "content": "真诚有勇气。",
                 "like_count": "24",
                 "sub_comment_count": "2",
@@ -81,6 +83,9 @@ def test_load_mediacrawler_export_preserves_notes_comments_and_cover(tmp_path: P
     ] == 1720559566000
     assert len(export.comments) == 1
     assert export.comments[0].content == "真诚有勇气。"
+    payload = module.build_xhs_creator_profile_payload(export)
+    assert payload["notes"][0]["authorHash"] == "1234567890abcdef"
+    assert payload["notes"][0]["comments"][0]["authorHash"] == "1234567890abcdef"
 
 
 def test_load_mediacrawler_export_deduplicates_repeated_notes_and_comments(

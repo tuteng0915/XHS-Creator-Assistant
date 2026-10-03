@@ -10,7 +10,7 @@ from app.errors import ValidationError
 from app.models import APIModel
 from app.repositories.simulated_fans import SimulatedFanRepository
 from app.repositories.workspaces import WorkspaceRepository
-from app.services.audience_evidence import select_audience_personas
+from app.services.audience_evidence import InterestLabel, select_audience_personas
 from app.services.common import as_iso
 from app.services.fan_voice_templates import fan_voice_template
 
@@ -18,6 +18,7 @@ from app.services.fan_voice_templates import fan_voice_template
 class FanDefinition(APIModel):
     name: str = Field(min_length=1, max_length=200)
     profile: str = Field(min_length=1, max_length=4000)
+    interests: list[InterestLabel] = Field(default_factory=list, max_length=6)
     core_concern: str = Field(default="", max_length=2000)
     content_preference: str = Field(default="", max_length=2000)
     expression_style: str = Field(default="", max_length=2000)
@@ -142,6 +143,7 @@ class SimulatedFanService:
                         f"参与方式：{template.participation_style}"
                     )[:4000],
                     "coreConcern": root.editable.core_concern,
+                    "interests": root.editable.interests,
                     "contentPreference": (
                         f"{root.editable.content_preference[:1400]} {template.decision_style}"
                     ).strip()[:2000],
@@ -167,7 +169,10 @@ class SimulatedFanService:
             raise ValidationError("名称和阅读视角不能为空")
         editable = FanDefinition.model_validate(payload.model_dump()).model_dump(by_alias=True)
         with self.database.transaction() as c:
-            self.repository.get(c, fan_id)
+            current = self.response(self.repository.get(c, fan_id))
+            # Older clients cannot edit interests and must not erase the saved labels.
+            if "interests" not in payload.model_fields_set:
+                editable["interests"] = current.editable.interests
             return self.response(
                 self.repository.update(
                     c,

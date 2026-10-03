@@ -1,5 +1,9 @@
 # 小红书本地导入与主 Agent 接入设计
 
+## 评论来源字段（2026-10-03）
+
+`xhs-creator-profile/v1` 增加可选的笔记及评论 `authorHash`，保留 MediaCrawler 的 `creator_hash`（16 位匿名哈希）。导入时缺失或格式不符置空，不反解真实 ID，也不以昵称匹配。受众分析本地比较同篇笔记和评论的哈希，向模型仅发送 `sourceRole=author/non_author/unknown`；作者回复仅作背景，不能作为读者需求证据。新导出后再导入才获得来源字段，旧业务数据不自动回填；不升级 schema、不新增表、不重写历史分析。只有匿名标识可比较时才确定来源，非作者不意味着已确认粉丝。
+
 ## 固定样本
 
 当前已有两组本地 MediaCrawler 输出，作为离线 fixture 使用。原始数据保留在 `data/` 下，不纳入 git。

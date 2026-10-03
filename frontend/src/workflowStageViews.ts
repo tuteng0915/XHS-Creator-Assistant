@@ -3,7 +3,8 @@ import type {
   StageView,
   WorkflowOutputKind,
 } from './components/WorkflowOutputPanel'
-import type { AnalysisRun, SimulationRun } from './types'
+import type { ActivityEvent, AnalysisRun, SimulationRun } from './types'
+import { withSimulationPersonaLabels } from './simulationPersonaLabels'
 import {
   ACCOUNT_STAGES,
   TREND_STAGES,
@@ -53,6 +54,28 @@ export function simulationStageSeed(): StageView[] {
   return SIMULATION_STAGES.map((stage) => ({ ...stage, status: 'waiting' }))
 }
 
+// Observation only: preserve successful results when a parallel role fails.
+export function applySimulationStageEvent(stages: StageView[], activity: ActivityEvent): StageView[] {
+  const key = activity.stageKey
+  const kind = activity.data.eventType
+  if (!key || !['stage.started', 'stage.succeeded', 'stage.failed'].includes(String(kind))) return stages
+  return stages.map(stage => {
+    if (stage.key !== key && !key.startsWith(`${stage.key}.`)) return stage
+    if (kind === 'stage.started') return {...stage, status:'running'}
+    if (kind === 'stage.succeeded') {
+      const result = {...activity.data}
+      delete result.eventType
+      return {...stage, status:'completed', result}
+    }
+    const error = String(activity.data.error || '阶段执行失败')
+    const raw = activity.data.stageErrors
+    const structured = raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? Object.fromEntries(Object.entries(raw).filter(([k,v]) => (k === stage.key || k.startsWith(`${stage.key}.`)) && typeof v === 'string')) as Record<string,string>
+      : {[key]:error}
+    return {...stage, status:'failed', error, executionErrors:{...stage.executionErrors,...structured}}
+  })
+}
+
 export function stageSeedFromRun(run: AnalysisRun): StageView[] {
   const tab =
     run.workflowType === 'account_diagnosis'
@@ -81,7 +104,8 @@ export function stageSeedFromSimulation(run: SimulationRun): StageView[] {
   const noRecipient = statefulDiscussion
     ? !run.reactionResults.some(r => publicComments.some(p => p.personaId !== r.personaId))
     : publicComments.length < 2
-  const discussionSkipped = !run.debateResults.length && (hasSynthesis || ['completed', 'partially_completed', 'failed'].includes(run.status)) && run.reactionResults.length > 0 && noRecipient
+  const debateFailed = Object.keys(run.stageErrors).some(key => key === 'debate_responses' || key.startsWith('debate_responses.'))
+  const discussionSkipped = !debateFailed && !run.debateResults.length && (hasSynthesis || ['completed', 'partially_completed', 'failed'].includes(run.status)) && run.reactionResults.length > 0 && noRecipient
   const resultByStage: Record<string, unknown> = {
     personas: run.personaDefinitions.length
       ? { personas: run.personaDefinitions }
@@ -96,7 +120,7 @@ export function stageSeedFromSimulation(run: SimulationRun): StageView[] {
         : '不足两条模拟公开评论，无需交叉回应。' } : undefined,
     synthesis: hasSynthesis ? { synthesis: run.synthesis } : undefined,
   }
-  return SIMULATION_STAGES.map((stage) => {
+  return withSimulationPersonaLabels(SIMULATION_STAGES.map((stage) => {
     const error = Object.entries(run.stageErrors)
       .filter(([key]) => key === stage.key || key.startsWith(`${stage.key}.`))
       .map(([, message]) => message).join('; ')
@@ -111,6 +135,8 @@ export function stageSeedFromSimulation(run: SimulationRun): StageView[] {
             : 'waiting',
       result: resultByStage[stage.key],
       error: error || undefined,
+      executionErrors: Object.fromEntries(Object.entries(run.stageErrors).filter(([key]) => key === stage.key || key.startsWith(`${stage.key}.`))),
+      executionEnded: ['completed', 'partially_completed', 'failed'].includes(run.status),
     }
-  })
+  }))
 }

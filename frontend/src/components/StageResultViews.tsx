@@ -1,6 +1,7 @@
 import type { MediaAsset, SavePhase } from '../types'
 import type { CreatorNote } from '../creatorNotes'
 import { AccountPortraitView, type Observations, type Portrait } from './AccountPortraitView'
+import { replyPersonaId, simulationPersonaLabels } from '../simulationPersonaLabels'
 
 export type SaveState = { phase: SavePhase; message?: string }
 
@@ -328,14 +329,13 @@ export function TitlesView({ items }: { items: unknown }) {
   )
 }
 
-export function PersonaListView({ items }: { items: unknown }) {
+export function PersonaListView({ items, personaLabels }: { items: unknown; personaLabels?: ReadonlyMap<string, string> }) {
   if (!Array.isArray(items) || items.length === 0) return null
+  const labels = personaLabels || simulationPersonaLabels(items, [], [])
   return (
     <div className="persona-list">
       {(items as Array<Record<string, unknown>>).map((persona) => {
-        const title = String(
-          persona.archetype || persona.name || persona.id || 'Persona',
-        )
+        const title = labels.get(String(persona.id)) || String(persona.name || persona.archetype || '未记录姓名的受众')
         const profile = String(persona.profile || persona.background || '')
         const personality = String(persona.personality || '')
         const concern = String(persona.concerns || persona.coreConcern || '')
@@ -379,16 +379,20 @@ export function PersonaListView({ items }: { items: unknown }) {
 export function ReactionListView({
   items,
   type,
+  personaLabels,
 }: {
   items: unknown
   type: 'reaction' | 'debate'
+  personaLabels?: ReadonlyMap<string, string>
 }) {
   if (!Array.isArray(items) || items.length === 0) return null
+  const labels = personaLabels || simulationPersonaLabels([], type === 'reaction' ? items : [], type === 'debate' ? items : [])
+  const label = (id: string) => labels.get(id) || '未记录姓名的受众'
   return (
-    <div className="persona-list">
+    <div className="persona-list simulation-reactions">
       {(items as Array<Record<string, unknown>>).map((item) => (
         <div className="topic" key={String(item.personaId)}>
-          <h4>Persona {String(item.personaId)}</h4>
+          <h4>{label(String(item.personaId))}</h4>
           {type === 'reaction' ? (
             <>
               <div className="angle">
@@ -403,17 +407,11 @@ export function ReactionListView({
           ) : (
             <>
               <div className="angle">{String(item.response || item.text || '不追加回应')}</div>
-              {Boolean(item.replyToId) && <p>回应：{String(item.targetedAt || item.replyToId)}</p>}
+              {Boolean(item.replyToId || item.targetedAt) && <p>回应：{replyPersonaId(item) ? label(replyPersonaId(item)) : '未记录回应对象'}</p>}
               {Boolean(item.changedMind && item.changeReason) && <p>看法变化：{String(item.changeReason)}</p>}
               {item.stance && (
                 <div className="why">
                   <b>立场：</b> {String(item.stance)}
-                  {Boolean(item.targetedAt && !item.replyToId) && (
-                    <>
-                      <br />
-                      <b>回应对象：</b> {String(item.targetedAt)}
-                    </>
-                  )}
                 </div>
               )}
               <ListBlock title="新顾虑" items={item.newConcerns} />

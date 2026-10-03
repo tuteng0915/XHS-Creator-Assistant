@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC
+from statistics import median
 from typing import Any
 
 from app.services.creator_analysis_scope import note_published_at
@@ -12,6 +14,20 @@ METRIC_KEYS = ("liked", "collected", "comments", "shares")
 RECENT_CHANGE_PERFORMANCE_TERMS = re.compile(
     r"点赞|收藏|评论量|分享量|曝光|点击|流量|爆款|转化|涨粉|推荐量|算法|增长|下滑|下降|变好|变差"
 )
+
+
+def profile_stage_input(snapshot: dict[str, Any], snapshot_at: str) -> tuple[dict, dict | None]:
+    """The exact profile model input, shared with the read-only check script."""
+    observations = build_account_observations(snapshot, snapshot_at)
+    historical_posts = str(snapshot["historicalPosts"]["content"])
+    chronology = (observations or {}).get("chronology", {})
+    if chronology.get("status") == "comparable":
+        historical_posts += (
+            "\n\n可比较的前后发布时间组（只比较内容方向，不比较累计互动）：\n"
+            + json.dumps(chronology, ensure_ascii=False)
+        )
+    return {"positioning": str(snapshot["accountPositioning"]),
+            "historicalPosts": historical_posts}, observations
 
 
 def _nonnegative_int(value: Any) -> int | None:
@@ -84,14 +100,25 @@ def build_account_observations(snapshot: dict[str, Any], snapshot_at: str) -> di
             }
         )
 
-    liked_values = sorted(
-        {item["metrics"]["liked"] for item in observations if item["metrics"]["liked"] is not None},
-        reverse=True,
-    )
-    ranks = {value: index + 1 for index, value in enumerate(liked_values)}
+    metric_summaries = []
+    for key in METRIC_KEYS:
+        values = [item["metrics"][key] for item in observations if item["metrics"][key] is not None]
+        ranks = {value: index + 1 for index, value in enumerate(sorted(set(values), reverse=True))}
+        metric_summaries.append({
+            "metric": key,
+            "validCount": len(values),
+            "missingCount": len(observations) - len(values),
+            "median": median(values) if values else None,
+            "rankMethod": "dense_descending",
+        })
+        for observation in observations:
+            observation.setdefault("metricRanksInSelection", {})[key] = ranks.get(
+                observation["metrics"][key]
+            )
+
     for observation in observations:
-        liked = observation["metrics"]["liked"]
-        observation["likesRankInSelection"] = ranks.get(liked) if liked is not None else None
+        # Keep the original field for existing renderers and history readers.
+        observation["likesRankInSelection"] = observation["metricRanksInSelection"]["liked"]
 
     source_metadata = source.get("source") if isinstance(source.get("source"), dict) else {}
     range_metadata = (
@@ -116,6 +143,7 @@ def build_account_observations(snapshot: dict[str, Any], snapshot_at: str) -> di
             "capturedCommentCount": sum(item["capturedCommentCount"] for item in observations),
         },
         "chronology": build_chronology(notes),
+        "metricSummaries": metric_summaries,
         "notes": observations,
     }
 

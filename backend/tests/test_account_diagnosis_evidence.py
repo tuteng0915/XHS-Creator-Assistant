@@ -1,11 +1,17 @@
 import asyncio
 import json
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from test_analysis_topics_api import create_text_material
 from test_workspace_api import create_workspace, send
 
-from app.services.account_diagnosis_evidence import build_account_observations, verified_portrait
+from app.services.account_diagnosis_evidence import (
+    build_account_observations,
+    profile_stage_input,
+    verified_portrait,
+)
 from app.workflows.account_diagnosis import FakeAccountDiagnosisModelProvider
 
 
@@ -56,6 +62,106 @@ def test_observations_use_selected_snapshot_and_preserve_missingness():
     assert result["notes"][1]["metrics"]["comments"] is None
     assert "正文甲" not in json.dumps(result, ensure_ascii=False)
     assert build_account_observations({}, "2026-09-21T00:00:00+00:00") is None
+
+
+def test_metrics_are_ranked_separately_without_mutating_selected_snapshot():
+    snapshot = selected_snapshot()
+    snapshot["xhsCreatorProfile"]["notes"].append({
+        "noteId": "n3", "title": "收藏更多的一篇",
+        "metrics": {"liked": 10, "collected": 90, "comments": 0},
+    })
+    before = deepcopy(snapshot)
+    result = build_account_observations(snapshot, "2026-10-03T00:00:00Z")
+    summaries = {item["metric"]: item for item in result["metricSummaries"]}
+    assert summaries == {
+        "liked": {"metric": "liked", "validCount": 3, "missingCount": 0,
+                  "median": 10, "rankMethod": "dense_descending"},
+        "collected": {"metric": "collected", "validCount": 3, "missingCount": 0,
+                      "median": 3, "rankMethod": "dense_descending"},
+        "comments": {"metric": "comments", "validCount": 2, "missingCount": 1,
+                     "median": 1, "rankMethod": "dense_descending"},
+        "shares": {"metric": "shares", "validCount": 1, "missingCount": 2,
+                   "median": 0, "rankMethod": "dense_descending"},
+    }
+    assert [item["metricRanksInSelection"]["liked"] for item in result["notes"]] == [1, 2, 1]
+    assert [item["metricRanksInSelection"]["collected"] for item in result["notes"]] == [2, 3, 1]
+    assert [item["metricRanksInSelection"]["shares"] for item in result["notes"]] == [1, None, None]
+    assert all(item["likesRankInSelection"] == item["metricRanksInSelection"]["liked"]
+               for item in result["notes"])
+    assert snapshot == before
+    assert build_account_observations(snapshot, "2026-10-03T00:00:00Z") == result
+    reordered = deepcopy(snapshot)
+    reordered["xhsCreatorProfile"]["notes"].reverse()
+    reversed_result = build_account_observations(reordered, "2026-10-03T00:00:00Z")
+    assert reversed_result["metricSummaries"] == result["metricSummaries"]
+    assert reversed_result["notes"] == list(reversed(result["notes"]))
+
+
+@pytest.mark.parametrize("values, expected_median, expected_ranks", [
+    ([], None, []),
+    ([None, None], None, [None, None]),
+    ([0], 0, [1]),
+    ([0, 0, 0], 0, [1, 1, 1]),
+    ([1, 2], 1.5, [2, 1]),
+    ([1, 2, 1_000_000], 2, [3, 2, 1]),
+    ([4, None, 4, 2, 0], 3, [1, None, 1, 2, 3]),
+])
+def test_metric_summary_small_samples_missingness_and_outliers(
+    values, expected_median, expected_ranks,
+):
+    snapshot = {"xhsCreatorProfile": {"notes": [
+        {"noteId": f"n{index}", "metrics": {"liked": value}}
+        for index, value in enumerate(values)
+    ]}}
+    result = build_account_observations(snapshot, "2026-10-03T00:00:00Z")
+    summary = result["metricSummaries"][0]
+    assert summary["median"] == expected_median
+    assert summary["validCount"] == sum(value is not None for value in values)
+    assert summary["missingCount"] == sum(value is None for value in values)
+    assert [item["metricRanksInSelection"]["liked"] for item in result["notes"]] == expected_ranks
+    assert result["metricSummaries"][1]["median"] is None
+
+
+@pytest.mark.parametrize("invalid", [True, False, -1, "12", 1.5, {}, []])
+def test_metric_summary_does_not_coerce_invalid_values(invalid):
+    snapshot = {"xhsCreatorProfile": {"notes": [{"noteId": "n1", "metrics": {
+        key: invalid for key in ("liked", "collected", "comments", "shares")
+    }}]}}
+    result = build_account_observations(snapshot, "2026-10-03T00:00:00Z")
+    for summary in result["metricSummaries"]:
+        assert summary["validCount"] == 0
+        assert summary["missingCount"] == 1
+        assert summary["median"] is None
+        assert result["notes"][0]["metricRanksInSelection"][summary["metric"]] is None
+
+
+def test_metric_summary_uses_selection_not_available_count_or_captured_comments():
+    snapshot = selected_snapshot()
+    snapshot["analysisRange"]["availableNoteCount"] = 100
+    snapshot["xhsCreatorProfile"]["notes"] = snapshot["xhsCreatorProfile"]["notes"][:1]
+    snapshot.update(accountPositioning="写自己的经历", historicalPosts={"content": "历史笔记原文"})
+    model_input, result = profile_stage_input(snapshot, "2026-10-03T00:00:00Z")
+    assert model_input == {"positioning": "写自己的经历", "historicalPosts": "历史笔记原文"}
+    assert all(item["validCount"] == 1 for item in result["metricSummaries"])
+    assert result["metricSummaries"][2]["median"] == 2
+    assert result["coverage"]["capturedCommentCount"] == 1
+    assert result["coverage"]["availableCount"] == 100
+    assert all(item["noteId"] == "n1" for item in result["notes"])
+
+
+def test_stitched_quotes_do_not_pass_and_original_ellipsis_is_allowed():
+    snapshot = selected_snapshot()
+    snapshot["xhsCreatorProfile"]["notes"][0]["desc"] = (
+        "先核对费用，再决定是否报名。记得预留时间。等待……也可以是准备。"
+    )
+    def claim(quote):
+        return {"statement": "帮助读者考虑行动条件", "evidence": [
+            {"noteId": "n1", "quote": quote},
+        ]}
+    assert verified_portrait({"summary": claim("先核对费用……预留时间")}, snapshot) is None
+    for quote in ("先核对费用，再决定是否报名。", "等待……也可以是准备。"):
+        result = verified_portrait({"summary": claim(quote)}, snapshot)
+        assert result["summary"]["evidence"][0]["quote"] == quote
 
 
 def test_portrait_keeps_only_quotes_from_selected_note():
@@ -262,6 +368,13 @@ def test_xhs_account_run_persists_facts_and_filters_unsupported_claims(app):
     result = send(app, "GET", f"/api/analysis-runs/{run['id']}").json()["stageResults"]["profile"]
     assert result["observations"]["coverage"]["selectedNoteIds"] == ["n1"]
     assert result["observations"]["notes"][0]["publishedAt"].startswith("2026-09-01")
+    assert result["observations"]["metricSummaries"][1] == {
+        "metric": "collected", "validCount": 1, "missingCount": 0,
+        "median": 3, "rankMethod": "dense_descending",
+    }
+    assert result["observations"]["notes"][0]["metricRanksInSelection"] == {
+        "liked": 1, "collected": 1, "comments": 1, "shares": 1,
+    }
     assert result["profile"]["accountPortrait"]["summary"]["statement"] == "有中文正文"
     assert result["profile"]["accountPortrait"]["keywords"][0]["statement"] == "中文分享"
     assert result["profile"]["accountPortrait"]["strengths"][0]["statement"] == "能把经验写具体"

@@ -400,6 +400,7 @@ export interface SimulationRun extends SimulationRunSummary {
 export interface FanDefinition {
   name: string
   profile: string
+  interests?: string[]
   coreConcern: string
   contentPreference: string
   expressionStyle: string
@@ -480,12 +481,13 @@ export interface AudienceAnalysis {
     rejectedGroups?: Array<{groupIndex: number; groupId?: string; groupName?: string;
       issues: Array<{code: string; message: string; referenceIndex?: number}>}>;
   }
-  inputSnapshot: { scope: { scope: string; selectedNoteCount: number } }
+  inputSnapshot: { scope: { scope: string; selectedNoteCount: number }; notes?: unknown[] }
   result: {
     method?: string; origin?: string; summary?: string; limitations?: string;
     sampling?: { sentNotes: number; sentComments: number; availableComments: number };
     groups?: Array<{
       id: string; name: string; profile: string; coreConcern: string;
+      interests?: string[];
       expressionStyle?: string;
       evidenceBasis?: 'comment_observed' | 'content_inferred' | 'mixed' | null;
       estimatedPercent?: number | null; evidence: string[];

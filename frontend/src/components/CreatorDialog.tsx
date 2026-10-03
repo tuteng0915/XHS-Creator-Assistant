@@ -1,22 +1,23 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react'
 
-export function CreatorDialog({ title, onClose, children, wide = false }: {
+export function CreatorDialog({ title, onClose, children, wide = false, returnFocusRef }: {
   title: string
   onClose: () => void
   children: ReactNode
   wide?: boolean
+  returnFocusRef?: RefObject<HTMLElement | null>
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
     const dialog = ref.current
-    const previous = document.activeElement as HTMLElement | null
+    const previous = returnFocusRef?.current || document.activeElement as HTMLElement | null
     if (dialog?.showModal) dialog.showModal()
     else dialog?.setAttribute('open', '')
     return () => {
       dialog?.close?.()
       previous?.focus()
     }
-  }, [])
+  }, [returnFocusRef])
   return (
     <dialog ref={ref} className={`creator-dialog${wide ? ' creator-dialog-wide' : ''}`} aria-label={title}
       onCancel={(event) => { event.preventDefault(); onClose() }}>

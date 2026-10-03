@@ -5,6 +5,8 @@ import { RunReviewEditor } from './AnalysisHistoryPage'
 import type { SaveState } from './StageResultViews'
 import type { ReviewStatus, SimulationRun, SimulationRunSummary } from '../types'
 import type { StageView } from './WorkflowOutputPanel'
+import { SimulationStageNotice } from './SimulationStageNotice'
+import { stageDisplayStatus } from '../simulationStageStatus'
 
 type ReviewDraft = {
   reviewStatus: ReviewStatus
@@ -89,8 +91,9 @@ export function SimulationHistoryPage({
                 <div className="stage-h">
                   <div className="stage-n">{stage.n}</div>
                   <h3>{stage.title}</h3>
+                  <div className={`stage-status ${stageDisplayStatus(stage).className}`}>{stageDisplayStatus(stage).label}</div>
                 </div>
-                {stage.error && <div className="err">{stage.error}</div>}
+                <SimulationStageNotice stage={stage} />
                 {renderStageResult(stage)}
               </div>
             ))}

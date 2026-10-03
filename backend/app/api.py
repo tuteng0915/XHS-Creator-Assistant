@@ -998,6 +998,10 @@ def create_api_router(
                 }
                 discussion_skipped = (
                     not run.debate_results and bool(run.reaction_results)
+                    and not any(
+                        key == "debate_responses" or key.startswith("debate_responses.")
+                        for key in run.stage_errors
+                    )
                     and is_discussion_skipped(
                         run.reaction_results, run.input_snapshot.get("simulationMethod")
                     ) and (bool(run.synthesis) or run.status.value in {
@@ -1068,7 +1072,10 @@ def create_api_router(
                             status="failed",
                             sequence=sequence,
                             event_type="stage.failed",
-                            data={"error": "; ".join(message for _, message in stage_errors)},
+                            data={
+                                "error": "; ".join(message for _, message in stage_errors),
+                                "stageErrors": dict(stage_errors),
+                            },
                         )
                         if sequence > min_sequence:
                             yield event

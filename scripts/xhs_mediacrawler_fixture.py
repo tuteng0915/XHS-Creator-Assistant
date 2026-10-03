@@ -26,6 +26,7 @@ class XhsMediaCrawlerNote:
     share_count: int | None
     cover_path: Path | None
     published_at: int | str | None = None
+    author_hash: str = ""
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class XhsMediaCrawlerComment:
     like_count: int | None
     sub_comment_count: int | None
     create_time: int | None
+    author_hash: str = ""
 
 
 @dataclass(frozen=True)
@@ -313,6 +315,7 @@ def build_xhs_creator_profile_payload(
         "notes": [
             {
                 "noteId": note.note_id,
+                "authorHash": note.author_hash,
                 "type": note.note_type or "normal",
                 "title": note.title,
                 "desc": note.desc,
@@ -333,6 +336,7 @@ def build_xhs_creator_profile_payload(
                 "comments": [
                     {
                         "commentId": comment.comment_id,
+                        "authorHash": comment.author_hash,
                         "content": comment.content,
                         "likeCount": comment.like_count,
                         "subCommentCount": comment.sub_comment_count,
@@ -401,6 +405,7 @@ def _parse_note(row: dict[str, Any], *, xhs_dir: Path) -> XhsMediaCrawlerNote:
         share_count=_to_int(row.get("share_count")),
         cover_path=_cover_path(xhs_dir, note_id),
         published_at=row.get("time") or row.get("publish_time"),
+        author_hash=_clean(row.get("creator_hash")),
     )
 
 
@@ -412,6 +417,7 @@ def _parse_comment(row: dict[str, Any]) -> XhsMediaCrawlerComment:
         like_count=_to_int(row.get("like_count")),
         sub_comment_count=_to_int(row.get("sub_comment_count")),
         create_time=_to_int(row.get("create_time")),
+        author_hash=_clean(row.get("creator_hash")),
     )
 
 

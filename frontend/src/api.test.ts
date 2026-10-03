@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, inputAssetApi, mediaAssetApi, xhsCaptureApi } from './api'
+import { ApiError, inputAssetApi, mediaAssetApi, readerSelectionApi, simulationRunApi, xhsCaptureApi } from './api'
 import type { MediaAsset, TextInputAsset } from './types'
 
 const imageAsset: MediaAsset = {
@@ -43,6 +43,18 @@ function jsonResponse(body: unknown, status = 200) {
 
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+it('uses scoped relative recommendation URLs and preserves adoption metadata on simulation creation', async()=>{
+  const fetch=vi.spyOn(globalThis,'fetch').mockImplementation(()=>jsonResponse({id:'r'}))
+  await readerSelectionApi.create('w',{requestKey:'key',topicId:'t',desiredCount:4})
+  expect(fetch).toHaveBeenLastCalledWith('/api/workspaces/w/reader-selections',expect.objectContaining({method:'POST',
+    body:JSON.stringify({requestKey:'key',topicId:'t',desiredCount:4})}))
+  await readerSelectionApi.get('w','r')
+  expect(fetch.mock.calls.at(-1)?.[0]).toBe('/api/workspaces/w/reader-selections/r')
+  const payload={topicId:'t',simulatedFanIds:['d','a'],readerSelectionId:'r',readerSelectionInputHash:'a'.repeat(64),mode:'live' as const}
+  await simulationRunApi.create('w',payload)
+  expect(fetch).toHaveBeenLastCalledWith('/api/workspaces/w/simulation-runs',expect.objectContaining({method:'POST',body:JSON.stringify(payload)}))
 })
 
 describe('mediaAssetApi', () => {

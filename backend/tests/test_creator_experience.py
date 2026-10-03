@@ -285,3 +285,70 @@ def test_canvas_live_context_persistence_and_conflict(app, conflict):
         "conflict" if conflict else "applied"
     )
     assert history.messages[-1].model_metadata["canvasUpdate"]["body"] == "AI 正文"
+
+
+@pytest.mark.parametrize("mode", ["discussion", "title", "opening"])
+def test_canvas_scoped_results_persist_without_touching_other_content(app, mode):
+    wid = create_workspace(app)["id"]
+    selected = topic(app, wid, "原有标题")
+    original_body = "原有第一段。\n\n第二段不得修改🌱\n\n结尾保留。"
+    selected = send(app, "PATCH", f"/api/topics/{selected['id']}", json={
+        "body": original_body, "expectedUpdatedAt": selected["updatedAt"],
+    }).json()
+    agents = send(app, "GET", f"/api/workspaces/{wid}/agents").json()
+    agent = next(item for item in agents if item["agentId"] == "topic_draft_editor")
+    conversation = send(app, "POST", f"/api/workspaces/{wid}/agent-conversations", json={
+        "agentAssetId": agent["id"],
+        "contextTarget": {"assetType": "topic", "assetId": selected["id"]},
+    }).json()
+    expected_title = "调整后的标题" if mode == "title" else selected["title"]
+    expected_body = (
+        "简短开头。\n\n第二段不得修改🌱\n\n结尾保留。" if mode == "opening" else original_body
+    )
+
+    class Model:
+        calls = 0
+
+        async def call_operation(self, operation, context):
+            self.calls += 1
+            assert operation.value == "creator_edit"
+            assert context["topic"]["body"] == original_body
+            assert context["topic"]["title"] == selected["title"]
+            return ModelCallResponse(output={
+                "reply": "可以先讨论两个方向。" if mode == "discussion" else "已调整指定部分。",
+                "update": None if mode == "discussion" else {
+                    "title": expected_title, "body": expected_body,
+                },
+                "pendingSuggestions": [],
+                "factCheck": {"safeToApply": True, "supportedClaims": []},
+            }, model_metadata={"model": "fake"})
+
+    model = Model()
+    service = app.state.agent_conversation_service
+    service.live_provider = RealAgentConversationModelProvider(model)
+
+    async def exercise():
+        payload = {"content": {
+            "discussion": "先讨论两个角度，不要改稿",
+            "title": "只改标题", "opening": "只改开头，其他保持原样",
+        }[mode], "mode": "live", "clientMessageKey": f"scoped-{mode}"}
+        for _ in range(2):
+            response = await request(app, "POST",
+                                     f"/api/agent-conversations/{conversation['id']}/messages",
+                                     json=payload)
+            assert response.status_code == 200
+            if service._tasks:
+                await asyncio.gather(*list(service._tasks.values()))
+
+    asyncio.run(exercise())
+    assert model.calls == 1
+    stored = send(app, "GET", f"/api/topics/{selected['id']}").json()
+    assert stored["title"] == expected_title
+    assert stored["body"] == expected_body
+    assert stored["generatedSnapshot"] == selected["generatedSnapshot"]
+    if mode == "discussion":
+        assert stored["updatedAt"] == selected["updatedAt"]
+    history = service.get(conversation["id"])
+    assert history.messages[-1].model_metadata.get("canvasApplyStatus") == (
+        None if mode == "discussion" else "applied"
+    )

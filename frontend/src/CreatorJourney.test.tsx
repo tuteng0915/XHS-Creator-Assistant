@@ -1,10 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import {memoryStorage} from './test/storage'
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState({}, '', '/') })
+beforeEach(()=>vi.stubGlobal('localStorage',memoryStorage()))
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); window.history.replaceState({}, '', '/') })
 
-function setup(withSimulation = false, withSavedUrl = false) {
+function setup(withSimulation = false, withSavedUrl = false, withTopics = false) {
   window.history.replaceState({}, '', '/')
   const workspaces = ['甲', '乙'].map((name, index) => ({ id: `account-${index}`, name,
     profileUrl: withSavedUrl && index === 0 ? 'https://xhslink.cn/m/saved-profile' : null,
@@ -16,6 +18,11 @@ function setup(withSimulation = false, withSavedUrl = false) {
       topicId: null, draftId: null, startedAt: null, completedAt: null,
       inputSnapshot: {}, personaDefinitions: [], reactionResults: [], debateResults: [], synthesis: {}, stageErrors: {}, modelMetadata: {} }
     if (withSimulation && url === '/api/simulation-runs/simulation') return Response.json({...simulation, status: 'completed'})
+    const topicRows=['第一个测试选题','第二个测试选题'].map((title,index)=>({id:`topic-${index}`,workspaceId:'account-0',title,
+      body:`${title}的正文`,angle:'',associatedPainPoint:'',whyItFits:'',generatedSnapshot:{},sourceAnalysisRunId:null,
+      sourceWorkflow:'manual',status:'candidate',createdAt:'',updatedAt:'v1'}))
+    if(withTopics && url==='/api/topics/topic-0' && init?.method==='PATCH') return Response.json({...topicRows[0],...JSON.parse(String(init.body)),updatedAt:'v2'})
+    if(withTopics && init?.method==='POST' && url.endsWith('/simulation-runs')) return Response.json({detail:'测试停止于执行前'},{status:422})
     if (init?.method === 'POST' && url.endsWith('/analysis-runs')) {
       return new Response(JSON.stringify({ detail: '测试停止于执行前' }), { status: 422 })
     }
@@ -28,6 +35,10 @@ function setup(withSimulation = false, withSavedUrl = false) {
     const workspace = workspaces.find((item) => url.startsWith(`/api/workspaces/${item.id}`))
     if (!workspace) throw new Error(`Unexpected ${url}`)
     if (url === `/api/workspaces/${workspace.id}`) return Response.json(workspace)
+    if(withTopics && workspace.id==='account-0' && url.endsWith('/topics')) return Response.json(topicRows)
+    if(withTopics && workspace.id==='account-0' && url.endsWith('/simulated-fans')) return Response.json(['a','b','c','d'].map(id=>({
+      id,workspaceId:'account-0',sourceAnalysisId:'analysis',sourceGroupId:id,original:{},
+      editable:{name:`读者${id}`,profile:'具体的阅读特点',coreConcern:'',contentPreference:'',expressionStyle:''},status:'active',createdAt:'',updatedAt:'v1'})))
     if (withSimulation && workspace.id === 'account-0' && url.endsWith('/simulation-runs')) return Response.json([simulation])
     if (url.endsWith('/input-assets')) return Response.json([{
       id: `profile-${workspace.id}`, workspaceId: workspace.id, type: 'xhs_creator_profile',
@@ -44,6 +55,50 @@ function setup(withSimulation = false, withSavedUrl = false) {
 }
 
 describe('public creator journey', () => {
+  it('opens topic simulation confirmation without running and keeps manually chosen readers across shortcuts', async()=>{
+    const fetch=setup(false,false,true)
+    const simulations=()=>fetch.mock.calls.filter(([url,init])=>String(url).endsWith('/simulation-runs')&&init?.method==='POST')
+    await screen.findByText('甲的笔记')
+    fireEvent.click(screen.getByRole('button',{name:/👥 受众模拟/}))
+    await waitFor(()=>expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('a'))
+    fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'d'}})
+    fireEvent.click(screen.getByRole('button',{name:/选题库/}))
+    fireEvent.click(await screen.findByRole('button',{name:/第一个测试选题/}))
+    fireEvent.click(screen.getByRole('button',{name:'受众模拟'}))
+    await screen.findByRole('region',{name:'模拟准备'})
+    expect(screen.getByLabelText('模拟选题')).toHaveValue('topic-0')
+    expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('d')
+    expect(simulations()).toHaveLength(0)
+    expect(fetch.mock.calls.filter(([url])=>String(url).includes('/reader-selections'))).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button',{name:/选题库/}))
+    fireEvent.click(await screen.findByRole('button',{name:/第二个测试选题/}))
+    fireEvent.click(screen.getByRole('button',{name:'受众模拟'}))
+    expect(screen.getByLabelText('模拟选题')).toHaveValue('topic-1')
+    fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+    await screen.findByText('测试停止于执行前')
+    expect(JSON.parse(String(simulations()[0][1]?.body))).toMatchObject({topicId:'topic-1',simulatedFanIds:['d','b','c'],mode:'live'})
+    expect(simulations()).toHaveLength(1)
+  })
+
+  it('takes the saved canvas text to confirmation rather than creating a simulation immediately', async()=>{
+    const fetch=setup(false,false,true)
+    await screen.findByText('甲的笔记')
+    fireEvent.click(screen.getByRole('button',{name:/AI 创作助手/}))
+    fireEvent.change(screen.getByLabelText('创作选题'),{target:{value:'topic-0'}})
+    await waitFor(()=>expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'刚刚润色的完整正文'}})
+    fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
+    await screen.findByRole('region',{name:'模拟准备'})
+    expect(screen.getByText('刚刚润色的完整正文')).toBeInTheDocument()
+    expect(fetch.mock.calls.filter(([url,init])=>String(url).endsWith('/simulation-runs')&&init?.method==='POST')).toHaveLength(0)
+    expect(fetch.mock.calls.filter(([,init])=>init?.method==='PATCH')).toHaveLength(1)
+    fireEvent.change(screen.getByLabelText('当前账号档案'),{target:{value:'account-1'}})
+    await screen.findByText('乙的笔记')
+    fireEvent.click(screen.getByRole('button',{name:/👥 受众模拟/}))
+    expect(screen.getByLabelText('模拟选题')).toHaveValue('')
+    expect(screen.queryByText('刚刚润色的完整正文')).not.toBeInTheDocument()
+    expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  })
   it('uses the recorded account URL when reading more notes', async () => {
     const fetchMock = setup(false, true)
     await screen.findByText('甲的笔记')

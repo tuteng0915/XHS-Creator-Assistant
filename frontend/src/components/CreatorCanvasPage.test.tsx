@@ -9,6 +9,71 @@ afterEach(() => {cleanup(); vi.restoreAllMocks(); vi.useRealTimers()})
 const topic: Topic = {id:'topic',workspaceId:'w',title:'原题',body:'原文',angle:'角度',associatedPainPoint:'',whyItFits:'',generatedSnapshot:{},sourceAnalysisRunId:null,sourceWorkflow:'manual',status:'candidate',createdAt:'2026-01-01',updatedAt:'2026-01-01'}
 const conversation: AgentConversation = {id:'chat', workspaceId:'w',agentAssetId:'a',title:'创作',status:'active',executionStatus:'completed',contextTarget:{assetType:'topic',assetId:'topic'},createdAt:'',updatedAt:'',messages:[]}
 
+it('saves the edited body before entering reader confirmation, with no conversation creation', async()=>{
+  vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
+  const create=vi.spyOn(agentConversationApi,'create')
+  let finish!:(value:Topic)=>void
+  const save=vi.spyOn(topicApi,'update').mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+  const onSimulate=vi.fn()
+  render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} onSelect={vi.fn()} onUpdated={vi.fn()} onSimulate={onSimulate} />)
+  await waitFor(()=>expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeEnabled())
+  fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'想测试的新正文'}})
+  fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
+  expect(onSimulate).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('创作正文')).toBeDisabled()
+  fireEvent.click(screen.getByRole('button',{name:'正在保存…'}))
+  expect(save).toHaveBeenCalledTimes(1)
+  const updated={...topic,body:'想测试的新正文',updatedAt:'v2'}
+  await act(async()=>finish(updated))
+  expect(onSimulate).toHaveBeenCalledExactlyOnceWith(updated)
+  expect(create).not.toHaveBeenCalled()
+})
+
+it('keeps edits and stays in the canvas if saving before simulation fails', async()=>{
+  vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
+  vi.spyOn(topicApi,'update').mockRejectedValue(new Error('内容已被修改，请刷新后重试'))
+  const onSimulate=vi.fn()
+  render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} onSelect={vi.fn()} onUpdated={vi.fn()} onSimulate={onSimulate} />)
+  await waitFor(()=>expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeEnabled())
+  fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'未保存内容'}})
+  fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
+  await screen.findByRole('alert')
+  expect(screen.getByLabelText('创作正文')).toHaveValue('未保存内容')
+  expect(onSimulate).not.toHaveBeenCalled()
+})
+
+it('uses already saved content without another save and waits while AI is replying', async()=>{
+  vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
+  const save=vi.spyOn(topicApi,'update')
+  const onSimulate=vi.fn()
+  const page=render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} onSelect={vi.fn()} onUpdated={vi.fn()} onSimulate={onSimulate} />)
+  await waitFor(()=>expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
+  expect(onSimulate).toHaveBeenCalledExactlyOnceWith(topic);expect(save).not.toHaveBeenCalled()
+  page.unmount()
+  vi.spyOn(agentConversationApi,'list').mockResolvedValue([conversation])
+  vi.spyOn(agentConversationApi,'get').mockResolvedValue({...conversation,executionStatus:'running'})
+  render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} onSelect={vi.fn()} onUpdated={vi.fn()} onSimulate={onSimulate} />)
+  await screen.findByRole('button',{name:'正在回复…'})
+  expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeDisabled()
+})
+
+it('ignores a late save callback after switching topics', async()=>{
+  vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
+  let finish!:(value:Topic)=>void
+  vi.spyOn(topicApi,'update').mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+  const onUpdated=vi.fn(),onSimulate=vi.fn()
+  const props={workspaceId:'w',topics:[topic],onSelect:vi.fn(),onUpdated,onSimulate}
+  const {rerender}=render(<CreatorCanvasPage {...props} topic={topic} />)
+  await waitFor(()=>expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeEnabled())
+  fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'旧选题编辑'}})
+  fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
+  rerender(<CreatorCanvasPage {...props} topic={{...topic,id:'other',title:'另一个选题'}} />)
+  await act(async()=>finish({...topic,body:'旧选题编辑'}))
+  expect(onSimulate).not.toHaveBeenCalled();expect(onUpdated).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('创作标题')).toHaveValue('另一个选题')
+})
+
 it('reopens saved conversation without creating another one and saves before sending', async () => {
   vi.spyOn(agentConversationApi,'list').mockResolvedValue([conversation])
   vi.spyOn(agentConversationApi,'get').mockResolvedValue(conversation)

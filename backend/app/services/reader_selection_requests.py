@@ -1,0 +1,165 @@
+"""Resolve a product request once, with all assets read in the same SQLite transaction."""
+import json
+from typing import Literal
+
+from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ValidationError as PydanticValidationError
+
+from app.errors import ConflictError, NotFoundError, ValidationError
+from app.models import APIModel
+from app.repositories.drafts import DraftRepository
+from app.repositories.simulated_fans import SimulatedFanRepository
+from app.repositories.topics import TopicRepository
+from app.repositories.workspaces import WorkspaceRepository
+from app.services.common import utc_now
+from app.services.reader_selection import (
+    ReaderSelectionInput,
+    prepare_reader_selection,
+    selection_input_hash,
+)
+from app.services.reader_selections import ReaderSelectionResponse, ReaderSelectionService
+from app.services.simulated_fans import SimulatedFanService
+
+
+class ReaderSelectionRequest(APIModel):
+    model_config = ConfigDict(extra="forbid")
+    request_key: str = Field(min_length=1, max_length=200)
+    topic_id: str | None = Field(default=None, min_length=1)
+    draft_id: str | None = Field(default=None, min_length=1)
+    manual_topic: str | None = Field(default=None, min_length=1, max_length=10000)
+    desired_count: int = Field(default=3, ge=1, strict=True)
+
+    @field_validator("request_key", "topic_id", "draft_id", "manual_topic")
+    @classmethod
+    def nonblank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("请求标识或目标不能为空")
+        return value
+
+    @model_validator(mode="after")
+    def one_target(self):
+        targets = (self.topic_id, self.draft_id, self.manual_topic)
+        if sum(value is not None for value in targets) != 1:
+            raise ValueError("请选择一个选题、草稿或手动标题")
+        return self
+
+    def identity(self) -> str:
+        return json.dumps(self.model_dump(by_alias=True, exclude={"request_key"}),
+                          ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+class ReaderSelectionRequestService:
+    def __init__(self, selections: ReaderSelectionService):
+        self.selections = selections
+        self.database = selections.database
+
+    def _existing(self, c, workspace_id, payload) -> ReaderSelectionResponse | None:
+        row = self.selections.repository.find_request(c, workspace_id, payload.request_key)
+        if row is None:
+            return None
+        if row["request_json"] != payload.identity():
+            raise ConflictError("这次推荐请求已使用不同目标或人数，请发起新的推荐")
+        return self.selections.response(row)
+
+    def existing(self, workspace_id, payload) -> ReaderSelectionResponse | None:
+        with self.database.read() as c:
+            WorkspaceRepository().get(c, workspace_id)
+            return self._existing(c, workspace_id, payload)
+
+    def create(self, workspace_id, payload: ReaderSelectionRequest) -> ReaderSelectionResponse:
+        with self.database.transaction() as c:
+            WorkspaceRepository().get(c, workspace_id)
+            existing = self._existing(c, workspace_id, payload)
+            if existing is not None:
+                return existing  # Do not re-read changed/deleted source assets on network replay.
+            inputs = self.resolve_input(c, workspace_id, payload)
+            row = self.selections.repository.create(
+                c, workspace_id=workspace_id, request_key=payload.request_key,
+                input_hash=selection_input_hash(inputs),
+                snapshot_json=inputs.model_dump_json(by_alias=True),
+                request_json=payload.identity(), now=utc_now(),
+            )
+            return self.selections.response(row)
+
+    @staticmethod
+    def resolve_input(
+        c, workspace_id: str, payload: ReaderSelectionRequest,
+    ) -> ReaderSelectionInput:
+        workspace = WorkspaceRepository().get(c, workspace_id)
+        draft = None
+        topic_id = payload.topic_id
+        if payload.draft_id:
+            row = DraftRepository().get(c, payload.draft_id)
+            if row["workspace_id"] != workspace_id:
+                raise ValidationError("草稿不属于当前账号")
+            topic_id = row["topic_id"]
+            draft = {"editableContent": json.loads(row["editable_content_json"])}
+        topic = {"title": payload.manual_topic or "", "body": ""}
+        if topic_id:
+            row = TopicRepository().get(c, topic_id)
+            if row["workspace_id"] != workspace_id:
+                raise ValidationError("选题不属于当前账号")
+            topic = {"title": row["title"], "body": row.get("body", "")}
+        fans = [SimulatedFanService.response(row)
+                for row in SimulatedFanRepository().list(c, workspace_id)]
+        return prepare_reader_selection(workspace_id, {
+            "workspaceId": workspace_id, "accountPositioning": workspace["account_positioning"],
+            "targetType": "draft" if draft else "topic" if topic_id else "manual",
+            "topic": topic, "draft": draft,
+        }, fans, desired_count=payload.desired_count)
+
+    @staticmethod
+    def stored_request(row: dict) -> ReaderSelectionRequest | None:
+        if row.get("request_json") is None:
+            return None
+        try:
+            return ReaderSelectionRequest.model_validate({
+                **json.loads(row["request_json"]), "requestKey": row["request_key"],
+            })
+        except (ValueError, TypeError, PydanticValidationError):
+            return None
+
+    def freshness(self, c, row: dict) -> "ReaderSelectionFreshness":
+        payload = self.stored_request(row)
+        if payload is None:
+            return ReaderSelectionFreshness(status="unavailable", reasons=["missing_source"])
+        saved = self.selections.response(row).input_snapshot
+        try:
+            current = self.resolve_input(c, row["workspace_id"], payload)
+        except (NotFoundError, ValidationError, PydanticValidationError, ValueError, TypeError):
+            return ReaderSelectionFreshness(status="unavailable", reasons=["source_unavailable"])
+        current_hash = selection_input_hash(current)
+        reasons = []
+        if current.target != saved.target:
+            reasons.append("target_changed")
+        if current.account_positioning != saved.account_positioning:
+            reasons.append("positioning_changed")
+        if current.candidates != saved.candidates:
+            reasons.append("readers_changed")
+        if current_hash != row["input_hash"] and not reasons:
+            reasons.append("inputs_changed")
+        return ReaderSelectionFreshness(
+            status="stale" if reasons else "current", reasons=reasons,
+            current_input_hash=current_hash,
+        )
+
+    def observe(self, workspace_id: str, selection_id: str) -> "ReaderSelectionObservation":
+        with self.database.read() as c:
+            c.execute("BEGIN")  # One consistent read snapshot; never writes or invokes the worker.
+            row = self.selections.repository.get(c, workspace_id, selection_id)
+            return ReaderSelectionObservation(
+                **self.selections.response(row).model_dump(), freshness=self.freshness(c, row),
+            )
+
+
+class ReaderSelectionFreshness(APIModel):
+    status: Literal["current", "stale", "unavailable"]
+    reasons: list[Literal[
+        "target_changed", "positioning_changed", "readers_changed", "inputs_changed",
+        "missing_source", "source_unavailable",
+    ]] = Field(default_factory=list)
+    current_input_hash: str | None = None
+
+
+class ReaderSelectionObservation(ReaderSelectionResponse):
+    freshness: ReaderSelectionFreshness

@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
 
 import type { WorkflowTab } from '../workflows'
+import { withSimulationPersonaLabels } from '../simulationPersonaLabels'
+import { SimulationStageNotice } from './SimulationStageNotice'
+import { stageDisplayStatus } from '../simulationStageStatus'
 
 export type StageView = {
   key: string
@@ -9,6 +12,10 @@ export type StageView = {
   status: 'waiting' | 'running' | 'completed' | 'failed'
   result?: unknown
   error?: string
+  personaLabels?: ReadonlyMap<string, string>
+  personaIds?: string[]
+  executionErrors?: Record<string, string>
+  executionEnded?: boolean
 }
 
 export type WorkflowOutputKind = 'analysis' | 'simulation'
@@ -29,6 +36,7 @@ export function WorkflowOutputPanel({
   renderStageResult,
 }: WorkflowOutputPanelProps) {
   const isSimulation = outputKind === 'simulation'
+  const renderedViews = isSimulation ? withSimulationPersonaLabels(views) : views
   return (
     <section className="output-panel">
       {runError && <div className="error-banner">⚠ {runError}</div>}
@@ -47,13 +55,13 @@ export function WorkflowOutputPanel({
           <p>运行后结果会渐进渲染，并保存到分析结果。</p>
         </div>
       ) : (
-        views.map((stage) => (
+        renderedViews.map((stage) => (
           <div className="stage" key={stage.key}>
             <div className="stage-h">
               <div className="stage-n">{stage.n}</div>
               <h3>{stage.title}</h3>
-              <div className={`stage-status ${stage.status}`}>
-                {stage.status === 'running'
+              <div className={`stage-status ${isSimulation ? stageDisplayStatus(stage).className : stage.status}`}>
+                {isSimulation ? stageDisplayStatus(stage).label : stage.status === 'running'
                   ? '分析中…'
                   : stage.status === 'completed'
                     ? '已完成'
@@ -68,7 +76,7 @@ export function WorkflowOutputPanel({
                 分析中…
               </div>
             )}
-            {stage.error && <div className="err">{stage.error}</div>}
+            {isSimulation ? <SimulationStageNotice stage={stage} /> : stage.error && <div className="err">{stage.error}</div>}
             {renderStageResult(stage)}
           </div>
         ))

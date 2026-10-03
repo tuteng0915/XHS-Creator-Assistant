@@ -8,6 +8,7 @@ from app.config import Settings
 from app.db.database import SQLiteDatabase
 from app.errors import ApplicationError, ConflictError, NotFoundError, ValidationError
 from app.models import HealthResponse
+from app.reader_selection_api import reader_selection_router
 from app.repositories import (
     AgentConversationRepository,
     AgentRepository,
@@ -56,6 +57,10 @@ from app.services.audience_analyses import (
     AudienceAnalysisService,
 )
 from app.services.fan_voice_templates import FanVoiceTemplateResponse, list_fan_voice_templates
+from app.services.reader_selection_model import RealReaderSelectionProvider
+from app.services.reader_selection_requests import ReaderSelectionRequestService
+from app.services.reader_selection_worker import ReaderSelectionProvider, ReaderSelectionWorker
+from app.services.reader_selections import ReaderSelectionService
 from app.services.simulated_fans import (
     FanCreate,
     FanResponse,
@@ -79,7 +84,10 @@ from app.workflows import (
 )
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *, reader_selection_provider: ReaderSelectionProvider | None = None,
+) -> FastAPI:
     active_settings = settings or Settings.from_environment()
     database = SQLiteDatabase(active_settings.database_path)
     database.migrate()
@@ -255,6 +263,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         video_workflow_service=video_workflow_service,
         simulation_workflow_service=simulation_workflow_service,
     )
+    reader_selection_service = ReaderSelectionService(database)
+    reader_selection_requests = ReaderSelectionRequestService(reader_selection_service)
+    if (reader_selection_provider is None
+            and active_settings.model_provider.strip().lower() in {"qwen", "dashscope"}
+            and active_settings.qwen_api_key):
+        reader_selection_provider = RealReaderSelectionProvider(model_call_service)
+    reader_selection_worker = ReaderSelectionWorker(
+        reader_selection_service, reader_selection_provider,
+    )
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI):
@@ -262,9 +279,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         xhs_capture_service.recover_interrupted()
         agent_conversation_service.resume_unfinished()
         await workflow_worker.resume_unfinished()
+        reader_selection_worker.start()
         try:
             yield
         finally:
+            await reader_selection_worker.shutdown()
             await audience_analysis_service.shutdown()
             await agent_conversation_service.shutdown()
             await workflow_worker.shutdown()
@@ -302,6 +321,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.video_workflow_service = video_workflow_service
     application.state.simulation_workflow_service = simulation_workflow_service
     application.state.workflow_worker = workflow_worker
+    application.state.reader_selection_service = reader_selection_service
+    application.state.reader_selection_requests = reader_selection_requests
+    application.state.reader_selection_worker = reader_selection_worker
+    application.include_router(reader_selection_router(
+        reader_selection_requests, reader_selection_worker,
+    ))
     application.state.xhs_capture_service = xhs_capture_service
 
     @application.exception_handler(ApplicationError)

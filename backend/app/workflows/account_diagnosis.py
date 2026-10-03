@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-import json
 from collections.abc import AsyncIterator
 from typing import Any, Literal, Protocol, TypedDict
 from uuid import uuid4
@@ -22,7 +21,7 @@ from app.models import (
 )
 from app.repositories.analysis_runs import TERMINAL_STATUSES, AnalysisRunRepository
 from app.repositories.graph_checkpoints import GraphCheckpointRepository
-from app.services.account_diagnosis_evidence import build_account_observations, verified_portrait
+from app.services.account_diagnosis_evidence import profile_stage_input, verified_portrait
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
@@ -453,17 +452,11 @@ class _AccountDiagnosisGraphExecution:
             await self.emit("stage.started", "profile", "running", {})
             try:
                 run = self.service.analysis_service.get(self.run_id)
-                observations = build_account_observations(snapshot, run.created_at.isoformat())
-                historical_posts = str(snapshot["historicalPosts"]["content"])
+                context, observations = profile_stage_input(snapshot, run.created_at.isoformat())
                 chronology = (observations or {}).get("chronology", {})
-                if chronology.get("status") == "comparable":
-                    historical_posts += (
-                        "\n\n可比较的前后发布时间组（只比较内容方向，不比较累计互动）：\n"
-                        + json.dumps(chronology, ensure_ascii=False)
-                    )
                 output = await provider.profile(
-                    positioning=str(snapshot["accountPositioning"]),
-                    historical_posts=historical_posts,
+                    positioning=context["positioning"],
+                    historical_posts=context["historicalPosts"],
                 )
                 result = ProfileStageResult.model_validate(output).model_dump(
                     mode="json"

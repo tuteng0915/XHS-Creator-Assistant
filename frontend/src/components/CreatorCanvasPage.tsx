@@ -3,17 +3,18 @@ import { agentConversationApi, topicApi } from '../api'
 import type { AgentConversation, Topic } from '../types'
 import { PendingSuggestions } from './PendingSuggestions'
 
-export function CreatorCanvasPage({workspaceId, topic, topics, agentId, onSelect, onUpdated}: {
+export function CreatorCanvasPage({workspaceId, topic, topics, agentId, onSelect, onUpdated, onSimulate}: {
   workspaceId: string; topic: Topic | null; topics: Topic[]; agentId?: string;
   onSelect: (topic: Topic) => void; onUpdated: (topic: Topic) => void;
+  onSimulate?: (topic: Topic) => void;
 }) {
   return <section className="creator-canvas-page">
     <div className="creator-page-head"><h1>AI 创作助手</h1><select aria-label="创作选题" value={topic?.id || ''} onChange={e => {const selected = topics.find(t => t.id === e.target.value); if (selected) onSelect(selected)}}><option value="">选择选题</option>{topics.filter(t => t.status !== 'archived').map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></div>
-    {topic ? <Canvas key={topic.id} workspaceId={workspaceId} topic={topic} agentId={agentId} onUpdated={onUpdated} /> : <p>先从选题库选择一个题目。</p>}
+    {topic ? <Canvas key={`${workspaceId}:${topic.id}`} workspaceId={workspaceId} topic={topic} agentId={agentId} onUpdated={onUpdated} onSimulate={onSimulate} /> : <p>先从选题库选择一个题目。</p>}
   </section>
 }
 
-function Canvas({workspaceId, topic, agentId, onUpdated}: {workspaceId: string; topic: Topic; agentId?: string; onUpdated: (t: Topic) => void}) {
+function Canvas({workspaceId, topic, agentId, onUpdated, onSimulate}: {workspaceId: string; topic: Topic; agentId?: string; onUpdated: (t: Topic) => void; onSimulate?: (t: Topic) => void}) {
   const [saved, setSaved] = useState(topic)
   const [title, setTitle] = useState(topic.title)
   const [body, setBody] = useState(topic.body || '')
@@ -24,6 +25,10 @@ function Canvas({workspaceId, topic, agentId, onUpdated}: {workspaceId: string; 
   const [sending, setSending] = useState(false)
   const [ready, setReady] = useState(false)
   const [split, setSplit] = useState(55)
+  const [preparing, setPreparing] = useState(false)
+  const prepareLock = useRef(false)
+  const active = useRef(true)
+  useEffect(() => {active.current = true; return () => {active.current = false}}, [])
   const dirty = title !== saved.title || body !== (saved.body || '')
   const dirtyRef = useRef(dirty)
   const onUpdatedRef = useRef(onUpdated)
@@ -62,9 +67,18 @@ function Canvas({workspaceId, topic, agentId, onUpdated}: {workspaceId: string; 
     setSaving(true)
     try {
       const updated = await topicApi.update(topic.id, {title, body, expectedUpdatedAt:saved.updatedAt})
-      setSaved(updated); onUpdated(updated); dirtyRef.current = false
+      if (active.current) {setSaved(updated); onUpdated(updated); dirtyRef.current = false}
       return updated
-    } finally {setSaving(false)}
+    } finally {if (active.current) setSaving(false)}
+  }
+  async function prepareSimulation() {
+    if (!onSimulate || prepareLock.current || saving || sending || running || !ready || !title.trim()) return
+    prepareLock.current = true; setPreparing(true); setError('')
+    try {
+      const target = dirty ? await save() : saved
+      if (active.current) onSimulate(target)
+    } catch (e) {if (active.current) setError(e instanceof Error ? e.message : String(e))}
+    finally {prepareLock.current = false; if (active.current) setPreparing(false)}
   }
   async function send() {
     if (!message.trim() || !agentId || sending || running || !ready) return
@@ -87,9 +101,11 @@ function Canvas({workspaceId, topic, agentId, onUpdated}: {workspaceId: string; 
     <div className="creator-canvas" style={{gridTemplateColumns:`minmax(0, ${split}fr) 12px minmax(0, ${100-split}fr)`}}>
       <section className="canvas-editor">
         <PendingSuggestions value={topic.generatedSnapshot.pendingSuggestions} />
-        <input aria-label="创作标题" value={title} onChange={e => setTitle(e.target.value)} />
-        <textarea aria-label="创作正文" value={body} placeholder="写下你的想法，或请右侧 AI 帮你开始。" onChange={e => setBody(e.target.value)} />
-        <div className="save-row"><button disabled={!dirty || saving || sending || !title.trim()} onClick={() => {setError(''); void save().catch(e => setError(String(e)))}}>保存</button><small>{saving ? '保存中…' : dirty ? '有未保存修改' : '已保存'}</small></div>
+        <input aria-label="创作标题" value={title} disabled={preparing} onChange={e => setTitle(e.target.value)} />
+        <textarea aria-label="创作正文" value={body} disabled={preparing} placeholder="写下你的想法，或请右侧 AI 帮你开始。" onChange={e => setBody(e.target.value)} />
+        <div className="save-row"><button disabled={!dirty || saving || sending || preparing || !title.trim()} onClick={() => {setError(''); void save().catch(e => setError(String(e)))}}>保存</button><small>{saving ? '保存中…' : dirty ? '有未保存修改' : '已保存'}</small>
+          {onSimulate && <button disabled={preparing || saving || sending || running || !ready || !title.trim()} onClick={() => void prepareSimulation()}>{preparing ? '正在保存…' : '选择模拟读者'}</button>}
+        </div>
       </section>
       <div className="canvas-divider" role="separator" aria-label="调整画布和对话宽度" aria-valuenow={split} aria-valuemin={30} aria-valuemax={70} aria-orientation="vertical" tabIndex={0}
         onKeyDown={e => {if(e.key === 'ArrowLeft') setSplit(v => Math.max(30,v-5)); if(e.key === 'ArrowRight') setSplit(v => Math.min(70,v+5))}}
@@ -103,7 +119,7 @@ function Canvas({workspaceId, topic, agentId, onUpdated}: {workspaceId: string; 
           {m.modelMetadata.canvasApplyStatus === 'needs_confirmation' && <small>原稿未改动 · 请在对话中补充真实素材</small>}
           {m.modelMetadata.canvasApplyStatus === 'conflict' && <details><summary>画布有新修改，AI 建议未覆盖</summary><h3>{String((m.modelMetadata.canvasUpdate as Record<string,unknown>)?.title || '')}</h3><p>{String((m.modelMetadata.canvasUpdate as Record<string,unknown>)?.body || '')}</p></details>}
         </article>)}{!conversation?.messages.length && <p className="muted">可以讨论角度，也可以直接要求修改标题和正文。</p>}</div>
-        <form onSubmit={e => {e.preventDefault(); void send()}}><textarea aria-label="给创作助手的消息" value={message} onChange={e=>setMessage(e.target.value)} placeholder="例如：开头更像我的口吻，少一点说教。" /><button className="primary" disabled={!ready || !agentId || sending || running || !message.trim() || !title.trim()}>{sending || running ? '正在回复…' : '发送'}</button></form>
+        <form onSubmit={e => {e.preventDefault(); if (!preparing) void send()}}><textarea aria-label="给创作助手的消息" value={message} onChange={e=>setMessage(e.target.value)} placeholder="例如：开头更像我的口吻，少一点说教。" /><button className="primary" disabled={preparing || !ready || !agentId || sending || running || !message.trim() || !title.trim()}>{sending || running ? '正在回复…' : '发送'}</button></form>
       </section>
     </div>
   </>

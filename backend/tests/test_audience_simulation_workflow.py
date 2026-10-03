@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI
 from test_workspace_api import create_workspace, send
 
-from app.models import ModelCallResponse, ModelOperation
+from app.models import ModelCallResponse, ModelOperation, SimulationRunStatus
 from app.workflows.audience_simulation import (
     AUDIENCE_SIMULATION_NODE_ORDER,
     MAX_CONCURRENT_PERSONA_CALLS,
@@ -107,6 +107,38 @@ def test_failed_persona_reaction_is_preserved_as_partial(app: FastAPI) -> None:
     assert len(partial["reactionResults"]) == 2
     assert "initial_reactions.nomad" in partial["stageErrors"]
     assert partial["synthesis"]["verdict"]
+
+    replay = send(app, "GET", f"/api/simulation-runs/{run['id']}/events")
+    replay_events = [json.loads(line.removeprefix("data: "))
+                     for line in replay.text.splitlines() if line.startswith("data: ")]
+    reaction_events = [event for event in replay_events
+                       if event["stageKey"] == "initial_reactions"]
+    succeeded = next(event for event in reaction_events
+                     if event["data"]["eventType"] == "stage.succeeded")
+    failed = next(event for event in reaction_events
+                  if event["data"]["eventType"] == "stage.failed")
+    assert len(succeeded["data"]["reactions"]) == 2
+    assert failed["data"]["stageErrors"] == {
+        "initial_reactions.nomad": partial["stageErrors"]["initial_reactions.nomad"]
+    }
+    assert failed["data"]["error"] == partial["stageErrors"]["initial_reactions.nomad"]
+
+
+def test_saved_discussion_error_is_not_replayed_as_successful_skip(app: FastAPI) -> None:
+    run = create_simulation_run(app)
+    app.state.simulation_service.save_progress(
+        run["id"], status=SimulationRunStatus.PARTIALLY_COMPLETED,
+        persona_definitions=[{"id": "quiet", "name": "安静派"}],
+        reaction_results=[{"personaId": "quiet", "action": "no_comment", "quote": ""}],
+        stage_errors={"debate_responses.quiet": "历史执行中断"}, complete=True,
+    )
+    replay = send(app, "GET", f"/api/simulation-runs/{run['id']}/events")
+    assert replay.status_code == 200
+    assert "skippedReason" not in replay.text
+    assert "历史执行中断" in replay.text
+    after = send(app, "GET", f"/api/simulation-runs/{run['id']}").json()
+    assert after["reactionResults"][0]["action"] == "no_comment"
+    assert after["debateResults"] == []
 
 
 def test_persona_calls_use_bounded_retry(app: FastAPI) -> None:

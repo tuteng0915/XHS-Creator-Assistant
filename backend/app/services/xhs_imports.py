@@ -20,6 +20,7 @@ from app.models import (
 )
 from app.services.input_assets import InputAssetService
 from app.services.media_assets import MediaAssetService
+from app.services.xhs_comment_roles import author_hash
 
 SUPPORTED_XHS_SCHEMA = "xhs-profile-import/v1"
 SUPPORTED_XHS_CREATOR_PROFILE_SCHEMA = "xhs-creator-profile/v1"
@@ -427,6 +428,9 @@ class XhsOfflineImportService:
                 {
                     "noteId": note_id,
                     "type": self._clean(raw_note.get("type")) or "normal",
+                    "authorHash": author_hash(
+                        raw_note.get("authorHash") or raw_note.get("creator_hash")
+                    ),
                     "title": title,
                     "desc": desc,
                     "noteUrl": note_url,
@@ -455,6 +459,9 @@ class XhsOfflineImportService:
                         {
                             "commentId": self._clean(
                                 comment.get("commentId") or comment.get("comment_id")
+                            ),
+                            "authorHash": author_hash(
+                                comment.get("authorHash") or comment.get("creator_hash")
                             ),
                             "content": self._clean(
                                 comment.get("content"), max_chars=12_000

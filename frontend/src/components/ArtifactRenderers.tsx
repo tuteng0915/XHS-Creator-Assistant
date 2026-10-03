@@ -135,10 +135,10 @@ export function StageResultRenderer({
   if (!stage.result) return null
   const result = stage.result as Record<string, unknown>
   if (stage.key === 'profile' && result.profile) {
-    return <ProfileView data={result.profile as Record<string, unknown>}
+    return <ProfileView key={currentRun?.id || 'unsaved-profile'} data={result.profile as Record<string, unknown>}
       observations={result.observations as Observations | undefined}
       notes={creatorNotesFromPayload(currentRun?.inputSnapshot.xhsCreatorProfile)}
-      mediaAssets={mediaAssets} />
+      mediaAssets={currentRun ? mediaAssets.filter(asset => asset.workspaceId === currentRun.workspaceId) : []} />
   }
   if (stage.key === 'trend_analysis' && result.trendAnalysis) {
     return (
@@ -170,13 +170,13 @@ export function StageResultRenderer({
   if (stage.key === 'structure' && result.structure) {
     return <StructureView data={result.structure as Record<string, unknown>} />
   }
-  if (stage.key === 'personas') return <PersonaListView items={result.personas} />
+  if (stage.key === 'personas') return <PersonaListView items={result.personas} personaLabels={stage.personaLabels} />
   if (stage.key === 'initial_reactions') {
-    return <ReactionListView items={result.reactions} type="reaction" />
+    return <ReactionListView items={result.reactions} type="reaction" personaLabels={stage.personaLabels} />
   }
   if (stage.key === 'debate_responses') {
     if (result.skippedReason) return <p className="muted">{String(result.skippedReason)}</p>
-    return <ReactionListView items={result.debateResponses} type="debate" />
+    return <ReactionListView items={result.debateResponses} type="debate" personaLabels={stage.personaLabels} />
   }
   if (stage.key === 'synthesis' && result.synthesis) {
     return <SynthesisView data={result.synthesis as Record<string, unknown>} />

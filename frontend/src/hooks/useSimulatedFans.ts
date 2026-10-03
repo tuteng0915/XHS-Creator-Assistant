@@ -11,18 +11,28 @@ export function useSimulatedFans(workspaceId: string, completedAnalyses: string)
     current.current = workspaceId; setError('')
     return () => {current.current = ''; sequence.current += 1}
   }, [workspaceId])
-  const refresh = useCallback(async () => {
-    if (!workspaceId || current.current !== workspaceId) return
+  const refresh = useCallback(async (requireSuccess = false) => {
+    if (!workspaceId || current.current !== workspaceId) {
+      if (requireSuccess) throw new Error('账号已切换，请重新打开粉丝列表。')
+      return
+    }
     const request = ++sequence.current
     try {
       const rows = await simulatedFanApi.list(workspaceId)
-      if (current.current !== workspaceId || sequence.current !== request) return
+      if (current.current !== workspaceId || sequence.current !== request) {
+        if (requireSuccess) throw new Error('列表刷新已被新的请求替代，请重试刷新。')
+        return
+      }
       setState(previous => ({workspaceId, rows, slots: previous.workspaceId === workspaceId && previous.rows.length
         ? previous.slots.map(id => rows.some(r => r.id === id && r.status === 'active') ? id : '')
         : Array.from({length:3},(_,index) => rows.filter(r => r.status === 'active')[index]?.id || '')}))
       setError('')
-    } catch(e) {if(current.current === workspaceId && sequence.current === request) setError(String(e))}
+    } catch(e) {
+      if(current.current === workspaceId && sequence.current === request) setError(String(e))
+      if (requireSuccess) throw e
+    }
   }, [workspaceId])
+  const refreshAfterSave = useCallback(() => refresh(true), [refresh])
   useEffect(() => {void refresh()}, [refresh, completedAnalyses])
   const rows = state.workspaceId === workspaceId ? state.rows : []
   const slots = state.workspaceId === workspaceId ? state.slots : ['','','']
@@ -41,5 +51,13 @@ export function useSimulatedFans(workspaceId: string, completedAnalyses: string)
     setState(s => s.workspaceId === workspaceId && index >= 3 && index < s.slots.length
       ? {...s,slots:s.slots.filter((_,i) => i !== index)} : s)
   }
-  return {rows,slots,ids,error,refresh,setSlot,addSlot,removeSlot}
+  function applySelection(selectedIds: string[]) {
+    if (!selectedIds.length || new Set(selectedIds).size !== selectedIds.length ||
+      selectedIds.some(id => !rows.some(row => row.id === id && row.status === 'active'))) return false
+    setState(s => s.workspaceId === workspaceId ? {...s, slots: [
+      ...selectedIds, ...Array(Math.max(0, 3 - selectedIds.length)).fill(''),
+    ]} : s)
+    return true
+  }
+  return {rows,slots,ids,error,refresh,refreshAfterSave,setSlot,addSlot,removeSlot,applySelection}
 }

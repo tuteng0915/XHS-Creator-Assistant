@@ -21,10 +21,13 @@ from app.repositories.simulation_runs import SIMULATION_TERMINAL_STATUSES
 from app.services.audience_evidence import (
     DISCUSSION_SKIPPED_REASON,
     AudienceEvidence,
+    InterestLabel,
     ObservedEpisode,
+    discussion_coverage,
     public_reactions,
     reader_persona_context,
 )
+from app.services.audience_target import reader_visible_target
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
 from app.services.simulation_runs import SimulationRunService
@@ -77,6 +80,7 @@ class PersonaDefinition(BaseModel):
     id: str
     name: str
     profile: str
+    interests: list[InterestLabel] = Field(default_factory=list, max_length=6)
     coreConcern: str = ""
     contentPreference: str = ""
     expressionStyle: str = ""
@@ -619,6 +623,7 @@ class RealAudienceSimulationModelProvider:
                 "personas": personas,
                 "reactions": reactions,
                 "debateResponses": debate_responses,
+                "discussionCoverage": discussion_coverage(personas, reactions, debate_responses),
             },
         )
         return response.output
@@ -659,38 +664,7 @@ class AudienceSimulationWorkflowService:
 
     @staticmethod
     def _simulation_target_context(snapshot: dict[str, Any]) -> dict[str, Any]:
-        topic = snapshot["topic"]
-        target = {
-            "targetType": snapshot.get("targetType", "topic"),
-            "title": topic.get("title", ""),
-            "body": topic.get("body", ""),
-            "previewLevel": "text_draft" if topic.get("body") else "concept",
-            "limitations": "仅预演提供的文字，不评价未提供的图片或真实传播效果。",
-        }
-        draft = snapshot.get("draft")
-        if draft:
-            editable = draft.get("editableContent", {})
-            structure = editable.get("structure") or {}
-            brief = editable.get("brief") or {}
-            visible = {}
-            if isinstance(structure, dict) and structure:
-                visible["structure"] = {
-                    "topicChosen": structure.get("topicChosen", ""),
-                    "outline": [
-                        {"sec": str(section.get("sec", "")), "ct": str(section.get("ct", ""))}
-                        for section in structure.get("outline", []) if isinstance(section, dict)
-                    ],
-                }
-            if isinstance(brief, dict) and brief:
-                visible["brief"] = {
-                    key: brief[key] for key in ("corePoint", "openingHook", "argumentPath", "cta")
-                    if key in brief
-                }
-            target["draft"] = {
-                "editableContent": visible,
-            }
-            target["previewLevel"] = "outline"
-        return target
+        return reader_visible_target(snapshot)
 
     async def stream_events(
         self, simulation_id: str, *, stop_after_node: str | None = None

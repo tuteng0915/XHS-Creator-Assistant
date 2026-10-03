@@ -7,6 +7,46 @@ import { useSimulatedFans } from './useSimulatedFans'
 afterEach(() => {cleanup();vi.restoreAllMocks()})
 const fan = (workspaceId:string,id:string):SimulatedFan => ({id,workspaceId,sourceAnalysisId:'a',sourceGroupId:id,original:{},editable:{name:id,profile:'关注点',coreConcern:'',contentPreference:'',expressionStyle:''},status:'active',createdAt:'',updatedAt:''})
 
+it('atomically adopts valid recommendations without imposing a three-reader limit', async()=>{
+  vi.spyOn(simulatedFanApi,'list').mockResolvedValue(['a','b','c','d'].map(id=>fan('w',id)))
+  const {result}=renderHook(()=>useSimulatedFans('w',''))
+  await waitFor(()=>expect(result.current.ids).toHaveLength(3))
+  act(()=>expect(result.current.applySelection(['d','c','b','a'])).toBe(true))
+  expect(result.current.ids).toEqual(['d','c','b','a'])
+  act(()=>expect(result.current.applySelection(['a','unknown'])).toBe(false))
+  act(()=>expect(result.current.applySelection(['a','a'])).toBe(false))
+  expect(result.current.ids).toEqual(['d','c','b','a'])
+  act(()=>expect(result.current.applySelection(['d'])).toBe(true))
+  expect(result.current.slots).toEqual(['d','',''])
+})
+
+it('reports automatic refresh errors but rejects explicit post-save refresh failures', async () => {
+  const list=vi.spyOn(simulatedFanApi,'list').mockRejectedValue(new Error('断网'))
+  const {result}=renderHook(()=>useSimulatedFans('w',''))
+  await waitFor(()=>expect(result.current.error).toContain('断网'))
+  await act(async()=>{await expect(result.current.refreshAfterSave()).rejects.toThrow('断网')})
+  expect(result.current.rows).toEqual([])
+  list.mockResolvedValue([fan('w','f')])
+  await act(async()=>result.current.refreshAfterSave())
+  expect(result.current.error).toBe('')
+  expect(result.current.rows).toHaveLength(1)
+})
+
+it('does not acknowledge superseded post-save refreshes as successful', async () => {
+  const pending:Array<(rows:SimulatedFan[])=>void>=[]
+  vi.spyOn(simulatedFanApi,'list').mockImplementation(()=>new Promise(resolve=>pending.push(resolve)))
+  const {result}=renderHook(()=>useSimulatedFans('w',''))
+  let assertion!:Promise<unknown>
+  act(()=>{assertion=expect(result.current.refreshAfterSave()).rejects.toThrow('新的请求替代')})
+  let latest!:Promise<void>
+  act(()=>{latest=result.current.refresh()})
+  await act(async()=>{pending[2]([fan('w','fresh')]);await latest})
+  await act(async()=>{pending[1]([fan('w','stale')]);await assertion})
+  expect(result.current.rows[0].id).toBe('fresh')
+  expect(result.current.error).toBe('')
+  await act(async()=>pending[0]([]))
+})
+
 it('starts with three slots, can add more, and clears archived selections', async () => {
   const rows = ['1','2','3','4'].map(id=>fan('w',id))
   const list = vi.spyOn(simulatedFanApi,'list').mockResolvedValue(rows)

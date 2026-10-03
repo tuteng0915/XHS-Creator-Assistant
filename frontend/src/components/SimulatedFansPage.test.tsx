@@ -1,16 +1,302 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { simulatedFanApi } from '../api'
+import { useSimulatedFans } from '../hooks/useSimulatedFans'
 import type { SimulatedFan } from '../types'
 import { SimulatedFanPicker, SimulatedFansPage } from './SimulatedFansPage'
 
 const fan: SimulatedFan = {id:'f',workspaceId:'w',sourceAnalysisId:'a',sourceGroupId:'g',original:{profile:'原始视角',unknowns:['身份未知']},editable:{name:'费用观察员',profile:'关心预算',coreConcern:'费用口径',contentPreference:'清单',expressionStyle:''},status:'active',createdAt:'2026-09-28',updatedAt:'2026-09-28'}
 afterEach(() => {cleanup();vi.restoreAllMocks()})
 
+const secondFan:SimulatedFan = {...fan,id:'second',editable:{...fan.editable,name:'行动派'}}
+const pageProps = {rows:[fan,secondFan],error:'',onRefresh:vi.fn(),onAnalyze:vi.fn()}
+
+const voiceOptions = [{id:'action_first',name:'直球行动派',outlook:'先试',decisionStyle:'看步骤',expressionStyle:'直说',participationStyle:'提问'}]
+const createdFan:SimulatedFan = {...fan,id:'variant',editable:{...fan.editable,name:'新的行动派'}}
+
+async function openVoiceOptions() {
+  fireEvent.click(await screen.findByRole('button',{name:/费用观察员/}))
+  fireEvent.click(screen.getByRole('button',{name:'添加不同声音'}))
+  await screen.findByRole('button',{name:'加入 1 位'})
+}
+
+it('recovers created voices through the real list hook without another POST', async () => {
+  vi.spyOn(simulatedFanApi,'voices').mockResolvedValue(voiceOptions)
+  const create=vi.spyOn(simulatedFanApi,'createVariants').mockResolvedValue([createdFan])
+  let finish!:(rows:SimulatedFan[])=>void
+  const list=vi.spyOn(simulatedFanApi,'list').mockResolvedValueOnce([fan,secondFan])
+    .mockRejectedValueOnce(new Error('503')).mockRejectedValueOnce(new Error('503'))
+    .mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
+  function Page() {
+    const fans=useSimulatedFans('w','')
+    return <SimulatedFansPage rows={fans.rows} error={fans.error} onRefresh={fans.refreshAfterSave} onAnalyze={()=>{}} />
+  }
+  render(<Page />)
+  await openVoiceOptions()
+  fireEvent.click(screen.getByRole('button',{name:'加入 1 位'}))
+  await screen.findByText('角色已加入，列表暂未刷新，请重试刷新。')
+  expect(screen.getByRole('dialog',{name:'角色已加入'})).toHaveTextContent('新的行动派')
+  expect(screen.queryByText('保存失败')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:/加入 1 位/})).not.toBeInTheDocument()
+  await waitFor(()=>expect(screen.getByRole('button',{name:'重试刷新'})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button',{name:'重试刷新'}))
+  await waitFor(()=>expect(list).toHaveBeenCalledTimes(3))
+  await waitFor(()=>expect(screen.getByRole('button',{name:'重试刷新'})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button',{name:'重试刷新'}))
+  expect(screen.getByRole('button',{name:'刷新中…'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:/行动派 可用于模拟/})).toBeDisabled()
+  fireEvent(screen.getByRole('dialog'),new Event('cancel',{cancelable:true}))
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  await act(async()=>finish([fan,secondFan,createdFan]))
+  await waitFor(()=>expect(screen.getByLabelText('名称')).toHaveValue('新的行动派'))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(create).toHaveBeenCalledOnce()
+  expect(list).toHaveBeenCalledTimes(4)
+})
+
+it('retains the creation receipt across dialog close and preserves subsequent source edits', async () => {
+  vi.spyOn(simulatedFanApi,'voices').mockResolvedValue(voiceOptions)
+  const create=vi.spyOn(simulatedFanApi,'createVariants').mockResolvedValue([createdFan,{...createdFan,id:'variant2',editable:{...fan.editable,name:'另一声音'}}])
+  const update=vi.spyOn(simulatedFanApi,'update')
+  const refresh=vi.fn().mockRejectedValueOnce(new Error('503')).mockResolvedValue(undefined)
+  render(<SimulatedFansPage {...pageProps} onRefresh={refresh} />)
+  await openVoiceOptions()
+  fireEvent.click(screen.getByRole('button',{name:'加入 1 位'}))
+  await screen.findByText('角色已加入，列表暂未刷新，请重试刷新。')
+  await waitFor(()=>expect(screen.getByLabelText('名称')).toBeEnabled())
+  fireEvent.click(screen.getByRole('button',{name:'关闭'}))
+  expect(screen.getByText('已加入 2 位角色，列表暂未刷新。')).toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'添加不同声音'})).not.toBeInTheDocument()
+  expect(screen.getByRole('button',{name:'查看加入结果'})).toBeEnabled()
+  expect(screen.getByRole('button',{name:'查看加入结果'})).toHaveFocus()
+  fireEvent.change(screen.getByLabelText('具体需求'),{target:{value:'新的未保存需求'}})
+  fireEvent.click(screen.getByRole('button',{name:'查看加入结果'}))
+  expect(screen.getByRole('dialog')).toHaveTextContent('新的行动派')
+  expect(screen.getByRole('dialog')).toHaveTextContent('另一声音')
+  fireEvent.click(screen.getByRole('button',{name:'重试刷新'}))
+  await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  expect(screen.getByLabelText('名称')).toHaveValue('费用观察员')
+  expect(screen.getByLabelText('具体需求')).toHaveValue('新的未保存需求')
+  expect(screen.getByText('有未保存修改')).toBeInTheDocument()
+  expect(create).toHaveBeenCalledOnce()
+  expect(update).not.toHaveBeenCalled()
+})
+
+it('keeps a failed creation retryable without claiming that source edits failed', async () => {
+  vi.spyOn(simulatedFanApi,'voices').mockResolvedValue(voiceOptions)
+  const create=vi.spyOn(simulatedFanApi,'createVariants').mockRejectedValue(new Error('创建失败'))
+  const refresh=vi.fn()
+  render(<SimulatedFansPage {...pageProps} onRefresh={refresh} />)
+  await openVoiceOptions()
+  fireEvent.click(screen.getByRole('button',{name:'加入 1 位'}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('创建失败')
+  await waitFor(()=>expect(screen.getByRole('button',{name:'加入 1 位'})).toBeEnabled())
+  expect(screen.getByRole('checkbox')).toBeChecked()
+  expect(screen.queryByText('保存失败')).not.toBeInTheDocument()
+  expect(screen.getByText('已保存')).toBeInTheDocument()
+  expect(refresh).not.toHaveBeenCalled()
+  expect(create).toHaveBeenCalledOnce()
+})
+
+it('blocks repeat submission and closing while creation is pending', async () => {
+  vi.spyOn(simulatedFanApi,'voices').mockResolvedValue(voiceOptions)
+  let finish!:(rows:SimulatedFan[])=>void
+  const create=vi.spyOn(simulatedFanApi,'createVariants').mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+  const refresh=vi.fn().mockRejectedValue(new Error('503'))
+  render(<SimulatedFansPage {...pageProps} onRefresh={refresh} />)
+  await openVoiceOptions()
+  fireEvent.click(screen.getByRole('button',{name:'加入 1 位'}))
+  fireEvent.click(screen.getByRole('button',{name:'添加中…'}))
+  fireEvent.click(screen.getByRole('button',{name:'关闭'}))
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  expect(screen.getByRole('checkbox')).toBeDisabled()
+  expect(screen.getByLabelText('名称')).toBeDisabled()
+  await act(async()=>finish([createdFan]))
+  expect(screen.getByRole('dialog',{name:'角色已加入'})).toBeInTheDocument()
+  expect(create).toHaveBeenCalledOnce()
+})
+
+it('reports an empty creation response without crashing or refreshing an unknown target', async () => {
+  vi.spyOn(simulatedFanApi,'voices').mockResolvedValue(voiceOptions)
+  vi.spyOn(simulatedFanApi,'createVariants').mockResolvedValue([])
+  const refresh=vi.fn()
+  render(<SimulatedFansPage {...pageProps} onRefresh={refresh} />)
+  await openVoiceOptions()
+  fireEvent.click(screen.getByRole('button',{name:'加入 1 位'}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('未返回可用角色，请刷新列表后检查。')
+  expect(refresh).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('名称')).toHaveValue('费用观察员')
+})
+
+it('retries only the list after saving, then completes the pending switch', async () => {
+  const update=vi.spyOn(simulatedFanApi,'update').mockResolvedValue({...fan,editable:{...fan.editable,name:'保存的新名'},updatedAt:'v2'})
+  let finish!:()=>void
+  const refresh=vi.fn().mockRejectedValueOnce(new Error('列表暂不可用')).mockRejectedValueOnce(new Error('仍未恢复'))
+    .mockImplementationOnce(()=>new Promise<void>(resolve=>{finish=resolve}))
+  render(<SimulatedFansPage {...pageProps} onRefresh={refresh} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  fireEvent.change(screen.getByLabelText('名称'),{target:{value:'保存的新名'}})
+  fireEvent.click(screen.getByRole('button',{name:/行动派/}))
+  fireEvent.click(screen.getByRole('button',{name:'保存并切换'}))
+  await screen.findByRole('dialog',{name:'修改已保存'})
+  expect(screen.queryByText('保存失败')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'放弃修改并切换'})).not.toBeInTheDocument()
+  expect(screen.getByLabelText('名称')).toHaveValue('保存的新名')
+  fireEvent.click(screen.getByRole('button',{name:'重试刷新并切换'}))
+  await waitFor(()=>expect(refresh).toHaveBeenCalledTimes(2))
+  expect(screen.getByRole('dialog',{name:'修改已保存'})).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'重试刷新并切换'}))
+  expect(screen.getByRole('button',{name:'刷新中…'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'继续编辑'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:/行动派/})).toBeDisabled()
+  await act(async()=>finish())
+  await waitFor(()=>expect(screen.getByLabelText('名称')).toHaveValue('行动派'))
+  expect(update).toHaveBeenCalledOnce()
+})
+
+it('retains subsequent edits during refresh recovery and saves using the acknowledged version', async () => {
+  const update=vi.spyOn(simulatedFanApi,'update').mockResolvedValue({...fan,editable:{...fan.editable,name:'第一次修改'},updatedAt:'v2'})
+  const refresh=vi.fn().mockRejectedValueOnce(new Error('列表失败')).mockResolvedValue(undefined)
+  render(<SimulatedFansPage {...pageProps} onRefresh={refresh} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  fireEvent.change(screen.getByLabelText('名称'),{target:{value:'第一次修改'}})
+  fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
+  await screen.findByRole('button',{name:'重试刷新'})
+  fireEvent.change(screen.getByLabelText('具体需求'),{target:{value:'后续的新需求'}})
+  fireEvent.click(screen.getByRole('button',{name:'重试刷新'}))
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'重试刷新'})).not.toBeInTheDocument())
+  expect(screen.getByLabelText('具体需求')).toHaveValue('后续的新需求')
+  expect(screen.getByText('有未保存修改')).toBeInTheDocument()
+  expect(update).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
+  await waitFor(()=>expect(update).toHaveBeenCalledTimes(2))
+  expect(update).toHaveBeenLastCalledWith('f',expect.objectContaining({expectedUpdatedAt:'v2',coreConcern:'后续的新需求'}))
+})
+
+it('keeps a successful archive and recovers its list without another mutation', async () => {
+  const update=vi.spyOn(simulatedFanApi,'update').mockResolvedValue({...fan,status:'archived',updatedAt:'v2'})
+  const refresh=vi.fn().mockRejectedValueOnce(new Error('列表失败')).mockResolvedValue(undefined)
+  render(<SimulatedFansPage {...pageProps} onRefresh={refresh} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  fireEvent.click(screen.getByRole('button',{name:'归档'}))
+  await screen.findByRole('button',{name:'重试刷新'})
+  expect(screen.getByRole('button',{name:'恢复'})).toBeDisabled()
+  expect(screen.getByText('已保存')).toBeInTheDocument()
+  await waitFor(()=>expect(screen.getByRole('button',{name:/行动派/})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button',{name:/行动派/}))
+  expect(screen.getByRole('dialog',{name:'修改已保存'})).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'继续编辑'}))
+  fireEvent.click(screen.getByRole('button',{name:'重试刷新'}))
+  await waitFor(()=>expect(screen.getByRole('button',{name:'恢复'})).toBeEnabled())
+  expect(update).toHaveBeenCalledOnce()
+})
+
+it('propagates actual hook refresh failure to the editor and updates the list on retry', async () => {
+  const updated={...fan,editable:{...fan.editable,name:'后端已保存'},updatedAt:'v2'}
+  const list=vi.spyOn(simulatedFanApi,'list').mockResolvedValueOnce([fan,secondFan])
+    .mockRejectedValueOnce(new Error('暂时断网')).mockResolvedValue([updated,secondFan])
+  const update=vi.spyOn(simulatedFanApi,'update').mockResolvedValue(updated)
+  function Page() {
+    const fans=useSimulatedFans('w','')
+    return <SimulatedFansPage rows={fans.rows} error={fans.error} onRefresh={fans.refreshAfterSave} onAnalyze={()=>{}} />
+  }
+  render(<Page />)
+  fireEvent.click(await screen.findByRole('button',{name:/费用观察员/}))
+  fireEvent.change(screen.getByLabelText('名称'),{target:{value:'后端已保存'}})
+  fireEvent.click(screen.getByRole('button',{name:/行动派/}))
+  fireEvent.click(screen.getByRole('button',{name:'保存并切换'}))
+  await screen.findByRole('dialog',{name:'修改已保存'})
+  expect(screen.getByRole('alert')).toHaveTextContent('暂时断网')
+  fireEvent.click(screen.getByRole('button',{name:'重试刷新并切换'}))
+  await waitFor(()=>expect(screen.getByLabelText('名称')).toHaveValue('行动派'))
+  await waitFor(()=>expect(screen.getByRole('button',{name:/后端已保存/})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button',{name:/后端已保存/}))
+  expect(screen.getByLabelText('名称')).toHaveValue('后端已保存')
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  expect(update).toHaveBeenCalledOnce()
+  expect(list).toHaveBeenCalledTimes(3)
+})
+
+it.each([['名称','新的名字'],['兴趣领域','个人成长、职业发展'],['具体需求','想先核对时间成本']])('protects unsaved %s when selecting another fan', (field,value) => {
+  const update=vi.spyOn(simulatedFanApi,'update')
+  render(<SimulatedFansPage {...pageProps} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  fireEvent.change(screen.getByLabelText(field),{target:{value}})
+  fireEvent.click(screen.getByRole('button',{name:/行动派/}))
+  const dialog=screen.getByRole('dialog',{name:'保留这次修改？'})
+  fireEvent.click(within(dialog).getByRole('button',{name:'继续编辑'}))
+  expect(screen.getByLabelText(field)).toHaveValue(value)
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(update).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{name:/行动派/}))
+  fireEvent.click(screen.getByRole('button',{name:'放弃修改并切换'}))
+  expect(screen.getByLabelText('名称')).toHaveValue('行动派')
+  expect(update).not.toHaveBeenCalled()
+})
+
+it('does not interrupt unchanged selection or clicking the current fan', () => {
+  render(<SimulatedFansPage {...pageProps} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  fireEvent.click(screen.getByRole('button',{name:/行动派/}))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('名称'),{target:{value:'临时修改'}})
+  fireEvent.click(screen.getByRole('button',{name:/行动派/}))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('名称')).toHaveValue('临时修改')
+})
+
+it('waits for save completion before switching and blocks repeated operations', async () => {
+  let finish!:(value:SimulatedFan)=>void
+  const update=vi.spyOn(simulatedFanApi,'update').mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
+  const refresh=vi.fn().mockResolvedValue(undefined)
+  render(<SimulatedFansPage {...pageProps} onRefresh={refresh} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  fireEvent.change(screen.getByLabelText('名称'),{target:{value:'已改名称'}})
+  fireEvent.click(screen.getByRole('button',{name:/行动派/}))
+  fireEvent.click(screen.getByRole('button',{name:'保存并切换'}))
+  expect(screen.getByRole('button',{name:/行动派/})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'放弃修改并切换'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'继续编辑'})).toBeDisabled()
+  fireEvent.click(screen.getByRole('button',{name:'保存中…'}))
+  expect(update).toHaveBeenCalledTimes(1)
+  await act(async()=>finish({...fan,editable:{...fan.editable,name:'已改名称'},updatedAt:'new-version'}))
+  await waitFor(()=>expect(screen.getByLabelText('名称')).toHaveValue('行动派'))
+  expect(update).toHaveBeenCalledWith('f',expect.objectContaining({name:'已改名称',expectedUpdatedAt:fan.updatedAt}))
+  expect(refresh).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+it('keeps the edit and pending selection after a save conflict', async () => {
+  vi.spyOn(simulatedFanApi,'update').mockRejectedValue(new Error('记录已被修改'))
+  render(<SimulatedFansPage {...pageProps} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  fireEvent.change(screen.getByLabelText('阅读视角'),{target:{value:'保留我的版本'}})
+  fireEvent.click(screen.getByRole('button',{name:/行动派/}))
+  fireEvent.click(screen.getByRole('button',{name:'保存并切换'}))
+  const dialog=screen.getByRole('dialog')
+  await waitFor(()=>expect(within(dialog).getByRole('alert')).toHaveTextContent('记录已被修改'))
+  expect(screen.getByLabelText('阅读视角')).toHaveValue('保留我的版本')
+  fireEvent.click(within(dialog).getByRole('button',{name:'继续编辑'}))
+  expect(screen.getByLabelText('名称')).toHaveValue('费用观察员')
+})
+
+it('does not allow saving invalid interests from the switch dialog', () => {
+  const update=vi.spyOn(simulatedFanApi,'update')
+  render(<SimulatedFansPage {...pageProps} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  fireEvent.change(screen.getByLabelText('兴趣领域'),{target:{value:'a,b,c,d,e,f,g'}})
+  fireEvent.click(screen.getByRole('button',{name:/行动派/}))
+  expect(screen.getByRole('button',{name:'保存并切换'})).toBeDisabled()
+  fireEvent.click(screen.getByRole('button',{name:'继续编辑'}))
+  expect(screen.getByLabelText('兴趣领域')).toHaveValue('a,b,c,d,e,f,g')
+  expect(update).not.toHaveBeenCalled()
+})
+
 it('distinguishes curated presets from model analyses', () => {
   render(<SimulatedFansPage rows={[{...fan,original:{...fan.original,origin:'curated_preset'}}]} error="" onRefresh={vi.fn()} onAnalyze={vi.fn()} />)
   expect(screen.getByText('预置整理 · 可用于模拟')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  expect(screen.getByLabelText('兴趣领域')).toHaveValue('')
   expect(screen.getByText(/非模型接口分析/)).toBeInTheDocument()
 })
 
@@ -26,7 +312,69 @@ it('opens an instance and explicitly saves edits with optimistic concurrency', a
   fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
   await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
   expect(update).toHaveBeenCalledWith('f',expect.objectContaining({name:'新名称',expectedUpdatedAt:fan.updatedAt,status:'active'}))
+  expect(update.mock.calls[0][1]).not.toHaveProperty('interests')
   expect(screen.getByText('已保存')).toBeInTheDocument()
+})
+
+it('edits interest domains separately and preserves the other persona fields', async () => {
+  const source = {...fan,editable:{...fan.editable,interests:['留学','职业发展']}}
+  const editable = {...source.editable,interests:['个人成长','职业发展','留学']}
+  const update = vi.spyOn(simulatedFanApi,'update').mockResolvedValue({...source,editable,updatedAt:'2026-10-01'})
+  render(<SimulatedFansPage rows={[source]} error="" onRefresh={vi.fn()} onAnalyze={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  expect(screen.getByLabelText('兴趣领域')).toHaveValue('留学、职业发展')
+  fireEvent.change(screen.getByLabelText('兴趣领域'),{target:{value:' 个人成长， 职业发展, 留学、 '}})
+  expect(update).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
+  await waitFor(() => expect(screen.getByText('已保存')).toBeInTheDocument())
+  expect(update).toHaveBeenCalledWith('f',{...editable,status:'active',expectedUpdatedAt:fan.updatedAt})
+  expect(screen.getByLabelText('兴趣领域')).toHaveValue('个人成长、职业发展、留学')
+  expect(screen.getByLabelText('具体需求')).toHaveValue(fan.editable.coreConcern)
+})
+
+it('allows clearing saved interests explicitly', async () => {
+  const source = {...fan,editable:{...fan.editable,interests:['留学']}}
+  const update = vi.spyOn(simulatedFanApi,'update').mockResolvedValue({...source,editable:{...source.editable,interests:[]}})
+  render(<SimulatedFansPage rows={[source]} error="" onRefresh={vi.fn()} onAnalyze={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  fireEvent.change(screen.getByLabelText('兴趣领域'),{target:{value:''}})
+  fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
+  await waitFor(() => expect(screen.getByText('已保存')).toBeInTheDocument())
+  expect(update).toHaveBeenCalledWith('f',expect.objectContaining({interests:[]}))
+})
+
+it('preserves existing interest labels containing separators when only the name changes', async () => {
+  const source = {...fan,editable:{...fan.editable,interests:['阅读、写作','旅行，生活','音乐,艺术']}}
+  const editable = {...source.editable,name:'新名称'}
+  const update = vi.spyOn(simulatedFanApi,'update').mockResolvedValue({...source,editable})
+  render(<SimulatedFansPage rows={[source]} error="" onRefresh={vi.fn()} onAnalyze={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  expect(screen.getByText('已保存')).toBeInTheDocument()
+  expect(screen.getByRole('button',{name:'保存修改'})).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('名称'),{target:{value:'新名称'}})
+  fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
+  await waitFor(() => expect(screen.getByText('已保存')).toBeInTheDocument())
+  expect(update).toHaveBeenCalledWith('f',{...editable,status:'active',expectedUpdatedAt:fan.updatedAt})
+})
+
+it('validates interest limits without silently trimming user input', async () => {
+  const update = vi.spyOn(simulatedFanApi,'update').mockResolvedValue({...fan,editable:{...fan.editable,interests:['🌱'.repeat(30)]}})
+  render(<SimulatedFansPage rows={[fan]} error="" onRefresh={vi.fn()} onAnalyze={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  const input = screen.getByLabelText('兴趣领域')
+  fireEvent.change(input,{target:{value:'旅行、留学、职业、生活、运动、艺术、游戏'}})
+  expect(screen.getByRole('alert')).toHaveTextContent('最多 6 项')
+  expect(input).toHaveValue('旅行、留学、职业、生活、运动、艺术、游戏')
+  expect(screen.getByRole('button',{name:'保存修改'})).toBeDisabled()
+  fireEvent.change(input,{target:{value:'长'.repeat(31)}})
+  expect(screen.getByRole('alert')).toHaveTextContent('最多 30 字')
+  expect(screen.getByRole('button',{name:'保存修改'})).toBeDisabled()
+  expect(update).not.toHaveBeenCalled()
+  fireEvent.change(input,{target:{value:'🌱'.repeat(30)}})
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'保存修改'}))
+  await waitFor(() => expect(screen.getByText('已保存')).toBeInTheDocument())
+  expect(update).toHaveBeenCalledWith('f',expect.objectContaining({interests:['🌱'.repeat(30)]}))
 })
 
 it('keeps unsaved text on conflict and supports restoring archived profiles', async () => {
@@ -53,7 +401,7 @@ it('adds multiple distinct voices from one saved fan without editing it', async 
   fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
   fireEvent.click(screen.getByRole('button',{name:'添加不同声音'}))
   await screen.findByText('直球行动派')
-  fireEvent.click(screen.getByRole('button',{name:'加入 2 位'}))
+  fireEvent.click(await screen.findByRole('button',{name:'加入 2 位'}))
   await waitFor(() => expect(create).toHaveBeenCalledWith('f',['action_first','fact_checker']))
   expect(refresh).toHaveBeenCalledOnce()
 })
@@ -75,4 +423,46 @@ it('shows three default dropdown slots and lets users add a fourth', () => {
   expect(change).toHaveBeenCalledWith(3,'3')
   fireEvent.click(screen.getByRole('button',{name:'移除第 4 位'}))
   expect(remove).toHaveBeenCalledWith(3)
+})
+
+it('previews saved interests and concrete needs, updating on selection and clearing', () => {
+  const first = {...fan,editable:{...fan.editable,interests:['留学','个人成长']}}
+  const other = {...fan,id:'other',editable:{...fan.editable,name:'行动派',coreConcern:'确定本周第一步',profile:'看到步骤就动手'}}
+  const props = {rows:[first,other],slots:['f'],onSlotChange:vi.fn(),onAddSlot:vi.fn(),onRemoveSlot:vi.fn()}
+  const {rerender} = render(<SimulatedFanPicker {...props} />)
+  const preview = screen.getByRole('group',{name:'费用观察员的画像预览'})
+  expect(within(preview).getByText('留学 · 个人成长')).toBeInTheDocument()
+  expect(within(preview).getByText('费用口径')).toBeInTheDocument()
+  expect(within(preview).queryByText('清单')).not.toBeInTheDocument()
+  fireEvent.click(within(preview).getByRole('button',{name:'展开画像'}))
+  expect(within(preview).getByText('清单')).toBeInTheDocument()
+  expect(within(preview).getByRole('button',{name:'收起画像'})).toHaveAttribute('aria-expanded','true')
+  rerender(<SimulatedFanPicker {...props} slots={['other']} />)
+  expect(screen.queryByText('费用口径')).not.toBeInTheDocument()
+  expect(screen.queryByText('留学 · 个人成长')).not.toBeInTheDocument()
+  expect(screen.getByText('确定本周第一步')).toBeInTheDocument()
+  expect(screen.getByRole('button',{name:'展开画像'})).toHaveAttribute('aria-expanded','false')
+  rerender(<SimulatedFanPicker {...props} slots={['']} />)
+  expect(screen.queryByRole('group',{name:/画像预览/})).not.toBeInTheDocument()
+})
+
+it('reflects refreshed editable definitions, not the generated snapshot', () => {
+  const props = {rows:[fan],slots:['f'],onSlotChange:vi.fn(),onAddSlot:vi.fn(),onRemoveSlot:vi.fn()}
+  const {rerender} = render(<SimulatedFanPicker {...props} />)
+  expect(screen.getByText('关心预算')).toBeInTheDocument()
+  expect(screen.queryByText('原始视角')).not.toBeInTheDocument()
+  const profile = '先核对成本再行动。'.repeat(60)
+  rerender(<SimulatedFanPicker {...props} rows={[{...fan,editable:{...fan.editable,profile,expressionStyle:'缺信息才追问'}}]} />)
+  fireEvent.click(screen.getByRole('button',{name:'展开画像'}))
+  expect(screen.getByText(profile)).toBeVisible()
+  expect(screen.getByText('缺信息才追问')).toBeVisible()
+  fireEvent.click(screen.getByRole('button',{name:'收起画像'}))
+  expect(screen.queryByText('缺信息才追问')).not.toBeInTheDocument()
+})
+
+it('does not preview stale archived or missing fan selections', () => {
+  render(<SimulatedFanPicker rows={[{...fan,status:'archived'}]} slots={['f','missing','']} onSlotChange={vi.fn()} onAddSlot={vi.fn()} onRemoveSlot={vi.fn()} />)
+  expect(screen.queryByRole('group',{name:/画像预览/})).not.toBeInTheDocument()
+  expect(screen.getAllByRole('option',{name:'该粉丝已不可用，请重新选择'})).toHaveLength(2)
+  expect(screen.getByRole('combobox',{name:'第 1 位模拟粉丝'})).toHaveValue('f')
 })

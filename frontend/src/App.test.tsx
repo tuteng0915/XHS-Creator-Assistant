@@ -3408,7 +3408,7 @@ describe('workspace UI', () => {
     )
 
     expect(await screen.findByText('模拟结果')).toBeInTheDocument()
-    expect(screen.getByText('谨慎执行派')).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: '谨慎执行派' })).toHaveLength(2)
     expect(screen.getByText('真实前提 + 分阶段路径')).toBeInTheDocument()
   })
 
