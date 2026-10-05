@@ -5,6 +5,9 @@ the real graph using a temporary database; no network retries. These authored
 roles test behavior differences, not audience inference or prediction accuracy.
 --audience-from with explicit --group-ids instead reuses accepted analysis roles
 for at most three initial reactions, without a graph, database, or synthesis.
+--task-pair requires one selected role and freezes its episodes for two task variants.
+--synthesis-from with --panel-feedback previews the new summary contract for free;
+add --live to make exactly one synthesis request, reusing all earlier reactions.
 """
 
 from __future__ import annotations
@@ -13,8 +16,10 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import sys
 import time
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -22,14 +27,14 @@ from tempfile import TemporaryDirectory
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from app.config import Settings  # noqa: E402
-from app.main import create_app  # noqa: E402
-from app.models import ModelOperation, WorkspaceCreate  # noqa: E402
+from app.models import ModelOperation, PanelTask, WorkspaceCreate  # noqa: E402
 from app.services.audience_evidence import (  # noqa: E402
     AUDIENCE_METHOD_VERSION,
     reader_persona_context,
     select_audience_personas,
 )
 from app.services.common import utc_now  # noqa: E402
+from app.services.editor_feedback import validate_editor_feedback  # noqa: E402
 from app.services.model_calls import ModelCallService  # noqa: E402
 from app.services.simulated_fans import FanDefinition  # noqa: E402
 from app.workflows.audience_simulation import (  # noqa: E402
@@ -175,6 +180,65 @@ def initial_context(case: dict) -> tuple[dict, list[dict]]:
 async def run_initial_check(service, case: dict) -> dict:
     """Mirror product input/validation, but call no graph, retry, debate or database."""
     target, personas = initial_context(case)
+    return await _run_initial_context(service, case, target, personas)
+
+
+def task_pair_context(case: dict) -> dict:
+    """A diagnostic intervention: freeze persona AND episode order, change task only."""
+    if len(case["personas"]) != 1:
+        raise ValueError("配对检查只能明确选择一位角色")
+    _, personas = initial_context(case)
+    shared = authored_case()["topic"]["body"].split("这只是一种练习产品判断的方法", 1)[0]
+    endings = {
+        "self_guided": ("这是个人自助练习，无需报名、申请或投递，也没有招聘名额。"
+                        "直接按上面的步骤开始即可。"),
+        "recruitment": ("这是一场线上练习招募，参加者需要先报名，审核后才可加入。"
+                        "报名方式将在后续通知中公布。"),
+    }
+    targets = {
+        name: AudienceSimulationWorkflowService._simulation_target_context({
+            "topic": {"title": "用半小时做一次 AI 产品小练习", "body": shared + ending},
+            "targetType": "topic",
+        }) for name, ending in endings.items()
+    }
+    def digest(value):
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True).encode()
+        return hashlib.sha256(encoded).hexdigest()
+    return {
+        "personas": personas, "targets": targets, "personaHash": digest(personas),
+        "targetHashes": {key: digest(value) for key, value in targets.items()},
+        "changedFields": ["topic.body"],
+        "control": "角色及历史案例含顺序固定；不按两个目标分别重排案例；判断标准不发送给模型。",
+    }
+
+
+async def run_task_pair(service, case: dict) -> dict:
+    prepared = task_pair_context(case)
+    variants = {}
+    calls = []
+    for key, target in prepared["targets"].items():
+        result = await _run_initial_context(
+            service, deepcopy(case), deepcopy(target), deepcopy(prepared["personas"])
+        )
+        variants[key] = result
+        calls.extend({**call, "variant": key} for call in result["calls"])
+        if not result["receivedStructuredResponses"]:
+            break  # Do not repeat a network/configuration failure for the second task.
+    completed = len(variants) == 2 and all(v["status"] == "completed" for v in variants.values())
+    status = "completed" if completed else (
+        "partially_completed" if any(v["reactions"] for v in variants.values()) else "failed"
+    )
+    return {
+        "createdAt": utc_now(), "case": case, "pair": prepared, "variants": variants,
+        "calls": calls, "paidRequests": len(calls), "requestAttempts": len(calls),
+        "status": status,
+        "skippedVariants": [key for key in prepared["targets"] if key not in variants],
+        "semanticStatus": "not_reviewed", "requiresSemanticReview": True,
+        "billingStatus": "not_verified", "executedStages": ["initial_reactions"],
+    }
+
+
+async def _run_initial_context(service, case: dict, target: dict, personas: list[dict]) -> dict:
     calls = SingleAttemptCalls(service, max_requests=3)
     provider = RealAudienceSimulationModelProvider(calls)
     errors = {}
@@ -183,7 +247,8 @@ async def run_initial_check(service, case: dict) -> dict:
         persona_id = persona["id"]
         try:
             output = await provider.initial_reaction(persona=persona, topic=target)
-            result = PersonaReactionResult.model_validate(output).model_dump(mode="json")["reaction"]
+            result = PersonaReactionResult.model_validate(output).model_dump(mode="json")
+            result = result["reaction"]
             if result["personaId"] != persona_id:
                 raise ValueError("反应角色与请求不一致")
             validate_trigger_quote(result["triggerQuote"], target)
@@ -204,6 +269,30 @@ async def run_initial_check(service, case: dict) -> dict:
         "billingStatus": "not_verified",
         "executedStages": ["initial_reactions"], "semanticStatus": "not_reviewed",
     }
+
+
+def create_app(settings: Settings):
+    """Import the legacy ASGI factory without initializing the configured user DB.
+
+    app.main creates a global app at import time. Only the graph path needs this
+    factory; free previews and reaction-only checks must not import it at all.
+    Environment overrides cover the synchronous import only, never model calls.
+    """
+    keys = ("DATABASE_PATH", "UPLOAD_DIRECTORY")
+    previous = {key: os.environ.get(key) for key in keys}
+    with TemporaryDirectory(prefix="audience-bootstrap-") as temporary:
+        root = Path(temporary)
+        try:
+            os.environ["DATABASE_PATH"] = str(root / "bootstrap.sqlite3")
+            os.environ["UPLOAD_DIRECTORY"] = str(root / "uploads")
+            from app.main import create_app as factory
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+    return factory(settings)
 
 
 async def run_check(service, settings: Settings) -> dict:
@@ -243,14 +332,19 @@ async def run_check(service, settings: Settings) -> dict:
     return report
 
 
-async def recheck_synthesis(service, baseline: dict) -> dict:
-    """Keep the exact earlier discussion and spend only one call on its summary."""
+def synthesis_target(baseline: dict, panel_feedback: bool = False) -> dict:
     if baseline["case"]["origin"] != "authored_test_not_real_followers":
         raise ValueError("仅接受本脚本生成的独立测试报告")
-    calls = SingleAttemptCalls(service)
-    target = AudienceSimulationWorkflowService._simulation_target_context({
-        "topic": baseline["case"]["topic"], "targetType": "topic",
-    })
+    snapshot = {"topic": baseline["case"]["topic"], "targetType": "topic"}
+    if panel_feedback:
+        snapshot["panelTask"] = PanelTask().model_dump(by_alias=True)
+    return AudienceSimulationWorkflowService._simulation_target_context(snapshot)
+
+
+async def recheck_synthesis(service, baseline: dict, panel_feedback: bool = False) -> dict:
+    """Keep the exact earlier discussion and spend only one call on its summary."""
+    target = synthesis_target(baseline, panel_feedback)
+    calls = SingleAttemptCalls(service, max_requests=1)
     errors = dict(baseline.get("stageErrors", {}))
     synthesis = {}
     try:
@@ -259,6 +353,12 @@ async def recheck_synthesis(service, baseline: dict) -> dict:
             debate_responses=baseline["debateResponses"],
         )
         synthesis = SimulationSynthesisResult.model_validate(output).model_dump()["synthesis"]
+        if panel_feedback:
+            synthesis.update(validate_editor_feedback(
+                output["synthesis"].get("editorFeedback"), topic=target,
+                personas=baseline["personas"], reactions=baseline["reactions"],
+                replies=baseline["debateResponses"],
+            ))
         errors.pop("synthesis", None)
     except Exception as error:
         errors["synthesis"] = type(error).__name__
@@ -267,7 +367,13 @@ async def recheck_synthesis(service, baseline: dict) -> dict:
         "status": "partially_completed" if errors else "completed", "stageErrors": errors,
         "calls": calls.calls, "paidRequests": len(calls.calls),
         "replayedStages": ["personas", "initial_reactions", "debate_responses"],
-        "requiresSemanticReview": True,
+        "requiresSemanticReview": True, "semanticStatus": "not_reviewed",
+        "target": target, "taskOverrideAppliedToSynthesisOnly": panel_feedback,
+        "executedStages": ["synthesis"],
+        "synthesisInputHash": hashlib.sha256(json.dumps(
+            calls.calls[0]["context"] if calls.calls else {}, ensure_ascii=False,
+            sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ).encode()).hexdigest(),
     }
 
 
@@ -279,16 +385,32 @@ def main() -> int:
     source.add_argument("--synthesis-from", type=Path, help="复用先前报告，只付费复测一次汇总")
     source.add_argument("--audience-from", type=Path, help="复用受众检查报告，只检查独立反应")
     parser.add_argument("--group-ids", nargs="+", help="明确选择一至三位有效受众 ID")
+    parser.add_argument("--task-pair", action="store_true", help="固定一位角色做两种报名情境对照")
+    parser.add_argument("--panel-feedback", action="store_true", help="配合 --synthesis-from 检查新反馈契约；不加 --live 免费预览")
     args = parser.parse_args()
+    if args.panel_feedback and not args.synthesis_from:
+        parser.error("--panel-feedback 必须配合 --synthesis-from")
     if bool(args.audience_from) != bool(args.group_ids):
         parser.error("--audience-from 和 --group-ids 必须同时提供")
     case = analysis_case(args.audience_from, args.group_ids) if args.audience_from else None
+    if args.task_pair and (case is None or len(case["personas"]) != 1):
+        parser.error("--task-pair 需要 --audience-from 和一位 --group-ids")
     if case:
         initial_context(case)  # Validate nested episodes before settings, output or billing.
-    if args.synthesis_from and not args.live:
+    baseline = json.loads(args.synthesis_from.read_text(encoding="utf-8")) if args.synthesis_from else None
+    if baseline is not None:
+        synthesis_target(baseline, args.panel_feedback)
+    if args.synthesis_from and not args.live and not args.panel_feedback:
         parser.error("--synthesis-from 需要显式提供 --live")
     if not args.live:
-        print(json.dumps(case or authored_case(), ensure_ascii=False, indent=2))
+        if args.panel_feedback:
+            print(json.dumps({"target": synthesis_target(baseline, True),
+                              "personas": baseline["personas"], "reactions": baseline["reactions"],
+                              "debateResponses": baseline["debateResponses"], "modelCalls": 0,
+                              "taskOverrideAppliedToSynthesisOnly": True}, ensure_ascii=False, indent=2))
+            return 0
+        print(json.dumps(task_pair_context(case) if args.task_pair else case or authored_case(),
+                         ensure_ascii=False, indent=2))
         return 0
     if args.output is None:
         parser.error("真实验证必须指定 --output，例如 data/evals/reactions-20261003")
@@ -297,12 +419,14 @@ def main() -> int:
         parser.error("未配置 Qwen 密钥")
     args.output.mkdir(parents=True, exist_ok=False)
     service = ModelCallService(settings)
-    if case:
+    if args.task_pair:
+        report = asyncio.run(run_task_pair(service, case))
+    elif case:
         report = asyncio.run(run_initial_check(service, case))
     elif args.synthesis_from:
-        baseline = json.loads(args.synthesis_from.read_text(encoding="utf-8"))
-        report = asyncio.run(recheck_synthesis(service, baseline))
+        report = asyncio.run(recheck_synthesis(service, baseline, args.panel_feedback))
         report["baselineReport"] = str(args.synthesis_from)
+        report["baselineReportHash"] = hashlib.sha256(args.synthesis_from.read_bytes()).hexdigest()
     else:
         report = asyncio.run(run_check(service, settings))
     operations = ([ModelOperation.SIMULATION_REACTION] if case else
@@ -311,7 +435,10 @@ def main() -> int:
         ModelOperation.SIMULATION_SYNTHESIS,
     ])
     report["promptHashes"] = {**report.get("promptHashes", {}), **{
-        operation.value: hashlib.sha256(service._build_prompt(operation, {})[0].encode()).hexdigest()
+        operation.value: hashlib.sha256(
+            service._build_prompt(operation, report["calls"][0]["context"]
+                                  if args.panel_feedback and report["calls"] else {})[0].encode()
+        ).hexdigest()
         for operation in operations
     }}
     report.update(provider="qwen", configuredModel=settings.qwen_model)

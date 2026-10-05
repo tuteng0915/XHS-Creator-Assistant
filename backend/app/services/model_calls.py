@@ -12,18 +12,23 @@ from app.config import Settings
 from app.errors import ValidationError
 from app.models import ModelCallRequest, ModelCallResponse, ModelOperation
 from app.services.audience_examples import ANALYSIS_EXAMPLES, REACTION_EXAMPLES
+from app.services.editor_feedback import EDITOR_FEEDBACK_PROMPT, reader_concern_catalog
+from app.services.feedback_anchors import feedback_anchor_prompt_context
+from app.services.panel_protocol import panel_prompt_context
 from app.services.reader_selection import ReaderSelectionInput
 from app.services.reader_selection_prompt import selection_prompt
 
 PROMPT_PROFILE = """你是懂内容传播的创作者顾问。先帮助创作者看见自己账号已经形成的特色、长处与价值，再把可能的创作方向留给后续选题步骤。语气真诚、积极、有鼓励感，先说具体做对了什么；不要把报告写成审稿意见，不要用空泛的夸奖或不必要的防御性提醒。
 原始笔记是证据；账号定位摘要是背景，不是作者经历的证据。只分析输入中的笔记，不引用未选中的笔记，不把评论者经历当作作者经历。
 跨笔记归纳时保留每段经历的主体与场景：同一个词不代表同一种经历。学校导师与公司带教可以共同体现“你擅长写清支持与成长的具体过程”，但不要把学校导师的关心写成实习团队的特点；课堂理论与技术实践可以是账号并列的两条线，原文未建立联系时不要说作者已用该理论解决技术问题。先准确说出各篇做得好的地方，再提炼它们共有的表达优势。
+生成每条优势前，先区分它是在说“写作方式”还是“经历事实”：跨场景的材料可以支持共同的写作方式；若结论限定在某个工作、求学或生活场景，依据也须来自该场景。不能只因都提到导师、成长或技术，就把不同经历合并为一个职业方法。无法连接的两条内容线可以并列呈现，这同样是账号的丰富性，不必强造融合标签。
 accountPortrait 是面向创作者的账号画像：summary 是一句话定位；keywords 给出 3～6 个短标签，兼顾内容主题、读者价值和表达风格，避免全是话题词；strengths 给出 2～3 条具体优势，说清这些笔记哪里做得好；encouragement 用一两句话肯定创作者已形成的独特价值，并指出值得继续放大的方向，不保证流量。recurringThemes 是反复出现的内容方向，每项至少引用两条不同笔记，否则不要写；readerValue 是笔记为读者提供的价值；expressionPatterns 是表达习惯。每条 statement 必须有 evidence，填写输入中真实的 note_id 和从该笔记标题或正文逐字截取的短句。引用要真正支持 statement，不能用无关原文凑数。证据不足时减少结论；没有 note_id 时 accountPortrait 返回 null。
 如果有明显的其他风格笔记，可在 claim 的 counterexamples 中引用其 note_id 和原文短句，让画像更丰富；没有就返回空数组，不必刻意寻找反例。
 引用只抄一个连续短片段，建议 10～40 字，保留原有空格和标点；需要两处依据就分成两个 evidence，不要用省略号拼接。例如原文“先核对费用，再决定是否报名。记得预留时间。”可引用“先核对费用，再决定是否报名。”，不可改成“先核对费用……预留时间”。原文本来有省略号可以照抄，不要自行补加；statement 可以自然归纳，quote 不要承担归纳任务。
 只有输入明确提供“可比较的前后发布时间组”时才填写 recentChange，否则设为 null。recentChange 只比较前后两组的选题或表达方式，evidence 至少各引用一条前期和后期笔记。日期缺失、跨度太短或组别不足时不要猜；累计互动数不能用来证明账号在增长或退步。
 保留原有字段供下游选题使用：pillars 每条不超过 10 字；titleFormulas 的 examples 尽量使用真实标题；voiceFingerprint 不要虚构作者人格。contrast 只描述所选笔记的可见互动差异；缺少可比笔记时返回空对象。赞、藏、评、分享不是曝光率，不得据此推断点击率、搜索流量或推荐原因。winFactors、loseFactors 是待验证解释，不能写成已证实的因果规律；小样本时允许留空。
 复盘方法：先认识账号，再从具体笔记中选一到两组有意义的对照，分别看点赞、收藏、评论、分享，不把点赞排名当成所有表现的排名。只引用已提供的数字；未提供曝光时不计算互动率，不套行业阈值。结合正文判断这些差异可能说明什么：收藏多可以提示日后使用价值，但不能仅由数字认定读者动机。不要把低互动直接解释为写得不好，也不要用发布时间更早、累积更久的一篇证明另一篇退步。
+互动字段缺失或为 None/null 时，metric 中省略该项或写“未提供”，不能原样输出 None/null，也不能补零。loseFactors 若没有超出互动数字本身的具体内容依据就留空，把可尝试的改法放进 takeaways。情绪记录、毕业纪念或视频不因互动较少就被判为缺乏价值或不适合账号；可以肯定它的记录价值，再提出“若希望引出交流，可在结尾补一个读者能回答的问题”这类有目标的尝试，不把建议伪装成已找到失败原因。样例仅示范表达方法，不是输入账号的事实。
 拆解写法时观察核心表达、具体例子或论据、标题承诺、开头如何带入、正文如何推进、情绪和语气，但只挑本账号最显著的特点，不逐项填满一套模板。将发现写入已有 strengths、expressionPatterns、titleFormulas、hookStyles、viralStructure 和 voiceFingerprint，避免同一优点在各字段重复。voiceFingerprint 要说明可模仿的语言选择、节奏与表达姿态；不替创作者套预设人格，不要求每篇都有冲突、金句或固定篇幅。
 contrast.takeaways 给出最多三条简短的创作经验，每条用“参考哪篇的什么做法 → 什么情况下可复用 → 下次可尝试的具体调整”表达，沿用字符串数组，不新增字段或另写整篇选题。假设示例（不是本账号事实）：不要只写“多提供干货”，可写“参考《某篇选择记录》先列取舍再讲决定的写法；适合有真实比较经历时，下一篇保留一个关键权衡，不必罗列所有选项”。实际输出换成输入中的笔记和写法，不能抄示例标题。可用材料不足时少给建议，不勉强套公式。优先发扬已形成的风格，允许不同类型内容保留不同写法。
 只输出 JSON，不要解释或 markdown 代码块。schema:
@@ -264,7 +269,7 @@ class ModelCallService:
                 },
                 json={
                     "model": self.settings.anthropic_model,
-                    "max_tokens": MAX_TOKENS[operation],
+                    "max_tokens": self._output_budget(operation, context),
                     "temperature": 0.3,
                     "system": system,
                     "messages": [{"role": "user", "content": user}],
@@ -300,7 +305,7 @@ class ModelCallService:
             )
 
         system, user = self._build_prompt(operation, context)
-        async with self._qwen_client() as client:
+        async with self._qwen_client(operation) as client:
             response = await client.post(
                 f"{self.settings.qwen_base_url.rstrip('/')}/chat/completions",
                 headers={
@@ -309,7 +314,7 @@ class ModelCallService:
                 },
                 json={
                     "model": self.settings.qwen_model,
-                    "max_tokens": MAX_TOKENS[operation],
+                    "max_tokens": self._output_budget(operation, context),
                     "temperature": 0.3,
                     "response_format": {"type": "json_object"},
                     "messages": [
@@ -337,8 +342,16 @@ class ModelCallService:
             },
         )
 
-    def _qwen_client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(timeout=90)
+    @staticmethod
+    def _output_budget(operation: ModelOperation, context: dict) -> int:
+        if operation == ModelOperation.SIMULATION_SYNTHESIS and (context.get("topic") or {}).get("panelTask") is not None:
+            return 3200
+        return MAX_TOKENS[operation]
+
+    def _qwen_client(self, operation: ModelOperation) -> httpx.AsyncClient:
+        read_timeout = (self.settings.qwen_profile_read_timeout_seconds
+                        if operation == ModelOperation.PROFILE else 90)
+        return httpx.AsyncClient(timeout=httpx.Timeout(90, read=read_timeout))
 
     def _anthropic_messages_url(self) -> str:
         if self.settings.anthropic_messages_url.strip():
@@ -444,7 +457,7 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
             )
         if operation == ModelOperation.SIMULATION_REACTION:
             return (
-                PROMPT_SIMULATION_REACTION,
+                PROMPT_SIMULATION_REACTION + panel_prompt_context(context.get("topic")),
                 "选题：\n"
                 f"{json.dumps(context.get('topic'), ensure_ascii=False)}\n\n"
                 "persona：\n"
@@ -452,7 +465,7 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
             )
         if operation == ModelOperation.SIMULATION_DEBATE:
             return (
-                PROMPT_SIMULATION_DEBATE,
+                PROMPT_SIMULATION_DEBATE + panel_prompt_context(context.get("topic")),
                 "选题：\n"
                 f"{json.dumps(context.get('topic'), ensure_ascii=False)}\n\n"
                 "persona：\n"
@@ -463,8 +476,20 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
                 f"{json.dumps(context.get('otherReactions'), ensure_ascii=False)}",
             )
         if operation == ModelOperation.SIMULATION_SYNTHESIS:
+            feedback_prompt = EDITOR_FEEDBACK_PROMPT if (context.get("topic") or {}).get("panelTask") is not None else ""
+            anchors = ("\n\ntextAnchors（只来自冻结作品，可选择的原文位置）：\n"
+                       + json.dumps(feedback_anchor_prompt_context(context["topic"]), ensure_ascii=False)
+                       + "\n\nreaderConcerns（记录的具体顾虑，非公开评论原句）：\n"
+                       + json.dumps(reader_concern_catalog(
+                           context.get("personas") or [], context.get("reactions") or [],
+                           context.get("debateResponses") or []), ensure_ascii=False)
+                       if feedback_prompt else "")
+            # A second, legacy JSON example competes with the panel envelope:
+            # a live check placed editorFeedback beside synthesis instead of inside it.
+            base = (PROMPT_SIMULATION_SYNTHESIS.split("只输出 JSON，不要解释。schema:", 1)[0]
+                    .replace("其他字段均为字符串。", "")) if feedback_prompt else PROMPT_SIMULATION_SYNTHESIS
             return (
-                PROMPT_SIMULATION_SYNTHESIS,
+                base + panel_prompt_context(context.get("topic")) + feedback_prompt,
                 "选题：\n"
                 f"{json.dumps(context.get('topic'), ensure_ascii=False)}\n\n"
                 "personas：\n"
@@ -474,7 +499,7 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
                 "第二轮回应：\n"
                 f"{json.dumps(context.get('debateResponses'), ensure_ascii=False)}\n\n"
                 "程序核对的执行概况：\n"
-                f"{json.dumps(context.get('discussionCoverage'), ensure_ascii=False)}",
+                f"{json.dumps(context.get('discussionCoverage'), ensure_ascii=False)}" + anchors,
             )
         if operation == ModelOperation.AGENT_CHAT:
             return (

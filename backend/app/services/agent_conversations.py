@@ -740,6 +740,8 @@ class AgentConversationService:
             reply_metadata = reply.model_metadata
 
         with self.database.transaction() as connection:
+            # History is a server receipt, never a provider-supplied assertion.
+            reply_metadata.pop("canvasEditSnapshot", None)
             if canvas_topic and reply_metadata.get("status") == "completed":
                 update = reply_metadata.get("canvasUpdate")
                 if update is not None:
@@ -747,7 +749,19 @@ class AgentConversationService:
                         validated = TopicUpdate.model_validate(
                             {**update, "expectedUpdatedAt": canvas_topic["updated_at"]}
                         )
-                        TopicRepository().update(
+                        edit_snapshot = {
+                            "schemaVersion": "creator-edit/v1",
+                            "workspaceId": conversation["workspace_id"],
+                            "topicId": canvas_topic["id"],
+                            "before": {
+                                "title": canvas_topic["title"], "body": canvas_topic["body"],
+                                "updatedAt": canvas_topic["updated_at"],
+                            },
+                            "suggested": {"title": validated.title, "body": validated.body},
+                            "after": None,
+                        }
+                        reply_metadata["canvasEditSnapshot"] = edit_snapshot
+                        updated_topic = TopicRepository().update(
                             connection,
                             topic_id=canvas_topic["id"],
                             title=validated.title,
@@ -756,6 +770,10 @@ class AgentConversationService:
                             expected_updated_at=canvas_topic["updated_at"],
                             now=utc_now(),
                         )
+                        edit_snapshot["after"] = {
+                            "title": updated_topic["title"], "body": updated_topic["body"],
+                            "updatedAt": updated_topic["updated_at"],
+                        }
                         reply_metadata["canvasApplyStatus"] = "applied"
                     except Exception as error:
                         reply_metadata["canvasApplyStatus"] = "conflict"

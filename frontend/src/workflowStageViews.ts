@@ -56,10 +56,12 @@ export function simulationStageSeed(): StageView[] {
 
 // Observation only: preserve successful results when a parallel role fails.
 export function applySimulationStageEvent(stages: StageView[], activity: ActivityEvent): StageView[] {
+  const frozen = stages.find(s=>s.key==='synthesis')?.feedbackRun
+  if (frozen && activity.runId !== frozen.id) return stages
   const key = activity.stageKey
   const kind = activity.data.eventType
   if (!key || !['stage.started', 'stage.succeeded', 'stage.failed'].includes(String(kind))) return stages
-  return stages.map(stage => {
+  const next:StageView[] = stages.map(stage => {
     if (stage.key !== key && !key.startsWith(`${stage.key}.`)) return stage
     if (kind === 'stage.started') return {...stage, status:'running'}
     if (kind === 'stage.succeeded') {
@@ -74,6 +76,16 @@ export function applySimulationStageEvent(stages: StageView[], activity: Activit
       : {[key]:error}
     return {...stage, status:'failed', error, executionErrors:{...stage.executionErrors,...structured}}
   })
+  if (frozen) {
+    const result = (key:string) => (next.find(s=>s.key===key)?.result || {}) as Record<string,unknown>
+    const records = (value:unknown, fallback:Record<string,unknown>[]) => Array.isArray(value) ? value : fallback
+    return next.map(s=>s.key==='synthesis' ? {...s, feedbackRun:{...frozen,
+      personaDefinitions:records(result('personas').personas,frozen.personaDefinitions),
+      reactionResults:records(result('initial_reactions').reactions,frozen.reactionResults),
+      debateResults:records(result('debate_responses').debateResponses,frozen.debateResults),
+    }} : s)
+  }
+  return next
 }
 
 export function stageSeedFromRun(run: AnalysisRun): StageView[] {
@@ -100,12 +112,14 @@ export function stageSeedFromRun(run: AnalysisRun): StageView[] {
 export function stageSeedFromSimulation(run: SimulationRun): StageView[] {
   const hasSynthesis = Object.keys(run.synthesis || {}).length > 0
   const statefulDiscussion = run.inputSnapshot?.simulationMethod === 'audience_methods_v2'
+  const task = run.inputSnapshot?.panelTask as Record<string, unknown> | undefined
+  const discussionDisabled = task?.protocolVersion === 'panel/v1' && task?.discussionEnabled === false
   const publicComments = run.reactionResults.filter(r => (!r.action || r.action === 'comment') && String(r.quote || r.text || '').trim())
   const noRecipient = statefulDiscussion
     ? !run.reactionResults.some(r => publicComments.some(p => p.personaId !== r.personaId))
     : publicComments.length < 2
   const debateFailed = Object.keys(run.stageErrors).some(key => key === 'debate_responses' || key.startsWith('debate_responses.'))
-  const discussionSkipped = !debateFailed && !run.debateResults.length && (hasSynthesis || ['completed', 'partially_completed', 'failed'].includes(run.status)) && run.reactionResults.length > 0 && noRecipient
+  const discussionSkipped = !debateFailed && !run.debateResults.length && (hasSynthesis || ['completed', 'partially_completed', 'failed'].includes(run.status)) && run.reactionResults.length > 0 && (discussionDisabled || noRecipient)
   const resultByStage: Record<string, unknown> = {
     personas: run.personaDefinitions.length
       ? { personas: run.personaDefinitions }
@@ -115,7 +129,8 @@ export function stageSeedFromSimulation(run: SimulationRun): StageView[] {
       : undefined,
     debate_responses: run.debateResults.length
       ? { debateResponses: run.debateResults }
-      : discussionSkipped ? { debateResponses: [], skippedReason: statefulDiscussion
+      : discussionSkipped ? { debateResponses: [], skippedReason: discussionDisabled
+        ? '本次只做独立试读，未开启互相回应。' : statefulDiscussion
         ? '没有可供其他读者回应的公开评论，跳过交流。'
         : '不足两条模拟公开评论，无需交叉回应。' } : undefined,
     synthesis: hasSynthesis ? { synthesis: run.synthesis } : undefined,
@@ -134,6 +149,8 @@ export function stageSeedFromSimulation(run: SimulationRun): StageView[] {
             ? 'running'
             : 'waiting',
       result: resultByStage[stage.key],
+      ...(stage.key === 'synthesis' ? {feedbackRun:{id:run.id,inputSnapshot:run.inputSnapshot,
+        personaDefinitions:run.personaDefinitions,reactionResults:run.reactionResults,debateResults:run.debateResults}} : {}),
       error: error || undefined,
       executionErrors: Object.fromEntries(Object.entries(run.stageErrors).filter(([key]) => key === stage.key || key.startsWith(`${stage.key}.`))),
       executionEnded: ['completed', 'partially_completed', 'failed'].includes(run.status),

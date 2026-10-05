@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime
 
 import pytest
 from test_workspace_api import create_workspace, request, send
@@ -8,6 +9,7 @@ from app.errors import ValidationError
 from app.models import ModelCallResponse, SimulationRunCreate
 from app.services.agent_conversations import RealAgentConversationModelProvider
 from app.services.audience_analyses import AudienceAnalysisCreate, AudienceResult
+from app.services.common import as_iso
 
 
 def topic(app, workspace_id, title="选题"):
@@ -260,7 +262,7 @@ def test_canvas_live_context_persistence_and_conflict(app, conflict):
                 output={"reply": "已调整开头", "update": {"title": "新标题", "body": "AI 正文"},
                         "pendingSuggestions": [],
                         "factCheck": {"safeToApply": True, "supportedClaims": []}},
-                model_metadata={},
+                model_metadata={"canvasEditSnapshot": {"before": "untrusted-provider-value"}},
             )
 
     service = app.state.agent_conversation_service
@@ -285,6 +287,21 @@ def test_canvas_live_context_persistence_and_conflict(app, conflict):
         "conflict" if conflict else "applied"
     )
     assert history.messages[-1].model_metadata["canvasUpdate"]["body"] == "AI 正文"
+    receipt = history.messages[-1].model_metadata["canvasEditSnapshot"]
+    assert receipt["schemaVersion"] == "creator-edit/v1"
+    assert receipt["workspaceId"] == wid
+    assert receipt["topicId"] == selected["id"]
+    assert receipt["before"] == {"title": selected["title"], "body": selected["body"],
+                                 "updatedAt": as_iso(datetime.fromisoformat(selected["updatedAt"]))}
+    assert receipt["suggested"] == {"title": "新标题", "body": "AI 正文"}
+    if conflict:
+        assert receipt["after"] is None
+    else:
+        refreshed = send(app, "GET", f"/api/topics/{selected['id']}").json()
+        assert receipt["after"] == {
+            "title": refreshed["title"], "body": refreshed["body"],
+            "updatedAt": as_iso(datetime.fromisoformat(refreshed["updatedAt"])),
+        }
 
 
 @pytest.mark.parametrize("mode", ["discussion", "title", "opening"])
@@ -352,3 +369,13 @@ def test_canvas_scoped_results_persist_without_touching_other_content(app, mode)
     assert history.messages[-1].model_metadata.get("canvasApplyStatus") == (
         None if mode == "discussion" else "applied"
     )
+    if mode == "discussion":
+        assert "canvasEditSnapshot" not in history.messages[-1].model_metadata
+    else:
+        receipt = history.messages[-1].model_metadata["canvasEditSnapshot"]
+        assert receipt["before"]["body"] == original_body
+        assert receipt["after"] == {
+            "title": stored["title"], "body": stored["body"],
+            "updatedAt": as_iso(datetime.fromisoformat(stored["updatedAt"])),
+        }
+        assert receipt["suggested"] == {"title": expected_title, "body": expected_body}

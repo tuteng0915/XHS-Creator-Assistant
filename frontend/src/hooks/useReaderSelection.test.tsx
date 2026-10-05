@@ -3,6 +3,7 @@ import {afterEach, beforeEach, expect, it, vi} from 'vitest'
 import {memoryStorage} from '../test/storage'
 import {readerSelectionApi} from '../api'
 import type {ReaderSelection} from '../readerSelection'
+import type {PanelTask} from '../types'
 import {readerSelectionStorageKey, useReaderSelection} from './useReaderSelection'
 
 const record: ReaderSelection = {id:'r', workspaceId:'w', inputHash:'a'.repeat(64), status:'completed',
@@ -113,4 +114,34 @@ it('rejects observations from another account', async () => {
   const {result}=renderHook(()=>useReaderSelection('w','t','v1'))
   await waitFor(()=>expect(result.current.error).toContain('不属于'))
   expect(result.current.record).toBeNull()
+})
+
+it('isolates lost receipts by task and retries with the original task key', async()=>{
+  const task:PanelTask={protocolVersion:'panel/v1',readingMode:'natural',discussionEnabled:true,focusQuestions:[]}
+  const create=vi.spyOn(readerSelectionApi,'create').mockRejectedValue(new Error('断网'))
+  const {result,rerender}=renderHook(({task})=>useReaderSelection('w','t','v1',task),{initialProps:{task}})
+  await act(async()=>result.current.recommend(3))
+  const original=create.mock.calls[0][1]
+  rerender({task:{...task,discussionEnabled:false}})
+  await act(async()=>result.current.recommend(3))
+  expect(create.mock.calls[1][1].requestKey).not.toBe(original.requestKey)
+  expect(create.mock.calls[1][1].panelTask?.discussionEnabled).toBe(false)
+  rerender({task})
+  await act(async()=>result.current.recommend(5))
+  expect(create.mock.calls[2][1]).toEqual(original)
+})
+
+it('ignores late results after a task change and rejects mismatched task snapshots', async()=>{
+  const task:PanelTask={protocolVersion:'panel/v1',readingMode:'natural',discussionEnabled:true,focusQuestions:[]}
+  let finish!:(value:ReaderSelection)=>void
+  vi.spyOn(readerSelectionApi,'create').mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve})).mockResolvedValue(record)
+  vi.spyOn(readerSelectionApi,'get').mockResolvedValue(record)
+  const {result,rerender}=renderHook(({task})=>useReaderSelection('w','t','v1',task),{initialProps:{task}})
+  let pending!:Promise<void>
+  act(()=>{pending=result.current.recommend(3)})
+  rerender({task:{...task,discussionEnabled:false}})
+  await act(async()=>{finish({...record,inputSnapshot:{...record.inputSnapshot,panelTask:task}});await pending})
+  expect(result.current.record).toBeNull()
+  await act(async()=>result.current.recommend(3))
+  expect(result.current.error).toContain('试读设置不一致')
 })

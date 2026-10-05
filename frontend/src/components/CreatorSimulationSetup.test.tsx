@@ -6,7 +6,7 @@ import {readerSelectionApi, simulatedFanApi} from '../api'
 import {useSimulatedFans} from '../hooks/useSimulatedFans'
 import {readerSelectionStorageKey} from '../hooks/useReaderSelection'
 import type {ReaderSelection} from '../readerSelection'
-import type {SimulatedFan, Topic} from '../types'
+import type {PanelTask, SimulatedFan, Topic} from '../types'
 import {CreatorSimulationSetup} from './CreatorSimulationSetup'
 
 const topic:Topic={id:'t',workspaceId:'w',title:'下班后如何开始学语言',body:'每天只留十分钟，先开口。',angle:'',
@@ -15,8 +15,9 @@ const topic:Topic={id:'t',workspaceId:'w',title:'下班后如何开始学语言'
 const rows:SimulatedFan[]=['a','b','c','d'].map(id=>({id,workspaceId:'w',sourceAnalysisId:'analysis',sourceGroupId:id,
   original:{},editable:{name:`读者${id}`,profile:'先确认时间投入，再试一次。',coreConcern:'',contentPreference:'',expressionStyle:''},
   status:'active',createdAt:'',updatedAt:'v1'}))
+const task:PanelTask={protocolVersion:'panel/v1',readingMode:'natural',discussionEnabled:true,focusQuestions:[]}
 const record:ReaderSelection={id:'r',workspaceId:'w',inputHash:'a'.repeat(64),status:'completed',errorCode:null,
-  inputSnapshot:{target:{title:topic.title},candidates:rows.map(f=>({id:f.id,name:f.editable.name}))},
+  inputSnapshot:{panelTask:task,target:{title:topic.title},candidates:rows.map(f=>({id:f.id,name:f.editable.name}))},
   result:{proposedReaders:[{fanId:'d',fitReason:'重视开始行动的门槛。',contribution:'从时间投入角度试读。'}],unmatchedReason:''},
   freshness:{status:'current',reasons:[]}}
 beforeEach(()=>vi.stubGlobal('localStorage',memoryStorage()))
@@ -50,14 +51,14 @@ it('previews the target first and does not replace manual choices until explicit
   expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('a')
   fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'d'}})
   fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
-  expect(run).toHaveBeenLastCalledWith(topic,undefined)
+  expect(run).toHaveBeenLastCalledWith(topic,undefined,task)
   fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
   await screen.findByText('已采用推荐，可继续调整名单。')
   expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('d')
   expect(screen.getByLabelText('第 2 位模拟粉丝')).toHaveValue('')
   fireEvent.change(screen.getByLabelText('第 2 位模拟粉丝'),{target:{value:'b'}})
   fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
-  expect(run).toHaveBeenLastCalledWith(topic,{readerSelectionId:'r',readerSelectionInputHash:record.inputHash})
+  expect(run).toHaveBeenLastCalledWith(topic,{readerSelectionId:'r',readerSelectionInputHash:record.inputHash},task)
 })
 
 it('checks freshness again at adoption and preserves the old selection on conflict', async()=>{
@@ -82,7 +83,7 @@ it('locks topic and reader editing during explicit adoption verification', async
 })
 
 it('restores recommendations without auto-adopting them or charging another request', async()=>{
-  window.localStorage.setItem(readerSelectionStorageKey('w','t'),JSON.stringify({id:'r',requestKey:'original',desiredCount:3}))
+  window.localStorage.setItem(readerSelectionStorageKey('w','t',task),JSON.stringify({id:'r',requestKey:'original',desiredCount:3}))
   const {create}=setup()
   await screen.findByText('重视开始行动的门槛。')
   expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('a')
@@ -116,5 +117,40 @@ it('does not carry adopted provenance to another topic', async()=>{
   await screen.findByText('已采用推荐，可继续调整名单。')
   fireEvent.change(screen.getByLabelText('模拟选题'),{target:{value:'other'}})
   fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
-  expect(run).toHaveBeenLastCalledWith(expect.objectContaining({id:'other'}),undefined)
+  expect(run).toHaveBeenLastCalledWith(expect.objectContaining({id:'other'}),undefined,task)
+})
+
+it('requires one or two nonempty guided questions and passes the task to manual simulation', async()=>{
+  const {run}=setup()
+  await waitFor(()=>expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('a'))
+  fireEvent.click(screen.getByLabelText('定向试读'))
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'推荐读者'})).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('重点问题 1'),{target:{value:'  第一步清楚吗？  '}})
+  fireEvent.click(screen.getByRole('button',{name:'＋ 添加第二个问题'}))
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('重点问题 2'),{target:{value:'愿意尝试吗？'}})
+  expect(screen.getByLabelText('重点问题 2')).toHaveAttribute('maxlength','300')
+  fireEvent.click(screen.getByLabelText('互相回应'))
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(run).toHaveBeenLastCalledWith(topic,undefined,{...task,readingMode:'guided',discussionEnabled:false,
+    focusQuestions:['第一步清楚吗？','愿意尝试吗？']})
+  fireEvent.click(screen.getByRole('button',{name:'移除第二个问题'}))
+  expect(screen.queryByLabelText('重点问题 2')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByLabelText('自然全文试读'))
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(run).toHaveBeenLastCalledWith(topic,undefined,{...task,discussionEnabled:false})
+})
+
+it('clears adoption on task changes without replacing the selected readers', async()=>{
+  const {run,create}=setup();await recommend()
+  expect(create).toHaveBeenCalledWith('w',expect.objectContaining({panelTask:task}))
+  fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
+  await screen.findByText('已采用推荐，可继续调整名单。')
+  fireEvent.click(screen.getByLabelText('互相回应'))
+  expect(screen.queryByText('已采用推荐，可继续调整名单。')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'使用这组'})).not.toBeInTheDocument()
+  expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('d')
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(run).toHaveBeenLastCalledWith(topic,undefined,{...task,discussionEnabled:false})
 })

@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import Field, StringConstraints
 
 from app.models import APIModel
+from app.services.audience_target import reader_visible_texts
 from app.services.xhs_comment_roles import comment_source_role
 
 AUDIENCE_METHOD_VERSION = "audience_methods_v2"
@@ -66,7 +67,9 @@ def reader_persona_context(persona: dict, topic: dict) -> dict:
         compact = "".join(text.lower().split())
         return {compact[i:i + 2] for i in range(len(compact) - 1)}
 
-    query = terms(str(topic.get("title", "")) + str(topic.get("body", "")))
+    # Include the reader-visible Brief/outline too, not just the parent Topic.
+    # Union per fragment avoids manufacturing bigrams across unrelated fields.
+    query = set().union(*(terms(text) for text in reader_visible_texts(topic)))
     episodes = list(persona.get("observedEpisodes", []))
     episodes.sort(key=lambda e: len(query & terms(
         e["noteTitle"] + e["noteExcerpt"] + e["observedComment"]
@@ -93,12 +96,13 @@ def public_reactions(reactions: list[dict]) -> list[dict]:
 
 def discussion_coverage(
     personas: list[dict], reactions: list[dict], replies: list[dict],
+    *, enabled: bool = True,
 ) -> dict:
     """Describe observed execution coverage; silence is a result, not a missing call."""
     expected = [p["id"] for p in personas]
     initial = {r["personaId"] for r in reactions}
     public = public_reactions(reactions)
-    eligible = [pid for pid in expected if pid in initial
+    eligible = [pid for pid in expected if enabled and pid in initial
                 and any(r["personaId"] != pid for r in public)]
     responded = {r["personaId"] for r in replies}
     return {

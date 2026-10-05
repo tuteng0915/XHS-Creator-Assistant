@@ -101,6 +101,8 @@ from app.services.audience_evidence import (
     discussion_skipped as is_discussion_skipped,
 )
 from app.services.common import utc_now
+from app.services.panel_edits import PanelEditConfirm, PanelEditCreate, PanelEditService
+from app.services.panel_protocol import DISCUSSION_DISABLED_REASON, panel_discussion_enabled
 from app.services.xhs_imports import XhsPackageFile
 from app.workflows import (
     ACCOUNT_STAGE_ORDER,
@@ -164,6 +166,7 @@ def create_api_router(
     xhs_capture_service: XhsCaptureJobService,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
+    panel_edits = PanelEditService(simulation_service.database)
 
     @router.post(
         "/workspaces",
@@ -945,6 +948,33 @@ def create_api_router(
     def list_simulation_runs(workspace_id: str) -> list[SimulationRunSummary]:
         return simulation_service.list(workspace_id)
 
+    @router.post(
+        "/workspaces/{workspace_id}/simulation-runs/{simulation_id}/edit-proposals",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_panel_edit(workspace_id: str, simulation_id: str, payload: PanelEditCreate):
+        return panel_edits.create(workspace_id, simulation_id, payload)
+
+    @router.get("/workspaces/{workspace_id}/simulation-runs/{simulation_id}/edit-proposals")
+    def list_panel_edits(workspace_id: str, simulation_id: str):
+        return panel_edits.list_for_run(workspace_id, simulation_id)
+
+    @router.get("/workspaces/{workspace_id}/panel-edit-proposals/{proposal_id}")
+    def get_panel_edit(workspace_id: str, proposal_id: str):
+        return panel_edits.get(workspace_id, proposal_id)
+
+    @router.post("/workspaces/{workspace_id}/panel-edit-proposals/{proposal_id}/apply")
+    def apply_panel_edit(workspace_id: str, proposal_id: str, payload: PanelEditConfirm):
+        return panel_edits.apply(workspace_id, proposal_id)
+
+    @router.post("/workspaces/{workspace_id}/panel-edit-proposals/{proposal_id}/reject")
+    def reject_panel_edit(workspace_id: str, proposal_id: str):
+        return panel_edits.reject(workspace_id, proposal_id)
+
+    @router.post("/workspaces/{workspace_id}/panel-edit-proposals/{proposal_id}/undo")
+    def undo_panel_edit(workspace_id: str, proposal_id: str, payload: PanelEditConfirm):
+        return panel_edits.undo(workspace_id, proposal_id)
+
     @router.get("/simulation-runs/{simulation_id}", response_model=SimulationRunResponse)
     def get_simulation_run(simulation_id: str) -> SimulationRunResponse:
         return simulation_service.get(simulation_id)
@@ -1002,15 +1032,17 @@ def create_api_router(
                         key == "debate_responses" or key.startswith("debate_responses.")
                         for key in run.stage_errors
                     )
-                    and is_discussion_skipped(
+                    and (not panel_discussion_enabled(run.input_snapshot) or is_discussion_skipped(
                         run.reaction_results, run.input_snapshot.get("simulationMethod")
-                    ) and (bool(run.synthesis) or run.status.value in {
+                    )) and (bool(run.synthesis) or run.status.value in {
                         "completed", "partially_completed", "failed",
                     })
                 )
                 if discussion_skipped:
                     stage_data["debate_responses"]["skippedReason"] = (
-                        DISCUSSION_SKIPPED_REASON
+                        DISCUSSION_DISABLED_REASON
+                        if not panel_discussion_enabled(run.input_snapshot)
+                        else DISCUSSION_SKIPPED_REASON
                         if run.input_snapshot.get("simulationMethod") == AUDIENCE_METHOD_VERSION
                         else "不足两条模拟公开评论，无需交叉回应。"
                     )

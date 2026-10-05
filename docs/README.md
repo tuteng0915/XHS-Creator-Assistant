@@ -1,6 +1,6 @@
 # 文档索引
 
-最新实施进展与限制先读 [status-and-todo.md](status-and-todo.md)，功能口径读 [product-requirements.md](product-requirements.md)。[creator-experience-iteration.md](creator-experience-iteration.md) 保留四组导航、账号创建、选题与创作助手的阶段设计；其中早期 Top 3 不是当前人数上限：现在默认三个槽位、可继续增加。按选题推荐读者已接通后端、真实 Qwen、过期／采用校验及公开入口的统一确认页；历史推荐摘要展示仍待完成。公开创作助手编辑 Topic 正文，独立 Draft 仍是内部兼容功能，不在本轮重新开放。
+最新实施进展与限制先读 [status-and-todo.md](status-and-todo.md)，功能口径读 [product-requirements.md](product-requirements.md)。[creator-experience-iteration.md](creator-experience-iteration.md) 保留四组导航、账号创建、选题与创作助手的阶段设计；其中早期 Top 3 不是当前人数上限：现在默认三个槽位、可继续增加。按选题推荐读者已接通后端、真实 Qwen、过期／采用校验及公开入口的统一确认页；历史页已展示冻结的推荐／实际名单，旧记录缺姓名时不从当前资产补造。公开创作助手编辑 Topic 正文，独立 Draft 仍是内部兼容功能，不在本轮重新开放。
 
 当前产品已经进入“创作者聚焦版 V2”改造。公开产品范围、账号空间模型、URL 导入链路和分阶段验收以 [creator-focused-v2-execution-manual.md](creator-focused-v2-execution-manual.md) 为准；旧的开发者工作台说明只用于理解保留代码和内部调试能力。
 
@@ -17,6 +17,7 @@
 
 ## 当前有效文档
 
+- `audience-panel-four-stage-plan.md` — 画像、检索组队、独立试读与回应、创作反馈四阶段改造计划；含字段、Prompt 分工、来源借鉴程度及验收。可选任务协议、快照和关闭讨论的执行底座已完成，页面模式选择、改稿反馈及同组复测待实现。
 - `creator-writing-collaboration-design.md` — 账号复盘如何用于人机共创的待实施设计，涵盖外部 Skill 借鉴、经验与偏好、改稿确认、字段及分阶段验收；不代表当前功能已上线。
 - `creator-journey-acceptance.md` — 09-27 真实 Qwen 与公开页面链路验收、工程修复及尚未解决的内容质量问题。
 - `account-diagnosis-design.md` — 账号诊断的设计与首轮实施记录：先帮助创作者认识账号，再进入选题；明确字段、证据边界和后续验证方法。

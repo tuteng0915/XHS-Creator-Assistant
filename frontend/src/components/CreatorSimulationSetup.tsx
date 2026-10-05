@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { useReaderSelection } from '../hooks/useReaderSelection'
+import { panelTaskKey, useReaderSelection } from '../hooks/useReaderSelection'
 import type { useSimulatedFans } from '../hooks/useSimulatedFans'
 import type { ReaderSelectionLink } from '../readerSelection'
-import type { Topic } from '../types'
+import type { PanelTask, Topic } from '../types'
 import { SimulatedFanPicker } from './SimulatedFansPage'
 
 interface Props {
@@ -13,16 +13,22 @@ interface Props {
   fans: ReturnType<typeof useSimulatedFans>
   running: boolean
   onSelect: (topic: Topic | null) => void
-  onRun: (topic: Topic, recommendation?: ReaderSelectionLink) => void
+  onRun: (topic: Topic, recommendation: ReaderSelectionLink | undefined, task: PanelTask) => void
   onAddFans: () => void
 }
 
 export function CreatorSimulationSetup(props: Props) {
   const {workspaceId, positioning, topic, topics, fans, running, onSelect, onRun, onAddFans} = props
   const scope = `${workspaceId}:${topic?.id || ''}`
+  const [readingMode, setReadingMode] = useState<PanelTask['readingMode']>('natural')
+  const [discussionEnabled, setDiscussionEnabled] = useState(true)
+  const [questions, setQuestions] = useState([''])
+  const panelTask: PanelTask = {protocolVersion: 'panel/v1', readingMode, discussionEnabled,
+    focusQuestions: readingMode === 'guided' ? questions.map(q => q.trim()) : []}
+  const taskValid = readingMode === 'natural' || panelTask.focusQuestions.every(q => q.length > 0 && [...q].length <= 300)
   const revision = JSON.stringify([topic?.title, topic?.body, positioning,
     fans.rows.map(f => [f.id, f.status, f.updatedAt])])
-  const recommendation = useReaderSelection(workspaceId, topic?.id || '', revision)
+  const recommendation = useReaderSelection(workspaceId, topic?.id || '', revision, panelTask)
   const [adopted, setAdopted] = useState<(ReaderSelectionLink & {scope: string}) | null>(null)
   const [applyError, setApplyError] = useState('')
   const [applying, setApplying] = useState(false)
@@ -33,12 +39,16 @@ export function CreatorSimulationSetup(props: Props) {
   const activeAdoption = adopted?.scope === scope ? adopted : null
   const adoptionReady = !activeAdoption || (valid && record?.id === activeAdoption.readerSelectionId
     && record.inputHash === activeAdoption.readerSelectionInputHash)
+  function changeTask(change: () => void) {
+    change(); setAdopted(null); setApplyError('')
+  }
 
   async function apply() {
     setApplyError(''); setApplying(true)
     try {
       const checked = await recommendation.refresh()
-      if (!checked || checked.freshness?.status !== 'current' || !checked.result?.proposedReaders.length) {
+      if (!checked || checked.freshness?.status !== 'current' || !checked.result?.proposedReaders.length
+        || panelTaskKey(checked.inputSnapshot.panelTask) !== panelTaskKey(panelTask)) {
         setApplyError('推荐已变化或暂时无法核验，名单未改变。'); return
       }
       const ids = checked.result.proposedReaders.map(p => p.fanId)
@@ -57,12 +67,33 @@ export function CreatorSimulationSetup(props: Props) {
     </label>
     {topic && <details className="simulation-target-preview"><summary>{topic.body ? '查看待测正文' : '仅预演选题概念'}</summary>
       <p><strong>{topic.title}</strong>{topic.body && <><br />{topic.body}</>}</p></details>}
+    <fieldset className="panel-task-controls" disabled={running || applying}>
+      <legend>试读方式</legend>
+      <div className="panel-task-modes">
+        <label><input type="radio" name="panel-reading-mode" checked={readingMode === 'natural'}
+          onChange={() => changeTask(() => setReadingMode('natural'))} />自然全文试读</label>
+        <label><input type="radio" name="panel-reading-mode" checked={readingMode === 'guided'}
+          onChange={() => changeTask(() => setReadingMode('guided'))} />定向试读</label>
+      </div>
+      {readingMode === 'guided' && <div className="panel-task-questions">
+        {questions.map((question, index) => <label key={index}>重点问题 {index + 1}
+          <textarea rows={2} maxLength={300} value={question} placeholder="例如：读完能否知道第一步怎么做？"
+            onChange={e => changeTask(() => setQuestions(current => current.map((q, i) => i === index ? e.target.value : q)))} />
+        </label>)}
+        <button type="button" onClick={() => changeTask(() => setQuestions(current => current.length === 1 ? [...current, ''] : current.slice(0, 1)))}>
+          {questions.length === 1 ? '＋ 添加第二个问题' : '移除第二个问题'}</button>
+        {!taskValid && <p role="status">请填写每个重点问题，最多两个，每个不超过 300 字。</p>}
+      </div>}
+      <label className="panel-task-discussion"><input type="checkbox" checked={discussionEnabled}
+        onChange={e => changeTask(() => setDiscussionEnabled(e.target.checked))} />互相回应</label>
+      <p className="muted">{discussionEnabled ? '先各自试读，再回应其他人的公开留言。' : '只做独立试读，省去互相回应。'}</p>
+    </fieldset>
     <div className="reader-recommendation" aria-label="读者推荐">
       <div className="reader-recommendation-actions">
-        <button type="button" disabled={!topic || running || recommendation.busy || applying}
+        <button type="button" disabled={!topic || !taskValid || running || recommendation.busy || applying}
           onClick={() => {setApplyError(''); void recommendation.recommend(Math.max(1, fans.slots.length))}}>
           {recommendation.busy ? '正在读取推荐…' : record ? '重新推荐读者' : '推荐读者'}</button>
-        {recommendation.error && <button type="button" disabled={running || applying}
+        {recommendation.error && <button type="button" disabled={!taskValid || running || applying}
           onClick={() => void (recommendation.hasReceipt ? recommendation.refresh() : recommendation.recommend(fans.slots.length))}>
           {recommendation.hasReceipt ? '重试读取' : '重试原请求'}</button>}
       </div>
@@ -86,10 +117,10 @@ export function CreatorSimulationSetup(props: Props) {
       <SimulatedFanPicker rows={fans.rows} slots={fans.slots} onSlotChange={fans.setSlot} onAddSlot={fans.addSlot} onRemoveSlot={fans.removeSlot} />
     </fieldset>
     {!fans.rows.some(r => r.status === 'active') && <button type="button" onClick={onAddFans}>从受众分析添加模拟粉丝</button>}
-    <button className="primary" disabled={running || applying || !fans.ids.length || !topic || !adoptionReady}
+    <button className="primary" disabled={running || applying || !taskValid || !fans.ids.length || !topic || !adoptionReady}
       onClick={() => {if(topic) onRun(topic, activeAdoption ? {
         readerSelectionId: activeAdoption.readerSelectionId,
         readerSelectionInputHash: activeAdoption.readerSelectionInputHash,
-      } : undefined)}}>开始模拟</button>
+      } : undefined, panelTask)}}>开始模拟</button>
   </section>
 }

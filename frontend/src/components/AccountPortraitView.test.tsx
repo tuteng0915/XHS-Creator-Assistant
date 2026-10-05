@@ -21,7 +21,7 @@ it('shows valid keywords and strengths without requiring a summary or missing se
   expect(screen.queryByText('主要内容方向')).not.toBeInTheDocument()
   expect(screen.queryByText('给读者的价值')).not.toBeInTheDocument()
   expect(screen.queryByText(/本次暂无可展示/)).not.toBeInTheDocument()
-  fireEvent.click(screen.getAllByRole('button',{name:'查看依据 · 1 条笔记'})[1])
+  fireEvent.click(screen.getByRole('button',{name:'查看依据 · 1 条笔记'}))
   expect(screen.getByText('“先列成本”')).toBeInTheDocument()
 })
 
@@ -30,6 +30,33 @@ it('does not render a blank intro card when only strengths are available', () =>
   expect(screen.getByText(summary.statement)).toBeInTheDocument()
   expect(container.querySelector('.account-portrait-intro')).toBeNull()
   expect(screen.queryByText(/本次暂无可展示/)).not.toBeInTheDocument()
+})
+
+it('switches keyword evidence below the tags and preserves missing historical quotes', () => {
+  render(<AccountPortraitView portrait={{keywords:[
+    {...summary,statement:'过程分享'},
+    {statement:'真实表达',evidence:[{noteId:'missing',quote:'历史文字仍在'}]},
+  ]}} observations={observations} notes={[note]} mediaAssets={[]} />)
+  const first=screen.getByRole('button',{name:'过程分享：查看 1 条笔记依据'})
+  const second=screen.getByRole('button',{name:'真实表达：查看 1 条笔记依据'})
+  expect(first).toHaveAttribute('aria-expanded','false')
+  expect(screen.queryByRole('region')).not.toBeInTheDocument()
+  fireEvent.click(first)
+  expect(first).toHaveAttribute('aria-expanded','true')
+  const evidence=screen.getByRole('region',{name:'过程分享的依据'})
+  expect(document.getElementById(first.getAttribute('aria-controls')!)).toContainElement(evidence)
+  expect(screen.getByRole('group',{name:'账号关键词'})).not.toContainElement(evidence)
+  expect(screen.getByText('“先列成本”')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:/准备过程 赞/}))
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'关闭'}))
+  fireEvent.click(second)
+  expect(first).toHaveAttribute('aria-expanded','false')
+  expect(screen.queryByText('“先列成本”')).not.toBeInTheDocument()
+  expect(screen.getByRole('region',{name:'真实表达的依据'})).toHaveTextContent('历史文字仍在')
+  expect(screen.getByText('1 条依据笔记未保留在本次分析快照中，仅显示历史引用。')).toBeInTheDocument()
+  fireEvent.click(second)
+  expect(screen.queryByRole('region')).not.toBeInTheDocument()
 })
 
 it('recognizes a valid recent change without an intro, but keeps the chronology requirement', () => {

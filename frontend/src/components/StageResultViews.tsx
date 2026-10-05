@@ -2,6 +2,8 @@ import type { MediaAsset, SavePhase } from '../types'
 import type { CreatorNote } from '../creatorNotes'
 import { AccountPortraitView, type Observations, type Portrait } from './AccountPortraitView'
 import { replyPersonaId, simulationPersonaLabels } from '../simulationPersonaLabels'
+import { EditorFeedbackView } from './EditorFeedbackView'
+import { feedbackCards, type FeedbackRun } from '../editorFeedback'
 
 export type SaveState = { phase: SavePhase; message?: string }
 
@@ -107,14 +109,17 @@ export function ProfileView({ data, observations, notes = [], mediaAssets = [] }
       <AccountPortraitView portrait={data.accountPortrait as Portrait | null} observations={observations} notes={notes} mediaAssets={mediaAssets} />
       <details className="account-legacy-profile" open={!data.accountPortrait}>
         <summary>更多内容归纳</summary>
-        <LegacyProfileView data={data} />
+        <LegacyProfileView data={data} showPerformanceContrast={false} />
       </details>
     </>
   }
   return <LegacyProfileView data={data} />
 }
 
-function LegacyProfileView({ data }: { data: Record<string, unknown> }) {
+function LegacyProfileView({ data, showPerformanceContrast = true }: {
+  data: Record<string, unknown>
+  showPerformanceContrast?: boolean
+}) {
   const pillars = Array.isArray(data.pillars) ? data.pillars : []
   const formulas = Array.isArray(data.titleFormulas) ? data.titleFormulas : []
   const hooks = Array.isArray(data.hookStyles) ? data.hookStyles : []
@@ -133,7 +138,8 @@ function LegacyProfileView({ data }: { data: Record<string, unknown> }) {
     | undefined
   return (
     <div className="stage-block">
-      {contrast && (
+      {/* Structured reports use frozen counts above, not model-written metrics or title matching. */}
+      {contrast && showPerformanceContrast && (
         <>
           <label>📊 高表现 vs 低表现 · 对比诊断</label>
           <div className="cmp">
@@ -156,11 +162,13 @@ function LegacyProfileView({ data }: { data: Record<string, unknown> }) {
               <ul>{(contrast.loseFactors || []).map((item) => <li key={item}>{item}</li>)}</ul>
             </div>
           </div>
-          <div className="takeaway">
-            <b>→ 可执行结论：</b>
-            <ol>{(contrast.takeaways || []).map((item) => <li key={item}>{item}</li>)}</ol>
-          </div>
         </>
+      )}
+      {Array.isArray(contrast?.takeaways) && contrast.takeaways.length > 0 && (
+        <div className="takeaway">
+          <b>可尝试的写法：</b>
+          <ol>{contrast.takeaways.map((item) => <li key={item}>{item}</li>)}</ol>
+        </div>
       )}
       <label>📚 内容支柱</label>
       <div className="pill-row">
@@ -424,7 +432,7 @@ export function ReactionListView({
   )
 }
 
-export function SynthesisView({ data }: { data: Record<string, unknown> }) {
+export function SynthesisView({ data, feedbackRun }: { data: Record<string, unknown>; feedbackRun?: FeedbackRun }) {
   const topResonance = data.topResonance as
     | { persona?: string; reason?: string; expectedBehavior?: string }
     | undefined
@@ -447,7 +455,8 @@ export function SynthesisView({ data }: { data: Record<string, unknown> }) {
       <p>
         <b>最强切角：</b> {String(data.strongestAngle || '')}
       </p>
-      <ListBlock title="内容调整" items={data.contentAdjustments} />
+      {('editorFeedback' in data || 'editorFeedbackValidation' in data) && <EditorFeedbackView key={feedbackRun?.id || 'unavailable'} data={data} run={feedbackRun} />}
+      {!feedbackCards(data).length && <ListBlock title="内容调整" items={data.contentAdjustments} />}
       <ListBlock title="风险提醒" items={data.riskWarnings} />
       <ListBlock title="潜在争议点" items={data.controversyPoints} />
       <ListBlock title="优化建议" items={data.suggestions} />

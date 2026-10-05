@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 from app.db.database import SQLiteDatabase
@@ -16,6 +17,7 @@ from app.repositories.simulation_runs import SimulationRunRepository
 from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.audience_evidence import AUDIENCE_METHOD_VERSION, select_audience_personas
+from app.services.audience_target import reader_visible_target
 from app.services.common import as_iso, utc_now
 from app.services.reader_selection_adoption import selection_adoption_snapshot
 from app.services.simulated_fans import SimulatedFanService
@@ -78,6 +80,7 @@ class SimulationRunService:
                     "associatedPainPoint": topic["associated_pain_point"],
                     "whyItFits": topic["why_it_fits"],
                     "sourceWorkflow": topic["source_workflow"],
+                    "updatedAt": topic["updated_at"],
                 }
                 draft_snapshot = {
                     "draftId": draft["id"],
@@ -99,6 +102,7 @@ class SimulationRunService:
                     "associatedPainPoint": topic["associated_pain_point"],
                     "whyItFits": topic["why_it_fits"],
                     "sourceWorkflow": topic["source_workflow"],
+                    "updatedAt": topic["updated_at"],
                 }
             snapshot = {
                 "simulationMethod": AUDIENCE_METHOD_VERSION,
@@ -131,6 +135,13 @@ class SimulationRunService:
             }
             if selection_snapshot is not None:
                 snapshot["readerSelection"] = selection_snapshot
+            if payload.panel_task is not None:
+                if not payload.simulated_fan_ids:
+                    raise ValidationError("新试读协议需要选择已保存的模拟读者")
+                snapshot["panelTask"] = payload.panel_task.model_dump(by_alias=True)
+                visible = json.dumps(reader_visible_target(snapshot), ensure_ascii=False,
+                                     sort_keys=True, separators=(",", ":"), allow_nan=False)
+                snapshot["targetContentHash"] = hashlib.sha256(visible.encode("utf-8")).hexdigest()
             row = self.repository.create(
                 connection,
                 workspace_id=workspace_id,

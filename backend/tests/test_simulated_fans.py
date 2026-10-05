@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 
 import pytest
 from test_audience_simulation_workflow import collect
@@ -7,6 +8,7 @@ from test_workspace_api import create_workspace, send
 
 from app.models import ModelCallResponse, ModelOperation, SimulationRunCreate
 from app.services.audience_analyses import AudienceAnalysisCreate
+from app.services.fan_voice_templates import fan_voice_template
 from app.workflows.audience_simulation import RealAudienceSimulationModelProvider
 
 
@@ -368,6 +370,42 @@ def test_voice_templates_expand_one_fan_into_distinct_editable_variants(app, see
     ).json()
     assert nested == [changed]
     assert send(app, "GET", f"/api/simulated-fans/{source['id']}").json() == source
+
+
+def test_action_voice_update_keeps_old_assets_and_frozen_simulation(app, seeded, monkeypatch):
+    wid, _, _, fans = seeded
+    source = fans[0]
+    current = fan_voice_template("action_first")
+    legacy = replace(current, decision_style="先找下一步、步骤和具体入口。",
+                     expression_style="短句、直接，会追问怎么做。",
+                     participation_style="容易公开提问。")
+    route = f"/api/simulated-fans/{source['id']}/variants"
+    with monkeypatch.context() as patch:
+        patch.setattr("app.services.simulated_fans.fan_voice_template", lambda _: legacy)
+        old = send(app, "POST", route, json={"templateIds": ["action_first"]}).json()[0]
+    run = send(app, "POST", f"/api/workspaces/{wid}/simulation-runs", json={
+        "manualTopic": "自行开始的练习", "simulatedFanIds": [old["id"]], "mode": "live",
+    }).json()
+    repeated = send(app, "POST", route, json={"templateIds": ["action_first"]}).json()
+    assert repeated == [old]
+    assert send(app, "GET", f"/api/simulation-runs/{run['id']}").json()["inputSnapshot"] == (
+        run["inputSnapshot"]
+    )
+    assert send(app, "GET", f"/api/simulated-fans/{source['id']}").json() == source
+
+    new = send(app, "POST", f"/api/simulated-fans/{fans[1]['id']}/variants",
+               json={"templateIds": ["action_first"]}).json()[0]
+    assert current.decision_style in new["editable"]["profile"]
+    assert current.participation_style in new["editable"]["expressionStyle"]
+    assert new["editable"]["interests"] == fans[1]["editable"]["interests"]
+    assert new["editable"]["coreConcern"] == fans[1]["editable"]["coreConcern"]
+    assert new["original"]["evidenceRefs"] == fans[1]["original"]["evidenceRefs"]
+    new_run = send(app, "POST", f"/api/workspaces/{wid}/simulation-runs", json={
+        "manualTopic": "新练习", "simulatedFanIds": [new["id"]], "mode": "live",
+    }).json()
+    person = new_run["inputSnapshot"]["audiencePersonas"][0]
+    assert person["profile"] == new["editable"]["profile"]
+    assert person["expressionStyle"] == new["editable"]["expressionStyle"]
 
 
 def test_voice_variant_request_rejects_invalid_or_duplicate_templates(app, seeded):

@@ -3,6 +3,25 @@ from copy import deepcopy
 from typing import Any
 
 
+def reader_visible_texts(target: dict[str, Any]) -> list[str]:
+    """Text fragments of an already normalized target, without preview metadata.
+
+    Keep fragments separate: joining fields must not make a fabricated quote valid.
+    Historical episodes and persona descriptions are never part of this target.
+    """
+    def strings(value: Any):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from strings(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from strings(item)
+
+    return list(strings([target.get("title", ""), target.get("body", ""), target.get("draft", {})]))
+
+
 def reader_visible_target(snapshot: dict[str, Any]) -> dict[str, Any]:
     topic = snapshot["topic"]
     target = {

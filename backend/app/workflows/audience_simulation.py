@@ -15,7 +15,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.db.database import SQLiteDatabase
 from app.errors import ConflictError, ValidationError
-from app.models import ModelOperation, SimulationRunStatus
+from app.models import ModelOperation, PanelTask, SimulationRunStatus
 from app.repositories.graph_checkpoints import GraphCheckpointRepository
 from app.repositories.simulation_runs import SIMULATION_TERMINAL_STATUSES
 from app.services.audience_evidence import (
@@ -27,9 +27,11 @@ from app.services.audience_evidence import (
     public_reactions,
     reader_persona_context,
 )
-from app.services.audience_target import reader_visible_target
+from app.services.audience_target import reader_visible_target, reader_visible_texts
 from app.services.common import utc_now
+from app.services.editor_feedback import validate_editor_feedback
 from app.services.model_calls import ModelCallService
+from app.services.panel_protocol import DISCUSSION_DISABLED_REASON, panel_discussion_enabled
 from app.services.simulation_runs import SimulationRunService
 from app.workflows.account_diagnosis import GraphExecutionPaused
 
@@ -179,18 +181,7 @@ class SimulationSynthesisResult(BaseModel):
 
 
 def validate_trigger_quote(quote: str, target: dict) -> None:
-    def texts(value):
-        if isinstance(value, str):
-            yield value
-        elif isinstance(value, dict):
-            for item in value.values():
-                yield from texts(item)
-        elif isinstance(value, list):
-            for item in value:
-                yield from texts(item)
-
-    visible = [target.get("title", ""), target.get("body", ""), target.get("draft", {})]
-    if quote and (not quote.strip() or not any(quote in text for text in texts(visible))):
+    if quote and (not quote.strip() or not any(quote in text for text in reader_visible_texts(target))):
         raise ValueError("触发表达不是本次内容的原文")
 
 
@@ -623,7 +614,10 @@ class RealAudienceSimulationModelProvider:
                 "personas": personas,
                 "reactions": reactions,
                 "debateResponses": debate_responses,
-                "discussionCoverage": discussion_coverage(personas, reactions, debate_responses),
+                "discussionCoverage": discussion_coverage(
+                    personas, reactions, debate_responses,
+                    enabled=panel_discussion_enabled(topic),
+                ),
             },
         )
         return response.output
@@ -664,7 +658,12 @@ class AudienceSimulationWorkflowService:
 
     @staticmethod
     def _simulation_target_context(snapshot: dict[str, Any]) -> dict[str, Any]:
-        return reader_visible_target(snapshot)
+        target = reader_visible_target(snapshot)
+        if snapshot.get("panelTask") is not None:
+            target["panelTask"] = PanelTask.model_validate(snapshot["panelTask"]).model_dump(
+                by_alias=True,
+            )
+        return target
 
     async def stream_events(
         self, simulation_id: str, *, stop_after_node: str | None = None
@@ -895,6 +894,12 @@ class _AudienceSimulationGraphExecution:
         if updated.get("debate_responses"):
             await self.save_checkpoint("parallel_debate_responses", updated)
             return AudienceSimulationState(**updated)
+        if not panel_discussion_enabled(updated["topic"]):
+            await self.emit("stage.succeeded", "debate_responses", "completed", {
+                "debateResponses": [], "skippedReason": DISCUSSION_DISABLED_REASON,
+            })
+            await self.save_checkpoint("parallel_debate_responses", updated)
+            return AudienceSimulationState(**updated)
         if not debate_personas:
             await self.emit("stage.succeeded", "debate_responses", "completed", {
                 "debateResponses": [], "skippedReason": DISCUSSION_SKIPPED_REASON,
@@ -991,6 +996,12 @@ class _AudienceSimulationGraphExecution:
             result = SimulationSynthesisResult.model_validate(output).model_dump(
                 mode="json"
             )
+            if updated["topic"].get("panelTask") is not None:
+                result["synthesis"].update(validate_editor_feedback(
+                    output["synthesis"].get("editorFeedback"), topic=updated["topic"],
+                    personas=updated.get("personas", []), reactions=updated.get("initial_reactions", []),
+                    replies=updated.get("debate_responses", []),
+                ))
             updated["synthesis"] = result["synthesis"]
             self.service.simulation_service.save_progress(
                 self.simulation_id,
@@ -1146,6 +1157,10 @@ class _AudienceSimulationGraphExecution:
                 "completed",
                 {"debateResponses": run.debate_results},
             )
+        elif run.reaction_results and not panel_discussion_enabled(run.input_snapshot):
+            await self.emit("stage.succeeded", "debate_responses", "completed", {
+                "debateResponses": [], "skippedReason": DISCUSSION_DISABLED_REASON,
+            })
         if run.synthesis:
             await self.emit(
                 "stage.succeeded",

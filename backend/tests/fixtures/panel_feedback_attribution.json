@@ -1,0 +1,23 @@
+{
+  "case": {
+    "caseId": "panel-feedback-attribution-authored-v1",
+    "origin": "authored_test_not_real_followers",
+    "topic": {
+      "title": "用一条活动提醒练习 AI 改写",
+      "body": "找一段公开的活动介绍，用你熟悉的文字模型改写成两个报名提醒版本。先对照原文核对日期、地点和报名条件，再选一个版本，写下选择理由。只在自己的文档里练习，不要求公开发布。不要输入公司文件或他人的私人信息。"
+    }
+  },
+  "personas": [
+    {"id": "action", "name": "先试一步派", "interests": ["AI应用", "个人成长"], "profile": "步骤清楚就愿意先试，不会为了提问而提问。", "coreConcern": "能否找到今天就能做的小练习", "contentPreference": "短步骤", "expressionStyle": "直接说想试什么"},
+    {"id": "check", "name": "对照选择派", "interests": ["AI应用", "表达沟通"], "profile": "比较两种结果时想知道判断依据，不追问已经说清楚的条件。", "coreConcern": "怎样判断哪个版本更适合读者", "contentPreference": "有对照标准的例子", "expressionStyle": "针对卡住的地方问一个具体问题"},
+    {"id": "quiet", "name": "安静回看派", "interests": ["表达沟通", "个人成长"], "profile": "步骤完整会自己留着回看，没有问题不留言。", "coreConcern": "在需要时找到能照做的步骤", "contentPreference": "简短清单", "expressionStyle": "通常不公开表达"}
+  ],
+  "reactions": [
+    {"messageId": "initial:action", "personaId": "action", "action": "comment", "stance": "喜欢", "quote": "步骤很短，今天可以找一段公开介绍试试。", "understanding": "先生成两个版本，再核对事实和做选择，不需要公开发布。", "concerns": [], "opportunities": ["有明确第一步"]},
+    {"messageId": "initial:check", "personaId": "check", "action": "comment", "stance": "犹豫", "quote": "如果两个版本的日期地点都对，该根据什么决定用哪个？", "understanding": "事实需要核对，但事实都正确之后缺少选择标准。隐私和是否发布已经说清楚。", "concerns": ["两个版本事实都正确时，缺少选择哪个版本的判断标准。"], "opportunities": []},
+    {"messageId": "initial:quiet", "personaId": "quiet", "action": "no_comment", "stance": "喜欢", "quote": "", "understanding": "这是可保存在自己文档里的练习，发布不是必需步骤。", "concerns": [], "opportunities": []}
+  ],
+  "debateResponses": [],
+  "stageErrors": {},
+  "fixtureNotice": "All personas and reactions are authored regression inputs, not new model reactions or real readers. Only synthesis is evaluated."
+}

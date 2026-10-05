@@ -100,6 +100,7 @@ import { useSimulatedFans } from './hooks/useSimulatedFans'
 import { SimulatedFansPage } from './components/SimulatedFansPage'
 import { CreatorSimulationSetup } from './components/CreatorSimulationSetup'
 import type { ReaderSelectionLink } from './readerSelection'
+import type { PanelTask } from './types'
 import type { AnalysisScope } from './creatorNotes'
 import {
   WorkflowOutputPanel,
@@ -191,9 +192,30 @@ function WorkspaceApp() {
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([])
   const [analysisRuns, setAnalysisRuns] = useState<AnalysisRunSummary[]>([])
   const [selectedRun, setSelectedRun] = useState<AnalysisRun | null>(null)
+  const analysisHistoryRequest = useRef(0)
+  const analysisReviewSave = useRef<{scope: number; runId: string} | null>(null)
+  const analysisReviewEdit = useRef(0)
+  const selectedRunRef = useRef(selectedRun)
+  useEffect(() => { selectedRunRef.current = selectedRun }, [selectedRun])
+  const [analysisHistoryLoad, setAnalysisHistoryLoad] = useState<SaveState>(idleState)
+  useEffect(() => {
+    setAnalysisHistoryLoad(idleState)
+    return () => { analysisHistoryRequest.current += 1 }
+  }, [selectedWorkspaceId])
   const [simulationRuns, setSimulationRuns] = useState<SimulationRunSummary[]>([])
   const [selectedSimulationRun, setSelectedSimulationRun] =
     useState<SimulationRun | null>(null)
+  const simulationHistoryRequest = useRef(0)
+  const simulationReviewSave = useRef<{scope: number; runId: string} | null>(null)
+  const simulationReviewEdit = useRef(0)
+  const selectedSimulationRunRef = useRef(selectedSimulationRun)
+  useEffect(() => { selectedSimulationRunRef.current = selectedSimulationRun }, [selectedSimulationRun])
+  const [simulationHistoryLoad, setSimulationHistoryLoad] = useState<SaveState>(idleState)
+  useEffect(() => {
+    setSimulationHistoryLoad(idleState)
+    // Invalidate even an A → B → A switch, and any response after unmount.
+    return () => { simulationHistoryRequest.current += 1 }
+  }, [selectedWorkspaceId])
   const [skills, setSkills] = useState<SkillSummary[]>([])
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null)
   const [skillDefinitionDraft, setSkillDefinitionDraft] =
@@ -1697,7 +1719,7 @@ function WorkspaceApp() {
     setActivePage('simulations')
   }
 
-  async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic, recommendation?: ReaderSelectionLink) {
+  async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic, recommendation?: ReaderSelectionLink, panelTask?: PanelTask) {
     if (!workspace) return
     if (!internalMode && !fans.ids.length) { setActivePage('simulated-fans'); return }
     setWorkflowTab(targetTab)
@@ -1722,6 +1744,7 @@ function WorkspaceApp() {
         !draft && selectedTopic && topicForSimulation.includes(selectedTopic.title)
       const created = await simulationRunApi.create(workspace.id, {
         ...recommendation,
+        ...(panelTask ? {panelTask} : {}),
         simulatedFanIds: internalMode ? undefined : fans.ids,
         draftId: draft?.id,
         topicId: topic?.id || (useSavedTopic ? selectedTopic.id : null),
@@ -1747,6 +1770,7 @@ function WorkspaceApp() {
   }
 
   async function runSimulationGraphWorkflow(run: SimulationRun, targetTab: WorkflowTab) {
+    setSimulationStageViews(stageSeedFromSimulation(run))
     await new Promise<void>((resolve, reject) => {
       const source = new EventSource(`/api/simulation-runs/${run.id}/events`)
       const finish = async () => {
@@ -1971,99 +1995,168 @@ function WorkspaceApp() {
   }
 
   async function openRun(runId: string, inOutput = false) {
-    const run = await analysisRunApi.get(runId)
-    setSelectedRun(run)
-    setAnalysisReviewDraft({
-      userNotes: run.userNotes,
-      reviewStatus: run.reviewStatus,
-    })
+    const requestId = ++analysisHistoryRequest.current
+    const workspaceId = selectedWorkspaceId
+    const isCurrent = () => requestId === analysisHistoryRequest.current && selectedWorkspaceRef.current === workspaceId
+    setAnalysisHistoryLoad({phase:'saving'})
     setSaveState('analysisReview', idleState)
-    if (inOutput) {
-      const targetTab = workflowTabFromSource(run.workflowType)
-      setCurrentRun(run)
-      setAnalysisStageViews(targetTab, stageSeedFromRun(run))
-      setWorkflowOutputKind(targetTab, 'analysis')
-      setWorkflowTab(targetTab)
-      setActivePage(activePageForWorkflowTab(targetTab))
+    try {
+      const run = await analysisRunApi.get(runId)
+      if (!isCurrent()) return
+      if (run.workspaceId !== workspaceId || run.id !== runId) {
+        throw new Error('返回的分析记录与当前选择不一致，请重新打开。')
+      }
+      setAnalysisHistoryLoad(idleState)
+      setSelectedRun(run)
+      setAnalysisReviewDraft({userNotes:run.userNotes, reviewStatus:run.reviewStatus})
+      setSaveState('analysisReview', idleState)
+      if (inOutput) {
+        const targetTab = workflowTabFromSource(run.workflowType)
+        setCurrentRun(run)
+        setAnalysisStageViews(targetTab, stageSeedFromRun(run))
+        setWorkflowOutputKind(targetTab, 'analysis')
+        setWorkflowTab(targetTab)
+        setActivePage(activePageForWorkflowTab(targetTab))
+      }
+    } catch (error) {
+      if (isCurrent()) setAnalysisHistoryLoad({phase:'error', message:errorMessage(error)})
     }
   }
 
   async function openSimulationRun(simulationId: string, inOutput = false) {
-    const run = await simulationRunApi.get(simulationId)
-    setSelectedSimulationRun(run)
-    setSimulationRuns((current) => current.map((item) => item.id === run.id ? run : item))
-    setSimulationReviewDraft({
-      userNotes: run.userNotes,
-      reviewStatus: run.reviewStatus,
-    })
+    const requestId = ++simulationHistoryRequest.current
+    const workspaceId = selectedWorkspaceId
+    const isCurrent = () => requestId === simulationHistoryRequest.current && selectedWorkspaceRef.current === workspaceId
+    setSimulationHistoryLoad({ phase: 'saving' })
     setSaveState('simulationReview', idleState)
-    if (inOutput) {
-      const targetTab = workflowTabFromSimulation(run)
-      setCurrentRun(null)
-      setSimulationStageViews(stageSeedFromSimulation(run))
-      setWorkflowOutputKind(targetTab, 'simulation')
-      setWorkflowTab(targetTab)
-      const topic = run.inputSnapshot.topic as { title?: string; angle?: string }
-      setSimulationTopic(
-        [topic?.title || '', topic?.angle ? `切入角度：${topic.angle}` : '']
-          .filter(Boolean)
-          .join('\n'),
-      )
-      setActivePage(activePageForWorkflowTab(targetTab))
+    try {
+      const run = await simulationRunApi.get(simulationId)
+      if (!isCurrent()) return
+      if (run.workspaceId !== workspaceId || run.id !== simulationId) {
+        throw new Error('返回的模拟记录与当前选择不一致，请重新打开。')
+      }
+      setSimulationHistoryLoad(idleState)
+      setSelectedSimulationRun(run)
+      setSimulationRuns((current) => current.map((item) => item.id === run.id ? run : item))
+      setSimulationReviewDraft({
+        userNotes: run.userNotes,
+        reviewStatus: run.reviewStatus,
+      })
+      setSaveState('simulationReview', idleState)
+      if (inOutput) {
+        const targetTab = workflowTabFromSimulation(run)
+        setCurrentRun(null)
+        setSimulationStageViews(stageSeedFromSimulation(run))
+        setWorkflowOutputKind(targetTab, 'simulation')
+        setWorkflowTab(targetTab)
+        const topic = run.inputSnapshot.topic as { title?: string; angle?: string }
+        setSimulationTopic(
+          [topic?.title || '', topic?.angle ? `切入角度：${topic.angle}` : '']
+            .filter(Boolean)
+            .join('\n'),
+        )
+        setActivePage(activePageForWorkflowTab(targetTab))
+      }
+    } catch (error) {
+      if (isCurrent()) setSimulationHistoryLoad({ phase: 'error', message: errorMessage(error) })
     }
   }
 
   async function saveAnalysisRunReview() {
-    if (!selectedRun) return
+    if (!selectedRun || analysisHistoryLoad.phase === 'saving') return
+    const run = selectedRun
+    const scope = analysisHistoryRequest.current
+    if (analysisReviewSave.current?.scope === scope && analysisReviewSave.current.runId === run.id) return
+    const saving = {scope, runId: run.id}
+    analysisReviewSave.current = saving
+    const edit = analysisReviewEdit.current
+    const isCurrent = () => scope === analysisHistoryRequest.current &&
+      run.workspaceId === selectedWorkspaceRef.current && selectedRunRef.current?.id === run.id
     setSaveState('analysisReview', { phase: 'saving' })
     try {
-      const updated = await analysisRunApi.updateReview(selectedRun.id, {
+      const updated = await analysisRunApi.updateReview(run.id, {
         userNotes: analysisReviewDraft.userNotes,
         reviewStatus: analysisReviewDraft.reviewStatus,
-        expectedUpdatedAt: selectedRun.updatedAt,
+        expectedUpdatedAt: run.updatedAt,
       })
+      if (!isCurrent()) return
+      if (updated.id !== run.id || updated.workspaceId !== run.workspaceId) {
+        throw new Error('保存回执与当前分析记录不一致，请重新核对。')
+      }
       setSelectedRun(updated)
-      setAnalysisReviewDraft({
+      const hasNewEdits = edit !== analysisReviewEdit.current
+      if (!hasNewEdits) setAnalysisReviewDraft({
         userNotes: updated.userNotes,
         reviewStatus: updated.reviewStatus,
       })
       setAnalysisRuns((current) =>
         current.map((run) => (run.id === updated.id ? updated : run)),
       )
-      if (currentRun?.id === updated.id) setCurrentRun(updated)
-      setSaveState('analysisReview', { phase: 'saved' })
+      setCurrentRun(current => current?.id === updated.id && current.workspaceId === updated.workspaceId ? updated : current)
+      setSaveState('analysisReview', { phase: 'saved',
+        message: hasNewEdits ? '已保存上次提交，当前修改尚未保存' : undefined })
     } catch (error) {
-      setSaveState('analysisReview', {
+      if (isCurrent()) setSaveState('analysisReview', {
         phase: 'error',
         message: errorMessage(error),
       })
+    } finally {
+      if (analysisReviewSave.current === saving) analysisReviewSave.current = null
     }
   }
 
+  function editAnalysisReview(draft: typeof analysisReviewDraft) {
+    analysisReviewEdit.current += 1
+    setAnalysisReviewDraft(draft)
+    if (saveStates.analysisReview.phase !== 'saving') setSaveState('analysisReview', idleState)
+  }
+
   async function saveSimulationRunReview() {
-    if (!selectedSimulationRun) return
+    if (!selectedSimulationRun || simulationHistoryLoad.phase === 'saving') return
+    const run = selectedSimulationRun
+    const scope = simulationHistoryRequest.current
+    if (simulationReviewSave.current?.scope === scope && simulationReviewSave.current.runId === run.id) return
+    const saving = {scope, runId: run.id}
+    simulationReviewSave.current = saving
+    const edit = simulationReviewEdit.current
+    const isCurrent = () => scope === simulationHistoryRequest.current &&
+      run.workspaceId === selectedWorkspaceRef.current && selectedSimulationRunRef.current?.id === run.id
     setSaveState('simulationReview', { phase: 'saving' })
     try {
-      const updated = await simulationRunApi.updateReview(selectedSimulationRun.id, {
+      const updated = await simulationRunApi.updateReview(run.id, {
         userNotes: simulationReviewDraft.userNotes,
         reviewStatus: simulationReviewDraft.reviewStatus,
-        expectedUpdatedAt: selectedSimulationRun.updatedAt,
+        expectedUpdatedAt: run.updatedAt,
       })
+      if (!isCurrent()) return
+      if (updated.id !== run.id || updated.workspaceId !== run.workspaceId) {
+        throw new Error('保存回执与当前模拟记录不一致，请重新核对。')
+      }
       setSelectedSimulationRun(updated)
-      setSimulationReviewDraft({
+      const hasNewEdits = edit !== simulationReviewEdit.current
+      if (!hasNewEdits) setSimulationReviewDraft({
         userNotes: updated.userNotes,
         reviewStatus: updated.reviewStatus,
       })
       setSimulationRuns((current) =>
         current.map((run) => (run.id === updated.id ? updated : run)),
       )
-      setSaveState('simulationReview', { phase: 'saved' })
+      setSaveState('simulationReview', { phase: 'saved',
+        message: hasNewEdits ? '已保存上次提交，当前修改尚未保存' : undefined })
     } catch (error) {
-      setSaveState('simulationReview', {
+      if (isCurrent()) setSaveState('simulationReview', {
         phase: 'error',
         message: errorMessage(error),
       })
+    } finally {
+      if (simulationReviewSave.current === saving) simulationReviewSave.current = null
     }
+  }
+
+  function editSimulationReview(draft: typeof simulationReviewDraft) {
+    simulationReviewEdit.current += 1
+    setSimulationReviewDraft(draft)
+    if (saveStates.simulationReview.phase !== 'saving') setSaveState('simulationReview', idleState)
   }
 
   async function openSkill(skillAssetId: string) {
@@ -2700,11 +2793,12 @@ function WorkspaceApp() {
             (run) => internalMode || run.workflowType === 'account_diagnosis',
           )}
           selectedRun={selectedRun}
+          loadState={analysisHistoryLoad}
           analysisReviewDraft={analysisReviewDraft}
           analysisReviewSaveState={saveStates.analysisReview}
           renderStageResult={renderStageResult}
           onOpenRun={openRun}
-          onAnalysisReviewDraftChange={setAnalysisReviewDraft}
+          onAnalysisReviewDraftChange={editAnalysisReview}
           onSaveAnalysisRunReview={saveAnalysisRunReview}
         />
       )}
@@ -2742,6 +2836,7 @@ function WorkspaceApp() {
       {!loading && workspace && activePage === 'drafts' && !internalMode && <CreatorCanvasPage
         key={workspace.id} workspaceId={workspace.id} topic={selectedTopic} topics={topics.filter(t => t.sourceWorkflow !== 'trend_analysis')}
         onSimulate={prepareAudienceSimulation}
+        simulationRuns={simulationRuns}
         agentId={agents.find(a => a.agentId === 'topic_draft_editor')?.id}
         onSelect={setSelectedTopic} onUpdated={topic => {if(selectedWorkspaceRef.current !== topic.workspaceId) return; setSelectedTopic(topic); setTopics(current => current.map(t => t.id === topic.id ? topic : t))}}
       />}
@@ -2767,10 +2862,10 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'simulations' && (
         <>
-        {!internalMode && <CreatorSimulationSetup key={workspace.id} workspaceId={workspace.id}
+        {!internalMode && <CreatorSimulationSetup key={`${workspace.id}:${selectedTopic?.id || ''}`} workspaceId={workspace.id}
           positioning={workspace.accountPositioning} topic={selectedTopic} topics={topics} fans={fans}
           running={running} onSelect={setSelectedTopic}
-          onRun={(topic, recommendation) => void runAudienceSimulation(undefined, 'account', topic, recommendation)}
+          onRun={(topic, recommendation, task) => void runAudienceSimulation(undefined, 'account', topic, recommendation, task)}
           onAddFans={() => setActivePage('audience-analysis')} />}
         {!internalMode && running && <WorkflowOutputPanel targetTab="account" views={simulationStageViews} outputKind="simulation" runError={runError} renderStageResult={renderStageResult} />}
         {!internalMode && !running && runError && <p role="alert">{runError}</p>}
@@ -2780,9 +2875,10 @@ function WorkspaceApp() {
           selectedSimulationRun={selectedSimulationRun}
           simulationReviewDraft={simulationReviewDraft}
           simulationReviewSaveState={saveStates.simulationReview}
+          loadState={simulationHistoryLoad}
           reviewStatusLabel={reviewStatusLabel}
           onOpenSimulationRun={openSimulationRun}
-          onSimulationReviewDraftChange={setSimulationReviewDraft}
+          onSimulationReviewDraftChange={editSimulationReview}
           onSaveSimulationRunReview={saveSimulationRunReview}
           stageSeedFromSimulation={stageSeedFromSimulation}
           renderStageResult={renderStageResult}

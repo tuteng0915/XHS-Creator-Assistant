@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import type { MediaAsset } from '../types'
 import type { CreatorNote } from '../creatorNotes'
 import { CreatorNoteBrowser } from './CreatorNoteBrowser'
@@ -49,6 +49,7 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
   mediaAssets: MediaAsset[]
 }) {
   const [openClaim, setOpenClaim] = useState<string | null>(null)
+  const keywordEvidenceId = useId()
   const coverage = observations.coverage
   const selectable = new Map(notes.map(note => [note.noteId, note]))
   const sections: Array<[string, Claim[]]> = [
@@ -60,24 +61,21 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
     claimHasEvidence(claim) && (title !== '主要内容方向' || new Set(claim.evidence.map(ref => ref.noteId)).size >= 2)
   )] as const)
   const keywords = (portrait?.keywords || []).filter(claimHasEvidence)
+  const openKeyword = keywords.find((_, index) => openClaim === `keyword-${index}`)
   const strengths = (portrait?.strengths || []).filter(claimHasEvidence)
   const hasIntro = claimHasEvidence(portrait?.summary) || keywords.length > 0 || claimHasEvidence(portrait?.encouragement)
   const recentChange = observations.chronology?.status === 'comparable' && claimHasEvidence(portrait?.recentChange)
     ? portrait.recentChange : null
   const hasPortrait = hasIntro || strengths.length > 0 || Boolean(recentChange) || validSections.some(([, claims]) => claims.length)
 
-  function renderClaim(claim: Claim, key: string) {
+  function renderEvidence(claim: Claim) {
     const evidenceIds = [...new Set(claim.evidence.map(ref => ref.noteId))]
     const exceptionIds = [...new Set((claim.counterexamples || []).map(ref => ref.noteId))]
     const linkedNotes = evidenceIds.map(id => selectable.get(id)).filter((note): note is CreatorNote => Boolean(note))
     const exceptionNotes = exceptionIds.map(id => selectable.get(id)).filter((note): note is CreatorNote => Boolean(note))
     const missingCount = evidenceIds.length - linkedNotes.length
     const missingExceptions = exceptionIds.length - exceptionNotes.length
-    return <div className={`account-portrait-claim${key.startsWith('keyword-') ? ' account-portrait-keyword' : ''}`} key={key}>
-      <p>{claim.statement}</p>
-      <button type="button" onClick={() => setOpenClaim(openClaim === key ? null : key)}
-        aria-expanded={openClaim === key}>查看依据 · {evidenceIds.length} 条笔记</button>
-      {openClaim === key && <div className="account-portrait-evidence">
+    return <div className="account-portrait-evidence">
         <div className="account-portrait-quotes">
           {claim.evidence.map((ref, index) => <span key={`${ref.noteId}-${index}`}>“{ref.quote}”</span>)}
         </div>
@@ -89,7 +87,16 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
           {missingExceptions > 0 && <p className="muted">{missingExceptions} 条例外笔记未保留在本次分析快照中，仅显示历史引用。</p>}
           <CreatorNoteBrowser notes={exceptionNotes} mediaAssets={mediaAssets} />
         </div>}
-      </div>}
+      </div>
+  }
+
+  function renderClaim(claim: Claim, key: string) {
+    const evidenceCount = new Set(claim.evidence.map(ref => ref.noteId)).size
+    return <div className="account-portrait-claim" key={key}>
+      <p>{claim.statement}</p>
+      <button type="button" onClick={() => setOpenClaim(openClaim === key ? null : key)}
+        aria-expanded={openClaim === key}>查看依据 · {evidenceCount} 条笔记</button>
+      {openClaim === key && renderEvidence(claim)}
     </div>
   }
 
@@ -97,7 +104,19 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
     {hasPortrait ? <>
       {hasIntro && <div className="account-portrait-intro">
         {claimHasEvidence(portrait?.summary) && <div className="account-portrait-summary">{renderClaim(portrait.summary, 'summary')}</div>}
-        {keywords.length > 0 && <div className="account-portrait-keywords">{keywords.map((claim, index) => renderClaim(claim, `keyword-${index}`))}</div>}
+        {keywords.length > 0 && <div className="account-portrait-keyword-section">
+          <div className="account-portrait-keywords" role="group" aria-label="账号关键词">
+            {keywords.map((claim, index) => <button type="button" className="account-portrait-keyword" key={index}
+              aria-label={`${claim.statement}：查看 ${new Set(claim.evidence.map(ref => ref.noteId)).size} 条笔记依据`}
+              aria-expanded={openClaim === `keyword-${index}`} aria-controls={keywordEvidenceId}
+              onClick={() => setOpenClaim(openClaim === `keyword-${index}` ? null : `keyword-${index}`)}>{claim.statement}</button>)}
+          </div>
+          <div id={keywordEvidenceId} hidden={!openKeyword}>
+            {openKeyword && <div className="account-portrait-keyword-detail" role="region" aria-label={`${openKeyword.statement}的依据`} key={openClaim}>
+              {renderEvidence(openKeyword)}
+            </div>}
+          </div>
+        </div>}
         {claimHasEvidence(portrait?.encouragement) && <div className="account-portrait-encouragement">{renderClaim(portrait.encouragement, 'encouragement')}</div>}
       </div>}
       {strengths.length > 0 && <section>

@@ -55,6 +55,28 @@ function setup(withSimulation = false, withSavedUrl = false, withTopics = false)
 }
 
 describe('public creator journey', () => {
+  it('sends guided questions and discussion settings from the public setup to simulation creation', async()=>{
+    const fetch=setup(false,false,true)
+    await screen.findByText('甲的笔记')
+    fireEvent.click(screen.getByRole('button',{name:/👥 受众模拟/}))
+    await waitFor(()=>expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('a'))
+    fireEvent.change(screen.getByLabelText('模拟选题'),{target:{value:'topic-0'}})
+    fireEvent.click(screen.getByLabelText('定向试读'))
+    fireEvent.change(screen.getByLabelText('重点问题 1'),{target:{value:'第一步清楚吗？'}})
+    fireEvent.click(screen.getByLabelText('互相回应'))
+    fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+    await waitFor(()=>expect(fetch.mock.calls.some(([url,init])=>String(url).endsWith('/simulation-runs')&&init?.method==='POST')).toBe(true))
+    const sent=fetch.mock.calls.find(([url,init])=>String(url).endsWith('/simulation-runs')&&init?.method==='POST')!
+    expect(JSON.parse(String(sent[1]?.body))).toMatchObject({topicId:'topic-0',simulatedFanIds:['a','b','c'],
+      panelTask:{protocolVersion:'panel/v1',readingMode:'guided',discussionEnabled:false,focusQuestions:['第一步清楚吗？']}})
+    await screen.findByText('测试停止于执行前')
+    expect(screen.getByLabelText('重点问题 1')).toHaveValue('第一步清楚吗？')
+    fireEvent.change(screen.getByLabelText('模拟选题'),{target:{value:'topic-1'}})
+    expect(screen.getByLabelText('自然全文试读')).toBeChecked()
+    expect(screen.getByLabelText('互相回应')).toBeChecked()
+    expect(screen.queryByLabelText('重点问题 1')).not.toBeInTheDocument()
+  })
+
   it('opens topic simulation confirmation without running and keeps manually chosen readers across shortcuts', async()=>{
     const fetch=setup(false,false,true)
     const simulations=()=>fetch.mock.calls.filter(([url,init])=>String(url).endsWith('/simulation-runs')&&init?.method==='POST')

@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def to_camel(value: str) -> str:
@@ -773,7 +773,34 @@ class SimulationRunStatus(StrEnum):
     FAILED = "failed"
 
 
+class PanelTask(APIModel):
+    """Explicit opt-in protocol; absent on legacy requests and snapshots."""
+    model_config = ConfigDict(extra="forbid")
+    protocol_version: Literal["panel/v1"] = "panel/v1"
+    reading_mode: Literal["natural", "guided"] = "natural"
+    discussion_enabled: bool = Field(default=True, strict=True)
+    focus_questions: list[Annotated[str, Field(strict=True, min_length=1, max_length=300)]] = (
+        Field(default_factory=list, max_length=2)
+    )
+
+    @field_validator("focus_questions")
+    @classmethod
+    def nonblank_questions(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("试读问题不能为空")
+        return values
+
+    @model_validator(mode="after")
+    def questions_match_mode(self):
+        if self.reading_mode == "guided" and not self.focus_questions:
+            raise ValueError("定向试读需要一到两个问题")
+        if self.reading_mode == "natural" and self.focus_questions:
+            raise ValueError("自然阅读不携带定向问题")
+        return self
+
+
 class SimulationRunCreate(APIModel):
+    panel_task: PanelTask | None = None
     reader_selection_id: str | None = Field(default=None, min_length=1)
     reader_selection_input_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     simulated_fan_ids: list[str] | None = Field(default=None, min_length=1)

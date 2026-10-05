@@ -49,7 +49,7 @@ def test_pack_uses_all_active_editable_cards_and_does_not_mutate_sources():
     assert "original" not in inputs.candidates[0].model_dump()
     assert set(inputs.model_dump(by_alias=True)) == {
         "workspaceId", "accountPositioning", "target", "candidates",
-        "desiredCount", "selectorVersion",
+        "desiredCount", "selectorVersion", "panelTask",
     }
     assert "内部策略" not in str(inputs.target)
     assert "他必须反对" not in str(inputs.target)

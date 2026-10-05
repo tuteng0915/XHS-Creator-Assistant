@@ -32,7 +32,6 @@ export function RunReviewEditor({
           <h3>人工复盘</h3>
           <p>{hint}</p>
         </div>
-        <SaveIndicator state={saveState} />
       </div>
       <label htmlFor={`${idPrefix}-status`}>复盘状态</label>
       <select
@@ -60,7 +59,7 @@ export function RunReviewEditor({
         }
       />
       <div className="save-row">
-        <button type="button" onClick={onSave}>
+        <button type="button" onClick={onSave} disabled={saveState.phase === 'saving'}>
           保存复盘
         </button>
         <SaveIndicator state={saveState} />
@@ -75,6 +74,7 @@ type AnalysisHistoryPageProps = {
   selectedRun: AnalysisRun | null
   analysisReviewDraft: ReviewDraft
   analysisReviewSaveState: SaveState
+  loadState?: SaveState
   renderStageResult: (stage: StageView, run: AnalysisRun) => ReactNode
   onOpenRun: (runId: string, inOutput?: boolean) => void
   onAnalysisReviewDraftChange: (draft: ReviewDraft) => void
@@ -87,6 +87,7 @@ export function AnalysisHistoryPage({
   selectedRun,
   analysisReviewDraft,
   analysisReviewSaveState,
+  loadState,
   renderStageResult,
   onOpenRun,
   onAnalysisReviewDraftChange,
@@ -114,6 +115,8 @@ export function AnalysisHistoryPage({
         )}
       </section>
       <section className="history-detail">
+        {loadState?.phase === 'saving' && <p role="status">正在读取分析记录…</p>}
+        {loadState?.phase === 'error' && <p role="alert">{loadState.message} 请重新点击记录重试。</p>}
         {selectedRun ? (
           <>
             <div className="detail-head">
@@ -154,7 +157,7 @@ export function AnalysisHistoryPage({
             ))}
           </>
         ) : (
-          <div className="empty-card">选择一次运行查看输入和结果。</div>
+          !['saving','error'].includes(loadState?.phase || '') && <div className="empty-card">选择一次运行查看输入和结果。</div>
         )}
       </section>
     </div>

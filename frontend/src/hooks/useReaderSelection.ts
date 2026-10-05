@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { readerSelectionApi } from '../api'
 import type { ReaderSelection } from '../readerSelection'
+import type { PanelTask } from '../types'
 
 type Receipt = {requestKey: string; desiredCount: number; id?: string}
 type View = {key: string; revision: string; record: ReaderSelection | null; busy: boolean; error: string}
-export const readerSelectionStorageKey = (workspaceId: string, topicId: string) =>
-  `reader-selection:${workspaceId}:${topicId}`
+export const panelTaskKey = (task?: PanelTask | null) => task ? JSON.stringify([
+  task.protocolVersion, task.readingMode, task.discussionEnabled, task.focusQuestions,
+]) : ''
+export const readerSelectionStorageKey = (workspaceId: string, topicId: string, task?: PanelTask) =>
+  `reader-selection:${workspaceId}:${topicId}${task ? `:${panelTaskKey(task)}` : ''}`
 
 function read(key: string): Receipt | null {
   try {
@@ -15,8 +19,8 @@ function read(key: string): Receipt | null {
   } catch { return null }
 }
 
-export function useReaderSelection(workspaceId: string, topicId: string, revision: string) {
-  const key = readerSelectionStorageKey(workspaceId, topicId)
+export function useReaderSelection(workspaceId: string, topicId: string, revision: string, panelTask?: PanelTask) {
+  const key = readerSelectionStorageKey(workspaceId, topicId, panelTask)
   const epoch = useRef(0)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const locked = useRef(false)
@@ -29,6 +33,7 @@ export function useReaderSelection(workspaceId: string, topicId: string, revisio
       const record = await readerSelectionApi.get(workspaceId, receipt.id)
       if (turn !== epoch.current) return null
       if (record.workspaceId !== workspaceId || record.id !== receipt.id) throw new Error('推荐不属于当前账号')
+      if (panelTaskKey(record.inputSnapshot.panelTask) !== panelTaskKey(panelTask)) throw new Error('推荐的试读设置不一致，请重新推荐。')
       const busy = ['pending', 'running'].includes(record.status)
       setView({key, revision, record, busy, error: ''})
       locked.current = busy
@@ -86,6 +91,7 @@ export function useReaderSelection(workspaceId: string, topicId: string, revisio
       window.localStorage.setItem(key, JSON.stringify(receipt))
       const record = await readerSelectionApi.create(workspaceId, {
         requestKey: receipt.requestKey, desiredCount: receipt.desiredCount, topicId,
+        ...(panelTask ? {panelTask} : {}),
       })
       if (record.workspaceId !== workspaceId) throw new Error('推荐不属于当前账号')
       const confirmed = {...receipt, id: record.id}

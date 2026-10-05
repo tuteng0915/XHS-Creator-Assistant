@@ -32,12 +32,18 @@ def selection_adoption_snapshot(c, database, workspace_id: str, payload: Simulat
         payload.topic_id, payload.draft_id, payload.manual_topic,
     ):
         raise ConflictError("推荐不属于当前选题或草稿，请重新推荐或手动选择")
+    if request.panel_task != payload.panel_task:
+        raise ConflictError("试读任务已变化，请重新推荐，或按当前手选名单继续")
     if requests.freshness(c, row).status != "current":
         raise ConflictError("推荐依据已变化或不可用，请重新推荐，或按当前手选名单继续")
     candidate_ids = {candidate.id for candidate in saved.input_snapshot.candidates}
     if not set(payload.simulated_fan_ids).issubset(candidate_ids):
         raise ValidationError("最终读者不属于这次推荐的候选池")
-    proposed = [reader.model_dump(by_alias=True) for reader in saved.result.proposed_readers]
+    candidate_names = {
+        candidate.id: candidate.name for candidate in saved.input_snapshot.candidates
+    }
+    proposed = [{**reader.model_dump(by_alias=True), "name": candidate_names[reader.fan_id]}
+                for reader in saved.result.proposed_readers]
     proposed_ids = [reader.fan_id for reader in saved.result.proposed_readers]
     return {
         "source": "recommended" if payload.simulated_fan_ids == proposed_ids else "adjusted",

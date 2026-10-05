@@ -9,6 +9,25 @@ import { WorkflowOutputPanel, type StageView } from './WorkflowOutputPanel'
 
 afterEach(cleanup)
 
+it('shows deliberately disabled discussion in saved history without calling it silence or failure', () => {
+  const run = {status:'completed', inputSnapshot:{simulationMethod:'audience_methods_v2',
+    panelTask:{protocolVersion:'panel/v1',readingMode:'guided',discussionEnabled:false,focusQuestions:['第一步清楚吗？']}},
+    personaDefinitions:[],reactionResults:[{personaId:'a',quote:'第一步很清楚'},{personaId:'b',quote:'我也理解了'}],
+    debateResults:[],synthesis:{verdict:'保留清楚的开头'},stageErrors:{}} as unknown as SimulationRun
+  const stage = stageSeedFromSimulation(run).find(s => s.key === 'debate_responses')!
+  expect(stage.status).toBe('completed')
+  expect(stage.result).toEqual({debateResponses:[], skippedReason:'本次只做独立试读，未开启互相回应。'})
+})
+
+it('does not let a disabled-discussion label hide a saved execution error', () => {
+  const run = {status:'partially_completed', inputSnapshot:{panelTask:{protocolVersion:'panel/v1',discussionEnabled:false}},
+    personaDefinitions:[],reactionResults:[{personaId:'a',quote:'有疑问'}],debateResults:[],synthesis:{verdict:'试读'},
+    stageErrors:{'debate_responses.a':'已有执行错误'}} as unknown as SimulationRun
+  const stage = stageSeedFromSimulation(run).find(s => s.key === 'debate_responses')!
+  expect(stage.status).toBe('failed')
+  expect(stage.result).toBeUndefined()
+})
+
 const renderStage = (stage:StageView) => <StageResultRenderer stage={stage} currentRun={null}
   onSaveGeneratedTopic={vi.fn()} onSelectTopic={vi.fn()} onGenerateBrief={vi.fn()}
   onGenerateDraft={vi.fn()} onFillSimulationTopic={vi.fn()} />

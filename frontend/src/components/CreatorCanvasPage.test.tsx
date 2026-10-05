@@ -9,6 +9,38 @@ afterEach(() => {cleanup(); vi.restoreAllMocks(); vi.useRealTimers()})
 const topic: Topic = {id:'topic',workspaceId:'w',title:'原题',body:'原文',angle:'角度',associatedPainPoint:'',whyItFits:'',generatedSnapshot:{},sourceAnalysisRunId:null,sourceWorkflow:'manual',status:'candidate',createdAt:'2026-01-01',updatedAt:'2026-01-01'}
 const conversation: AgentConversation = {id:'chat', workspaceId:'w',agentAssetId:'a',title:'创作',status:'active',executionStatus:'completed',contextTarget:{assetType:'topic',assetId:'topic'},createdAt:'',updatedAt:'',messages:[]}
 
+it('reopens frozen edits without changing current text and resets details on topic/account switch', async () => {
+  const second = {...topic,id:'second',title:'第二题'}
+  function chat(t: Topic): AgentConversation {
+    return {...conversation,id:`chat-${t.id}`,workspaceId:t.workspaceId,
+      contextTarget:{assetType:'topic',assetId:t.id},messages:[{
+        id:`reply-${t.id}`,conversationId:`chat-${t.id}`,role:'assistant',content:'历史回复',
+        contextPack:{},assetRefs:[],proposedActions:[],createdAt:'',modelMetadata:{
+          canvasApplyStatus:'applied',canvasEditSnapshot:{schemaVersion:'creator-edit/v1',
+            workspaceId:t.workspaceId,topicId:t.id,before:{title:'历史原题',body:`改前-${t.id}`},
+            suggested:{title:'历史新题',body:`改后-${t.id}`},after:{title:'历史新题',body:`改后-${t.id}`}},
+        },
+      }]}
+  }
+  vi.spyOn(agentConversationApi,'list').mockResolvedValue([chat(topic),chat(second)])
+  vi.spyOn(agentConversationApi,'get').mockImplementation(async id=>chat(id==='chat-topic'?topic:second))
+  const save=vi.spyOn(topicApi,'update'), send=vi.spyOn(agentConversationApi,'sendMessage')
+  const props={topics:[topic,second],onSelect:vi.fn(),onUpdated:vi.fn()}
+  const {rerender}=render(<CreatorCanvasPage {...props} workspaceId="w" topic={topic} />)
+  fireEvent.click(await screen.findByText('当时已应用 · 查看修改'))
+  expect(screen.getByText('改前-topic').closest('details')).toHaveAttribute('open')
+  expect(screen.getByLabelText('创作正文')).toHaveValue('原文')
+  rerender(<CreatorCanvasPage {...props} workspaceId="w" topic={second} />)
+  await screen.findByText('改前-second')
+  expect(screen.queryByText('改前-topic')).not.toBeInTheDocument()
+  expect(screen.getByText('改前-second').closest('details')).not.toHaveAttribute('open')
+  vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
+  rerender(<CreatorCanvasPage {...props} workspaceId="other" topic={{...second,workspaceId:'other'}} />)
+  await screen.findByText('可以讨论角度，也可以直接要求修改标题和正文。')
+  expect(screen.queryByText('改前-second')).not.toBeInTheDocument()
+  expect(save).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled()
+})
+
 it('saves the edited body before entering reader confirmation, with no conversation creation', async()=>{
   vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
   const create=vi.spyOn(agentConversationApi,'create')

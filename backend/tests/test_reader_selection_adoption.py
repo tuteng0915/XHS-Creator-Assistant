@@ -144,6 +144,14 @@ def test_recommended_adjusted_and_history_snapshots_are_independent(app, recomme
     assert summary["source"] == "recommended"
     assert summary["readerSelectionId"] == selection.id
     assert summary["proposedReaders"][0]["fanId"] == fans[0]["id"]
+    expected_name = next(
+        c.name for c in selection.input_snapshot.candidates if c.id == fans[0]["id"]
+    )
+    assert summary["proposedReaders"][0]["name"] == expected_name
+    # Recommended but not selected readers must retain their historical name too.
+    unselected = service.create(wid, adopting(recommended, simulatedFanIds=[fans[1]["id"]]))
+    unselected_summary = unselected.input_snapshot["readerSelection"]
+    assert unselected_summary["proposedReaders"][0]["name"] == expected_name
     # Adjustment may add more readers than the requested recommendation count of three.
     adjusted_ids = [fan["id"] for fan in fans]
     adjusted = service.create(wid, adopting(recommended, simulatedFanIds=adjusted_ids))
@@ -152,6 +160,7 @@ def test_recommended_adjusted_and_history_snapshots_are_independent(app, recomme
     edit_fan(app, fans[0], name="后来改名")
     assert service.get(run.id).input_snapshot == run.input_snapshot
     assert service.get(adjusted.id).input_snapshot == adjusted.input_snapshot
+    assert service.get(unselected.id).input_snapshot == unselected.input_snapshot
     assert app.state.reader_selection_service.get(wid, selection.id) == selection
 
 

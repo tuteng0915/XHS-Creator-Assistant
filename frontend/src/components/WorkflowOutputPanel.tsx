@@ -4,6 +4,7 @@ import type { WorkflowTab } from '../workflows'
 import { withSimulationPersonaLabels } from '../simulationPersonaLabels'
 import { SimulationStageNotice } from './SimulationStageNotice'
 import { stageDisplayStatus } from '../simulationStageStatus'
+import type { FeedbackRun } from '../editorFeedback'
 
 export type StageView = {
   key: string
@@ -16,6 +17,7 @@ export type StageView = {
   personaIds?: string[]
   executionErrors?: Record<string, string>
   executionEnded?: boolean
+  feedbackRun?: FeedbackRun
 }
 
 export type WorkflowOutputKind = 'analysis' | 'simulation'

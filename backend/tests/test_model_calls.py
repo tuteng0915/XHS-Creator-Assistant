@@ -15,9 +15,10 @@ class FakeAsyncClient:
     requests: list[dict[str, Any]] = []
     response_body: dict[str, Any] = {}
     response_status_code = 200
+    options: dict[str, Any] = {}
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        pass
+        type(self).options = kwargs
 
     async def __aenter__(self) -> "FakeAsyncClient":
         return self
@@ -81,6 +82,20 @@ def test_profile_prompt_teaches_short_contiguous_quotes_without_banning_source_e
     assert "原文本来有省略号可以照抄" in system
 
 
+def test_profile_review_handles_missing_metrics_and_scene_specific_claims():
+    system, user = ModelCallService(settings())._build_prompt(ModelOperation.PROFILE, {
+        "historicalPosts": "毕业记录：赞 3，分享 None。学校与工作是两段经历。",
+    })
+    assert "跨场景的材料可以支持共同的写作方式" in system
+    assert "依据也须来自该场景" in system
+    assert "省略该项或写“未提供”" in system
+    assert "不能原样输出 None/null，也不能补零" in system
+    assert "没有超出互动数字本身的具体内容依据就留空" in system
+    assert "可以肯定它的记录价值" in system
+    assert "样例仅示范表达方法，不是输入账号的事实" in system
+    assert "分享 None" in user  # Instructions do not mutate the frozen source.
+
+
 def test_profile_review_methods_preserve_schema_and_use_only_supplied_context():
     service = ModelCallService(settings())
     system, user = service._build_prompt(ModelOperation.PROFILE, {
@@ -121,9 +136,25 @@ def test_profile_review_roundtrip_keeps_existing_output_and_single_request(monke
     request = FakeAsyncClient.requests[0]["json"]
     assert "复盘方法：先认识账号" in request["messages"][0]["content"]
     assert request["max_tokens"] == 6000
+    assert FakeAsyncClient.options["timeout"].as_dict() == dict(
+        connect=90, read=180, write=90, pool=90,
+    )
     assert result.output["profile"]["voiceFingerprint"] == ["短句先讲取舍，再解释理由"]
     assert isinstance(result.output["profile"]["contrast"]["takeaways"][0], str)
     assert result.model_metadata["model"] == "fake-qwen"
+
+
+@pytest.mark.parametrize("operation", list(ModelOperation))
+def test_only_qwen_profile_has_configurable_read_timeout(operation):
+    service = ModelCallService(settings(qwen_profile_read_timeout_seconds=150))
+
+    async def check():
+        async with service._qwen_client(operation) as client:
+            assert client.timeout.as_dict() == dict(
+                connect=90, read=150 if operation == ModelOperation.PROFILE else 90,
+                write=90, pool=90,
+            )
+    asyncio.run(check())
 
 
 def test_profile_budget_change_keeps_other_operations_unchanged(monkeypatch):

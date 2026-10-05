@@ -179,7 +179,7 @@ export function StageResultRenderer({
     return <ReactionListView items={result.debateResponses} type="debate" personaLabels={stage.personaLabels} />
   }
   if (stage.key === 'synthesis' && result.synthesis) {
-    return <SynthesisView data={result.synthesis as Record<string, unknown>} />
+    return <SynthesisView data={result.synthesis as Record<string, unknown>} feedbackRun={stage.feedbackRun} />
   }
   if (stage.key === 'creator_profile' && result.creatorProfile) {
     return (

@@ -1,10 +1,11 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react'
 
-export function CreatorDialog({ title, onClose, children, wide = false, returnFocusRef }: {
+export function CreatorDialog({ title, onClose, children, wide = false, returnFocusRef, className = '' }: {
   title: string
   onClose: () => void
   children: ReactNode
   wide?: boolean
+  className?: string
   returnFocusRef?: RefObject<HTMLElement | null>
 }) {
   const ref = useRef<HTMLDialogElement>(null)
@@ -19,7 +20,7 @@ export function CreatorDialog({ title, onClose, children, wide = false, returnFo
     }
   }, [returnFocusRef])
   return (
-    <dialog ref={ref} className={`creator-dialog${wide ? ' creator-dialog-wide' : ''}`} aria-label={title}
+    <dialog ref={ref} className={`creator-dialog${wide ? ' creator-dialog-wide' : ''}${className ? ` ${className}` : ''}`} aria-label={title}
       onCancel={(event) => { event.preventDefault(); onClose() }}>
       <div className="creator-dialog-head">
         <h2>{title}</h2>

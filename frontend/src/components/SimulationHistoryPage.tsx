@@ -7,6 +7,8 @@ import type { ReviewStatus, SimulationRun, SimulationRunSummary } from '../types
 import type { StageView } from './WorkflowOutputPanel'
 import { SimulationStageNotice } from './SimulationStageNotice'
 import { stageDisplayStatus } from '../simulationStageStatus'
+import { SimulationReaderSummary } from './SimulationReaderSummary'
+import { SimulationTaskSummary } from './SimulationTaskSummary'
 
 type ReviewDraft = {
   reviewStatus: ReviewStatus
@@ -19,6 +21,7 @@ type Props = {
   selectedSimulationRun: SimulationRun | null
   simulationReviewDraft: ReviewDraft
   simulationReviewSaveState: SaveState
+  loadState?: SaveState
   reviewStatusLabel: (status: ReviewStatus) => string
   onOpenSimulationRun: (runId: string, showInOutput?: boolean) => void
   onSimulationReviewDraftChange: (draft: ReviewDraft) => void
@@ -33,6 +36,7 @@ export function SimulationHistoryPage({
   selectedSimulationRun,
   simulationReviewDraft,
   simulationReviewSaveState,
+  loadState,
   reviewStatusLabel,
   onOpenSimulationRun,
   onSimulationReviewDraftChange,
@@ -62,6 +66,8 @@ export function SimulationHistoryPage({
         )}
       </section>
       <section className="history-detail">
+        {loadState?.phase === 'saving' && <p role="status">正在读取模拟记录…</p>}
+        {loadState?.phase === 'error' && <p role="alert">{loadState.message} 请重新点击记录重试。</p>}
         {selectedSimulationRun ? (
           <>
             <div className="detail-head">
@@ -76,6 +82,8 @@ export function SimulationHistoryPage({
                 在输出区打开
               </button>}
             </div>
+            <SimulationTaskSummary run={selectedSimulationRun} />
+            <SimulationReaderSummary key={selectedSimulationRun.id} run={selectedSimulationRun} />
             <details open={!publicMode}><summary>复盘备注</summary><RunReviewEditor
               idPrefix="simulation-run-review"
               draft={simulationReviewDraft}
@@ -99,7 +107,7 @@ export function SimulationHistoryPage({
             ))}
           </>
         ) : (
-          <EmptyState>选择一次受众模拟查看输入和结果。</EmptyState>
+          loadState?.phase !== 'saving' && loadState?.phase !== 'error' && <EmptyState>选择一次受众模拟查看输入和结果。</EmptyState>
         )}
       </section>
     </div>

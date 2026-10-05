@@ -145,6 +145,8 @@ http://localhost:8000/docs
 .venv/bin/python -m pytest
 ```
 
+受众反应检查可在仓库根目录运行 `backend/.venv/bin/python scripts/check_audience_reactions.py`，默认只免费预览，不需要启动后端，也不初始化正式数据库。只有显式加 `--live --output <新的报告目录>` 才会调用 Qwen；完整图检查的应用初始化和运行数据库均自动隔离到临时目录，结束或异常时清理，无需额外包裹环境变量。`--audience-from <已有报告> --group-ids <角色ID>` 仅检查所选角色的独立反应，不创建数据库；加 `--task-pair` 则要求恰好一位角色，最多两次调用对比报名条件。报告建议存入被 Git 忽略的 `data/evals/`；结构校验通过不等于人物反应质量已经通过人工验收。
+
 ## 模型配置
 
 live generation 统一通过后端模型代理调用，浏览器不持有模型 API key。默认 provider 是 Anthropic-compatible path：
@@ -186,6 +188,8 @@ export QWEN_MODEL=qwen-plus
 # 可选；这是默认值：
 export QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
+
+Qwen 账号画像的单次读取等待默认是 180 秒（已观察到完整响应需要约 99 秒）。可在 `.env.local` 设置 `QWEN_PROFILE_READ_TIMEOUT_SECONDS=180`，范围为 1～300 的整数；只影响 `MODEL_PROVIDER=qwen` 的账号画像，其他文本操作及连接／写入等待仍为 90 秒，不增加自动重试。这是单次网络读取上限，不是整个 workflow 的总时限。只读画像检查脚本使用独立的 `--read-timeout-seconds` 参数，默认 90 秒，便于重现旧设置。
 
 也支持这些 alias：
 

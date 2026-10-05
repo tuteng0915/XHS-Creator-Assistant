@@ -20,6 +20,32 @@ async function openVoiceOptions() {
   await screen.findByRole('button',{name:'加入 1 位'})
 }
 
+it('shows decision differences with named checkboxes and retains selection after creation failure', async () => {
+  const options=[...voiceOptions,{...voiceOptions[0],id:'quiet',name:'安静收藏派',decisionStyle:'看是否值得留作参考',expressionStyle:'有具体缺口才开口'}]
+  vi.spyOn(simulatedFanApi,'voices').mockResolvedValue(options)
+  const create=vi.spyOn(simulatedFanApi,'createVariants').mockRejectedValue(new Error('稍后再试'))
+  render(<SimulatedFansPage {...pageProps} />)
+  fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
+  fireEvent.click(screen.getByRole('button',{name:'添加不同声音'}))
+  const action=await screen.findByRole('checkbox',{name:'直球行动派'})
+  expect(screen.getByRole('dialog')).toHaveClass('fan-voice-dialog')
+  const quiet=screen.getByRole('checkbox',{name:'安静收藏派'})
+  expect(action).toHaveAccessibleDescription('看步骤')
+  expect(quiet).toHaveAccessibleDescription('看是否值得留作参考')
+  expect(action.closest('label')).toHaveClass('selected')
+  fireEvent.click(action)
+  expect(action.closest('label')).not.toHaveClass('selected')
+  fireEvent.click(quiet)
+  expect(screen.getByRole('button',{name:'加入 0 位'})).toBeDisabled()
+  fireEvent.click(quiet)
+  fireEvent.click(screen.getByRole('button',{name:'加入 1 位'}))
+  expect(await screen.findByRole('alert')).toHaveTextContent('稍后再试')
+  expect(action).not.toBeChecked()
+  expect(quiet).toBeChecked()
+  expect(create).toHaveBeenCalledExactlyOnceWith('f',['quiet'])
+  expect(screen.getByRole('button',{name:'加入 1 位'})).toBeEnabled()
+})
+
 it('recovers created voices through the real list hook without another POST', async () => {
   vi.spyOn(simulatedFanApi,'voices').mockResolvedValue(voiceOptions)
   const create=vi.spyOn(simulatedFanApi,'createVariants').mockResolvedValue([createdFan])

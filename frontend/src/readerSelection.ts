@@ -8,8 +8,9 @@ export interface ReaderSelection {
   workspaceId: string
   inputHash: string
   status: 'pending' | 'running' | 'completed' | 'partially_completed' | 'failed'
-  inputSnapshot: {target: {title: string; body?: string}; candidates: Array<{id: string; name: string}>}
+  inputSnapshot: {target: {title: string; body?: string}; candidates: Array<{id: string; name: string}>; panelTask?: PanelTask | null}
   result: null | {proposedReaders: Array<{fanId: string; fitReason: string; contribution: string}>; unmatchedReason: string}
   errorCode: string | null
   freshness?: {status: 'current' | 'stale' | 'unavailable'; reasons: string[]}
 }
+import type { PanelTask } from './types'

@@ -6,7 +6,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from app.errors import ConflictError, NotFoundError, ValidationError
-from app.models import APIModel
+from app.models import APIModel, PanelTask
 from app.repositories.drafts import DraftRepository
 from app.repositories.simulated_fans import SimulatedFanRepository
 from app.repositories.topics import TopicRepository
@@ -28,6 +28,7 @@ class ReaderSelectionRequest(APIModel):
     draft_id: str | None = Field(default=None, min_length=1)
     manual_topic: str | None = Field(default=None, min_length=1, max_length=10000)
     desired_count: int = Field(default=3, ge=1, strict=True)
+    panel_task: PanelTask | None = None
 
     @field_validator("request_key", "topic_id", "draft_id", "manual_topic")
     @classmethod
@@ -44,7 +45,10 @@ class ReaderSelectionRequest(APIModel):
         return self
 
     def identity(self) -> str:
-        return json.dumps(self.model_dump(by_alias=True, exclude={"request_key"}),
+        exclude = {"request_key"}
+        if self.panel_task is None:
+            exclude.add("panel_task")
+        return json.dumps(self.model_dump(by_alias=True, exclude=exclude),
                           ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
@@ -58,7 +62,7 @@ class ReaderSelectionRequestService:
         if row is None:
             return None
         if row["request_json"] != payload.identity():
-            raise ConflictError("这次推荐请求已使用不同目标或人数，请发起新的推荐")
+            raise ConflictError("这次推荐请求已使用不同目标、人数或试读任务，请发起新的推荐")
         return self.selections.response(row)
 
     def existing(self, workspace_id, payload) -> ReaderSelectionResponse | None:
@@ -106,7 +110,7 @@ class ReaderSelectionRequestService:
             "workspaceId": workspace_id, "accountPositioning": workspace["account_positioning"],
             "targetType": "draft" if draft else "topic" if topic_id else "manual",
             "topic": topic, "draft": draft,
-        }, fans, desired_count=payload.desired_count)
+        }, fans, desired_count=payload.desired_count, panel_task=payload.panel_task)
 
     @staticmethod
     def stored_request(row: dict) -> ReaderSelectionRequest | None:

@@ -1,4 +1,6 @@
 import type { ReaderSelection, ReaderSelectionLink } from './readerSelection'
+import type { PanelTask } from './types'
+import type { PanelEditOperation, PanelEditProposal } from './panelEdits'
 import type {
   Agent,
   AgentConversation,
@@ -68,6 +70,24 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
+
+export const panelEditApi = {
+  list: (workspaceId: string, runId: string) => request<PanelEditProposal[]>(
+    `/api/workspaces/${workspaceId}/simulation-runs/${runId}/edit-proposals`),
+  create: (workspaceId: string, runId: string, payload: {
+    requestKey: string; feedbackId: string; expectedUpdatedAt: string
+    operation: PanelEditOperation; text: string
+  }) => request<PanelEditProposal>(`/api/workspaces/${workspaceId}/simulation-runs/${runId}/edit-proposals`, {
+    method:'POST', headers:jsonHeaders, body:JSON.stringify(payload),
+  }),
+  apply: (workspaceId: string, id: string) => request<PanelEditProposal>(`/api/workspaces/${workspaceId}/panel-edit-proposals/${id}/apply`, {
+    method:'POST', headers:jsonHeaders, body:JSON.stringify({confirmed:true}),
+  }),
+  reject: (workspaceId: string, id: string) => request<PanelEditProposal>(`/api/workspaces/${workspaceId}/panel-edit-proposals/${id}/reject`, {method:'POST'}),
+  undo: (workspaceId: string, id: string) => request<PanelEditProposal>(`/api/workspaces/${workspaceId}/panel-edit-proposals/${id}/undo`, {
+    method:'POST', headers:jsonHeaders, body:JSON.stringify({confirmed:true}),
+  }),
+}
 
 export const workspaceApi = {
   list: () => request<Workspace[]>('/api/workspaces'),
@@ -601,7 +621,7 @@ export const analysisRunApi = {
 }
 
 export const readerSelectionApi = {
-  create: (workspaceId: string, payload: {requestKey: string; topicId: string; desiredCount: number}) =>
+  create: (workspaceId: string, payload: {requestKey: string; topicId: string; desiredCount: number; panelTask?: PanelTask}) =>
     request<ReaderSelection>(`/api/workspaces/${workspaceId}/reader-selections`, {
       method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload),
     }),
@@ -615,6 +635,7 @@ export const simulationRunApi = {
     payload: Partial<ReaderSelectionLink> & {
       audienceAnalysisId?: string
       simulatedFanIds?: string[]
+      panelTask?: PanelTask
       topicId?: string | null
       draftId?: string | null
       manualTopic?: string

@@ -11,9 +11,12 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
+from pydantic import ValidationError as SchemaError
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from app.config import Settings  # noqa: E402
+from app.models import PanelTask  # noqa: E402
 from app.services.model_calls import ModelCallService  # noqa: E402
 from app.services.reader_selection import (  # noqa: E402
     prepare_reader_selection,
@@ -36,7 +39,7 @@ CASES = [
 ]
 
 
-def load_inputs(database: Path, workspace_id: str):
+def load_inputs(database: Path, workspace_id: str, panel_task: PanelTask | None = None):
     from app.repositories.simulated_fans import SimulatedFanRepository
     from app.repositories.workspaces import WorkspaceRepository
 
@@ -50,7 +53,7 @@ def load_inputs(database: Path, workspace_id: str):
         return [prepare_reader_selection(workspace_id, {
             "workspaceId": workspace_id, "accountPositioning": workspace["account_positioning"],
             "targetType": "topic", "topic": case,
-        }, fans) for case in CASES]
+        }, fans, panel_task=panel_task) for case in CASES]
     finally:
         connection.close()
 
@@ -65,7 +68,16 @@ async def check(provider, inputs):
                   "requestAttempted": bool(item.candidates),
                   "promptHash": hashlib.sha256(
                       selection_prompt(item)[0].encode("utf-8"),
-                  ).hexdigest()}
+                  ).hexdigest(),
+                  "semanticReview": {
+                      "status": "not_reviewed",
+                      "questions": [
+                          "每位推荐理由能否同时对应本篇正文和已有的人物需求？",
+                          "组合是否提供不同判断，而不只是换语气？",
+                          "有没有预写人物一定会追问或补正文未提到的具体环节？",
+                          "两题的名单或排序即使相同，理由是否真实适配各自内容？",
+                      ],
+                  }}
         try:
             response = await provider.select(item)
             result = validate_reader_selection(response.output, item)
@@ -88,12 +100,28 @@ def main():
     parser.add_argument("--workspace-id", required=True)
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--reading-mode", choices=["natural", "guided"],
+                        help="显式测试新试读协议；不传则保持旧协议")
+    parser.add_argument("--focus-question", action="append", default=[])
+    parser.add_argument("--no-discussion", action="store_true")
     args = parser.parse_args()
-    inputs = load_inputs(args.database, args.workspace_id)
+    if args.reading_mode is None and (args.focus_question or args.no_discussion):
+        parser.error("问题或讨论开关需要配合 --reading-mode")
+    try:
+        task = PanelTask(
+            reading_mode=args.reading_mode, focus_questions=args.focus_question,
+            discussion_enabled=not args.no_discussion,
+        ) if args.reading_mode else None
+    except SchemaError:
+        parser.error("试读任务无效：定向模式需一到两个非空问题，每条最多300字；自然模式不带问题")
+    inputs = load_inputs(args.database, args.workspace_id, panel_task=task)
     sizes = [len("".join(selection_prompt(item)).encode("utf-8")) for item in inputs]
     if not args.live:
         print(json.dumps({"candidateCount": len(inputs[0].candidates), "inputBytes": sizes,
-                          "topics": CASES, "modelCalls": 0}, ensure_ascii=False, indent=2))
+                          "topics": CASES, "modelCalls": 0,
+                          "panelTask": task.model_dump(by_alias=True) if task else None,
+                          "inputHashes": [selection_input_hash(item) for item in inputs]},
+                         ensure_ascii=False, indent=2))
         return 0
     if args.output is None:
         parser.error("--live 必须指定新的 --output 目录")

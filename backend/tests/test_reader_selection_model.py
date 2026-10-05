@@ -11,12 +11,13 @@ from test_reader_selection_persistence import store as store
 
 from app.errors import ValidationError
 from app.main import create_app
-from app.models import ModelCallResponse, ModelOperation
+from app.models import ModelCallResponse, ModelOperation, PanelTask
 from app.services.model_calls import ModelCallService
 from app.services.reader_selection import prepare_reader_selection, validate_reader_selection
 from app.services.reader_selection_model import RealReaderSelectionProvider
 from app.services.reader_selection_prompt import (
     MAX_SELECTION_PROMPT_BYTES,
+    SELECTION_SYSTEM,
     ReaderSelectionInputTooLarge,
     selection_prompt,
 )
@@ -32,6 +33,32 @@ class Calls:
         self.received.append((operation, context))
         return ModelCallResponse(output=self.output or {"proposedReaders": [proposal()]},
                                  model_metadata={"model": "injected-test"})
+
+
+@pytest.mark.parametrize("mode", ["natural", "guided"])
+def test_panel_selection_distinguishes_reading_motive_from_guided_feedback(mode):
+    legacy = prepare_reader_selection("w", snapshot(), [fan()])
+    task = PanelTask(reading_mode=mode,
+                     focus_questions=["第一步是否看得懂？"] if mode == "guided" else [])
+    inputs = prepare_reader_selection("w", snapshot(), [fan()], panel_task=task)
+    old_system, old_user = selection_prompt(legacy)
+    system, user = selection_prompt(inputs)
+    sent = json.loads(user)
+    assert old_system == SELECTION_SYSTEM
+    assert "panelTask" not in json.loads(old_user)
+    assert sent.pop("panelTask") == task.model_dump(by_alias=True)
+    assert sent == json.loads(old_user)
+    assert "这是上限不是配额" in system
+    assert "不能替正文添加" in system
+    if mode == "natural":
+        assert "可能愿意读当前作品的普通读者" in system
+        assert "不是给他分配检验、评估或优化作品的任务" in system
+    else:
+        assert "围绕 panelTask.focusQuestions" in system
+        assert "问题中的观点也不必赞同" in system
+    empty = validate_reader_selection(
+        {"proposedReaders": [], "unmatchedReason": "没有具体阅读需求联系"}, inputs)
+    assert empty.status == "completed"
 
 
 def test_eight_complete_cards_and_six_requested_reach_model_without_strategy(settings):

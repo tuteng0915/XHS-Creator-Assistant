@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from datetime import UTC
 from statistics import median
 from typing import Any
@@ -14,6 +15,38 @@ METRIC_KEYS = ("liked", "collected", "comments", "shares")
 RECENT_CHANGE_PERFORMANCE_TERMS = re.compile(
     r"点赞|收藏|评论量|分享量|曝光|点击|流量|爆款|转化|涨粉|推荐量|算法|增长|下滑|下降|变好|变差"
 )
+
+
+def topic_profile_context(
+    profile: dict[str, Any] | None, snapshot: dict[str, Any], snapshot_at: str
+) -> dict[str, Any] | None:
+    """Project a request-local profile; never rewrite the saved model result."""
+    if profile is None:
+        return None
+    observations = build_account_observations(snapshot, snapshot_at)
+    if observations is None:
+        # Text-only historical inputs have no structured facts to substitute.
+        return deepcopy(profile)
+    context = {
+        key: deepcopy(profile[key])
+        for key in (
+            "accountPortrait", "pillars", "titleFormulas", "hookStyles",
+            "viralStructure", "voiceFingerprint",
+        )
+        if key in profile
+    }
+    contrast = profile.get("contrast")
+    takeaways = contrast.get("takeaways") if isinstance(contrast, dict) else None
+    context["writingSuggestions"] = [
+        item for item in takeaways if isinstance(item, str) and item.strip()
+    ] if isinstance(takeaways, list) else []
+    context["performanceObservations"] = observations
+    context["interpretationGuide"] = (
+        "performanceObservations 是本次所选笔记抓取时的累计互动；null 表示未获取，不是零。"
+        "各指标分别比较，不计算无曝光分母的互动率，不视为内容质量或写法导致传播的证明。"
+        "其余画像与 writingSuggestions 是内容归纳和可尝试的写法，不是已经验证的效果。"
+    )
+    return context
 
 
 def profile_stage_input(snapshot: dict[str, Any], snapshot_at: str) -> tuple[dict, dict | None]:

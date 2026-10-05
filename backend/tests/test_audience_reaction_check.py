@@ -335,3 +335,70 @@ def test_failed_synthesis_replay_retains_raw_output_and_does_not_retry(settings)
     assert report["synthesis"] == {}
     assert report["calls"][0]["output"]["synthesis"]["contentAdjustments"][0]["location"] == "正文"
     assert report["reactions"] == baseline["reactions"]
+
+
+def test_panel_synthesis_preview_is_free_and_does_not_initialize_settings(
+    tmp_path, monkeypatch, capsys,
+):
+    module = load_check()
+    baseline = {
+        "case": module.authored_case(), "personas": [], "reactions": [], "debateResponses": [],
+    }
+    path = tmp_path / "source.json"
+    path.write_text(json.dumps(baseline), encoding="utf-8")
+    before = path.read_bytes()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("preview must not read settings or initialize a database")
+
+    monkeypatch.setattr(module.Settings, "from_environment", forbidden)
+    monkeypatch.setattr(module, "create_app", forbidden)
+    monkeypatch.setattr(sys, "argv", ["check", "--synthesis-from", str(path), "--panel-feedback"])
+    assert module.main() == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["modelCalls"] == 0
+    assert preview["taskOverrideAppliedToSynthesisOnly"] is True
+    assert preview["target"]["panelTask"]["readingMode"] == "natural"
+    assert path.read_bytes() == before
+
+
+def test_panel_synthesis_validates_cards_and_keeps_frozen_input_and_raw_output(settings):
+    module = load_check()
+    baseline = asyncio.run(module.run_check(Model(), settings))
+    before = json.dumps(baseline)
+
+    class Feedback:
+        calls = 0
+
+        async def call_operation(self, operation, context):
+            self.calls += 1
+            assert operation == ModelOperation.SIMULATION_SYNTHESIS
+            source = context["reactions"][0]
+            assert "panelTask" in context["topic"]
+            good = {"id": "f1", "kind": "keep", "sourceType": "reader",
+                    "sourceMessageIds": [source["messageId"]], "target": {"field": "whole"},
+                    "observation": "有具体步骤", "reason": "读者能开始", "priority": "first"}
+            return ModelCallResponse(output={"synthesis": {"verdict": "测试",
+                "editorFeedback": [good, {**good, "id": "bad", "sourceMessageIds": ["missing"]}]}},
+                model_metadata={"model": "fake"})
+
+    model = Feedback()
+    report = asyncio.run(module.recheck_synthesis(model, baseline, panel_feedback=True))
+    assert model.calls == report["paidRequests"] == 1
+    assert report["synthesis"]["editorFeedbackValidation"]["status"] == "partial"
+    assert len(report["synthesis"]["editorFeedback"]) == 1
+    assert len(report["calls"][0]["output"]["synthesis"]["editorFeedback"]) == 2
+    assert len(report["synthesisInputHash"]) == 64
+    assert report["executedStages"] == ["synthesis"]
+    assert report["semanticStatus"] == "not_reviewed"
+    assert report["personas"] == baseline["personas"]
+    assert report["reactions"] == baseline["reactions"]
+    assert json.dumps(baseline) == before
+
+
+def test_panel_feedback_requires_a_saved_synthesis_source(monkeypatch):
+    module = load_check()
+    monkeypatch.setattr(sys, "argv", ["check", "--panel-feedback"])
+    with pytest.raises(SystemExit) as error:
+        module.main()
+    assert error.value.code == 2

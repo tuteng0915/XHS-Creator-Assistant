@@ -387,6 +387,13 @@ export interface SimulationRunSummary {
   updatedAt: string
 }
 
+export interface PanelTask {
+  protocolVersion: 'panel/v1'
+  readingMode: 'natural' | 'guided'
+  discussionEnabled: boolean
+  focusQuestions: string[]
+}
+
 export interface SimulationRun extends SimulationRunSummary {
   inputSnapshot: Record<string, unknown>
   personaDefinitions: Array<Record<string, unknown>>

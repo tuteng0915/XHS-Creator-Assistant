@@ -21,7 +21,11 @@ from app.models import (
 )
 from app.repositories.analysis_runs import TERMINAL_STATUSES, AnalysisRunRepository
 from app.repositories.graph_checkpoints import GraphCheckpointRepository
-from app.services.account_diagnosis_evidence import profile_stage_input, verified_portrait
+from app.services.account_diagnosis_evidence import (
+    profile_stage_input,
+    topic_profile_context,
+    verified_portrait,
+)
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
@@ -523,9 +527,12 @@ class _AccountDiagnosisGraphExecution:
             return AccountDiagnosisState(**updated)
         await self.emit("stage.started", "topics", "running", {})
         try:
+            run = self.service.analysis_service.get(self.run_id)
             output = await self.provider().topics(
-                positioning=str(self.snapshot()["accountPositioning"]),
-                profile=updated.get("profile"),
+                positioning=str(run.input_snapshot["accountPositioning"]),
+                profile=topic_profile_context(
+                    updated.get("profile"), run.input_snapshot, run.created_at.isoformat()
+                ),
                 pain_points=updated.get("pain_points"),
             )
             result = TopicsStageResult.model_validate(output).model_dump(mode="json")

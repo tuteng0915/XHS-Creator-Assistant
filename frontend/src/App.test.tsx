@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -3280,6 +3281,188 @@ describe('workspace UI', () => {
     expect(screen.getByText('中介费到底该花在哪三步')).toBeInTheDocument()
   })
 
+  it.each(['success','failure'] as const)('analysis history ignores late %s after selecting another record', async late => {
+    const fetchMock=installWorkspaceApiMock()
+    const original=fetchMock.getMockImplementation()!
+    let resolve!:(response:Response)=>void
+    fetchMock.mockImplementation(async(input,init)=>{
+      const url=String(input)
+      if(url==='/api/analysis-runs/run-1') return new Promise<Response>(done=>{resolve=done})
+      if(url==='/api/analysis-runs/run-new') {
+        const body=await (await original('/api/analysis-runs/run-1',{method:'GET'})).json()
+        return jsonResponse({...body,id:'run-new',userNotes:'当前选择'})
+      }
+      const response=await original(input,init)
+      if(url==='/api/workspaces/workspace-1/analysis-runs') {
+        const rows=await response.json()
+        return jsonResponse([...rows,{...rows[0],id:'run-new'}])
+      }
+      return response
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button',{name:/分析结果/}))
+    const list=(await screen.findByText('◷ 分析结果')).closest('section') as HTMLElement
+    const buttons=within(list).getAllByRole('button')
+    fireEvent.click(buttons[0]);fireEvent.click(buttons[1])
+    expect(await screen.findByDisplayValue('当前选择')).toBeInTheDocument()
+    const body=await (await original('/api/analysis-runs/run-1',{method:'GET'})).json()
+    await act(async()=>resolve(await (late==='success'
+      ? jsonResponse({...body,userNotes:'过期选择'}) : jsonResponse({detail:'过期读取失败'},503))))
+    expect(screen.getByDisplayValue('当前选择')).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('过期选择')).not.toBeInTheDocument()
+    expect(screen.queryByText(/过期读取失败/)).not.toBeInTheDocument()
+  })
+
+  it('analysis history reports failed reads and retries only the GET', async()=>{
+    const fetchMock=installWorkspaceApiMock()
+    const original=fetchMock.getMockImplementation()!
+    let fail=true
+    fetchMock.mockImplementation((input,init)=>String(input)==='/api/analysis-runs/run-1' && fail
+      ? Promise.resolve(jsonResponse({detail:'读取暂时失败'},503)) : original(input,init))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button',{name:/分析结果/}))
+    const list=(await screen.findByText('◷ 分析结果')).closest('section') as HTMLElement
+    fireEvent.click(within(list).getByRole('button'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('读取暂时失败')
+    fail=false
+    fireEvent.click(within(list).getByRole('button'))
+    expect(await screen.findByLabelText('复盘备注')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.filter(([,init])=>init?.method==='POST')).toHaveLength(0)
+  })
+
+  it.each([{workspaceId:'wrong-account'},{id:'wrong-run'}])('analysis history rejects mismatched receipt %j',async mismatch=>{
+    const fetchMock=installWorkspaceApiMock()
+    const original=fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async(input,init)=>{
+      const response=await original(input,init)
+      return String(input)==='/api/analysis-runs/run-1'
+        ? jsonResponse({...await response.json(),...mismatch}) : response
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button',{name:/分析结果/}))
+    const list=(await screen.findByText('◷ 分析结果')).closest('section') as HTMLElement
+    fireEvent.click(within(list).getByRole('button'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('与当前选择不一致')
+    expect(screen.queryByLabelText('复盘备注')).not.toBeInTheDocument()
+  })
+
+  it('analysis history discards an old read after an account round trip',async()=>{
+    window.history.pushState({},'','/')
+    const fetchMock=installWorkspaceApiMock()
+    const original=fetchMock.getMockImplementation()!
+    let resolve!:(response:Response)=>void
+    fetchMock.mockImplementation((input,init)=>String(input)==='/api/analysis-runs/run-1'
+      ? new Promise<Response>(done=>{resolve=done}) : original(input,init))
+    render(<App />)
+    await waitFor(()=>expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
+    fireEvent.click(await screen.findByRole('button',{name:/分析历史/}))
+    const list=(await screen.findByText('◷ 分析结果')).closest('section') as HTMLElement
+    fireEvent.click(within(list).getByRole('button'))
+    await screen.findByText('正在读取分析记录…')
+    fireEvent.change(screen.getByLabelText('当前账号档案'),{target:{value:'workspace-2'}})
+    await waitFor(()=>expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('当前账号档案'),{target:{value:'workspace-1'}})
+    await waitFor(()=>expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
+    fireEvent.click(screen.getByRole('button',{name:/分析历史/}))
+    await act(async()=>resolve(await original('/api/analysis-runs/run-1',{method:'GET'})))
+    expect(screen.queryByText('中介费到底该花在哪三步')).not.toBeInTheDocument()
+    expect(screen.queryByText('正在读取分析记录…')).not.toBeInTheDocument()
+  })
+
+  async function delayedAnalysisReview(publicMode=false) {
+    if(publicMode) window.history.pushState({},'','/')
+    const fetchMock=installWorkspaceApiMock()
+    const original=fetchMock.getMockImplementation()!
+    const saved=await (await original('/api/analysis-runs/run-1',{method:'GET'})).json()
+    const pending:Array<{body:Record<string,unknown>;resolve:(response:Response)=>void}>=[]
+    fetchMock.mockImplementation((input,init)=>{
+      if(String(input)==='/api/analysis-runs/run-1/review') return new Promise<Response>(resolve=>pending.push({body:JSON.parse(String(init?.body)),resolve}))
+      if(String(input)==='/api/workspaces/workspace-1/analysis-runs') return jsonResponse([analysisRuns['workspace-1'][0],{...analysisRuns['workspace-1'][0],id:'other'}])
+      if(String(input)==='/api/analysis-runs/other') return jsonResponse({...saved,id:'other',userNotes:'另一报告的备注'})
+      return original(input,init)
+    })
+    render(<App/> )
+    if(publicMode) await screen.findByRole('button',{name:'开始导入'})
+    fireEvent.click(await screen.findByRole('button',{name:publicMode?/分析历史/:/分析结果/}))
+    const list=(await screen.findByText('◷ 分析结果')).closest('section') as HTMLElement
+    const open=within(list).getAllByRole('button')[0]
+    fireEvent.click(open)
+    await screen.findByLabelText('复盘备注')
+    if(publicMode) fireEvent.click(screen.getByText('复盘备注',{selector:'summary'}))
+    return {saved,pending,list,open}
+  }
+
+  it('analysis review keeps edits made during save and uses the returned version next time',async()=>{
+    const {saved,pending}=await delayedAnalysisReview()
+    fireEvent.change(screen.getByLabelText('复盘备注'),{target:{value:'本次提交'}})
+    fireEvent.click(screen.getByRole('button',{name:'保存复盘'}))
+    fireEvent.change(screen.getByLabelText('复盘备注'),{target:{value:'继续编辑'}})
+    fireEvent.change(screen.getByLabelText('复盘状态'),{target:{value:'useful'}})
+    await act(async()=>pending[0].resolve(await jsonResponse({...saved,userNotes:'本次提交',updatedAt:'2026-10-04T02:00:00Z'})))
+    expect(screen.getByLabelText('复盘备注')).toHaveValue('继续编辑')
+    expect(screen.getByLabelText('复盘状态')).toHaveValue('useful')
+    expect(screen.getByText('已保存上次提交，当前修改尚未保存')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button',{name:'保存复盘'}))
+    expect(pending[1].body).toMatchObject({userNotes:'继续编辑',reviewStatus:'useful',expectedUpdatedAt:'2026-10-04T02:00:00Z'})
+    await act(async()=>pending[1].resolve(await jsonResponse({...saved,...pending[1].body})))
+  })
+
+  it.each(['success','failure'] as const)('analysis review ignores late %s after reopening',async outcome=>{
+    const {saved,pending,open}=await delayedAnalysisReview()
+    fireEvent.click(screen.getByRole('button',{name:'保存复盘'}))
+    fireEvent.click(open)
+    await waitFor(()=>expect(screen.queryByText('正在读取分析记录…')).not.toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('复盘备注'),{target:{value:'重新打开后的编辑'}})
+    await act(async()=>pending[0].resolve(await (outcome==='success'
+      ? jsonResponse({...saved,userNotes:'旧回执'}) : jsonResponse({detail:'旧保存错误'},409))))
+    expect(screen.getByLabelText('复盘备注')).toHaveValue('重新打开后的编辑')
+    expect(screen.queryByText('旧保存错误')).not.toBeInTheDocument()
+  })
+
+  it('analysis review does not replace another selected report',async()=>{
+    const {saved,pending,list}=await delayedAnalysisReview()
+    fireEvent.click(screen.getByRole('button',{name:'保存复盘'}))
+    fireEvent.click(within(list).getAllByRole('button')[1])
+    await screen.findByDisplayValue('另一报告的备注')
+    await act(async()=>pending[0].resolve(await jsonResponse({...saved,userNotes:'旧报告保存成功'})))
+    expect(screen.getByLabelText('复盘备注')).toHaveValue('另一报告的备注')
+    expect(within(list).getAllByRole('button')[1]).toHaveClass('active')
+  })
+
+  it('analysis review ignores a save from the previous account',async()=>{
+    const {saved,pending}=await delayedAnalysisReview(true)
+    fireEvent.click(screen.getByRole('button',{name:'保存复盘'}))
+    fireEvent.change(screen.getByLabelText('当前账号档案'),{target:{value:'workspace-2'}})
+    await waitFor(()=>expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
+    fireEvent.click(screen.getByRole('button',{name:/分析历史/}))
+    await act(async()=>pending[0].resolve(await jsonResponse({...saved,userNotes:'上个账号的备注'})))
+    expect(screen.queryByLabelText('复盘备注')).not.toBeInTheDocument()
+  })
+
+  it.each([{id:'wrong'},{workspaceId:'wrong'}])('analysis review rejects a mismatched receipt %j',async mismatch=>{
+    const {saved,pending}=await delayedAnalysisReview()
+    fireEvent.change(screen.getByLabelText('复盘备注'),{target:{value:'保留编辑'}})
+    fireEvent.click(screen.getByRole('button',{name:'保存复盘'}))
+    await act(async()=>pending[0].resolve(await jsonResponse({...saved,...mismatch,userNotes:'不属于本次的内容'})))
+    expect(screen.getByLabelText('复盘备注')).toHaveValue('保留编辑')
+    expect(screen.getByText('保存回执与当前分析记录不一致，请重新核对。')).toBeInTheDocument()
+  })
+
+  it('analysis review prevents duplicate submits and preserves input on conflict',async()=>{
+    const {saved,pending}=await delayedAnalysisReview()
+    fireEvent.change(screen.getByLabelText('复盘备注'),{target:{value:'待保存备注'}})
+    const button=screen.getByRole('button',{name:'保存复盘'})
+    fireEvent.click(button);fireEvent.click(button)
+    expect(pending).toHaveLength(1)
+    await act(async()=>pending[0].resolve(await jsonResponse({detail:'版本冲突，请核对'},409)))
+    expect(screen.getByLabelText('复盘备注')).toHaveValue('待保存备注')
+    expect(screen.getByText('版本冲突，请核对')).toBeInTheDocument()
+    fireEvent.click(button)
+    expect(pending[1].body.expectedUpdatedAt).toBe(saved.updatedAt)
+    await act(async()=>pending[1].resolve(await jsonResponse({...saved,userNotes:'待保存备注'})))
+  })
+
   it('saves review metadata for a saved analysis run', async () => {
     const fetchMock = installWorkspaceApiMock()
     render(<App />)
@@ -3410,6 +3593,193 @@ describe('workspace UI', () => {
     expect(await screen.findByText('模拟结果')).toBeInTheDocument()
     expect(screen.getAllByRole('heading', { name: '谨慎执行派' })).toHaveLength(2)
     expect(screen.getByText('真实前提 + 分阶段路径')).toBeInTheDocument()
+  })
+
+  it.each(['success', 'failure'] as const)('ignores a late simulation history %s after a newer selection', async (late) => {
+    const fetchMock = installWorkspaceApiMock('workspace-2')
+    const original = fetchMock.getMockImplementation()!
+    const pending: Array<(response: Response) => void> = []
+    fetchMock.mockImplementation((input, init) => String(input) === '/api/simulation-runs/simulation-2'
+      ? new Promise<Response>(resolve => pending.push(resolve)) : original(input, init))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /受众模拟/ }))
+    const list = (await screen.findByText('👥 受众模拟')).closest('section') as HTMLElement
+    const open = within(list).getByRole('button', { name: /受众模拟/ })
+    fireEvent.click(open)
+    fireEvent.click(open)
+    await waitFor(() => expect(pending).toHaveLength(2))
+    const response = await original('/api/simulation-runs/simulation-2', { method: 'GET' })
+    const body = await response.json()
+    await act(async () => pending[1](await jsonResponse({...body,userNotes:'最新选择的备注'})))
+    expect(await screen.findByDisplayValue('最新选择的备注')).toBeInTheDocument()
+    await act(async () => pending[0](await (late === 'success'
+      ? jsonResponse({...body,userNotes:'过时的备注'})
+      : jsonResponse({detail:'过时的错误'},500))))
+    expect(screen.getByDisplayValue('最新选择的备注')).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('过时的备注')).not.toBeInTheDocument()
+    expect(screen.queryByText(/过时的错误/)).not.toBeInTheDocument()
+  })
+
+  it('shows a simulation history read failure and allows retry without a model call', async () => {
+    const fetchMock = installWorkspaceApiMock('workspace-2')
+    const original = fetchMock.getMockImplementation()!
+    let fail = true
+    fetchMock.mockImplementation((input, init) => String(input) === '/api/simulation-runs/simulation-2' && fail
+      ? Promise.resolve(jsonResponse({detail:'历史读取失败'},503)) : original(input, init))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /受众模拟/ }))
+    const list = (await screen.findByText('👥 受众模拟')).closest('section') as HTMLElement
+    fireEvent.click(within(list).getByRole('button', { name: /受众模拟/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('历史读取失败')
+    fail = false
+    fireEvent.click(within(list).getByRole('button', { name: /受众模拟/ }))
+    expect(await screen.findByText('模拟结果')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.filter(([url, init]) => String(url).includes('simulation-runs') && init?.method === 'POST')).toHaveLength(0)
+  })
+
+  it('invalidates a simulation history request across an account round trip', async () => {
+    window.history.pushState({}, '', '/')
+    const fetchMock = installWorkspaceApiMock('workspace-2')
+    const original = fetchMock.getMockImplementation()!
+    let resolve!: (response: Response) => void
+    fetchMock.mockImplementation((input, init) => String(input) === '/api/simulation-runs/simulation-2'
+      ? new Promise<Response>(done => { resolve = done }) : original(input, init))
+    render(<App />)
+    await screen.findByRole('button', { name: '开始导入' })
+    fireEvent.click(await screen.findByRole('button', { name: /👥 受众模拟/ }))
+    const list = (await screen.findByText('👥 受众模拟')).closest('section') as HTMLElement
+    fireEvent.click(within(list).getByRole('button', { name: /受众模拟/ }))
+    await screen.findByText('正在读取模拟记录…')
+    fireEvent.change(screen.getByLabelText('当前账号档案'), {target:{value:'workspace-1'}})
+    await waitFor(() => expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
+    fireEvent.change(screen.getByLabelText('当前账号档案'), {target:{value:'workspace-2'}})
+    await waitFor(() => expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: /👥 受众模拟/ }))
+    const response = await original('/api/simulation-runs/simulation-2', {method:'GET'})
+    await act(async () => resolve(response))
+    expect(screen.queryByText('真实前提 + 分阶段路径')).not.toBeInTheDocument()
+    expect(screen.queryByText('正在读取模拟记录…')).not.toBeInTheDocument()
+  })
+
+  it.each([{workspaceId:'another-account'},{id:'another-run'}])('rejects a mismatched simulation history response %j', async mismatch => {
+    const fetchMock = installWorkspaceApiMock('workspace-2')
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async (input, init) => {
+      const response = await original(input, init)
+      return String(input) === '/api/simulation-runs/simulation-2'
+        ? jsonResponse({...await response.json(), ...mismatch}) : response
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', {name:/受众模拟/}))
+    const list = (await screen.findByText('👥 受众模拟')).closest('section') as HTMLElement
+    fireEvent.click(within(list).getByRole('button', {name:/受众模拟/}))
+    expect(await screen.findByRole('alert')).toHaveTextContent('与当前选择不一致')
+    expect(screen.queryByText('真实前提 + 分阶段路径')).not.toBeInTheDocument()
+  })
+
+  async function delayedSimulationReview(publicMode = false, secondRun = false) {
+    if (publicMode) window.history.pushState({}, '', '/')
+    const fetchMock = installWorkspaceApiMock('workspace-2')
+    const original = fetchMock.getMockImplementation()!
+    const pending: Array<{body: Record<string, unknown>; resolve: (response: Response) => void}> = []
+    const saved = await (await original('/api/simulation-runs/simulation-2', {method:'GET'})).json()
+    fetchMock.mockImplementation((input, init) => {
+      if (secondRun && String(input) === '/api/workspaces/workspace-2/simulation-runs') {
+        return jsonResponse([simulationRuns['workspace-2'][0], {...simulationRuns['workspace-2'][0],id:'simulation-3'}])
+      }
+      if (secondRun && String(input) === '/api/simulation-runs/simulation-3') {
+        return jsonResponse({...saved,id:'simulation-3',userNotes:'第二次模拟的备注'})
+      }
+      if (String(input).endsWith('/simulation-2/review')) {
+        return new Promise<Response>(resolve => pending.push({body:JSON.parse(String(init?.body)),resolve}))
+      }
+      return original(input, init)
+    })
+    render(<App />)
+    if (publicMode) await screen.findByRole('button', {name:'开始导入'})
+    fireEvent.click(await screen.findByRole('button', {name:/👥 受众模拟/}))
+    const list = (await screen.findByText('👥 受众模拟')).closest('section') as HTMLElement
+    const open = within(list).getAllByRole('button', {name:/受众模拟/})[0]
+    fireEvent.click(open)
+    await screen.findByLabelText('复盘备注')
+    if (publicMode) fireEvent.click(screen.getByText('复盘备注', {selector:'summary'}))
+    return {pending,saved,open,list}
+  }
+
+  it('simulation review preserves edits during save and advances the next save version', async () => {
+    const {pending,saved} = await delayedSimulationReview()
+    fireEvent.change(screen.getByLabelText('复盘备注'), {target:{value:'第一次提交'}})
+    fireEvent.click(screen.getByRole('button', {name:'保存复盘'}))
+    fireEvent.change(screen.getByLabelText('复盘备注'), {target:{value:'期间继续写的新备注'}})
+    fireEvent.change(screen.getByLabelText('复盘状态'), {target:{value:'useful'}})
+    await act(async () => pending[0].resolve(await jsonResponse({...saved,userNotes:'第一次提交',updatedAt:'2026-10-04T01:00:00Z'})))
+    expect(screen.getByLabelText('复盘备注')).toHaveValue('期间继续写的新备注')
+    expect(screen.getByLabelText('复盘状态')).toHaveValue('useful')
+    expect(screen.getAllByText(/当前修改尚未保存/).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', {name:'保存复盘'}))
+    expect(pending[1].body).toMatchObject({userNotes:'期间继续写的新备注',reviewStatus:'useful',expectedUpdatedAt:'2026-10-04T01:00:00Z'})
+    await act(async () => pending[1].resolve(await jsonResponse({...saved,...pending[1].body})))
+  })
+
+  it.each(['success','failure'] as const)('simulation review ignores a late %s after reopening history', async result => {
+    const {pending,saved,open} = await delayedSimulationReview()
+    fireEvent.change(screen.getByLabelText('复盘备注'), {target:{value:'旧提交'}})
+    fireEvent.click(screen.getByRole('button', {name:'保存复盘'}))
+    fireEvent.click(open)
+    await waitFor(() => expect(screen.getByLabelText('复盘备注')).toHaveValue(saved.userNotes))
+    fireEvent.change(screen.getByLabelText('复盘备注'), {target:{value:'重新打开后的备注'}})
+    await act(async () => pending[0].resolve(await (result==='success'
+      ? jsonResponse({...saved,userNotes:'旧提交'}) : jsonResponse({detail:'迟到保存失败'},409))))
+    expect(screen.getByLabelText('复盘备注')).toHaveValue('重新打开后的备注')
+    expect(screen.queryByText('迟到保存失败')).not.toBeInTheDocument()
+  })
+
+  it('simulation review prevents duplicate saves and retains input after a conflict', async () => {
+    const {pending,saved} = await delayedSimulationReview()
+    fireEvent.change(screen.getByLabelText('复盘备注'), {target:{value:'保留我的备注'}})
+    const button = screen.getByRole('button', {name:'保存复盘'})
+    fireEvent.click(button)
+    fireEvent.click(button)
+    expect(pending).toHaveLength(1)
+    await act(async () => pending[0].resolve(await jsonResponse({detail:'版本已变化，请重新核对'},409)))
+    expect(screen.getByLabelText('复盘备注')).toHaveValue('保留我的备注')
+    expect(screen.getAllByText('版本已变化，请重新核对').length).toBeGreaterThan(0)
+    fireEvent.click(button)
+    expect(pending).toHaveLength(2)
+    expect(pending[1].body.expectedUpdatedAt).toBe(saved.updatedAt)
+    await act(async () => pending[1].resolve(await jsonResponse({...saved,userNotes:'保留我的备注'})))
+  })
+
+  it('simulation review does not reappear after changing accounts', async () => {
+    const {pending,saved} = await delayedSimulationReview(true)
+    fireEvent.click(screen.getByRole('button', {name:'保存复盘'}))
+    fireEvent.change(screen.getByLabelText('当前账号档案'), {target:{value:'workspace-1'}})
+    await waitFor(() => expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', {name:/👥 受众模拟/}))
+    await act(async () => pending[0].resolve(await jsonResponse({...saved,userNotes:'其他账号的旧提交'})))
+    expect(screen.queryByDisplayValue('其他账号的旧提交')).not.toBeInTheDocument()
+    expect(screen.queryByText('本次读者')).not.toBeInTheDocument()
+  })
+
+  it('simulation review never replaces a different selected run with a late save', async () => {
+    const {pending,saved,list} = await delayedSimulationReview(false,true)
+    fireEvent.click(screen.getByRole('button', {name:'保存复盘'}))
+    fireEvent.click(within(list).getAllByRole('button', {name:/受众模拟/})[1])
+    await screen.findByDisplayValue('第二次模拟的备注')
+    fireEvent.change(screen.getByLabelText('复盘备注'), {target:{value:'第二次模拟的新编辑'}})
+    await act(async () => pending[0].resolve(await jsonResponse({...saved,userNotes:'第一条保存回执'})))
+    expect(screen.getByLabelText('复盘备注')).toHaveValue('第二次模拟的新编辑')
+    expect(within(list).getAllByRole('button')[1]).toHaveClass('active')
+  })
+
+  it('simulation review rejects a receipt for another account without replacing the draft', async () => {
+    const {pending,saved} = await delayedSimulationReview()
+    fireEvent.change(screen.getByLabelText('复盘备注'), {target:{value:'我的备注'}})
+    fireEvent.click(screen.getByRole('button', {name:'保存复盘'}))
+    await act(async () => pending[0].resolve(await jsonResponse({...saved,workspaceId:'wrong',userNotes:'别人的备注'})))
+    expect(screen.getByLabelText('复盘备注')).toHaveValue('我的备注')
+    expect(screen.getAllByText('保存回执与当前模拟记录不一致，请重新核对。').length).toBeGreaterThan(0)
   })
 
   it('saves review metadata for a saved audience simulation', async () => {

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
+import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import { simulatedFanApi } from '../api'
 import type { FanDefinition, FanVoiceTemplate, SimulatedFan } from '../types'
 import { CreatorDialog } from './CreatorDialog'
@@ -36,6 +36,7 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
   const [voiceError,setVoiceError] = useState('')
   const [createdVoices,setCreatedVoices] = useState<SimulatedFan[] | null>(null)
   const voiceTrigger = useRef<HTMLButtonElement>(null)
+  const voiceDescriptionPrefix = useId()
   const [pendingId,setPendingId] = useState<string | null>(null)
   const interestsUnchanged = interestsText === (draft.interests?.join('、') || '')
   const interests = interestsUnchanged ? (draft.interests || [])
@@ -141,7 +142,7 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
           : <button type="button" className="primary" disabled={busy || !canSave} onClick={async () => {if (await save(saved.status)) onSelect(pendingId)}}>{refreshing ? '刷新中…' : busy ? '保存中…' : '保存并切换'}</button>}
       </div>
     </CreatorDialog>}
-    {voices && <CreatorDialog title={createdVoices ? '角色已加入' : '添加不同声音'} returnFocusRef={voiceTrigger} onClose={() => !voiceBusy && setVoices(null)}>
+    {voices && <CreatorDialog className="fan-voice-dialog" title={createdVoices ? '角色已加入' : '添加不同声音'} returnFocusRef={voiceTrigger} onClose={() => !voiceBusy && setVoices(null)}>
       {createdVoices ? <>
         <p>已加入 {createdVoices.length} 位角色，无需再次创建。</p>
         <ul className="fan-created-list">{createdVoices.map(created => <li key={created.id}>{created.editable.name}</li>)}</ul>
@@ -149,9 +150,9 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
         <button type="button" className="primary" disabled={voiceBusy} onClick={() => void retryCreatedVoices()}>{voiceBusy ? '刷新中…' : '重试刷新'}</button>
       </> : <>
       <p>从这位粉丝的关注点出发，组合不同性格与表达方式。已有角色不会被覆盖。</p>
-      <div className="fan-voice-grid">{voices.map(voice => <label key={voice.id} className="fan-voice-option">
-        <input type="checkbox" checked={chosenVoices.includes(voice.id)} disabled={voiceBusy} onChange={() => setChosenVoices(current => current.includes(voice.id) ? current.filter(id => id !== voice.id) : [...current,voice.id])} />
-        <span><strong>{voice.name}</strong><small>{voice.outlook} {voice.expressionStyle}</small></span>
+      <div className="fan-voice-grid">{voices.map(voice => <label key={voice.id} className={`fan-voice-option${chosenVoices.includes(voice.id) ? ' selected' : ''}`}>
+        <input type="checkbox" aria-label={voice.name} aria-describedby={`${voiceDescriptionPrefix}-${voice.id}`} checked={chosenVoices.includes(voice.id)} disabled={voiceBusy} onChange={() => setChosenVoices(current => current.includes(voice.id) ? current.filter(id => id !== voice.id) : [...current,voice.id])} />
+        <span><strong>{voice.name}</strong><small id={`${voiceDescriptionPrefix}-${voice.id}`}>{voice.decisionStyle || voice.outlook}</small><small className="fan-voice-expression">{voice.expressionStyle}</small></span>
       </label>)}</div>
       {voiceError && <p role="alert">{voiceError}</p>}
       <button className="primary" disabled={voiceBusy || !chosenVoices.length} onClick={() => void addVoices()}>{voiceBusy ? '添加中…' : `加入 ${chosenVoices.length} 位`}</button>

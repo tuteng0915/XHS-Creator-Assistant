@@ -11,7 +11,7 @@ from pydantic import ConfigDict, Field, field_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from app.errors import ValidationError
-from app.models import APIModel
+from app.models import APIModel, PanelTask
 from app.services.audience_target import reader_visible_target
 from app.services.simulated_fans import FanDefinition, FanResponse
 
@@ -24,6 +24,7 @@ class ReaderCandidate(FanDefinition):
 
 
 class ReaderSelectionInput(APIModel):
+    panel_task: PanelTask | None = None
     workspace_id: str = Field(min_length=1)
     account_positioning: str
     target: dict[str, Any]
@@ -67,7 +68,7 @@ class ValidatedReaderSelection(APIModel):
 
 def prepare_reader_selection(
     workspace_id: str, snapshot: dict[str, Any], fans: Sequence[FanResponse],
-    *, desired_count: int = 3,
+    *, desired_count: int = 3, panel_task: PanelTask | None = None,
 ) -> ReaderSelectionInput:
     if not workspace_id or snapshot.get("workspaceId") != workspace_id:
         raise ValidationError("选题快照不属于当前账号")
@@ -87,11 +88,15 @@ def prepare_reader_selection(
     return ReaderSelectionInput(
         workspace_id=workspace_id, account_positioning=snapshot.get("accountPositioning", ""),
         target=reader_visible_target(snapshot), candidates=candidates, desired_count=desired_count,
+        panel_task=panel_task,
     ).model_copy(deep=True)
 
 
 def selection_input_hash(inputs: ReaderSelectionInput) -> str:
-    encoded = json.dumps(inputs.model_dump(mode="json", by_alias=True), ensure_ascii=False,
+    # Do not invalidate persisted v1 hashes by injecting a new null/default task.
+    exclude = {"panel_task"} if inputs.panel_task is None else set()
+    encoded = json.dumps(inputs.model_dump(mode="json", by_alias=True, exclude=exclude),
+                         ensure_ascii=False,
                          sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 

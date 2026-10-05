@@ -89,6 +89,8 @@ async def run_check(service, case: dict) -> dict:
                   "复盘经验是否指出来源写法、适用场景和一个可执行调整？",
                   "风格描述是否可以模仿，而非空泛人格标签或固定爆款模板？",
                   "示例是否被误写为账号事实，是否保留不同类型内容的表达差异？",
+                  "跨经历优势是在归纳共同写法，还是把不同场景合并成了一段经历？",
+                  "缺失指标是否省略或写未提供，是否把低互动内容贬为没有价值？",
               ]}
     phase = "model_call"
     started = time.monotonic()
@@ -124,7 +126,11 @@ def main() -> int:
     parser.add_argument("--input-from", type=Path, help="复用已有画像检查报告的完整冻结输入")
     parser.add_argument("--live", action="store_true", help="只调用一次 Qwen 账号画像")
     parser.add_argument("--output", type=Path, help="新的报告目录，拒绝覆盖")
+    parser.add_argument("--read-timeout-seconds", type=int, default=90,
+                        help="仅本次检查的读取等待上限，1～300 秒；默认 90，不改变生产设置")
     args = parser.parse_args()
+    if not 1 <= args.read_timeout_seconds <= 300:
+        parser.error("--read-timeout-seconds 必须为 1～300 的整数")
     if args.live and args.output is None:
         parser.error("--live 必须指定新的 --output 目录")
     if (args.source is None) == (args.input_from is None):
@@ -144,7 +150,7 @@ def main() -> int:
     if not settings.qwen_api_key:
         parser.error("未配置 Qwen 密钥")
     args.output.mkdir(parents=True, exist_ok=False)
-    service = DiagnosticProfileCalls(settings)
+    service = DiagnosticProfileCalls(settings, read_timeout_seconds=args.read_timeout_seconds)
     system, user = service._build_prompt(ModelOperation.PROFILE, case["context"])
     report = asyncio.run(run_check(service, case))
     report.update(provider="qwen", configuredModel=settings.qwen_model,

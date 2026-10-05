@@ -49,6 +49,7 @@ class Settings:
     anthropic_messages_url: str = ""
     qwen_api_key: str = ""
     qwen_model: str = "qwen-plus"
+    qwen_profile_read_timeout_seconds: int = 180
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     qwen_dashscope_base_url: str = "https://dashscope.aliyuncs.com/api/v1"
     qwen_vision_model: str = "qwen-vl-plus"
@@ -58,6 +59,11 @@ class Settings:
     qwen_task_poll_attempts: int = 30
     ffmpeg_path: str = "ffmpeg"
     video_preview_frame_count: int = 8
+
+    def __post_init__(self) -> None:
+        value = self.qwen_profile_read_timeout_seconds
+        if type(value) is not int or not 1 <= value <= 300:
+            raise ValueError("QWEN_PROFILE_READ_TIMEOUT_SECONDS must be an integer from 1 to 300")
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -95,6 +101,9 @@ class Settings:
             anthropic_messages_url=os.getenv("ANTHROPIC_MESSAGES_URL", ""),
             qwen_api_key=os.getenv("QWEN_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
             qwen_model=os.getenv("QWEN_MODEL", "qwen-plus"),
+            qwen_profile_read_timeout_seconds=int(
+                os.getenv("QWEN_PROFILE_READ_TIMEOUT_SECONDS", "180")
+            ),
             qwen_base_url=os.getenv(
                 "QWEN_BASE_URL",
                 os.getenv(
