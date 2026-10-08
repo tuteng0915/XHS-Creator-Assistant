@@ -1,4 +1,4 @@
-import {object, text, rows, strings, feedbackKinds as kinds, feedbackCards, feedbackGroups, verifiedConcerns, frozenTargetMatches, type FeedbackRun, type Row} from '../editorFeedback'
+import {object, text, rows, strings, feedbackKinds as kinds, feedbackCards, feedbackGroups, verifiedConcerns, frozenTargetMatches, needsAuthorMaterial, type FeedbackRun, type Row} from '../editorFeedback'
 
 function Concerns({card, run}: {card:Row; run?:FeedbackRun}) {
   const concerns = verifiedConcerns(card, run)
@@ -64,7 +64,11 @@ export function EditorFeedbackView({data, run, onPrepare, editDisabled = false}:
       {grouped && <span className="feedback-option-label">改法 {index + 1}</span>}
       <h5>{text(card.observation)}</h5><p>{text(card.reason)}</p>
       {!grouped && !optionalEditor && card.kind !== 'keep' && strings(card.readerConcernIds).length > 0 && <Concerns card={card} run={run}/>}
-      {text(card.suggestedText) && <div className="feedback-suggestion"><b>可参考的表达</b><p>{text(card.suggestedText)}</p></div>}
+      {needsAuthorMaterial(card) ? <div className="feedback-suggestion"><b>等你补充的素材</b>
+        {strings(card.materialRequests).length ? <ul>{strings(card.materialRequests).map((question, i) => <li key={i}>{question}</li>)}</ul>
+          : <p>这条旧建议需要你的实际材料，请按上面的建议补充。</p>}
+        {text(card.suggestedText) && <details><summary>查看旧版参考文字（未核实）</summary><p>{text(card.suggestedText)}</p></details>}
+      </div> : text(card.suggestedText) && <div className="feedback-suggestion"><b>可参考的表达</b><p>{text(card.suggestedText)}</p></div>}
       {strings(card.beneficiaries).length > 0 && <p className="muted">更适合：{strings(card.beneficiaries).map(id => {
         const p=run?.personaDefinitions.find(p=>p.id===id)
         return text(p?.name) || text(p?.archetype) || '当时的读者（姓名未保存）'
@@ -78,7 +82,7 @@ export function EditorFeedbackView({data, run, onPrepare, editDisabled = false}:
         <FrozenTarget target={object(card.target)} run={run}/>
       </details>
       {onPrepare && card.kind !== 'keep' && ['title','body'].includes(text(object(card.target).field))
-        && frozenTargetMatches(object(card.target), run) && <button disabled={editDisabled} onClick={() => onPrepare(card)}>准备这处修改</button>}
+        && frozenTargetMatches(object(card.target), run) && <button disabled={editDisabled} onClick={() => onPrepare(card)}>{needsAuthorMaterial(card) ? '补充素材' : '查看改写'}</button>}
     </article>
   }
   function renderGroups(items:Row[]) {

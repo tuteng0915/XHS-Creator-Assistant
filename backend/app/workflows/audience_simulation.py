@@ -7,7 +7,6 @@ import contextvars
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
 from typing import Any, Literal, Protocol, TypedDict
-from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field, model_validator
@@ -20,9 +19,6 @@ from app.repositories.graph_checkpoints import GraphCheckpointRepository
 from app.repositories.simulation_runs import SIMULATION_TERMINAL_STATUSES
 from app.services.audience_evidence import (
     DISCUSSION_SKIPPED_REASON,
-    AudienceEvidence,
-    InterestLabel,
-    ObservedEpisode,
     discussion_coverage,
     public_reactions,
     reader_persona_context,
@@ -31,7 +27,12 @@ from app.services.audience_target import reader_visible_target, reader_visible_t
 from app.services.common import utc_now
 from app.services.editor_feedback import validate_editor_feedback
 from app.services.model_calls import ModelCallService
+from app.services.panel_personas import PersonaDefinition as PersonaDefinition
+from app.services.panel_personas import PersonaDefinitionsResult
 from app.services.panel_protocol import DISCUSSION_DISABLED_REASON, panel_discussion_enabled
+from app.services.panel_reading import resolve_reaction_anchor
+from app.services.run_events import RunEvent, RunEventEmitter, RunEventType
+from app.services.simulation_review import demo_review, simulation_category, validated_review
 from app.services.simulation_runs import SimulationRunService
 from app.workflows.account_diagnosis import GraphExecutionPaused
 
@@ -54,17 +55,6 @@ ACTIVE_SIMULATION_EXECUTION: contextvars.ContextVar[
 ] = contextvars.ContextVar("audience_simulation_execution", default=None)
 
 
-class SimulationActivityEvent(TypedDict):
-    eventId: str
-    runId: str
-    runType: Literal["audience_simulation"]
-    stageKey: str | None
-    status: str
-    sequence: int
-    occurredAt: str
-    data: dict[str, Any]
-
-
 class AudienceSimulationState(TypedDict, total=False):
     simulation_id: str
     workspace_id: str
@@ -78,42 +68,6 @@ class AudienceSimulationState(TypedDict, total=False):
     stage_errors: dict[str, str]
 
 
-class PersonaDefinition(BaseModel):
-    id: str
-    name: str
-    profile: str
-    interests: list[InterestLabel] = Field(default_factory=list, max_length=6)
-    coreConcern: str = ""
-    contentPreference: str = ""
-    expressionStyle: str = ""
-    fanAssetId: str | None = None
-    sourceAnalysisId: str | None = None
-    updatedAt: str | None = None
-    userAdjusted: bool = False
-    archetype: str = ""
-    background: str = ""
-    personality: str = ""
-    concerns: str = ""
-    color: str = ""
-    evidence: list[str] = Field(default_factory=list)
-    evidenceRefs: list[AudienceEvidence] = Field(default_factory=list)
-    evidenceBasis: Literal["comment_observed", "content_inferred", "mixed"] | None = None
-    evidenceStatus: Literal["verified", "legacy_unverified", "hypothesis"] = "hypothesis"
-    limitations: str = ""
-    unknowns: list[str] = Field(default_factory=list)
-    observedEpisodes: list[ObservedEpisode] = Field(default_factory=list)
-
-
-class PersonaDefinitionsResult(BaseModel):
-    personas: list[PersonaDefinition] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def unique_personas(self):
-        if len({p.id for p in self.personas}) != len(self.personas):
-            raise ValueError("模拟角色 ID 不可重复")
-        return self
-
-
 class PersonaReaction(BaseModel):
     personaId: str
     stance: str
@@ -125,6 +79,8 @@ class PersonaReaction(BaseModel):
     action: Literal["comment", "no_comment", "skip"] = "comment"
     understanding: str = ""
     triggerQuote: str = ""
+    triggerAnchorId: str | None = None
+    satisfiedNeeds: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def comment_matches_action(self):
@@ -492,6 +448,14 @@ class FakeAudienceSimulationModelProvider:
         self.failures = failures or set()
         self.calls: list[str] = []
 
+    @staticmethod
+    def _legacy_persona(persona: dict, sample: dict) -> bool:
+        # Saved assets may even reuse a sample ID; they are still not that sample.
+        return not persona.get("fanAssetId") and any(
+            p["id"] == persona.get("id") and p["profile"] == persona.get("profile")
+            for p in sample["personas"]
+        )
+
     async def personas(
         self, *, positioning: str, topic: dict[str, Any]
     ) -> dict[str, Any]:
@@ -512,6 +476,15 @@ class FakeAudienceSimulationModelProvider:
         if f"reaction:{persona_id}" in self.failures or "reaction" in self.failures:
             raise RuntimeError(f"reaction failed for {persona_id}")
         sample = simulation_demo_sample(positioning="", topic=topic)
+        if not self._legacy_persona(persona, sample):
+            visible = next((text for text in reader_visible_texts(topic) if text.strip()), "")
+            return {"reaction": {
+                "personaId": persona_id, "action": "comment" if visible else "skip",
+                "stance": "演示占位，不代表真实判断",
+                "quote": "演示留言：已收到这版文字，供你检查试读流程。" if visible else "",
+                "understanding": "演示占位：未调用模型分析本篇内容。",
+                "triggerQuote": visible[:80], "concerns": [], "opportunities": [],
+            }}
         reaction = next(
             item for item in sample["reactions"] if item["personaId"] == persona_id
         )
@@ -530,11 +503,23 @@ class FakeAudienceSimulationModelProvider:
         if f"debate:{persona_id}" in self.failures or "debate" in self.failures:
             raise RuntimeError(f"debate failed for {persona_id}")
         sample = simulation_demo_sample(positioning="", topic=topic)
+        visible = [r for r in other_reactions if r.get("personaId") != persona_id
+                   and r.get("messageId") and r.get("action", "comment") == "comment"
+                   and (r.get("quote") or r.get("text") or "").strip()]
+        if not visible:
+            return {"debateResponse": {"personaId": persona_id, "response": "",
+                                       "changedMind": False, "replyToId": None}}
+        if not self._legacy_persona(persona, sample):
+            return {"debateResponse": {
+                "personaId": persona_id, "response": "演示回应：已看到另一位读者的公开留言。",
+                "replyToId": visible[0]["messageId"], "targetedAt": visible[0]["personaId"],
+                "changedMind": False, "changeReason": "", "newConcerns": [],
+            }}
         debate = next(
             item for item in sample["debate"] if item["personaId"] == persona_id
         )
-        target = next((r for r in other_reactions if r["personaId"] == debate.get("targetedAt")),
-                      other_reactions[0] if other_reactions else None)
+        target = next((r for r in visible if r["personaId"] == debate.get("targetedAt")),
+                      visible[0])
         return {"debateResponse": {
             **debate, "replyToId": target["messageId"] if target else None,
             "changeReason": "示例中的公开回应补充了可操作的步骤。" if debate.get("changedMind") else "",
@@ -551,6 +536,19 @@ class FakeAudienceSimulationModelProvider:
         self.calls.append("synthesis")
         if "synthesis" in self.failures:
             raise RuntimeError("synthesis failed")
+        if simulation_category(topic) != "creation":
+            return {"synthesis": {
+                "verdict": f"演示记录：{len(reactions)} 位读者完成反馈。",
+                "contentAdjustments": [], "review": demo_review(topic),
+                "limitations": "固定演示结果，未调用真实模型；不代表账号或笔记实际表现。",
+            }}
+        sample = simulation_demo_sample(positioning="", topic=topic)
+        if any(not self._legacy_persona(p, sample) for p in personas):
+            return {"synthesis": {
+                "verdict": f"演示记录：本组 {len(personas)} 位读者，保存了 {len(reactions)} 份试读记录。",
+                "contentAdjustments": [], "riskWarnings": [], "editorFeedback": [],
+                "limitations": "本次使用固定演示文字，未调用真实模型；不用于评估受众反应或改稿效果。",
+            }}
         return {
             "synthesis": simulation_demo_sample(positioning="", topic=topic)[
                 "synthesis"
@@ -562,10 +560,17 @@ class RealAudienceSimulationModelProvider:
     def __init__(self, model_call_service: ModelCallService) -> None:
         self.model_call_service = model_call_service
 
+    async def _call(self, operation, context):
+        response = await self.model_call_service.call_operation(operation, context)
+        execution = ACTIVE_SIMULATION_EXECUTION.get()
+        if execution is not None:
+            execution.record_model_response(operation, context, response.model_metadata)
+        return response
+
     async def personas(
         self, *, positioning: str, topic: dict[str, Any]
     ) -> dict[str, Any]:
-        response = await self.model_call_service.call_operation(
+        response = await self._call(
             ModelOperation.SIMULATION_PERSONAS,
             {"positioning": positioning, "topic": topic},
         )
@@ -574,7 +579,7 @@ class RealAudienceSimulationModelProvider:
     async def initial_reaction(
         self, *, persona: dict[str, Any], topic: dict[str, Any]
     ) -> dict[str, Any]:
-        response = await self.model_call_service.call_operation(
+        response = await self._call(
             ModelOperation.SIMULATION_REACTION,
             {"persona": persona, "topic": topic},
         )
@@ -588,7 +593,7 @@ class RealAudienceSimulationModelProvider:
         other_reactions: list[dict[str, Any]],
         prior_reaction: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        response = await self.model_call_service.call_operation(
+        response = await self._call(
             ModelOperation.SIMULATION_DEBATE,
             {
                 "persona": persona,
@@ -607,7 +612,7 @@ class RealAudienceSimulationModelProvider:
         reactions: list[dict[str, Any]],
         debate_responses: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        response = await self.model_call_service.call_operation(
+        response = await self._call(
             ModelOperation.SIMULATION_SYNTHESIS,
             {
                 "topic": topic,
@@ -667,8 +672,8 @@ class AudienceSimulationWorkflowService:
 
     async def stream_events(
         self, simulation_id: str, *, stop_after_node: str | None = None
-    ) -> AsyncIterator[SimulationActivityEvent]:
-        queue: asyncio.Queue[SimulationActivityEvent | None] = asyncio.Queue()
+    ) -> AsyncIterator[RunEvent]:
+        queue: asyncio.Queue[RunEvent | None] = asyncio.Queue()
         runner = _AudienceSimulationGraphExecution(
             service=self,
             simulation_id=simulation_id,
@@ -689,7 +694,7 @@ class AudienceSimulationWorkflowService:
 
     async def collect_events(
         self, simulation_id: str, *, stop_after_node: str | None = None
-    ) -> list[SimulationActivityEvent]:
+    ) -> list[RunEvent]:
         return [
             event
             async for event in self.stream_events(
@@ -740,14 +745,34 @@ class _AudienceSimulationGraphExecution:
         *,
         service: AudienceSimulationWorkflowService,
         simulation_id: str,
-        queue: asyncio.Queue[SimulationActivityEvent | None],
+        queue: asyncio.Queue[RunEvent | None],
         stop_after_node: str | None,
     ) -> None:
         self.service = service
         self.simulation_id = simulation_id
         self.queue = queue
         self.stop_after_node = stop_after_node
-        self.sequence = 0
+        self.events = RunEventEmitter(
+            run_id=simulation_id,
+            run_type="audience_simulation",
+        )
+        run = service.simulation_service.get(simulation_id)
+        self.response_calls = deepcopy(run.model_metadata.get("responseCalls", []))
+
+    def record_model_response(self, operation, context, metadata):
+        # Save only response provenance; never settings, credentials or raw prompts.
+        # Persist with the existing stage save, outside the model retry boundary.
+        self.response_calls.append({
+            "operation": operation.value,
+            "personaId": (context.get("persona") or {}).get("id"),
+            **{key: metadata[key] for key in ("provider", "model", "modelSource", "systemPromptHash",
+                                            "usage", "requestCount", "generationUsage", "panelReview")
+               if key in metadata},
+        })
+
+    def model_metadata(self):
+        return {"engine": "langgraph", **({"responseCalls": self.response_calls}
+                                         if self.response_calls else {})}
 
     @classmethod
     def current(cls) -> _AudienceSimulationGraphExecution:
@@ -768,7 +793,7 @@ class _AudienceSimulationGraphExecution:
                 self.service.simulation_service.save_progress(
                     self.simulation_id,
                     status=SimulationRunStatus.RUNNING,
-                    model_metadata={"engine": "langgraph"},
+                    model_metadata=self.model_metadata(),
                 )
             await self.emit("run.started", None, "running", {})
             try:
@@ -791,7 +816,10 @@ class _AudienceSimulationGraphExecution:
             return AudienceSimulationState(**updated)
         await self.emit("stage.started", "personas", "running", {})
         try:
-            saved_personas = self.service.simulation_service.get(self.simulation_id).input_snapshot.get('audiencePersonas')
+            run = self.service.simulation_service.get(self.simulation_id)
+            saved_personas = run.input_snapshot.get('audiencePersonas')
+            if run.parent_simulation_id and not saved_personas:
+                raise ValidationError("同组复测缺少当时人物快照，不能生成新人物替代")
             output = {'personas': saved_personas} if saved_personas else await self.provider().personas(
                 positioning=updated["positioning_snapshot"], topic=updated["topic"],
             )
@@ -802,14 +830,19 @@ class _AudienceSimulationGraphExecution:
             result = PersonaDefinitionsResult.model_validate(output).model_dump(
                 mode="json", by_alias=True
             )
-            result["personas"] = [reader_persona_context(p, updated["topic"])
-                                  for p in result["personas"]]
+            if run.parent_simulation_id:
+                # Preserve the exact prior input, including episode order; no re-retrieval.
+                if result["personas"] != saved_personas:
+                    raise ValidationError("当时人物快照与当前协议不兼容，不能严格同组复测")
+            else:
+                result["personas"] = [reader_persona_context(p, updated["topic"])
+                                      for p in result["personas"]]
             updated["personas"] = result["personas"]
             self.service.simulation_service.save_progress(
                 self.simulation_id,
                 status=SimulationRunStatus.RUNNING,
                 persona_definitions=result["personas"],
-                model_metadata={"engine": "langgraph"},
+                model_metadata=self.model_metadata(),
             )
             await self.emit("stage.succeeded", "personas", "completed", result)
         except Exception as error:
@@ -822,7 +855,15 @@ class _AudienceSimulationGraphExecution:
     ) -> AudienceSimulationState:
         updated = dict(state)
         personas = updated.get("personas") or []
-        if updated.get("initial_reactions") or not personas:
+        delivered_reactions = list(updated.get("initial_reactions") or [])
+        finished_ids = {str(item["personaId"]) for item in delivered_reactions}
+        errors = updated.get("stage_errors", {})
+        pending_personas = [
+            persona for persona in personas
+            if str(persona["id"]) not in finished_ids
+            and f"initial_reactions.{persona['id']}" not in errors
+        ]
+        if not pending_personas:
             await self.save_checkpoint("parallel_initial_reactions", updated)
             return AudienceSimulationState(**updated)
         await self.emit("stage.started", "initial_reactions", "running", {})
@@ -837,29 +878,47 @@ class _AudienceSimulationGraphExecution:
                             persona=persona, topic=updated["topic"]
                         )
                     )
-                result = PersonaReactionResult.model_validate(output).model_dump(
+                result = PersonaReactionResult.model_validate(
+                    resolve_reaction_anchor(output, updated["topic"])
+                ).model_dump(
                     mode="json"
                 )
                 if result["reaction"]["personaId"] != persona_id:
                     raise ValueError("反应角色与请求不一致")
                 validate_trigger_quote(result["reaction"]["triggerQuote"], updated["topic"])
                 result["reaction"].update(messageId=f"initial:{persona_id}", round=1)
+                delivered_reactions.append(result["reaction"])
+                self.service.simulation_service.save_progress(
+                    self.simulation_id, status=SimulationRunStatus.RUNNING,
+                    reaction_results=list(delivered_reactions),
+                    stage_errors=updated.get("stage_errors", {}),
+                    model_metadata=self.model_metadata(),
+                )
                 return result["reaction"]
             except Exception as error:
                 updated.setdefault("stage_errors", {})[
                     f"initial_reactions.{persona_id}"
                 ] = self.error_message(error)
+                # A sibling may still be waiting when the process stops.  Persist
+                # this settled failure now so resume does not pay to repeat it.
+                self.service.simulation_service.save_progress(
+                    self.simulation_id, status=SimulationRunStatus.RUNNING,
+                    reaction_results=list(delivered_reactions),
+                    stage_errors=updated.get("stage_errors", {}),
+                    model_metadata=self.model_metadata(),
+                )
                 return None
 
-        results = await asyncio.gather(*(run_one(persona) for persona in personas))
-        reactions = [result for result in results if result is not None]
+        await asyncio.gather(*(run_one(persona) for persona in pending_personas))
+        reaction_by_id = {item["personaId"]: item for item in delivered_reactions}
+        reactions = [reaction_by_id[p["id"]] for p in personas if p["id"] in reaction_by_id]
         updated["initial_reactions"] = reactions
         self.service.simulation_service.save_progress(
             self.simulation_id,
             status=SimulationRunStatus.RUNNING,
             reaction_results=reactions,
             stage_errors=updated.get("stage_errors", {}),
-            model_metadata={"engine": "langgraph"},
+            model_metadata=self.model_metadata(),
         )
         if reactions:
             await self.emit(
@@ -891,9 +950,6 @@ class _AudienceSimulationGraphExecution:
             if str(persona.get("id", "")) in prior_by_id
             and any(p["personaId"] != persona["id"] for p in public_comments)
         ]
-        if updated.get("debate_responses"):
-            await self.save_checkpoint("parallel_debate_responses", updated)
-            return AudienceSimulationState(**updated)
         if not panel_discussion_enabled(updated["topic"]):
             await self.emit("stage.succeeded", "debate_responses", "completed", {
                 "debateResponses": [], "skippedReason": DISCUSSION_DISABLED_REASON,
@@ -904,6 +960,17 @@ class _AudienceSimulationGraphExecution:
             await self.emit("stage.succeeded", "debate_responses", "completed", {
                 "debateResponses": [], "skippedReason": DISCUSSION_SKIPPED_REASON,
             })
+            await self.save_checkpoint("parallel_debate_responses", updated)
+            return AudienceSimulationState(**updated)
+        delivered_responses = list(updated.get("debate_responses") or [])
+        finished_ids = {str(item["personaId"]) for item in delivered_responses}
+        errors = updated.get("stage_errors", {})
+        pending_personas = [
+            persona for persona in debate_personas
+            if str(persona["id"]) not in finished_ids
+            and f"debate_responses.{persona['id']}" not in errors
+        ]
+        if not pending_personas:
             await self.save_checkpoint("parallel_debate_responses", updated)
             return AudienceSimulationState(**updated)
         await self.emit("stage.started", "debate_responses", "running", {})
@@ -941,22 +1008,36 @@ class _AudienceSimulationGraphExecution:
                         raise ValueError("观点改变缺少具体说明")
                 response.update(messageId=f"reply:{persona_id}", round=2,
                                 visibleMessageIds=list(visible))
+                delivered_responses.append(response)
+                self.service.simulation_service.save_progress(
+                    self.simulation_id, status=SimulationRunStatus.RUNNING,
+                    debate_results=list(delivered_responses),
+                    stage_errors=updated.get("stage_errors", {}),
+                    model_metadata=self.model_metadata(),
+                )
                 return response
             except Exception as error:
                 updated.setdefault("stage_errors", {})[
                     f"debate_responses.{persona_id}"
                 ] = self.error_message(error)
+                self.service.simulation_service.save_progress(
+                    self.simulation_id, status=SimulationRunStatus.RUNNING,
+                    debate_results=list(delivered_responses),
+                    stage_errors=updated.get("stage_errors", {}),
+                    model_metadata=self.model_metadata(),
+                )
                 return None
 
-        results = await asyncio.gather(*(run_one(persona) for persona in debate_personas))
-        debate_responses = [result for result in results if result is not None]
+        await asyncio.gather(*(run_one(persona) for persona in pending_personas))
+        response_by_id = {item["personaId"]: item for item in delivered_responses}
+        debate_responses = [response_by_id[p["id"]] for p in personas if p["id"] in response_by_id]
         updated["debate_responses"] = debate_responses
         self.service.simulation_service.save_progress(
             self.simulation_id,
             status=SimulationRunStatus.RUNNING,
             debate_results=debate_responses,
             stage_errors=updated.get("stage_errors", {}),
-            model_metadata={"engine": "langgraph"},
+            model_metadata=self.model_metadata(),
         )
         if debate_responses:
             await self.emit(
@@ -996,7 +1077,11 @@ class _AudienceSimulationGraphExecution:
             result = SimulationSynthesisResult.model_validate(output).model_dump(
                 mode="json"
             )
-            if updated["topic"].get("panelTask") is not None:
+            if simulation_category(updated["topic"]) != "creation":
+                result["synthesis"]["review"] = validated_review(output["synthesis"].get("review"))
+                result["synthesis"]["contentAdjustments"] = []
+                result["synthesis"]["suggestions"] = []
+            elif updated["topic"].get("panelTask") is not None:
                 result["synthesis"].update(validate_editor_feedback(
                     output["synthesis"].get("editorFeedback"), topic=updated["topic"],
                     personas=updated.get("personas", []), reactions=updated.get("initial_reactions", []),
@@ -1008,7 +1093,7 @@ class _AudienceSimulationGraphExecution:
                 status=SimulationRunStatus.RUNNING,
                 synthesis=result["synthesis"],
                 stage_errors=updated.get("stage_errors", {}),
-                model_metadata={"engine": "langgraph"},
+                model_metadata=self.model_metadata(),
             )
             await self.emit("stage.succeeded", "synthesis", "completed", result)
         except Exception as error:
@@ -1040,7 +1125,7 @@ class _AudienceSimulationGraphExecution:
         completed = self.service.simulation_service.save_progress(
             self.simulation_id,
             status=status,
-            model_metadata={"engine": "langgraph"},
+            model_metadata=self.model_metadata(),
             complete=True,
         )
         await self.save_checkpoint("finalize", updated)
@@ -1073,7 +1158,7 @@ class _AudienceSimulationGraphExecution:
             self.simulation_id,
             status=SimulationRunStatus.RUNNING,
             stage_errors=state.get("stage_errors", {}),
-            model_metadata={"engine": "langgraph"},
+            model_metadata=self.model_metadata(),
         )
         await self.emit("stage.failed", stage_key, "failed", {"error": message})
 
@@ -1116,22 +1201,17 @@ class _AudienceSimulationGraphExecution:
 
     async def emit(
         self,
-        event_type: str,
+        event_type: RunEventType,
         stage_key: str | None,
         status: str,
         data: dict[str, Any],
     ) -> None:
-        self.sequence += 1
         await self.queue.put(
-            SimulationActivityEvent(
-                eventId=str(uuid4()),
-                runId=self.simulation_id,
-                runType="audience_simulation",
-                stageKey=stage_key,
+            self.events.event(
+                event_type,
+                stage_key=stage_key,
                 status=status,
-                sequence=self.sequence,
-                occurredAt=utc_now(),
-                data={"eventType": event_type, **data},
+                data=data,
             )
         )
 

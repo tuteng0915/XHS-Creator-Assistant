@@ -42,7 +42,10 @@ class Settings:
     xhs_mediacrawler_directory: Path | None = None
     max_upload_bytes: int = 5 * 1024 * 1024
     csv_preview_rows: int = 20
-    model_provider: str = "anthropic"
+    # Qwen is the product default. Other supported providers remain explicit
+    # opt-ins through MODEL_PROVIDER rather than becoming an accidental
+    # fallback when a local env file is absent.
+    model_provider: str = "qwen"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
@@ -92,7 +95,7 @@ class Settings:
                     repository_root / "data/external/MediaCrawler",
                 )
             ),
-            model_provider=os.getenv("MODEL_PROVIDER", "anthropic"),
+            model_provider=os.getenv("MODEL_PROVIDER", "qwen"),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
             anthropic_base_url=os.getenv(

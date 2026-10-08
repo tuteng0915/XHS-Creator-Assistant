@@ -23,18 +23,24 @@ export function useAudienceAnalyses(workspaceId: string) {
     }
   }, [workspaceId])
   useEffect(() => {
-    let active = true
-    let timer: ReturnType<typeof setTimeout>
     current.current = workspaceId
     setRows([]); setSelectedId(''); setError('')
-    async function load() {
-      try {await refresh()} catch { /* refresh owns the visible error state. */ }
-      if(active) timer = setTimeout(() => void load(), 2000)
-    }
-    if(workspaceId) void load()
-    return () => {active=false; current.current=''; sequence.current += 1; clearTimeout(timer)}
+    if(workspaceId) void refresh().catch(() => { /* refresh owns the visible error state. */ })
+    return () => {current.current=''; sequence.current += 1}
   }, [workspaceId, refresh])
   const safeRows = rows.filter(row => row.workspaceId === workspaceId)
+  const running = safeRows.some(row => row.status === 'pending' || row.status === 'running')
+  useEffect(() => {
+    if (!workspaceId || !running) return
+    let active = true
+    let timer: ReturnType<typeof setTimeout>
+    async function poll() {
+      try {await refresh()} catch { /* Preserve the last visible result and retry active work. */ }
+      if (active) timer = setTimeout(() => void poll(), 2000)
+    }
+    timer = setTimeout(() => void poll(), 2000)
+    return () => {active = false; clearTimeout(timer)}
+  }, [workspaceId, running, refresh])
   const selected = safeRows.find(row => row.id === selectedId) || safeRows.find(row => ['completed', 'partially_completed'].includes(row.status))
   return {rows:safeRows, selectedId, setSelectedId, selected, refresh, error}
 }

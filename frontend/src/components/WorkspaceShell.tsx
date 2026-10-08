@@ -158,7 +158,7 @@ export function WorkspaceShell({
           <button className={activePage === 'audience-analysis' ? 'active' : ''} onClick={() => onSetActivePage('audience-analysis')}><span>◎</span> 受众分析</button>
           <button className={`creator-nav-child ${activePage === 'simulated-fans' ? 'active' : ''}`} onClick={() => onSetActivePage('simulated-fans')}><span>♧</span> 模拟粉丝</button>
           <button
-            className={`creator-nav-child ${activePage === 'simulations' ? 'active' : ''}`}
+            className={activePage === 'simulations' ? 'active' : ''}
             onClick={() => onSetActivePage('simulations')}
           >
             <span>👥</span> 受众模拟

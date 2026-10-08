@@ -73,6 +73,29 @@ def test_repeat_anchor_uses_unicode_codepoints_and_private_source_stays_private(
     assert (raw, TOPIC, REACTIONS) == before
 
 
+def test_material_feedback_asks_author_without_proposing_facts():
+    raw = card(kind="add_material", sourceType="editor_optional", sourceMessageIds=[],
+               priority="optional", materialRequests=["哪个练习让你敢开口？"], suggestedText="")
+    result = validate([raw])
+    assert result["editorFeedbackValidation"]["status"] == "validated"
+    assert result["editorFeedback"][0]["materialRequests"] == ["哪个练习让你敢开口？"]
+    assert result["contentAdjustments"] == ["可选：步骤清楚；待作者补充：哪个练习让你敢开口？"]
+
+
+@pytest.mark.parametrize("changes", [
+    {"kind": "add_material"},
+    {"kind": "add_material", "materialRequests": ["请补真实经历"], "suggestedText": "同伴鼓掌了"},
+    {"kind": "rewrite", "materialRequests": ["请补真实经历"]},
+])
+def test_material_contract_does_not_masquerade_as_ready_copy(changes):
+    result = validate([card(sourceType="editor_optional", sourceMessageIds=[],
+                            priority="optional", **changes)])
+    assert result["editorFeedback"] == []
+    rejected = result["editorFeedbackValidation"]["rejected"]
+    assert rejected[0]["reason"] == "invalid_material_contract"
+    assert result["contentAdjustments"] == []
+
+
 @pytest.mark.parametrize(
     "change,reason",
     [
@@ -166,7 +189,8 @@ def test_new_prompt_and_budget_do_not_change_legacy_synthesis(settings):
     assert "reader 来源的修改必须对应这次反应中实际未解决的问题" in prompt
     assert "target.quote 不能填读者的评论" in prompt
     assert "suggestedText 必须对应 target.field" in prompt
-    assert "contentAdjustments 只概括反馈卡里的非 keep 建议" in prompt
+    assert "contentAdjustments 由程序从有效反馈卡生成" in prompt
+    assert "你是发布前预演的评审员" not in prompt
     assert service._output_budget(operation, {"topic": {}}) == 1600
     assert service._output_budget(operation, {"topic": TOPIC}) == 3200
     legacy_user = service._build_prompt(operation, {"topic": {}})[1]
@@ -234,7 +258,10 @@ def test_workflow_persists_feedback_diagnostics_without_mutating_topic_or_retryi
     events = collect(app, run.id)
     saved = app.state.simulation_service.get(run.id)
     assert saved.status.value == "completed"
-    assert saved.synthesis["contentAdjustments"] == ["旧格式建议仍可读"]
+    assert saved.synthesis["contentAdjustments"] == (
+        (["步骤清楚"] if kind == "clarify" else [])
+        if new_protocol else ["旧格式建议仍可读"]
+    )
     if new_protocol:
         assert saved.synthesis["editorFeedbackValidation"]["status"] == "partial"
         assert (

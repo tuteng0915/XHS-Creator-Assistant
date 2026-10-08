@@ -149,12 +149,14 @@ http://localhost:8000/docs
 
 ## 模型配置
 
-live generation 统一通过后端模型代理调用，浏览器不持有模型 API key。默认 provider 是 Anthropic-compatible path：
+live generation 统一通过后端模型代理调用，浏览器不持有模型 API key。默认 provider 是 Qwen / DashScope 的 OpenAI-compatible API：
 
 ```bash
-export MODEL_PROVIDER=anthropic
-export ANTHROPIC_API_KEY=...
-export ANTHROPIC_MODEL=claude-sonnet-4-20250514
+export MODEL_PROVIDER=qwen
+export QWEN_API_KEY=...
+export QWEN_MODEL=qwen-plus
+# 可选；这是默认值：
+export QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 
 如果你通过编辑器插件使用 Codex，不能方便地给后端 shell 注入环境变量，可以在仓库根目录或 `backend/` 下创建本地 env 文件：
@@ -167,10 +169,9 @@ backend/.env.local
 这些文件已被 git ignore。文件里使用同样的 `export KEY=value` 格式，例如：
 
 ```bash
-export MODEL_PROVIDER=anthropic
-export ANTHROPIC_API_KEY=...
-export ANTHROPIC_BASE_URL=https://your-qwen-host/apps/anthropic
-export ANTHROPIC_MODEL=qwen-plus
+export MODEL_PROVIDER=qwen
+export QWEN_API_KEY=...
+export QWEN_MODEL=qwen-plus
 ```
 
 smoke script 会自动依次读取 `.env.local` 和 `backend/.env.local`：
@@ -179,7 +180,7 @@ smoke script 会自动依次读取 `.env.local` 和 `backend/.env.local`：
 backend/.venv/bin/python scripts/smoke_model_api.py
 ```
 
-如果使用 Qwen / DashScope 的 OpenAI-compatible API：
+如果需要显式重申 Qwen / DashScope 配置：
 
 ```bash
 export MODEL_PROVIDER=qwen
@@ -198,7 +199,7 @@ DASHSCOPE_API_KEY
 DASHSCOPE_BASE_URL
 ```
 
-部分 Qwen 部署也提供 Anthropic-compatible endpoint，可以通过同一个后端代理接入：
+也支持 Anthropic-compatible endpoint，作为显式兼容配置而非默认路径：
 
 ```bash
 export MODEL_PROVIDER=anthropic

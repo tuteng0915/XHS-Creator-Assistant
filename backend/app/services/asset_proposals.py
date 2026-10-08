@@ -4,12 +4,13 @@ import json
 from typing import Any
 
 from app.db.database import SQLiteDatabase
-from app.errors import ValidationError
+from app.errors import ConflictError, ValidationError
 from app.models import (
     AssetProposalDiffField,
     AssetProposalPreviewResponse,
     AssetProposalResponse,
     AssetProposalUpdate,
+    TopicUpdate,
 )
 from app.repositories.agents import AgentRepository
 from app.repositories.asset_proposals import AssetProposalRepository
@@ -17,7 +18,8 @@ from app.repositories.skills import SkillRepository
 from app.repositories.topics import TopicRepository
 from app.repositories.workflow_assets import WorkflowAssetRepository
 from app.repositories.workspaces import WorkspaceRepository
-from app.services.common import utc_now
+from app.services.common import as_iso, utc_now
+from app.services.proposal_lifecycle import APPLY, REJECT, should_execute_transition
 
 
 class AssetProposalService:
@@ -62,17 +64,15 @@ class AssetProposalService:
         now = utc_now()
         with self.database.transaction() as connection:
             proposal = self.repository.get(connection, proposal_id)
+            if not should_execute_transition(
+                proposal["status"],
+                APPLY,
+                conflict_message="Asset proposal is no longer pending",
+            ):
+                return self._to_response(proposal)
             action = json.loads(proposal["proposed_action_json"])
             try:
                 result = self._apply_action(connection, proposal, action, now)
-                row = self.repository.set_status(
-                    connection,
-                    proposal_id=proposal_id,
-                    status="applied",
-                    result_json=json.dumps(result, ensure_ascii=False),
-                    error="",
-                    now=now,
-                )
             except Exception as error:
                 row = self.repository.set_status(
                     connection,
@@ -80,6 +80,15 @@ class AssetProposalService:
                     status="failed",
                     result_json="{}",
                     error=str(error) or error.__class__.__name__,
+                    now=now,
+                )
+            else:
+                row = self.repository.set_status(
+                    connection,
+                    proposal_id=proposal_id,
+                    status="applied",
+                    result_json=json.dumps(result, ensure_ascii=False),
+                    error="",
                     now=now,
                 )
         return self._to_response(row)
@@ -103,13 +112,23 @@ class AssetProposalService:
         self, proposal_id: str, payload: AssetProposalUpdate
     ) -> AssetProposalResponse:
         now = utc_now()
-        proposed_action_json = None
-        if payload.proposed_action is not None:
-            self._validate_action_payload(payload.proposed_action)
-            proposed_action_json = json.dumps(
-                payload.proposed_action, ensure_ascii=False
-            )
         with self.database.transaction() as connection:
+            proposal = self.repository.get(connection, proposal_id)
+            # A canvas edit is a frozen, fact-checked before/suggested pair.
+            # Letting the generic proposal editor replace any part of it would
+            # sever the visible assistant receipt from the revision eventually
+            # applied to a Topic.  These proposals are intentionally accepted
+            # or rejected as-is; a revised instruction creates a fresh one.
+            if proposal["action_type"] == "topic.apply_canvas_edit":
+                raise ValidationError(
+                    "Canvas edit proposals are immutable; regenerate the suggestion instead"
+                )
+            proposed_action_json = None
+            if payload.proposed_action is not None:
+                self._validate_action_payload(payload.proposed_action)
+                proposed_action_json = json.dumps(
+                    payload.proposed_action, ensure_ascii=False
+                )
             row = self.repository.update_pending(
                 connection,
                 proposal_id=proposal_id,
@@ -128,6 +147,13 @@ class AssetProposalService:
     def reject(self, proposal_id: str) -> AssetProposalResponse:
         now = utc_now()
         with self.database.transaction() as connection:
+            proposal = self.repository.get(connection, proposal_id)
+            if not should_execute_transition(
+                proposal["status"],
+                REJECT,
+                conflict_message="Asset proposal is no longer pending",
+            ):
+                return self._to_response(proposal)
             row = self.repository.set_status(
                 connection,
                 proposal_id=proposal_id,
@@ -163,6 +189,8 @@ class AssetProposalService:
 
         if action_type == "workspace.update_profile":
             return self._apply_workspace_profile(connection, proposal, payload, now)
+        if action_type == "topic.apply_canvas_edit":
+            return self._apply_canvas_topic_edit(connection, proposal, payload, now)
         if action_type == "topic.create_or_update":
             return self._apply_topic(connection, proposal, payload, now)
         if action_type in {
@@ -208,6 +236,9 @@ class AssetProposalService:
                 current_snapshot=current_snapshot,
                 proposed_snapshot=proposed_snapshot,
             )
+
+        if action_type == "topic.apply_canvas_edit":
+            return self._preview_canvas_topic_edit(connection, proposal, payload)
 
         if action_type == "topic.create_or_update":
             return self._preview_topic(connection, proposal, payload)
@@ -404,6 +435,103 @@ class AssetProposalService:
             now=now,
         )
         return {"assetType": "topic", "assetId": created["id"], "operation": "create"}
+
+    def _preview_canvas_topic_edit(
+        self,
+        connection,
+        proposal: dict,
+        payload: dict[str, Any],
+    ) -> AssetProposalPreviewResponse:
+        """Preview a canvas revision against the current Topic without writing it.
+
+        The proposal preserves the version that the model saw.  A later manual
+        edit can therefore be visible in the preview and will be rejected on
+        apply rather than silently overwritten.
+        """
+        topic, update = self._canvas_topic_edit_target(connection, proposal, payload)
+        current_snapshot = self._canvas_topic_snapshot(topic)
+        proposed_snapshot = {
+            **current_snapshot,
+            "title": update.title,
+            "body": update.body,
+        }
+        preview = self._preview_response(
+            proposal=proposal,
+            operation="update",
+            target_asset_type="topic",
+            target_asset_id=topic["id"],
+            target_stable_id=topic["id"],
+            current_snapshot=current_snapshot,
+            proposed_snapshot=proposed_snapshot,
+        )
+        if topic["updated_at"] != as_iso(update.expected_updated_at):
+            preview.validation_errors.append("稿件在建议生成后已更新，请重新生成建议")
+        return preview
+
+    def _apply_canvas_topic_edit(
+        self,
+        connection,
+        proposal: dict,
+        payload: dict[str, Any],
+        now: str,
+    ) -> dict[str, Any]:
+        topic, update = self._canvas_topic_edit_target(connection, proposal, payload)
+        expected_updated_at = as_iso(update.expected_updated_at)
+        if topic["updated_at"] != expected_updated_at:
+            raise ConflictError("稿件在建议生成后已更新，请重新生成建议")
+        before = self._canvas_topic_snapshot(topic)
+        updated = self.topic_repository.update(
+            connection,
+            topic_id=topic["id"],
+            title=update.title,
+            angle=None,
+            body=update.body,
+            expected_updated_at=expected_updated_at,
+            now=now,
+        )
+        return {
+            "assetType": "topic",
+            "assetId": updated["id"],
+            "operation": "update",
+            "before": before,
+            "after": self._canvas_topic_snapshot(updated),
+        }
+
+    def _canvas_topic_edit_target(
+        self,
+        connection,
+        proposal: dict,
+        payload: dict[str, Any],
+    ) -> tuple[dict, TopicUpdate]:
+        topic_id = payload.get("topicId")
+        if not isinstance(topic_id, str) or not topic_id.strip():
+            raise ValidationError("Canvas proposal requires topicId")
+        topic = self.topic_repository.get(connection, topic_id)
+        if topic["workspace_id"] != proposal["workspace_id"]:
+            raise ValidationError("Topic belongs to another workspace")
+        try:
+            update = TopicUpdate.model_validate(
+                {
+                    "title": payload.get("title"),
+                    "body": payload.get("body"),
+                    "expectedUpdatedAt": payload.get("expectedUpdatedAt"),
+                }
+            )
+        except Exception as error:
+            raise ValidationError("Canvas proposal has an invalid revision") from error
+        if not isinstance(update.title, str) or not update.title.strip():
+            raise ValidationError("Canvas proposal requires a complete title")
+        if not isinstance(update.body, str):
+            raise ValidationError("Canvas proposal requires a complete body")
+        return topic, update
+
+    @staticmethod
+    def _canvas_topic_snapshot(topic: dict) -> dict[str, Any]:
+        return {
+            "title": topic["title"],
+            "body": topic.get("body", ""),
+            "updatedAt": topic["updated_at"],
+        }
 
     def _apply_capability_asset(
         self,
@@ -755,6 +883,7 @@ class AssetProposalService:
     def _target_asset_type(action_type: str) -> str:
         return {
             "workspace.update_profile": "account_profile",
+            "topic.apply_canvas_edit": "topic",
             "topic.create_or_update": "topic",
             "skill.propose_definition": "skill",
             "agent.propose_definition": "agent",

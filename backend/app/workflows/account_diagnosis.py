@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 from collections.abc import AsyncIterator
-from typing import Any, Literal, Protocol, TypedDict
-from uuid import uuid4
+from typing import Any, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
@@ -29,6 +28,7 @@ from app.services.account_diagnosis_evidence import (
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
+from app.services.run_events import RunEvent, RunEventEmitter, RunEventType
 
 ACCOUNT_GRAPH_NODE_ORDER = [
     "profile_analysis",
@@ -39,17 +39,6 @@ ACCOUNT_STAGE_ORDER = ["profile", "pain_points", "topics"]
 ACTIVE_EXECUTION: contextvars.ContextVar[
     _AccountDiagnosisGraphExecution | None
 ] = contextvars.ContextVar("account_diagnosis_execution", default=None)
-
-
-class ActivityEvent(TypedDict):
-    eventId: str
-    runId: str
-    runType: Literal["account_diagnosis"]
-    stageKey: str | None
-    status: str
-    sequence: int
-    occurredAt: str
-    data: dict[str, Any]
 
 
 class AccountDiagnosisState(TypedDict, total=False):
@@ -334,8 +323,8 @@ class AccountDiagnosisWorkflowService:
 
     async def stream_events(
         self, run_id: str, *, stop_after_node: str | None = None
-    ) -> AsyncIterator[ActivityEvent]:
-        queue: asyncio.Queue[ActivityEvent | None] = asyncio.Queue()
+    ) -> AsyncIterator[RunEvent]:
+        queue: asyncio.Queue[RunEvent | None] = asyncio.Queue()
         runner = _AccountDiagnosisGraphExecution(
             service=self,
             run_id=run_id,
@@ -356,7 +345,7 @@ class AccountDiagnosisWorkflowService:
 
     async def collect_events(
         self, run_id: str, *, stop_after_node: str | None = None
-    ) -> list[ActivityEvent]:
+    ) -> list[RunEvent]:
         return [
             event
             async for event in self.stream_events(
@@ -398,14 +387,17 @@ class _AccountDiagnosisGraphExecution:
         *,
         service: AccountDiagnosisWorkflowService,
         run_id: str,
-        queue: asyncio.Queue[ActivityEvent | None],
+        queue: asyncio.Queue[RunEvent | None],
         stop_after_node: str | None,
     ) -> None:
         self.service = service
         self.run_id = run_id
         self.queue = queue
         self.stop_after_node = stop_after_node
-        self.sequence = 0
+        self.events = RunEventEmitter(
+            run_id=run_id,
+            run_type=WorkflowType.ACCOUNT_DIAGNOSIS.value,
+        )
 
     @classmethod
     def current(cls) -> _AccountDiagnosisGraphExecution:
@@ -631,22 +623,17 @@ class _AccountDiagnosisGraphExecution:
 
     async def emit(
         self,
-        event_type: str,
+        event_type: RunEventType,
         stage_key: str | None,
         status: str,
         data: dict[str, Any],
     ) -> None:
-        self.sequence += 1
         await self.queue.put(
-            ActivityEvent(
-                eventId=str(uuid4()),
-                runId=self.run_id,
-                runType=WorkflowType.ACCOUNT_DIAGNOSIS.value,
-                stageKey=stage_key,
+            self.events.event(
+                event_type,
+                stage_key=stage_key,
                 status=status,
-                sequence=self.sequence,
-                occurredAt=utc_now(),
-                data={"eventType": event_type, **data},
+                data=data,
             )
         )
 

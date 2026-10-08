@@ -3648,7 +3648,8 @@ describe('workspace UI', () => {
     render(<App />)
     await screen.findByRole('button', { name: '开始导入' })
     fireEvent.click(await screen.findByRole('button', { name: /👥 受众模拟/ }))
-    const list = (await screen.findByText('👥 受众模拟')).closest('section') as HTMLElement
+    fireEvent.click(screen.getByRole('tab', {name:/创作级/}))
+    const list = (await screen.findByText('历史记录')).closest('section') as HTMLElement
     fireEvent.click(within(list).getByRole('button', { name: /受众模拟/ }))
     await screen.findByText('正在读取模拟记录…')
     fireEvent.change(screen.getByLabelText('当前账号档案'), {target:{value:'workspace-1'}})
@@ -3699,7 +3700,8 @@ describe('workspace UI', () => {
     render(<App />)
     if (publicMode) await screen.findByRole('button', {name:'开始导入'})
     fireEvent.click(await screen.findByRole('button', {name:/👥 受众模拟/}))
-    const list = (await screen.findByText('👥 受众模拟')).closest('section') as HTMLElement
+    if (publicMode) fireEvent.click(screen.getByRole('tab', {name:/创作级/}))
+    const list = (await screen.findByText(publicMode?'历史记录':'👥 受众模拟')).closest('section') as HTMLElement
     const open = within(list).getAllByRole('button', {name:/受众模拟/})[0]
     fireEvent.click(open)
     await screen.findByLabelText('复盘备注')

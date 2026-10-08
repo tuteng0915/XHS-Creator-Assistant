@@ -5,7 +5,7 @@ import json
 import pytest
 from test_audience_simulation_workflow import collect
 from test_creator_experience import audience_output, profile
-from test_simulated_fans import analyze
+from test_simulated_fans import adopt_candidates, analyze
 from test_workspace_api import create_workspace, send
 
 from app.main import create_app
@@ -89,7 +89,7 @@ def test_persona_dimensions_survive_save_edit_variants_restart_and_simulation(ap
          "coreConcern": "想判断付出是否值得", "expressionStyle": "简短追问遗漏"},
     ]
     analysis_id = analyze(app, workspace_id, source["id"], output)
-    fans = send(app, "GET", f"/api/workspaces/{workspace_id}/simulated-fans").json()
+    fans = adopt_candidates(app, workspace_id, analysis_id)
     assert len(fans) == 2  # Same interests/evidence do not collapse distinct roles.
     fan = next(f for f in fans if f["sourceGroupId"] == "action")
     original = fan["original"]

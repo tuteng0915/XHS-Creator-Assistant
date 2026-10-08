@@ -59,7 +59,7 @@ export function RunReviewEditor({
         }
       />
       <div className="save-row">
-        <button type="button" onClick={onSave} disabled={saveState.phase === 'saving'}>
+        <button type="button" className="primary" onClick={onSave} disabled={saveState.phase === 'saving'}>
           保存复盘
         </button>
         <SaveIndicator state={saveState} />

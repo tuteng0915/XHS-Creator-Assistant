@@ -23,9 +23,9 @@ export function useSimulatedFans(workspaceId: string, completedAnalyses: string)
         if (requireSuccess) throw new Error('列表刷新已被新的请求替代，请重试刷新。')
         return
       }
-      setState(previous => ({workspaceId, rows, slots: previous.workspaceId === workspaceId && previous.rows.length
+      setState(previous => ({workspaceId, rows, slots: previous.workspaceId === workspaceId
         ? previous.slots.map(id => rows.some(r => r.id === id && r.status === 'active') ? id : '')
-        : Array.from({length:3},(_,index) => rows.filter(r => r.status === 'active')[index]?.id || '')}))
+        : ['','','']}))
       setError('')
     } catch(e) {
       if(current.current === workspaceId && sequence.current === request) setError(String(e))

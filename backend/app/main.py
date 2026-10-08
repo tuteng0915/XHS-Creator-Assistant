@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from dataclasses import replace
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -8,12 +9,14 @@ from app.config import Settings
 from app.db.database import SQLiteDatabase
 from app.errors import ApplicationError, ConflictError, NotFoundError, ValidationError
 from app.models import HealthResponse
+from app.panel_interview_api import panel_interview_router
 from app.reader_selection_api import reader_selection_router
 from app.repositories import (
     AgentConversationRepository,
     AgentRepository,
     AnalysisRunRepository,
     AssetProposalRepository,
+    ContentCollaborationRepository,
     DraftRepository,
     GraphCheckpointRepository,
     MediaAssetRepository,
@@ -30,6 +33,7 @@ from app.services import (
     AgentService,
     AnalysisRunService,
     AssetProposalService,
+    ContentCollaborationSessionService,
     ContextAccessService,
     DraftGenerationService,
     DraftService,
@@ -41,6 +45,7 @@ from app.services import (
     ModelCallService,
     QwenMediaService,
     RealAgentConversationModelProvider,
+    RealContentCollaborationProvider,
     RealStructureModelProvider,
     SimulationRunService,
     SkillService,
@@ -57,6 +62,7 @@ from app.services.audience_analyses import (
     AudienceAnalysisService,
 )
 from app.services.fan_voice_templates import FanVoiceTemplateResponse, list_fan_voice_templates
+from app.services.panel_interviews import PanelInterviewService, RealPanelInterviewProvider
 from app.services.reader_selection_model import RealReaderSelectionProvider
 from app.services.reader_selection_requests import ReaderSelectionRequestService
 from app.services.reader_selection_worker import ReaderSelectionProvider, ReaderSelectionWorker
@@ -68,6 +74,8 @@ from app.services.simulated_fans import (
     FanVariantsCreate,
     SimulatedFanService,
 )
+from app.services.simulation_topic_ideas import SimulationTopicIdeaService
+from app.simulation_review_api import simulation_review_router
 from app.workflows import (
     AccountDiagnosisWorkflowService,
     AudienceSimulationWorkflowService,
@@ -103,6 +111,7 @@ def create_app(
     agent_repository = AgentRepository()
     agent_conversation_repository = AgentConversationRepository()
     asset_proposal_repository = AssetProposalRepository()
+    content_collaboration_repository = ContentCollaborationRepository()
     workflow_asset_repository = WorkflowAssetRepository()
     checkpoint_repository = GraphCheckpointRepository()
     xhs_capture_repository = XhsCaptureJobRepository()
@@ -224,6 +233,24 @@ def create_app(
         agent_repository=agent_repository,
         workflow_repository=workflow_asset_repository,
     )
+    # Collaboration live turns are an explicit Qwen-only feature.  Keep this
+    # separate from the application's general model provider so a demo request
+    # never starts using a different configured provider accidentally.
+    content_collaboration_live_provider = (
+        RealContentCollaborationProvider(
+            ModelCallService(replace(active_settings, model_provider="qwen"))
+        )
+        if active_settings.qwen_api_key
+        else None
+    )
+    content_collaboration_service = ContentCollaborationSessionService(
+        database=database,
+        repository=content_collaboration_repository,
+        workspace_repository=workspace_repository,
+        topic_repository=topic_repository,
+        context_access_service=context_access_service,
+        live_provider=content_collaboration_live_provider,
+    )
     account_workflow_service = AccountDiagnosisWorkflowService(
         database=database,
         analysis_repository=analysis_repository,
@@ -272,20 +299,30 @@ def create_app(
     reader_selection_worker = ReaderSelectionWorker(
         reader_selection_service, reader_selection_provider,
     )
+    panel_interview_service = PanelInterviewService(
+        database,
+        live_provider=RealPanelInterviewProvider(
+            ModelCallService(replace(active_settings, model_provider="qwen"))
+        ) if active_settings.qwen_api_key else None,
+    )
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI):
         audience_analysis_service.resume()
         xhs_capture_service.recover_interrupted()
         agent_conversation_service.resume_unfinished()
+        content_collaboration_service.resume_unfinished()
         await workflow_worker.resume_unfinished()
         reader_selection_worker.start()
+        panel_interview_service.start()
         try:
             yield
         finally:
+            await panel_interview_service.shutdown()
             await reader_selection_worker.shutdown()
             await audience_analysis_service.shutdown()
             await agent_conversation_service.shutdown()
+            await content_collaboration_service.shutdown()
             await workflow_worker.shutdown()
             xhs_capture_service.shutdown()
 
@@ -313,6 +350,7 @@ def create_app(
     application.state.agent_service = agent_service
     application.state.agent_conversation_service = agent_conversation_service
     application.state.asset_proposal_service = asset_proposal_service
+    application.state.content_collaboration_service = content_collaboration_service
     application.state.workflow_asset_service = workflow_asset_service
     application.state.model_call_service = model_call_service
     application.state.context_access_service = context_access_service
@@ -324,6 +362,9 @@ def create_app(
     application.state.reader_selection_service = reader_selection_service
     application.state.reader_selection_requests = reader_selection_requests
     application.state.reader_selection_worker = reader_selection_worker
+    application.state.panel_interview_service = panel_interview_service
+    application.include_router(panel_interview_router(panel_interview_service))
+    application.include_router(simulation_review_router(SimulationTopicIdeaService(database)))
     application.include_router(reader_selection_router(
         reader_selection_requests, reader_selection_worker,
     ))
@@ -417,6 +458,7 @@ def create_app(
             workflow_worker,
             xhs_import_service,
             xhs_capture_service,
+            content_collaboration_service,
         )
     )
     return application

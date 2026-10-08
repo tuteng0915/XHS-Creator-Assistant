@@ -466,7 +466,13 @@ def test_cli_rejects_invalid_timeout_before_loading_settings(monkeypatch, value)
 
 def test_diagnostics_redact_before_clipping_and_reject_non_qwen(settings):
     check = load_check()
-    service = check.DiagnosticProfileCalls(replace(settings, qwen_api_key="private-api-key"))
+    service = check.DiagnosticProfileCalls(
+        replace(
+            settings,
+            model_provider="anthropic",
+            qwen_api_key="private-api-key",
+        )
+    )
     text = "中" * 99_997 + "private-api-key" + "尾部" * 20
     assert service._extract_openai_compatible_text({"choices": [
         {"message": {"content": text}},

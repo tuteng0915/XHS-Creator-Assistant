@@ -16,6 +16,7 @@ from app.repositories.simulation_runs import SimulationRunRepository
 from app.repositories.topics import TopicRepository
 from app.services.audience_target import reader_visible_target
 from app.services.common import as_iso, utc_now
+from app.services.proposal_lifecycle import APPLY, REJECT, UNDO, should_execute_transition
 
 
 class PanelEditCreate(APIModel):
@@ -25,6 +26,7 @@ class PanelEditCreate(APIModel):
     expected_updated_at: datetime
     operation: Literal["replace", "insert_before", "insert_after"]
     text: str = Field(max_length=50_000, strict=True)
+    author_material: str | None = Field(default=None, max_length=50_000, strict=True)
 
     @field_validator("request_key", "feedback_id")
     @classmethod
@@ -118,7 +120,8 @@ class PanelEditService:
 
     def create(self, workspace_id: str, simulation_id: str, payload: PanelEditCreate):
         request_json = encoded(
-            {"simulationId": simulation_id, **payload.model_dump(mode="json", by_alias=True)}
+            {"simulationId": simulation_id,
+             **payload.model_dump(mode="json", by_alias=True, exclude_none=True)}
         )
         with self.database.transaction() as connection:
             prior = connection.execute(
@@ -175,6 +178,16 @@ class PanelEditService:
             }:
                 raise ValidationError("请选择一条已保存的修改建议")
             card = matches[0]
+            needs_material = (
+                card.get("kind") == "add_material" or bool(card.get("materialRequests"))
+            )
+            if needs_material and (
+                not payload.author_material or not payload.author_material.strip()
+                or payload.author_material != payload.text
+            ):
+                raise ValidationError("请先填写准备加入稿件的作者素材，不能直接采用模型补写的事实")
+            if not needs_material and payload.author_material is not None:
+                raise ValidationError("这条建议不是补素材，请按普通改写预览")
             target = card.get("target", {})
             visible = reader_visible_target(frozen)
             content_hash = hashlib.sha256(encoded(visible).encode()).hexdigest()
@@ -236,6 +249,8 @@ class PanelEditService:
                     "text": payload.text,
                 },
             }
+            if needs_material:
+                snapshot["authorMaterial"] = payload.author_material
             proposal_id, now = str(uuid4()), utc_now()
             connection.execute(
                 "INSERT INTO panel_edit_proposals(id,workspace_id,simulation_id,topic_id,"
@@ -258,13 +273,23 @@ class PanelEditService:
     def apply(self, workspace_id, proposal_id):
         with self.database.transaction() as connection:
             row = self._get(connection, workspace_id, proposal_id)
-            if row["status"] == "applied":
+            if not should_execute_transition(
+                row["status"],
+                APPLY,
+                conflict_message="该提案已拒绝或撤销，不能再次采用",
+            ):
                 return self._response(
                     connection, row
                 )  # Immutable original receipt, no second write.
-            if row["status"] != "pending":
-                raise ConflictError("该提案已拒绝或撤销，不能再次采用")
             snapshot = json.loads(row["snapshot_json"])
+            feedback = snapshot.get("feedback", {})
+            if (feedback.get("kind") == "add_material" or feedback.get("materialRequests")) and (
+                not str(snapshot.get("authorMaterial") or "").strip()
+                or snapshot.get("authorMaterial") != snapshot.get("edit", {}).get("text")
+            ):
+                raise ValidationError(
+                    "这份旧提案尚未记录作者素材，请重新补充素材并预览；原记录仍保留"
+                )
             current = self.topics.get(connection, row["topic_id"])
             if (
                 current["workspace_id"] != workspace_id
@@ -297,10 +322,12 @@ class PanelEditService:
     def undo(self, workspace_id, proposal_id):
         with self.database.transaction() as connection:
             row = self._get(connection, workspace_id, proposal_id)
-            if row["status"] == "undone":
+            if not should_execute_transition(
+                row["status"],
+                UNDO,
+                conflict_message="只有已采用的提案可以撤销",
+            ):
                 return self._response(connection, row)
-            if row["status"] != "applied":
-                raise ConflictError("只有已采用的提案可以撤销")
             receipt = json.loads(row["receipt_json"])
             current = self.topics.get(connection, row["topic_id"])
             if (
@@ -337,11 +364,14 @@ class PanelEditService:
     def reject(self, workspace_id, proposal_id):
         with self.database.transaction() as connection:
             row = self._get(connection, workspace_id, proposal_id)
-            if row["status"] in {"applied", "undone"}:
-                raise ConflictError("已采用或撤销的提案不能标记为拒绝")
-            if row["status"] == "pending":
-                connection.execute(
-                    "UPDATE panel_edit_proposals SET status='rejected',updated_at=? WHERE id=?",
-                    (utc_now(), proposal_id),
-                )
+            if not should_execute_transition(
+                row["status"],
+                REJECT,
+                conflict_message="已采用或撤销的提案不能标记为拒绝",
+            ):
+                return self._response(connection, row)
+            connection.execute(
+                "UPDATE panel_edit_proposals SET status='rejected',updated_at=? WHERE id=?",
+                (utc_now(), proposal_id),
+            )
             return self._response(connection, self._get(connection, workspace_id, proposal_id))

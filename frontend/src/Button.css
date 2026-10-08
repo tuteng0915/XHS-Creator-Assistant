@@ -1,0 +1,97 @@
+/* Shared action controls. Components own placement, not a separate button skin. */
+:root {
+  --button-radius: 8px;
+  --button-height: 36px;
+  --button-border: #cbd5e1;
+  --button-background: #fff;
+  --button-foreground: #334155;
+  --button-hover-background: #f1f5f9;
+  --button-hover-border: #94a3b8;
+  --button-active-background: #e2e8f0;
+  --button-focus: #2563eb;
+}
+
+button {
+  appearance: none;
+  min-height: var(--button-height);
+  max-width: 100%;
+  padding: 7px 14px;
+  border: 1px solid var(--button-border);
+  border-radius: var(--button-radius);
+  background: var(--button-background);
+  color: var(--button-foreground);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+
+/* Low-specificity states leave navigation, tabs and selectable cards intact. */
+button:where(:enabled:hover) {
+  background: var(--button-hover-background);
+  border-color: var(--button-hover-border);
+}
+button:where(:enabled:active) { background: var(--button-active-background); }
+button:focus-visible { outline: 2px solid var(--button-focus); outline-offset: 3px; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Legacy class names deliberately map to the same primary treatment. */
+button:is(.primary, .save-button, .small-primary, .btn-fill) {
+  --button-background: var(--blue);
+  --button-foreground: #fff;
+  --button-border: var(--blue);
+  --button-hover-background: #1d4ed8;
+  --button-hover-border: #1d4ed8;
+  --button-active-background: #1e40af;
+}
+button.danger-button {
+  --button-foreground: #b91c1c;
+  --button-border: #fecaca;
+  --button-hover-background: #fef2f2;
+  --button-hover-border: #f87171;
+  --button-active-background: #fee2e2;
+}
+button.text-button {
+  --button-background: transparent;
+  --button-border: transparent;
+  --button-foreground: var(--blue);
+  --button-hover-background: var(--blue-soft);
+  --button-hover-border: transparent;
+  --button-active-background: #dbeafe;
+  min-height: 28px;
+  padding: 3px 4px;
+  border-radius: 5px;
+  font-size: 13px;
+  text-align: left;
+}
+button.icon-button {
+  width: var(--button-height);
+  min-width: var(--button-height);
+  padding: 0;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+/* Selected filters are secondary controls, not additional primary actions. */
+.filter-row button.active, .help-button.active,
+.simulation-target-kind button[aria-pressed=true] {
+  color: #1d4ed8;
+  background: var(--blue-soft);
+  border-color: #93b4ed;
+}
+
+/* Card and navigation geometry belongs to their component styles. */
+button:is(.creator-note-card, .run-row, .topic-row, .capability-ref-chip, .panel-edit-record) {
+  font-weight: 400;
+  white-space: normal;
+}
+nav button:where(:enabled:hover) { color: var(--blue); background: var(--blue-soft); }
+
+@media (prefers-reduced-motion: reduce) { button { transition: none; } }

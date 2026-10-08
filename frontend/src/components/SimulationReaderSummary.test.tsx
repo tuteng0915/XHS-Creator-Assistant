@@ -22,6 +22,15 @@ it('distinguishes proposed from actual readers and collapses historical reasons'
   expect(screen.getByText('先考虑投入，再决定行动。')).toBeVisible()
 })
 
+it('shows the frozen session-only persona adjustment without reading current assets',()=>{
+  render(<SimulationReaderSummary run={{...run,inputSnapshot:{...run.inputSnapshot,personaOverrides:{b:{coreConcern:'想先知道能不能在下班后开始'}}}}}/>)
+  expect(screen.getByText('本次画像已调整')).toBeVisible()
+  expect(screen.getByText('想先知道能不能在下班后开始')).not.toBeVisible()
+  fireEvent.click(screen.getByText('本次画像已调整'))
+  expect(screen.getByText('想先知道能不能在下班后开始')).toBeVisible()
+  expect(screen.getByText('仅用于这次讨论，未修改长期读者画像。')).toBeVisible()
+})
+
 it('uses frozen participant names for old recommendations but does not invent omitted names', () => {
   render(<SimulationReaderSummary run={{...run,inputSnapshot:{readerSelection:{source:'recommended',proposedReaders:[{fanId:'b'},{fanId:'gone'}],actualFanIds:['b']}}}} />)
   expect(screen.getAllByText('当时的行动派')).toHaveLength(2)

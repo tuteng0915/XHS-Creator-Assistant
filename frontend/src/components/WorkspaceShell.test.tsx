@@ -57,6 +57,7 @@ describe('WorkspaceShell', () => {
     expect(screen.getByText('受众分析')).toBeInTheDocument()
     expect(screen.getByText('AI 创作助手')).toBeInTheDocument()
     expect(screen.getByText('账号诊断')).toBeInTheDocument()
+    expect(screen.getByRole('button',{name:/受众模拟/})).not.toHaveClass('creator-nav-child')
     expect(screen.queryByText('热点分析')).not.toBeInTheDocument()
     expect(screen.queryByText('视频博主质量诊断')).not.toBeInTheDocument()
     expect(screen.queryByText('Skills')).not.toBeInTheDocument()

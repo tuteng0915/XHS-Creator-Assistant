@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 from collections.abc import AsyncIterator
-from typing import Annotated, Any, Literal, Protocol, TypedDict
-from uuid import uuid4
+from typing import Annotated, Any, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
@@ -24,6 +23,7 @@ from app.repositories.graph_checkpoints import GraphCheckpointRepository
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
+from app.services.run_events import RunEvent, RunEventEmitter, RunEventType
 from app.workflows.account_diagnosis import (
     GraphExecutionPaused,
     TopicsStageResult,
@@ -50,17 +50,6 @@ def merge_stage_errors(
     left: dict[str, str] | None, right: dict[str, str] | None
 ) -> dict[str, str]:
     return {**(left or {}), **(right or {})}
-
-
-class TrendActivityEvent(TypedDict):
-    eventId: str
-    runId: str
-    runType: Literal["trend_analysis"]
-    stageKey: str | None
-    status: str
-    sequence: int
-    occurredAt: str
-    data: dict[str, Any]
 
 
 class TrendAnalysisState(TypedDict, total=False):
@@ -303,8 +292,8 @@ class TrendAnalysisWorkflowService:
 
     async def stream_events(
         self, run_id: str, *, stop_after_node: str | None = None
-    ) -> AsyncIterator[TrendActivityEvent]:
-        queue: asyncio.Queue[TrendActivityEvent | None] = asyncio.Queue()
+    ) -> AsyncIterator[RunEvent]:
+        queue: asyncio.Queue[RunEvent | None] = asyncio.Queue()
         runner = _TrendAnalysisGraphExecution(
             service=self,
             run_id=run_id,
@@ -325,7 +314,7 @@ class TrendAnalysisWorkflowService:
 
     async def collect_events(
         self, run_id: str, *, stop_after_node: str | None = None
-    ) -> list[TrendActivityEvent]:
+    ) -> list[RunEvent]:
         return [
             event
             async for event in self.stream_events(
@@ -372,14 +361,17 @@ class _TrendAnalysisGraphExecution:
         *,
         service: TrendAnalysisWorkflowService,
         run_id: str,
-        queue: asyncio.Queue[TrendActivityEvent | None],
+        queue: asyncio.Queue[RunEvent | None],
         stop_after_node: str | None,
     ) -> None:
         self.service = service
         self.run_id = run_id
         self.queue = queue
         self.stop_after_node = stop_after_node
-        self.sequence = 0
+        self.events = RunEventEmitter(
+            run_id=run_id,
+            run_type=WorkflowType.TREND_ANALYSIS.value,
+        )
 
     @classmethod
     def current(cls) -> _TrendAnalysisGraphExecution:
@@ -613,22 +605,17 @@ class _TrendAnalysisGraphExecution:
 
     async def emit(
         self,
-        event_type: str,
+        event_type: RunEventType,
         stage_key: str | None,
         status: str,
         data: dict[str, Any],
     ) -> None:
-        self.sequence += 1
         await self.queue.put(
-            TrendActivityEvent(
-                eventId=str(uuid4()),
-                runId=self.run_id,
-                runType=WorkflowType.TREND_ANALYSIS.value,
-                stageKey=stage_key,
+            self.events.event(
+                event_type,
+                stage_key=stage_key,
                 status=status,
-                sequence=self.sequence,
-                occurredAt=utc_now(),
-                data={"eventType": event_type, **data},
+                data=data,
             )
         )
 

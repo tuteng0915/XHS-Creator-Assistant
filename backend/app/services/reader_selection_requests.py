@@ -11,6 +11,7 @@ from app.repositories.drafts import DraftRepository
 from app.repositories.simulated_fans import SimulatedFanRepository
 from app.repositories.topics import TopicRepository
 from app.repositories.workspaces import WorkspaceRepository
+from app.services.account_simulation_target import account_reader_topic, account_simulation_target
 from app.services.common import utc_now
 from app.services.reader_selection import (
     ReaderSelectionInput,
@@ -18,6 +19,7 @@ from app.services.reader_selection import (
     selection_input_hash,
 )
 from app.services.reader_selections import ReaderSelectionResponse, ReaderSelectionService
+from app.services.saved_note_target import saved_note_target
 from app.services.simulated_fans import SimulatedFanService
 
 
@@ -27,10 +29,16 @@ class ReaderSelectionRequest(APIModel):
     topic_id: str | None = Field(default=None, min_length=1)
     draft_id: str | None = Field(default=None, min_length=1)
     manual_topic: str | None = Field(default=None, min_length=1, max_length=10000)
+    source_material_id: str | None = Field(default=None, min_length=1)
+    note_id: str | None = Field(default=None, min_length=1)
+    account_profile_id: str | None = Field(default=None, min_length=1)
     desired_count: int = Field(default=3, ge=1, strict=True)
     panel_task: PanelTask | None = None
 
-    @field_validator("request_key", "topic_id", "draft_id", "manual_topic")
+    @field_validator(
+        "request_key", "topic_id", "draft_id", "manual_topic", "source_material_id", "note_id",
+        "account_profile_id",
+    )
     @classmethod
     def nonblank(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
@@ -39,15 +47,22 @@ class ReaderSelectionRequest(APIModel):
 
     @model_validator(mode="after")
     def one_target(self):
-        targets = (self.topic_id, self.draft_id, self.manual_topic)
+        if bool(self.source_material_id) != bool(self.note_id):
+            raise ValueError("请选择完整的笔记来源")
+        targets = (self.topic_id, self.draft_id, self.manual_topic, self.note_id,
+                   self.account_profile_id)
         if sum(value is not None for value in targets) != 1:
-            raise ValueError("请选择一个选题、草稿或手动标题")
+            raise ValueError("请选择一个账号、选题、草稿、历史笔记或手动标题")
         return self
 
     def identity(self) -> str:
         exclude = {"request_key"}
         if self.panel_task is None:
             exclude.add("panel_task")
+        if self.note_id is None:
+            exclude.update({"note_id", "source_material_id"})
+        if self.account_profile_id is None:
+            exclude.add("account_profile_id")
         return json.dumps(self.model_dump(by_alias=True, exclude=exclude),
                           ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -99,6 +114,13 @@ class ReaderSelectionRequestService:
             topic_id = row["topic_id"]
             draft = {"editableContent": json.loads(row["editable_content_json"])}
         topic = {"title": payload.manual_topic or "", "body": ""}
+        account = None
+        if payload.account_profile_id:
+            account = account_simulation_target(c, workspace_id, payload.account_profile_id)
+            topic = account_reader_topic(account)
+        if payload.note_id:
+            note = saved_note_target(c, workspace_id, payload.source_material_id, payload.note_id)
+            topic = {"title": note["title"], "body": note["body"]}
         if topic_id:
             row = TopicRepository().get(c, topic_id)
             if row["workspace_id"] != workspace_id:
@@ -108,8 +130,9 @@ class ReaderSelectionRequestService:
                 for row in SimulatedFanRepository().list(c, workspace_id)]
         return prepare_reader_selection(workspace_id, {
             "workspaceId": workspace_id, "accountPositioning": workspace["account_positioning"],
-            "targetType": "draft" if draft else "topic" if topic_id else "manual",
-            "topic": topic, "draft": draft,
+            "targetType": ("account" if account else "note" if payload.note_id else "draft" if draft
+                           else "topic" if topic_id else "manual"),
+            "topic": topic, "draft": draft, "sourceAccount": account,
         }, fans, desired_count=payload.desired_count, panel_task=payload.panel_task)
 
     @staticmethod

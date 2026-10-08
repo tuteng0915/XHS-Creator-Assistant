@@ -78,7 +78,7 @@ export function TopicLibraryPage({
     }}>
       <input aria-label="手动选题标题" placeholder="选题标题" required value={manualTopicTitle} onChange={(event) => onManualTopicTitleChange(event.target.value)} />
       <textarea aria-label="手动选题角度" placeholder="切入角度" rows={3} value={manualTopicAngle} onChange={(event) => onManualTopicAngleChange(event.target.value)} />
-      <div className="save-row"><button className="small-primary" disabled={manualTopicSaveState.phase === 'saving' || !manualTopicTitle.trim()}>保存选题</button><SaveIndicator state={manualTopicSaveState} /></div>
+      <div className="save-row"><button className="primary" disabled={manualTopicSaveState.phase === 'saving' || !manualTopicTitle.trim()}>保存选题</button><SaveIndicator state={manualTopicSaveState} /></div>
     </form>
   )
   return (
@@ -86,7 +86,7 @@ export function TopicLibraryPage({
       <section className="history-list">
         <div className="panel-title">◇ 选题库</div>
         {publicMode ? <>
-          <button type="button" onClick={() => setCreating(true)}>＋ 新建选题</button>
+          <button type="button" className="primary" onClick={() => setCreating(true)}>＋ 新建选题</button>
           {creating && <CreatorDialog title="新建选题" onClose={() => setCreating(false)}>{manualForm}</CreatorDialog>}
         </> : <form className="manual-topic" onSubmit={onSaveManualTopic}>
           <input
@@ -103,7 +103,7 @@ export function TopicLibraryPage({
             onChange={(event) => onManualTopicAngleChange(event.target.value)}
           />
           <div className="save-row">
-            <button className="small-primary">保存选题</button>
+            <button className="primary">保存选题</button>
             <SaveIndicator state={manualTopicSaveState} />
           </div>
         </form>}
@@ -146,7 +146,7 @@ export function TopicLibraryPage({
                 <button disabled={actionDisabled} onClick={() => onSelectCurrentTopic(selectedTopic)}>
                   设为当前
                 </button>
-                <button disabled={actionDisabled} onClick={() => publicMode ? onOpenCanvas?.(selectedTopic) : onGenerateBrief(selectedTopic)}>
+                <button className="primary" disabled={actionDisabled} onClick={() => publicMode ? onOpenCanvas?.(selectedTopic) : onGenerateBrief(selectedTopic)}>
                   {publicMode ? 'AI 创作助手' : '生成创作 Brief'}
                 </button>
                 {!publicMode && <button disabled={actionDisabled} onClick={() => onGenerateDraft(selectedTopic)}>
@@ -187,7 +187,7 @@ export function TopicLibraryPage({
               />
               {publicMode && <><label htmlFor="topic-body">正文</label><textarea id="topic-body" rows={12} value={topicDraft.body || ''} onChange={event => onTopicDraftChange({...topicDraft,body:event.target.value})} /></>}
               <div className="save-row">
-                <button className="save-button" disabled={publicMode && (!dirty || topicSaveState.phase === 'saving')} onClick={onSaveTopicEdits}>
+                <button className="primary" disabled={publicMode && (!dirty || topicSaveState.phase === 'saving')} onClick={onSaveTopicEdits}>
                   {publicMode ? '保存修改' : '保存选题资产'}
                 </button>
                 <SaveIndicator state={topicSaveState} />

@@ -50,6 +50,10 @@ def test_note_only_reader_view_persists_as_hypothesis_without_image_context(app)
     assert saved.status == "completed"
     assert saved.result["groups"][0]["evidenceBasis"] == "content_inferred"
     assert "尚无评论直接佐证" in saved.result["summary"]
+    assert send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json() == []
+    assert send(app, "POST", f"/api/workspaces/{wid}/simulated-fans", json={
+        "sourceAnalysisId": run_id, "sourceGroupId": "steps",
+    }).status_code == 201
     fans = send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()
     assert len(fans) == 1
     assert fans[0]["original"]["evidenceStatus"] == "hypothesis"

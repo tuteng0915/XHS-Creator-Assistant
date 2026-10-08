@@ -99,8 +99,10 @@ import { useAudienceAnalyses } from './hooks/useAudienceAnalyses'
 import { useSimulatedFans } from './hooks/useSimulatedFans'
 import { SimulatedFansPage } from './components/SimulatedFansPage'
 import { CreatorSimulationSetup } from './components/CreatorSimulationSetup'
+import { SimulationCategoryTabs } from './components/SimulationCategoryTabs'
+import { simulationCategoryFor } from './simulationChat'
 import type { ReaderSelectionLink } from './readerSelection'
-import type { PanelTask } from './types'
+import type { PanelTask, SimulationCategory, SimulationPersonaOverrides } from './types'
 import type { AnalysisScope } from './creatorNotes'
 import {
   WorkflowOutputPanel,
@@ -203,6 +205,9 @@ function WorkspaceApp() {
     return () => { analysisHistoryRequest.current += 1 }
   }, [selectedWorkspaceId])
   const [simulationRuns, setSimulationRuns] = useState<SimulationRunSummary[]>([])
+  const [simulationCategory, setSimulationCategory] = useState<SimulationCategory>('account')
+  const simulationCategoryRef = useRef(simulationCategory)
+  useEffect(() => { simulationCategoryRef.current = simulationCategory }, [simulationCategory])
   const [selectedSimulationRun, setSelectedSimulationRun] =
     useState<SimulationRun | null>(null)
   const simulationHistoryRequest = useRef(0)
@@ -411,6 +416,8 @@ function WorkspaceApp() {
     setMediaAssets([])
     setAnalysisRuns([])
     setSimulationRuns([])
+    setSimulationCategory('account')
+    simulationCategoryRef.current = 'account'
     setSkills([])
     setAgents([])
     setWorkflowAssets([])
@@ -642,6 +649,9 @@ function WorkspaceApp() {
         setCurrentRun(null)
         setSelectedRun(null)
         setSelectedSimulationRun(null)
+        selectedSimulationRunRef.current = null
+        setSimulationCategory('account')
+        simulationCategoryRef.current = 'account'
         setSelectedSkill(null)
         setSelectedAgent(null)
         setSelectedAgentConversation(null)
@@ -1025,6 +1035,7 @@ function WorkspaceApp() {
       draftApi.list(workspace.id),
       topicApi.list(workspace.id),
     ])
+    if (selectedWorkspaceRef.current !== workspace.id) return
     setWorkspace(loadedWorkspace)
     setAnalysisRuns(loadedRuns)
     setSimulationRuns(loadedSimulationRuns)
@@ -1715,12 +1726,25 @@ function WorkspaceApp() {
     if (!workspace || topic.workspaceId !== workspace.id || topic.workspaceId !== selectedWorkspaceRef.current || running) return
     if (internalMode) { void runAudienceSimulation(undefined, 'account', topic); return }
     setSelectedTopic(topic)
-    setRunError('')
+    changeSimulationCategory('creation')
     setActivePage('simulations')
   }
 
-  async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic, recommendation?: ReaderSelectionLink, panelTask?: PanelTask) {
+  function changeSimulationCategory(category: SimulationCategory) {
+    setSimulationCategory(category)
+    simulationCategoryRef.current = category
+    simulationHistoryRequest.current += 1
+    selectedSimulationRunRef.current = null
+    setSelectedSimulationRun(null)
+    setSimulationHistoryLoad(idleState)
+    setRunError('')
+  }
+
+  async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic, recommendation?: ReaderSelectionLink, panelTask?: PanelTask, note?: {sourceMaterialId:string;noteId:string}, accountProfileId?: string, personaOverrides?: SimulationPersonaOverrides) {
     if (!workspace) return
+    const workspaceId = workspace.id
+    const category: SimulationCategory = accountProfileId ? 'account' : note ? 'published_note' : 'creation'
+    const requestId = ++simulationHistoryRequest.current
     if (!internalMode && !fans.ids.length) { setActivePage('simulated-fans'); return }
     setWorkflowTab(targetTab)
     setRunError('')
@@ -1730,7 +1754,7 @@ function WorkspaceApp() {
     setSimulationStageViews(simulationStageSeed())
     if (!internalMode) setActivePage('simulations')
     try {
-      const savedInputs = draft || topic
+      const savedInputs = draft || topic || note || accountProfileId
         ? { simulationTopic }
         : await ensureInputsSavedForRun(targetTab, true, true)
       if (draft) {
@@ -1739,21 +1763,33 @@ function WorkspaceApp() {
         setSaveState('workspace', { phase: 'saved' })
       }
       const topicForSimulation = savedInputs.simulationTopic.trim()
-      if (!draft && !topic && !topicForSimulation) throw new Error('请填写受众模拟选题。')
+      if (!draft && !topic && !note && !accountProfileId && !topicForSimulation) throw new Error('请填写受众模拟选题。')
       const useSavedTopic =
-        !draft && selectedTopic && topicForSimulation.includes(selectedTopic.title)
+        !draft && !note && !accountProfileId && selectedTopic && topicForSimulation.includes(selectedTopic.title)
       const created = await simulationRunApi.create(workspace.id, {
         ...recommendation,
+        ...note,
+        ...(accountProfileId ? {accountProfileId} : {}),
+        ...(personaOverrides ? {personaOverrides} : {}),
         ...(panelTask ? {panelTask} : {}),
         simulatedFanIds: internalMode ? undefined : fans.ids,
         draftId: draft?.id,
-        topicId: topic?.id || (useSavedTopic ? selectedTopic.id : null),
-        manualTopic: draft || topic || useSavedTopic ? undefined : topicForSimulation,
-        mode,
+        topicId: note || accountProfileId ? undefined : topic?.id || (useSavedTopic ? selectedTopic.id : null),
+        manualTopic: draft || topic || note || accountProfileId || useSavedTopic ? undefined : topicForSimulation,
+        mode: internalMode ? mode : 'live',
       })
+      if (selectedWorkspaceRef.current === workspaceId) {
+        setSimulationRuns(current=>[created,...current.filter(item=>item.id!==created.id)])
+        if (simulationHistoryRequest.current === requestId && (internalMode || simulationCategoryRef.current === category)) {
+          selectedSimulationRunRef.current = created
+          setSelectedSimulationRun(created)
+        }
+      }
       await runSimulationGraphWorkflow(created, targetTab)
-      await refreshWorkspaceSummary()
+      if (selectedWorkspaceRef.current === workspaceId) await refreshWorkspaceSummary()
     } catch (error) {
+      if (selectedWorkspaceRef.current !== workspaceId) return
+      if (!internalMode && (simulationCategoryRef.current !== category || simulationHistoryRequest.current !== requestId)) return
       const message = errorMessage(error)
       setRunError(message)
       setSaveStates((current) =>
@@ -1765,29 +1801,36 @@ function WorkspaceApp() {
         ) as Record<SaveKey, SaveState>,
       )
     } finally {
-      setRunning(false)
+      if (selectedWorkspaceRef.current === workspaceId) setRunning(false)
     }
   }
 
   async function runSimulationGraphWorkflow(run: SimulationRun, targetTab: WorkflowTab) {
-    setSimulationStageViews(stageSeedFromSimulation(run))
+    const viewingRun = () => selectedWorkspaceRef.current === run.workspaceId
+      && selectedSimulationRunRef.current?.id === run.id
+    const observe = (latest: SimulationRun) => {
+      if (latest.id !== run.id || latest.workspaceId !== run.workspaceId) throw new Error('模拟记录不匹配')
+      if (selectedWorkspaceRef.current !== run.workspaceId) return
+      setSimulationRuns(current => current.map(item => item.id === latest.id ? latest : item))
+      if (!viewingRun()) return
+      setSelectedSimulationRun(latest)
+      setWorkflowOutputKind(targetTab, 'simulation')
+      setSimulationStageViews(stageSeedFromSimulation(latest))
+    }
+    if (viewingRun()) setSimulationStageViews(stageSeedFromSimulation(run))
     await new Promise<void>((resolve, reject) => {
       const source = new EventSource(`/api/simulation-runs/${run.id}/events`)
       const finish = async () => {
         source.close()
         const completed = await simulationRunApi.get(run.id)
-        setSelectedSimulationRun(completed)
-        setWorkflowOutputKind(targetTab, 'simulation')
-        setSimulationStageViews(stageSeedFromSimulation(completed))
+        observe(completed)
         resolve()
       }
       const pollFallback = async () => {
         source.close()
         for (let attempt = 0; attempt < 40; attempt += 1) {
           const latest = await simulationRunApi.get(run.id)
-          setSelectedSimulationRun(latest)
-          setWorkflowOutputKind(targetTab, 'simulation')
-          setSimulationStageViews(stageSeedFromSimulation(latest))
+          observe(latest)
           if (
             latest.status === 'completed' ||
             latest.status === 'partially_completed' ||
@@ -1808,7 +1851,7 @@ function WorkspaceApp() {
         const activity = JSON.parse(message.data) as ActivityEvent
         const eventType = activity.data.eventType
         if (['stage.started', 'stage.succeeded', 'stage.failed'].includes(String(eventType)) && activity.stageKey) {
-          setSimulationStageViews(current => applySimulationStageEvent(current, activity))
+          if (viewingRun()) setSimulationStageViews(current => applySimulationStageEvent(current, activity))
           return
         }
         if (
@@ -2035,7 +2078,11 @@ function WorkspaceApp() {
       if (run.workspaceId !== workspaceId || run.id !== simulationId) {
         throw new Error('返回的模拟记录与当前选择不一致，请重新打开。')
       }
+      if (!internalMode && simulationCategoryFor(run) !== simulationCategoryRef.current) {
+        throw new Error('这条记录不属于当前模拟类别，请切换类别后打开。')
+      }
       setSimulationHistoryLoad(idleState)
+      selectedSimulationRunRef.current = run
       setSelectedSimulationRun(run)
       setSimulationRuns((current) => current.map((item) => item.id === run.id ? run : item))
       setSimulationReviewDraft({
@@ -2836,6 +2883,18 @@ function WorkspaceApp() {
       {!loading && workspace && activePage === 'drafts' && !internalMode && <CreatorCanvasPage
         key={workspace.id} workspaceId={workspace.id} topic={selectedTopic} topics={topics.filter(t => t.sourceWorkflow !== 'trend_analysis')}
         onSimulate={prepareAudienceSimulation}
+        onRetestCreated={(run, navigate) => {
+          if (selectedWorkspaceRef.current !== run.workspaceId) return
+          setSimulationRuns(current => [run, ...current.filter(item => item.id !== run.id)])
+          if (!navigate) return
+          changeSimulationCategory(simulationCategoryFor(run))
+          selectedSimulationRunRef.current = run
+          setSelectedSimulationRun(run)
+          setSimulationHistoryLoad(idleState)
+          setSimulationReviewDraft({userNotes: run.userNotes, reviewStatus: run.reviewStatus})
+          setSaveState('simulationReview', idleState)
+          setActivePage('simulations')
+        }}
         simulationRuns={simulationRuns}
         agentId={agents.find(a => a.agentId === 'topic_draft_editor')?.id}
         onSelect={setSelectedTopic} onUpdated={topic => {if(selectedWorkspaceRef.current !== topic.workspaceId) return; setSelectedTopic(topic); setTopics(current => current.map(t => t.id === topic.id ? topic : t))}}
@@ -2862,27 +2921,42 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'simulations' && (
         <>
-        {!internalMode && <CreatorSimulationSetup key={`${workspace.id}:${selectedTopic?.id || ''}`} workspaceId={workspace.id}
-          positioning={workspace.accountPositioning} topic={selectedTopic} topics={topics} fans={fans}
+        {!internalMode && <SimulationCategoryTabs value={simulationCategory} runs={simulationRuns} onChange={changeSimulationCategory} />}
+        <div id="simulation-category-content" role={internalMode?undefined:'tabpanel'} aria-labelledby={internalMode?undefined:`simulation-category-${simulationCategory}`}>
+        {!internalMode && <details className="trial-setup-disclosure" open={!selectedSimulationRun}><summary>{selectedSimulationRun?'发起新的模拟':'准备模拟 · 选择对象和读者'}</summary><CreatorSimulationSetup key={`${workspace.id}:${simulationCategory}:${selectedTopic?.id || ''}`} workspaceId={workspace.id}
+          category={simulationCategory}
+          positioning={workspace.accountPositioning} topic={selectedTopic} topics={topics} fans={fans} profile={xhsCreatorProfileMaterial}
           running={running} onSelect={setSelectedTopic}
-          onRun={(topic, recommendation, task) => void runAudienceSimulation(undefined, 'account', topic, recommendation, task)}
-          onAddFans={() => setActivePage('audience-analysis')} />}
-        {!internalMode && running && <WorkflowOutputPanel targetTab="account" views={simulationStageViews} outputKind="simulation" runError={runError} renderStageResult={renderStageResult} />}
+          onRun={(topic, recommendation, task, overrides) => void runAudienceSimulation(undefined, 'account', topic, recommendation, task, undefined, undefined, overrides)}
+          onRunNote={(note,recommendation,task,overrides)=>void runAudienceSimulation(undefined,'account',undefined,recommendation,task,note,undefined,overrides)}
+          onRunAccount={(profileId,recommendation,task,overrides)=>void runAudienceSimulation(undefined,'account',undefined,recommendation,task,undefined,profileId,overrides)}
+          onAddFans={() => setActivePage('audience-analysis')} /></details>}
         {!internalMode && !running && runError && <p role="alert">{runError}</p>}
         <SimulationHistoryPage
           publicMode={!internalMode}
-          simulationRuns={simulationRuns}
+          topics={topics}
+          simulationRuns={internalMode?simulationRuns:simulationRuns.filter(run=>simulationCategoryFor(run)===simulationCategory)}
           selectedSimulationRun={selectedSimulationRun}
           simulationReviewDraft={simulationReviewDraft}
           simulationReviewSaveState={saveStates.simulationReview}
           loadState={simulationHistoryLoad}
           reviewStatusLabel={reviewStatusLabel}
           onOpenSimulationRun={openSimulationRun}
+          onTopicAdded={topic => {
+            if (selectedWorkspaceRef.current !== topic.workspaceId) return
+            setTopics(current => [topic, ...current.filter(item => item.id !== topic.id)])
+          }}
+          onSimulationObserved={run => {
+            if (selectedWorkspaceRef.current !== run.workspaceId || selectedSimulationRunRef.current?.id !== run.id) return
+            setSelectedSimulationRun(run)
+            setSimulationRuns(current => current.map(item => item.id === run.id ? run : item))
+          }}
           onSimulationReviewDraftChange={editSimulationReview}
           onSaveSimulationRunReview={saveSimulationRunReview}
           stageSeedFromSimulation={stageSeedFromSimulation}
           renderStageResult={renderStageResult}
         />
+        </div>
         </>
       )}
       {!loading &&

@@ -4,8 +4,36 @@ import { audienceAnalysisApi } from '../api'
 import type { AudienceAnalysis } from '../types'
 import { useAudienceAnalyses } from './useAudienceAnalyses'
 
-afterEach(() => {cleanup(); vi.restoreAllMocks()})
+afterEach(() => {cleanup(); vi.useRealTimers(); vi.restoreAllMocks()})
 const run = (workspaceId:string, id:string):AudienceAnalysis => ({id,workspaceId,sourceMaterialId:'p',status:'completed',result:{},inputSnapshot:{scope:{scope:'all',selectedNoteCount:1}},createdAt:'',error:''})
+
+it.each(['completed', 'partially_completed', 'failed'] as const)('does not poll a %s analysis', async status => {
+  vi.useFakeTimers()
+  const list = vi.spyOn(audienceAnalysisApi, 'list').mockResolvedValue([{...run('a', 'done'), status}])
+  renderHook(() => useAudienceAnalyses('a'))
+  await act(async () => {await Promise.resolve()})
+  await act(async () => {await vi.advanceTimersByTimeAsync(10000)})
+  expect(list).toHaveBeenCalledTimes(1)
+})
+
+it('starts polling after manual refresh finds new work and stops when it finishes', async () => {
+  vi.useFakeTimers()
+  const list = vi.spyOn(audienceAnalysisApi, 'list').mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{...run('a', 'new'), status: 'pending'}])
+    .mockResolvedValueOnce([{...run('a', 'new'), status: 'running'}])
+    .mockResolvedValue([{...run('a', 'new'), status: 'partially_completed'}])
+  const {result} = renderHook(() => useAudienceAnalyses('a'))
+  await act(async () => {await Promise.resolve()})
+  await act(async () => {await vi.advanceTimersByTimeAsync(4000)})
+  expect(list).toHaveBeenCalledTimes(1)
+  await act(async () => {await result.current.refresh()})
+  await act(async () => {await vi.advanceTimersByTimeAsync(2000)})
+  expect(result.current.rows[0].status).toBe('running')
+  await act(async () => {await vi.advanceTimersByTimeAsync(2000)})
+  expect(result.current.rows[0].status).toBe('partially_completed')
+  await act(async () => {await vi.advanceTimersByTimeAsync(10000)})
+  expect(list).toHaveBeenCalledTimes(4)
+})
 
 it('ignores old refresh results after switching accounts away and back', async () => {
   const pending: Array<(rows:AudienceAnalysis[])=>void> = []

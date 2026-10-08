@@ -116,13 +116,29 @@ def test_canvas_sources_and_blocked_edits_are_persisted(app, valid):
 
     asyncio.run(exercise())
     stored = app.state.topic_service.get(selected["id"])
-    assert stored.body == ("我整理了申请材料。" if valid else "")
+    assert stored.body == ""
     history = service.get(conversation["id"])
     metadata = history.messages[-1].model_metadata
-    assert metadata["canvasApplyStatus"] == ("applied" if valid else "needs_confirmation")
+    assert metadata["canvasApplyStatus"] == (
+        "pending_confirmation" if valid else "needs_confirmation"
+    )
     assert metadata["pendingSuggestions"] == pending
     sources = history.messages[-1].context_pack["creatorFactSources"]
     assert sources[0]["text"] == "昨天我整理了申请材料。"
-    if not valid:
+    if valid:
+        proposal = next(
+            item
+            for item in send(
+                app,
+                "GET",
+                f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+            ).json()
+            if item["actionType"] == "topic.apply_canvas_edit"
+        )
+        applied = send(app, "POST", f"/api/asset-proposals/{proposal['id']}/apply")
+        assert applied.status_code == 200
+        assert applied.json()["status"] == "applied"
+        assert app.state.topic_service.get(selected["id"]).body == "我整理了申请材料。"
+    else:
         assert metadata["suggestedCanvasUpdate"]["body"] == "我整理了申请材料。"
         assert "未通过事实核验" in history.messages[-1].content

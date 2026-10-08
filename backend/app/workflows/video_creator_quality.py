@@ -4,7 +4,6 @@ import asyncio
 import contextvars
 from collections.abc import AsyncIterator
 from typing import Any, Literal, Protocol, TypedDict
-from uuid import uuid4
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field, field_validator
@@ -24,6 +23,7 @@ from app.repositories.graph_checkpoints import GraphCheckpointRepository
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
+from app.services.run_events import RunEvent, RunEventEmitter, RunEventType
 from app.services.skills import SkillService
 
 VIDEO_CREATOR_QUALITY_STAGE_ORDER = [
@@ -45,17 +45,6 @@ VIDEO_STAGE_SKILL_IDS = {
 ACTIVE_VIDEO_EXECUTION: contextvars.ContextVar[
     _VideoCreatorQualityGraphExecution | None
 ] = contextvars.ContextVar("video_creator_quality_execution", default=None)
-
-
-class VideoCreatorQualityEvent(TypedDict):
-    eventId: str
-    runId: str
-    runType: Literal["video_creator_quality"]
-    stageKey: str | None
-    status: str
-    sequence: int
-    occurredAt: str
-    data: dict[str, Any]
 
 
 class VideoCreatorQualityState(TypedDict, total=False):
@@ -645,8 +634,8 @@ class VideoCreatorQualityWorkflowService:
 
     async def stream_events(
         self, run_id: str, *, stop_after_node: str | None = None
-    ) -> AsyncIterator[VideoCreatorQualityEvent]:
-        queue: asyncio.Queue[VideoCreatorQualityEvent | None] = asyncio.Queue()
+    ) -> AsyncIterator[RunEvent]:
+        queue: asyncio.Queue[RunEvent | None] = asyncio.Queue()
         runner = _VideoCreatorQualityGraphExecution(
             service=self,
             run_id=run_id,
@@ -667,7 +656,7 @@ class VideoCreatorQualityWorkflowService:
 
     async def collect_events(
         self, run_id: str, *, stop_after_node: str | None = None
-    ) -> list[VideoCreatorQualityEvent]:
+    ) -> list[RunEvent]:
         return [
             event
             async for event in self.stream_events(
@@ -715,14 +704,17 @@ class _VideoCreatorQualityGraphExecution:
         *,
         service: VideoCreatorQualityWorkflowService,
         run_id: str,
-        queue: asyncio.Queue[VideoCreatorQualityEvent | None],
+        queue: asyncio.Queue[RunEvent | None],
         stop_after_node: str | None,
     ) -> None:
         self.service = service
         self.run_id = run_id
         self.queue = queue
         self.stop_after_node = stop_after_node
-        self.sequence = 0
+        self.events = RunEventEmitter(
+            run_id=run_id,
+            run_type=WorkflowType.VIDEO_CREATOR_QUALITY.value,
+        )
 
     @classmethod
     def current(cls) -> _VideoCreatorQualityGraphExecution:
@@ -1079,23 +1071,18 @@ class _VideoCreatorQualityGraphExecution:
 
     async def emit(
         self,
-        event_type: str,
+        event_type: RunEventType,
         stage_key: str | None,
         status: str,
         data: dict[str, Any],
     ) -> None:
-        self.sequence += 1
         await self.queue.put(
-            {
-                "eventId": str(uuid4()),
-                "runId": self.run_id,
-                "runType": "video_creator_quality",
-                "stageKey": stage_key,
-                "status": str(status),
-                "sequence": self.sequence,
-                "occurredAt": utc_now(),
-                "data": {"eventType": event_type, **data},
-            }
+            self.events.event(
+                event_type,
+                stage_key=stage_key,
+                status=status,
+                data=data,
+            )
         )
 
     async def _emit_existing_terminal_run(self, run) -> None:

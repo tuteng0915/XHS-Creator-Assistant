@@ -94,7 +94,7 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
     const evidenceCount = new Set(claim.evidence.map(ref => ref.noteId)).size
     return <div className="account-portrait-claim" key={key}>
       <p>{claim.statement}</p>
-      <button type="button" onClick={() => setOpenClaim(openClaim === key ? null : key)}
+      <button type="button" className="text-button" onClick={() => setOpenClaim(openClaim === key ? null : key)}
         aria-expanded={openClaim === key}>查看依据 · {evidenceCount} 条笔记</button>
       {openClaim === key && renderEvidence(claim)}
     </div>

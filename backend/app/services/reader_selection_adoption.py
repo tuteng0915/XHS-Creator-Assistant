@@ -28,10 +28,12 @@ def selection_adoption_snapshot(c, database, workspace_id: str, payload: Simulat
     request = requests.stored_request(row)
     if request is None:
         raise ConflictError("旧推荐缺少来源，不能核验，请重新推荐或手动选择")
-    if (request.topic_id, request.draft_id, request.manual_topic) != (
+    if (request.topic_id, request.draft_id, request.manual_topic,
+        request.source_material_id, request.note_id, request.account_profile_id) != (
         payload.topic_id, payload.draft_id, payload.manual_topic,
+        payload.source_material_id, payload.note_id, payload.account_profile_id,
     ):
-        raise ConflictError("推荐不属于当前选题或草稿，请重新推荐或手动选择")
+        raise ConflictError("推荐不属于当前分析对象，请重新推荐或手动选择")
     if request.panel_task != payload.panel_task:
         raise ConflictError("试读任务已变化，请重新推荐，或按当前手选名单继续")
     if requests.freshness(c, row).status != "current":
@@ -46,9 +48,14 @@ def selection_adoption_snapshot(c, database, workspace_id: str, payload: Simulat
                 for reader in saved.result.proposed_readers]
     proposed_ids = [reader.fan_id for reader in saved.result.proposed_readers]
     return {
-        "source": "recommended" if payload.simulated_fan_ids == proposed_ids else "adjusted",
+        "source": "recommended" if payload.simulated_fan_ids == proposed_ids
+        and not payload.persona_overrides else "adjusted",
         "readerSelectionId": saved.id, "inputHash": saved.input_hash,
         "proposedReaders": proposed, "actualFanIds": list(payload.simulated_fan_ids),
+        **({"personaOverridesAfterRecommendation": {
+            fan_id: override.model_dump(by_alias=True, exclude_none=True)
+            for fan_id, override in payload.persona_overrides.items()
+        }} if payload.persona_overrides else {}),
         "validationWarnings": [warning.model_dump(by_alias=True)
                                for warning in saved.result.validation_warnings],
     }

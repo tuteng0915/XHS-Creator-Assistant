@@ -106,6 +106,69 @@ def current(app, case):
     return send(app, "GET", f"/api/topics/{case['tid']}").json()
 
 
+def material_case(app, case):
+    with app.state.simulation_service.database.transaction() as connection:
+        row = connection.execute("SELECT synthesis_json FROM simulation_runs WHERE id=?",
+                                 (case["rid"],)).fetchone()
+        synthesis = json.loads(row[0])
+        synthesis["editorFeedback"][0].update(
+            kind="add_material", materialRequests=["请描述真实练习"],
+            suggestedText="旧模型猜测的经历")
+        connection.execute("UPDATE simulation_runs SET synthesis_json=? WHERE id=?",
+                           (json.dumps(synthesis), case["rid"]))
+
+
+@pytest.mark.parametrize("material", [None, "", "  ", "与正文不一致"])
+def test_material_proposal_requires_author_text(app, case, material):
+    material_case(app, case)
+    before = current(app, case)
+    assert create(app, case, authorMaterial=material).status_code == 422
+    assert current(app, case) == before
+
+
+def test_author_material_preview_apply_undo_and_idempotence(app, case):
+    material_case(app, case)
+    before = current(app, case)
+    history = app.state.simulation_service.get(case["rid"]).model_dump(mode="json")
+    payload = {"text": "我先向邻座问了一个问题。", "authorMaterial": "我先向邻座问了一个问题。"}
+    response = create(app, case, **payload)
+    assert response.status_code == 201
+    saved = response.json()
+    assert saved["snapshot"]["authorMaterial"] == payload["text"]
+    assert current(app, case) == before
+    assert create(app, case, **payload).json() == saved
+    assert create(app, case, text="新答案", authorMaterial="新答案").status_code == 409
+    assert send(app, "POST", url(case, saved["id"]) + "/apply",
+                json={"confirmed": True}).status_code == 200
+    assert send(app, "POST", url(case, saved["id"]) + "/undo",
+                json={"confirmed": True}).status_code == 200
+    assert current(app, case)["body"] == before["body"]
+    assert app.state.simulation_service.get(case["rid"]).model_dump(mode="json") == history
+
+
+def test_old_material_proposal_is_readable_but_needs_new_author_material(app, case):
+    saved = create(app, case).json()
+    with app.state.simulation_service.database.transaction() as connection:
+        snapshot = saved["snapshot"]
+        snapshot["feedback"]["kind"] = "add_material"
+        connection.execute("UPDATE panel_edit_proposals SET snapshot_json=? WHERE id=?",
+                           (json.dumps(snapshot), saved["id"]))
+    assert send(app, "GET", url(case, saved["id"])).status_code == 200
+    before = current(app, case)
+    result = send(app, "POST", url(case, saved["id"]) + "/apply", json={"confirmed": True})
+    assert result.status_code == 422
+    assert current(app, case) == before
+
+
+def test_old_rewrite_request_key_remains_replayable(app, case):
+    saved = create(app, case).json()
+    with app.state.simulation_service.database.read() as connection:
+        request = connection.execute("SELECT request_json FROM panel_edit_proposals WHERE id=?",
+                                     (saved["id"],)).fetchone()[0]
+    assert "authorMaterial" not in json.loads(request)
+    assert create(app, case, authorMaterial=None).json() == saved
+
+
 @pytest.mark.parametrize(
     "operation,expected",
     [

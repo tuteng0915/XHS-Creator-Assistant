@@ -55,7 +55,7 @@ export function AccountPerformanceView({ observations, summaries, notes, mediaAs
     if (!entries.length) return null
     return <div className="account-performance-group"><b>{title}</b>
       {entries.map(note => <div key={note.noteId} className="account-performance-row">
-        <button type="button" disabled={!available.has(note.noteId)} aria-expanded={openNote === note.noteId}
+        <button type="button" className="text-button" disabled={!available.has(note.noteId)} aria-expanded={openNote === note.noteId}
           onClick={() => setOpenNote(openNote === note.noteId ? null : note.noteId)}>{note.title}</button>
         {!available.has(note.noteId) && <small>本次分析快照未保留正文</small>}
         <small>{note.publishedAt ? `${new Date(note.publishedAt).toLocaleDateString('zh-CN')} · ` : '发布时间未知 · '}

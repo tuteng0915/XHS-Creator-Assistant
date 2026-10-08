@@ -70,7 +70,7 @@ it('recovers created voices through the real list hook without another POST', as
   await waitFor(()=>expect(screen.getByRole('button',{name:'重试刷新'})).toBeEnabled())
   fireEvent.click(screen.getByRole('button',{name:'重试刷新'}))
   expect(screen.getByRole('button',{name:'刷新中…'})).toBeDisabled()
-  expect(screen.getByRole('button',{name:/行动派 可用于模拟/})).toBeDisabled()
+  expect(screen.getByRole('button',{name:/行动派 可邀请试读/})).toBeDisabled()
   fireEvent(screen.getByRole('dialog'),new Event('cancel',{cancelable:true}))
   expect(screen.getByRole('dialog')).toBeInTheDocument()
   await act(async()=>finish([fan,secondFan,createdFan]))
@@ -320,7 +320,7 @@ it('does not allow saving invalid interests from the switch dialog', () => {
 
 it('distinguishes curated presets from model analyses', () => {
   render(<SimulatedFansPage rows={[{...fan,original:{...fan.original,origin:'curated_preset'}}]} error="" onRefresh={vi.fn()} onAnalyze={vi.fn()} />)
-  expect(screen.getByText('预置整理 · 可用于模拟')).toBeInTheDocument()
+  expect(screen.getByText('预置整理 · 可邀请试读')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button',{name:/费用观察员/}))
   expect(screen.getByLabelText('兴趣领域')).toHaveValue('')
   expect(screen.getByText(/非模型接口分析/)).toBeInTheDocument()

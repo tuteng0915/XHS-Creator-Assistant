@@ -4,6 +4,7 @@ import json
 from fastapi import FastAPI
 from test_workspace_api import create_workspace, send
 
+from app.services.run_events import RUN_EVENT_TYPES
 from app.workflows.trend_analysis import (
     TREND_GRAPH_NODE_ORDER,
     FakeTrendAnalysisModelProvider,
@@ -85,6 +86,9 @@ def test_fake_trend_graph_routes_and_persists_successful_stages(app: FastAPI) ->
     event_types = [event["data"]["eventType"] for event in events]
     assert event_types.count("stage.succeeded") == 4
     assert events[-1]["data"]["eventType"] == "run.succeeded"
+    assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
+    assert all(event["data"]["eventType"] in RUN_EVENT_TYPES for event in events)
+    assert all(event["runType"] == "trend_analysis" for event in events)
 
     completed = send(app, "GET", f"/api/analysis-runs/{run['id']}").json()
     assert completed["status"] == "completed"

@@ -29,14 +29,27 @@ def analyze(app, wid, source_id, output=None):
     return asyncio.run(run())
 
 
+def adopt_candidates(app, wid, analysis_id, group_ids=None):
+    groups = app.state.audience_analysis_service.get(analysis_id).result["groups"]
+    for group in groups:
+        if group_ids is None or group["id"] in group_ids:
+            response = send(app, "POST", f"/api/workspaces/{wid}/simulated-fans", json={
+                "sourceAnalysisId": analysis_id, "sourceGroupId": group["id"],
+            })
+            assert response.status_code == 201, response.text
+    return send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()
+
+
 @pytest.fixture
 def seeded(app):
     wid = create_workspace(app)["id"]
     source = profile(app, wid)
     analysis = analyze(app, wid, source["id"])
-    fans = send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()
+    assert send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json() == []
+    fans = adopt_candidates(app, wid, analysis)
     assert len(fans) == 4
-    assert [f["sourceGroupId"] for f in fans] == ["3", "2", "1", "0"]
+    assert {f["sourceGroupId"] for f in fans} == {"3", "2", "1", "0"}
+    fans.sort(key=lambda f: f["sourceGroupId"], reverse=True)
     return wid, source, analysis, fans
 
 
@@ -79,8 +92,10 @@ def test_fan_edit_original_idempotency_and_new_analysis(app, seeded):
         },
     ).json()
     assert duplicate == updated
-    analyze(app, wid, source["id"])
-    assert len(send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()) == 8
+    new_analysis = analyze(app, wid, source["id"])
+    assert len(send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()) == 4
+    adopt_candidates(app, wid, new_analysis, ["0"])
+    assert len(send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()) == 5
     assert send(app, "GET", f"/api/simulated-fans/{fan['id']}").json() == updated
     added = send(
         app,
@@ -96,7 +111,7 @@ def test_fan_edit_original_idempotency_and_new_analysis(app, seeded):
     assert added.json()["original"]["evidenceRefs"]
 
 
-def test_eight_compact_personas_are_saved_and_selectable_without_truncation(app):
+def test_eight_compact_personas_are_candidates_until_explicitly_adopted(app):
     wid = create_workspace(app)["id"]
     source = profile(app, wid)
     output = audience_output()
@@ -109,18 +124,14 @@ def test_eight_compact_personas_are_saved_and_selectable_without_truncation(app)
         for i, style in enumerate(styles)
     ]
     analysis_id = analyze(app, wid, source["id"], output)
-    fans = send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()
+    assert send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json() == []
+    fans = adopt_candidates(app, wid, analysis_id)
     assert len(fans) == 8
     assert {fan["editable"]["expressionStyle"] for fan in fans} == set(styles)
     service = app.state.audience_analysis_service
     analysis = service.get(analysis_id)
     assert len(analysis.result["groups"]) == 8
-    from app.services.simulated_fans import SimulatedFanService
-
-    with service.database.transaction() as connection:
-        SimulatedFanService(service.database).save_generated(
-            connection, wid, analysis_id, analysis.result, analysis.input_snapshot,
-        )
+    adopt_candidates(app, wid, analysis_id)
     assert len(send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()) == 8
     run = app.state.simulation_service.create(wid, SimulationRunCreate(
         manual_topic="申请准备", simulated_fan_ids=[fan["id"] for fan in fans],
@@ -144,6 +155,8 @@ def test_fan_snapshot_survives_edit_archive_and_restart(app, settings, seeded):
     )
     before = run.input_snapshot
     assert before["audiencePersonas"][0]["fanAssetId"] == fan["id"]
+    assert before["audiencePersonas"][0]["sourceAnalysisId"] == fan["sourceAnalysisId"]
+    assert before["audiencePersonas"][0]["sourceGroupId"] == fan["sourceGroupId"]
     updated = send(
         app,
         "PATCH",
@@ -200,6 +213,8 @@ def test_fan_snapshot_survives_edit_archive_and_restart(app, settings, seeded):
     completed = restored_app.state.simulation_service.get(new_run.id)
     assert completed.status.value == "completed", completed.stage_errors
     assert completed.persona_definitions[0]["id"] == fan["id"]
+    assert completed.persona_definitions[0]["sourceAnalysisId"] == fan["sourceAnalysisId"]
+    assert completed.persona_definitions[0]["sourceGroupId"] == fan["sourceGroupId"]
     assert completed.persona_definitions[0]["userAdjusted"] is True
     assert completed.input_snapshot == new_run.input_snapshot
     assert restored_app.state.simulated_fan_service.get(fan["id"]).original == fan["original"]

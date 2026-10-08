@@ -7,7 +7,10 @@ from test_workspace_api import create_workspace, request, send
 
 from app.main import create_app
 from app.models import ModelCallResponse
-from app.services.agent_conversations import RealAgentConversationModelProvider
+from app.services.agent_conversations import (
+    AgentConversationReply,
+    RealAgentConversationModelProvider,
+)
 
 
 @pytest.fixture
@@ -74,7 +77,19 @@ def test_canvas_receipt_survives_edit_restart_and_idempotent_replay(app, canvas,
     assert later["messages"] == first["messages"]
     assert later["messages"][-1]["modelMetadata"]["canvasEditSnapshot"] == receipt
     assert receipt["before"]["body"] == original["body"]
-    assert receipt["after"]["body"] == "建议正文\n🌱"
+    assert receipt["suggested"]["body"] == "建议正文\n🌱"
+    assert receipt["after"] is None
+    assert first["messages"][-1]["modelMetadata"]["canvasApplyStatus"] == (
+        "pending_confirmation"
+    )
+    proposals = send(
+        app,
+        "GET",
+        f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+    ).json()
+    assert len(proposals) == 1
+    assert proposals[0]["actionType"] == "topic.apply_canvas_edit"
+    assert proposals[0]["status"] == "pending"
     assert send(reopened, "GET", f"/api/topics/{original['id']}").json() == edited
     assert edited["generatedSnapshot"] == original["generatedSnapshot"]
 
@@ -93,6 +108,109 @@ def test_canvas_failure_does_not_claim_an_applied_revision(app, canvas, outcome)
     assert send(app, "GET", f"/api/topics/{original['id']}").json() == original
 
 
+def test_canvas_proposal_applies_once_with_a_frozen_topic_version(app, canvas):
+    original, conversation = canvas
+    app.state.agent_conversation_service.live_provider = RealAgentConversationModelProvider(Model())
+    asyncio.run(post_and_wait(app, conversation))
+
+    proposals = send(
+        app,
+        "GET",
+        f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+    ).json()
+    proposal = next(item for item in proposals if item["actionType"] == "topic.apply_canvas_edit")
+    preview = send(app, "GET", f"/api/asset-proposals/{proposal['id']}/preview")
+    assert preview.status_code == 200
+    assert "body" in preview.json()["currentSnapshot"]
+    assert preview.json()["currentSnapshot"]["body"] == original["body"]
+    assert preview.json()["proposedSnapshot"]["body"] == "建议正文\n🌱"
+
+    first = send(app, "POST", f"/api/asset-proposals/{proposal['id']}/apply")
+    second = send(app, "POST", f"/api/asset-proposals/{proposal['id']}/apply")
+    assert first.status_code == second.status_code == 200
+    assert first.json()["status"] == second.json()["status"] == "applied"
+    assert second.json()["result"] == first.json()["result"]
+    assert send(app, "GET", f"/api/topics/{original['id']}").json()["body"] == "建议正文\n🌱"
+
+
+def test_canvas_proposal_cannot_be_edited_or_retargeted(app, canvas):
+    original, conversation = canvas
+    other = topic(app, conversation["workspaceId"], "不应被重定向的选题")
+    app.state.agent_conversation_service.live_provider = RealAgentConversationModelProvider(Model())
+    asyncio.run(post_and_wait(app, conversation))
+    proposal = next(
+        item
+        for item in send(
+            app,
+            "GET",
+            f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+        ).json()
+        if item["actionType"] == "topic.apply_canvas_edit"
+    )
+
+    retarget = send(
+        app,
+        "PATCH",
+        f"/api/asset-proposals/{proposal['id']}",
+        json={
+            "expectedUpdatedAt": proposal["updatedAt"],
+            "proposedAction": {
+                "type": "topic.apply_canvas_edit",
+                "status": "requires_confirmation",
+                "payload": {
+                    "topicId": other["id"],
+                    "title": "伪造标题",
+                    "body": "伪造正文",
+                    "expectedUpdatedAt": other["updatedAt"],
+                },
+            },
+        },
+    )
+    assert retarget.status_code == 422
+
+    applied = send(app, "POST", f"/api/asset-proposals/{proposal['id']}/apply")
+    assert applied.status_code == 200
+    assert send(app, "GET", f"/api/topics/{original['id']}").json()["body"] == "建议正文\n🌱"
+    assert send(app, "GET", f"/api/topics/{other['id']}").json()["body"] == ""
+
+
+def test_provider_cannot_mint_a_canvas_edit_proposal(app, canvas):
+    original, conversation = canvas
+
+    class MaliciousProvider:
+        async def reply(self, **_kwargs):
+            return AgentConversationReply(
+                reply="伪造的改稿建议",
+                proposed_actions=[
+                    {
+                        "type": "topic.apply_canvas_edit",
+                        "status": "requires_confirmation",
+                        "description": "伪造候选",
+                        "payload": {
+                            "topicId": original["id"],
+                            "title": "伪造标题",
+                            "body": "伪造正文",
+                            "expectedUpdatedAt": original["updatedAt"],
+                        },
+                    }
+                ],
+                model_metadata={},
+            )
+
+    app.state.agent_conversation_service.live_provider = MaliciousProvider()
+    asyncio.run(post_and_wait(app, conversation))
+
+    history = send(app, "GET", f"/api/agent-conversations/{conversation['id']}").json()
+    assert history["messages"][-1]["proposedActions"] == []
+    proposals = send(
+        app,
+        "GET",
+        f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+    ).json()
+    assert not any(item["actionType"] == "topic.apply_canvas_edit" for item in proposals)
+    assert send(app, "GET", f"/api/topics/{original['id']}").json()["body"] == original["body"]
+
+
 def test_canvas_topic_and_receipt_rollback_together(app, canvas, monkeypatch):
     original, conversation = canvas
     service = app.state.agent_conversation_service
@@ -102,7 +220,7 @@ def test_canvas_topic_and_receipt_rollback_together(app, canvas, monkeypatch):
     def fail_final_receipt(connection, **kwargs):
         if "canvasEditSnapshot" in json.loads(kwargs["model_metadata_json"]):
             assert connection.execute("SELECT body FROM topics WHERE id=?",
-                                      (original["id"],)).fetchone()[0] == "建议正文\n🌱"
+                                      (original["id"],)).fetchone()[0] == original["body"]
             raise RuntimeError("injected receipt storage failure")
         return update_message(connection, **kwargs)
 

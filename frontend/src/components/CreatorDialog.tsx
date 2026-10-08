@@ -24,7 +24,7 @@ export function CreatorDialog({ title, onClose, children, wide = false, returnFo
       onCancel={(event) => { event.preventDefault(); onClose() }}>
       <div className="creator-dialog-head">
         <h2>{title}</h2>
-        <button type="button" onClick={onClose} aria-label="关闭">×</button>
+        <button type="button" className="icon-button" onClick={onClose} aria-label="关闭">×</button>
       </div>
       {children}
     </dialog>

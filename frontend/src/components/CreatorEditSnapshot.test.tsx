@@ -28,6 +28,15 @@ it('does not present a conflicted suggestion as an applied result', () => {
   expect(screen.queryByRole('region',{name:'当时应用后'})).not.toBeInTheDocument()
 })
 
+it('shows a pending confirmation as a frozen suggestion without calling it applied', () => {
+  render(<CreatorEditSnapshot {...props} metadata={{canvasApplyStatus:'pending_confirmation',canvasEditSnapshot:snapshot}} />)
+  fireEvent.click(screen.getByText('待你确认 · 查看原稿与建议'))
+  expect(screen.getByRole('region',{name:'修改前'})).toHaveTextContent('原文')
+  expect(screen.getByRole('region',{name:'AI 建议（待你确认）'})).toHaveTextContent('新正文')
+  expect(screen.queryByRole('region',{name:'当时应用后'})).not.toBeInTheDocument()
+  expect(screen.getByText('建议尚未写入稿件，请在消息下方确认是否采用。')).toBeInTheDocument()
+})
+
 it('keeps suggested and actually applied text distinct if they differ', () => {
   render(<CreatorEditSnapshot {...props} metadata={{canvasApplyStatus:'applied',canvasEditSnapshot:{...snapshot,after:{title:'落库标题',body:'落库正文'}}}} />)
   fireEvent.click(screen.getByText('当时已应用 · 查看修改'))

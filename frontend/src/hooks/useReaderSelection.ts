@@ -19,8 +19,9 @@ function read(key: string): Receipt | null {
   } catch { return null }
 }
 
-export function useReaderSelection(workspaceId: string, topicId: string, revision: string, panelTask?: PanelTask) {
-  const key = readerSelectionStorageKey(workspaceId, topicId, panelTask)
+export function useReaderSelection(workspaceId: string, topicId: string, revision: string, panelTask?: PanelTask, note?: {sourceMaterialId:string;noteId:string}, accountProfileId?: string) {
+  const targetKey = accountProfileId ? `account:${accountProfileId}` : note ? `note:${note.sourceMaterialId}:${note.noteId}` : topicId
+  const key = readerSelectionStorageKey(workspaceId, targetKey, panelTask)
   const epoch = useRef(0)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const locked = useRef(false)
@@ -64,7 +65,7 @@ export function useReaderSelection(workspaceId: string, topicId: string, revisio
     locked.current = false
     setView({key, revision, record: null, busy: false, error: ''})
     const receipt = read(key)
-    if (workspaceId && topicId && receipt?.id) {
+    if (workspaceId && targetKey && receipt?.id) {
       locked.current = true
       setView({key, revision, record: null, busy: true, error: ''})
       void observe(receipt, turn)
@@ -77,7 +78,7 @@ export function useReaderSelection(workspaceId: string, topicId: string, revisio
   }, [key, revision])
 
   async function recommend(desiredCount: number) {
-    if (!workspaceId || !topicId || locked.current) return
+    if (!workspaceId || !targetKey || locked.current) return
     cancelTimer()
     const turn = ++epoch.current
     locked.current = true
@@ -90,7 +91,8 @@ export function useReaderSelection(workspaceId: string, topicId: string, revisio
       // Persist before sending, so a lost response can be retried with the same key.
       window.localStorage.setItem(key, JSON.stringify(receipt))
       const record = await readerSelectionApi.create(workspaceId, {
-        requestKey: receipt.requestKey, desiredCount: receipt.desiredCount, topicId,
+        requestKey: receipt.requestKey, desiredCount: receipt.desiredCount,
+        ...(accountProfileId ? {accountProfileId} : note || {topicId}),
         ...(panelTask ? {panelTask} : {}),
       })
       if (record.workspaceId !== workspaceId) throw new Error('推荐不属于当前账号')

@@ -5,6 +5,7 @@ import type {PanelEditProposal} from '../panelEdits'
 import type {SimulationRun, Topic} from '../types'
 import {PanelEditWorkspace} from './PanelEditWorkspace'
 import {CreatorCanvasPage} from './CreatorCanvasPage'
+import {contentCollaborationApi} from '../contentCollaboration'
 
 afterEach(() => {cleanup(); vi.restoreAllMocks()})
 const before = {title:'原标题', body:'🌱原句。\n原句。结尾。', updatedAt:'2026-10-05T00:00:00+00:00'}
@@ -16,6 +17,7 @@ const applied: PanelEditProposal = {...proposal,status:'applied',receipt:{before
 const undone: PanelEditProposal = {...applied,status:'undone',undoReceipt:{before:applied.receipt.after,after:{...before,updatedAt:'2026-10-05T00:00:02+00:00'},undoneAt:'2026-10-05T00:00:02+00:00'}}
 function deferred<T>() {let resolve!:(value:T)=>void; const promise = new Promise<T>(yes => {resolve=yes}); return {promise,resolve}}
 function setup() {
+  vi.spyOn(contentCollaborationApi,'list').mockResolvedValue([])
   vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
   return {
     get:vi.spyOn(simulationRunApi,'get').mockResolvedValue(run),
@@ -27,6 +29,55 @@ function setup() {
   }
 }
 const props = {workspaceId:'w',topic,runs:[run],blocked:'',onApply:vi.fn(async () => applied)}
+
+it('starts material input empty and records author text only after explicit preview', async () => {
+  const api = setup(), onApply = vi.fn(async () => applied)
+  const materialCard = {...card,kind:'add_material',materialRequests:['哪个练习让你开口？'],suggestedText:'模型猜测的课堂经历'}
+  api.get.mockResolvedValue({...run,synthesis:{...run.synthesis,editorFeedback:[materialCard]}})
+  render(<PanelEditWorkspace {...props} onApply={onApply}/>)
+  await open()
+  expect(screen.queryByText('可参考的表达')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'补充素材'}))
+  expect(screen.getByRole('dialog')).toHaveAccessibleName('补充你的素材')
+  expect(screen.getByLabelText('作者补充的正文')).toHaveValue('')
+  fireEvent.change(screen.getByLabelText('修改方式'),{target:{value:'insert_after'}})
+  expect(screen.getByRole('button',{name:'保存提案并预览'})).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('作者补充的正文'),{target:{value:'  '}})
+  expect(screen.getByRole('button',{name:'保存提案并预览'})).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('作者补充的正文'),{target:{value:'我先向邻座问了一个问题。'}})
+  fireEvent.click(screen.getByRole('button',{name:'保存提案并预览'}))
+  await screen.findByRole('button',{name:'确认采用'})
+  expect(api.create.mock.calls[0][2]).toMatchObject({operation:'insert_after',text:'我先向邻座问了一个问题。',authorMaterial:'我先向邻座问了一个问题。'})
+  expect(onApply).not.toHaveBeenCalled()
+})
+
+it('keeps old material proposals readable without offering unconfirmed adoption', async () => {
+  const api = setup()
+  api.list.mockResolvedValue([{...proposal,snapshot:{...proposal.snapshot,feedback:{...card,kind:'add_material'}}}])
+  render(<PanelEditWorkspace {...props}/>)
+  await open()
+  fireEvent.click(within(screen.getByRole('region',{name:'已保存的改稿提案'})).getByRole('button'))
+  expect(screen.getByRole('button',{name:'确认采用'})).toBeDisabled()
+  expect(screen.getByText(/这份旧提案未记录作者素材/)).toBeVisible()
+  expect(screen.getByRole('button',{name:'不采用这份提案'})).toBeEnabled()
+})
+
+it('preserves supplied material after failed preview and reuses its request key', async () => {
+  const api = setup()
+  api.get.mockResolvedValue({...run,synthesis:{...run.synthesis,editorFeedback:[{...card,kind:'add_material',materialRequests:['请补一个例子']}]}})
+  api.create.mockRejectedValueOnce(new Error('网络断开'))
+  render(<PanelEditWorkspace {...props}/>)
+  await open()
+  fireEvent.click(screen.getByRole('button',{name:'补充素材'}))
+  fireEvent.change(screen.getByLabelText('修改方式'),{target:{value:'replace'}})
+  fireEvent.change(screen.getByLabelText('作者补充的正文'),{target:{value:'真实例子'}})
+  fireEvent.click(screen.getByRole('button',{name:'保存提案并预览'}))
+  await screen.findByRole('alert')
+  expect(screen.getByLabelText('作者补充的正文')).toHaveValue('真实例子')
+  fireEvent.click(screen.getByRole('button',{name:'保存提案并预览'}))
+  await screen.findByRole('button',{name:'确认采用'})
+  expect(api.create.mock.calls[0][2].requestKey).toBe(api.create.mock.calls[1][2].requestKey)
+})
 async function open() {
   fireEvent.click(screen.getByRole('button',{name:'试读反馈改稿'}))
   await screen.findByRole('heading',{name:'第二句更具体'})
@@ -34,7 +85,7 @@ async function open() {
 }
 async function preview() {
   await open()
-  fireEvent.click(screen.getByRole('button',{name:'准备这处修改'}))
+  fireEvent.click(screen.getByRole('button',{name:'查看改写'}))
   fireEvent.change(screen.getByLabelText('修改方式'),{target:{value:'replace'}})
   fireEvent.click(screen.getByRole('button',{name:'保存提案并预览'}))
   await screen.findByRole('button',{name:'确认采用'})
@@ -44,7 +95,7 @@ it('requires explicit operation, previews full text, and only applies after conf
   const api = setup(), onApply = vi.fn(async () => applied)
   render(<PanelEditWorkspace {...props} onApply={onApply}/>)
   await open()
-  fireEvent.click(screen.getByRole('button',{name:'准备这处修改'}))
+  fireEvent.click(screen.getByRole('button',{name:'查看改写'}))
   expect(screen.getByRole('button',{name:'保存提案并预览'})).toBeDisabled()
   fireEvent.change(screen.getByLabelText('修改方式'),{target:{value:'insert_after'}})
   fireEvent.change(screen.getByLabelText('建议文字'),{target:{value:'补一句'}})
@@ -63,7 +114,7 @@ it('keeps request identity across uncertain creation failures and permits editin
   api.create.mockRejectedValueOnce(new Error('连接中断'))
   render(<PanelEditWorkspace {...props}/>)
   await open()
-  fireEvent.click(screen.getByRole('button',{name:'准备这处修改'}))
+  fireEvent.click(screen.getByRole('button',{name:'查看改写'}))
   fireEvent.change(screen.getByLabelText('修改方式'),{target:{value:'replace'}})
   fireEvent.click(screen.getByRole('button',{name:'保存提案并预览'}))
   await screen.findByRole('alert')
@@ -166,7 +217,7 @@ it('uses a new request identity when preparing the same wording after a known re
   fireEvent.click(screen.getByRole('button',{name:'不采用这份提案'}))
   await screen.findByText(/未采用，原稿未因这份提案改变/)
   fireEvent.click(screen.getByRole('button',{name:'关闭'}))
-  fireEvent.click(screen.getByRole('button',{name:'准备这处修改'}))
+  fireEvent.click(screen.getByRole('button',{name:'查看改写'}))
   fireEvent.change(screen.getByLabelText('修改方式'),{target:{value:'replace'}})
   fireEvent.click(screen.getByRole('button',{name:'保存提案并预览'}))
   await screen.findByRole('button',{name:'确认采用'})

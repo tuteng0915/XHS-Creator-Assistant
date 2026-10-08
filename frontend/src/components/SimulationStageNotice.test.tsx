@@ -35,9 +35,9 @@ it('uses the same partial status and role errors in the actual history page', ()
     simulationReviewDraft={{reviewStatus:'unreviewed',userNotes:''}} simulationReviewSaveState={{phase:'idle'}} reviewStatusLabel={s=>s}
     onOpenSimulationRun={vi.fn()} onSimulationReviewDraftChange={vi.fn()} onSaveSimulationRunReview={vi.fn()}
     stageSeedFromSimulation={stageSeedFromSimulation} renderStageResult={renderer}/>)
-  expect(screen.getByText('部分完成')).toBeInTheDocument()
-  expect(screen.getByText(/模拟评论：我先试试/)).toBeInTheDocument()
-  fireEvent.click(screen.getByText('部分角色未完成，已保留成功结果'))
+  expect(screen.getByText(/已有部分结果/)).toBeInTheDocument()
+  expect(screen.getByText('我先试试')).toBeInTheDocument()
+  fireEvent.click(screen.getByText('部分环节未完成，已保留现有发言'))
   expect(screen.getByText('核对派：连接失败')).toBeVisible()
 })
 

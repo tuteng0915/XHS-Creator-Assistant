@@ -378,6 +378,146 @@ class AgentConversationResponse(AgentConversationSummary):
     messages: list[AgentMessageResponse]
 
 
+class ContentCollaborationRole(StrEnum):
+    """Fixed identities in the product's creator collaboration room."""
+
+    CREATOR = "creator"
+    RESEARCH = "research"
+    WRITING = "writing"
+    REVIEW = "review"
+    SYSTEM = "system"
+
+
+class ContentCollaborationSessionStatus(StrEnum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class ContentCollaborationExecutionStatus(StrEnum):
+    IDLE = "idle"
+    QUEUED = "queued"
+    RUNNING = "running"
+    WAITING_CREATOR = "waiting_creator"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ContentCollaborationRunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    WAITING_CREATOR = "waiting_creator"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ContentCollaborationContextTarget(APIModel):
+    """The first collaboration slice is intentionally scoped to one Topic."""
+
+    asset_type: Literal["topic"]
+    asset_id: str = Field(min_length=1, max_length=120)
+
+
+class ContentCollaborationSessionCreate(APIModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    context_target: ContentCollaborationContextTarget
+    request_key: str | None = Field(default=None, min_length=1, max_length=120)
+
+    @field_validator("title", "request_key")
+    @classmethod
+    def nonblank_optional_text(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("内容不能为空")
+        return value
+
+
+class ContentCollaborationSessionUpdate(APIModel):
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    status: ContentCollaborationSessionStatus | None = None
+    expected_revision: int = Field(ge=1)
+
+    @field_validator("title")
+    @classmethod
+    def nonblank_title(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("标题不能为空")
+        return value
+
+
+class ContentCollaborationMessageCreate(APIModel):
+    content: str = Field(min_length=1, max_length=8_000)
+    recipient: Literal[
+        ContentCollaborationRole.RESEARCH,
+        ContentCollaborationRole.WRITING,
+        ContentCollaborationRole.REVIEW,
+    ]
+    request_key: str = Field(min_length=1, max_length=120)
+    # Collaboration is a quality-facing product surface. It uses the product
+    # default Qwen path unless a caller explicitly asks for the local demo.
+    mode: Literal["demo", "live"] = "live"
+
+    @field_validator("content", "request_key")
+    @classmethod
+    def nonblank_message_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("内容不能为空")
+        return value
+
+
+class ContentCollaborationMessageResponse(APIModel):
+    id: str
+    session_id: str
+    sequence_no: int
+    sender: ContentCollaborationRole
+    recipient: ContentCollaborationRole | None = None
+    content: str
+    reply_to_message_id: str | None = None
+    artifact_refs: list[dict[str, Any]] = Field(default_factory=list)
+    context_snapshot: dict[str, Any] = Field(default_factory=dict)
+    model_metadata: dict[str, Any] = Field(default_factory=dict)
+    client_request_key: str | None = None
+    created_at: datetime
+
+
+class ContentCollaborationRunResponse(APIModel):
+    id: str
+    session_id: str
+    trigger_message_id: str | None = None
+    request_key: str
+    input_snapshot: dict[str, Any]
+    graph_state: dict[str, Any]
+    status: ContentCollaborationRunStatus
+    attempt_count: int
+    revision: int
+    error_code: str = ""
+    error_detail: str = ""
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    updated_at: datetime
+
+
+class ContentCollaborationSessionSummary(APIModel):
+    id: str
+    workspace_id: str
+    title: str
+    context_target: ContentCollaborationContextTarget
+    status: ContentCollaborationSessionStatus
+    execution_status: ContentCollaborationExecutionStatus
+    revision: int
+    failure_code: str = ""
+    failure_detail: str = ""
+    created_at: datetime
+    updated_at: datetime
+    last_message_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class ContentCollaborationSessionResponse(ContentCollaborationSessionSummary):
+    initial_context_snapshot: dict[str, Any] = Field(default_factory=dict)
+    messages: list[ContentCollaborationMessageResponse] = Field(default_factory=list)
+    runs: list[ContentCollaborationRunResponse] = Field(default_factory=list)
+
+
 class AssetProposalStatus(StrEnum):
     PENDING = "pending"
     APPLIED = "applied"
@@ -749,7 +889,9 @@ class ModelOperation(StrEnum):
     SIMULATION_REACTION = "simulation_reaction"
     SIMULATION_DEBATE = "simulation_debate"
     SIMULATION_SYNTHESIS = "simulation_synthesis"
+    PANEL_INTERVIEW = "panel_interview"
     AGENT_CHAT = "agent_chat"
+    CONTENT_COLLABORATION_TURN = "content_collaboration_turn"
     VIDEO_CREATOR_PROFILE = "video_creator_profile"
     VIDEO_QUALITY_ANALYSIS = "video_quality_analysis"
     INCENTIVE_FIT_ANALYSIS = "incentive_fit_analysis"
@@ -799,11 +941,36 @@ class PanelTask(APIModel):
         return self
 
 
+class SimulationPersonaOverride(APIModel):
+    """A local reading-room adjustment, never a mutation of the saved reader."""
+    model_config = ConfigDict(extra="forbid")
+    profile: str | None = Field(default=None, strict=True, min_length=1, max_length=4000)
+    core_concern: str | None = Field(default=None, strict=True, min_length=1, max_length=2000)
+    expression_style: str | None = Field(default=None, strict=True, min_length=1, max_length=2000)
+
+    @field_validator("profile", "core_concern", "expression_style")
+    @classmethod
+    def nonblank_adjustment(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("本次读者设定不能为空")
+        return value
+
+    @model_validator(mode="after")
+    def has_adjustment(self):
+        if not any((self.profile, self.core_concern, self.expression_style)):
+            raise ValueError("请至少调整一项读者设定")
+        return self
+
+
 class SimulationRunCreate(APIModel):
+    account_profile_id: str | None = Field(default=None, min_length=1)
+    source_material_id: str | None = None
+    note_id: str | None = None
     panel_task: PanelTask | None = None
     reader_selection_id: str | None = Field(default=None, min_length=1)
     reader_selection_input_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     simulated_fan_ids: list[str] | None = Field(default=None, min_length=1)
+    persona_overrides: dict[str, SimulationPersonaOverride] | None = None
     audience_analysis_id: str | None = None
     topic_id: str | None = None
     draft_id: str | None = None
@@ -813,9 +980,14 @@ class SimulationRunCreate(APIModel):
 
 class SimulationRunSummary(APIModel):
     id: str
+    parent_simulation_id: str | None = None
     workspace_id: str
     topic_id: str | None
     draft_id: str | None = None
+    simulation_category: Literal["account", "published_note", "creation"] = "creation"
+    target_title: str = ""
+    source_material_id: str | None = None
+    note_id: str | None = None
     status: SimulationRunStatus
     user_notes: str = ""
     review_status: ReviewStatus = ReviewStatus.UNREVIEWED

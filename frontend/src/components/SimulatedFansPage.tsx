@@ -2,6 +2,7 @@ import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type
 import { simulatedFanApi } from '../api'
 import type { FanDefinition, FanVoiceTemplate, SimulatedFan } from '../types'
 import { CreatorDialog } from './CreatorDialog'
+import { ReaderAvatar } from './ReaderAvatar'
 
 type FanEditorHandle = { requestSwitch: (id: string) => void }
 
@@ -15,8 +16,8 @@ export function SimulatedFansPage({rows, error, onRefresh, onAnalyze}: {
   return <div className="workspace-page">
     <section className="history-list"><div className="panel-title">模拟粉丝</div>
       {error && <p role="alert">{error}</p>}
-      {!rows.length && <><p>先分析受众，生成模拟粉丝。</p><button onClick={onAnalyze}>分析受众</button></>}
-      {rows.map(f => <button key={f.id} disabled={editorBusy} className={`run-row ${f.id === selectedId ? 'active' : ''}`} onClick={() => editor.current ? editor.current.requestSwitch(f.id) : setSelectedId(f.id)}><span>{f.editable.name}</span><small>{f.original.origin === 'curated_preset' ? '预置整理 · ' : f.original.origin === 'voice_template' ? '预设声音 · ' : ''}{f.status === 'archived' ? '已归档' : '可用于模拟'}</small></button>)}
+      {!rows.length && <><p>先分析历史图文中的受众，再收录你想邀请的模拟读者。</p><button className="primary" onClick={onAnalyze}>分析受众</button></>}
+      {rows.map(f => <button key={f.id} disabled={editorBusy} className={`run-row ${f.id === selectedId ? 'active' : ''}`} onClick={() => editor.current ? editor.current.requestSwitch(f.id) : setSelectedId(f.id)}><span className="reader-card-heading"><ReaderAvatar id={`${f.sourceAnalysisId}:${f.sourceGroupId}`} name={f.editable.name} size={32} /><span>{f.editable.name}</span></span><small>{f.original.origin === 'curated_preset' ? '预置整理 · ' : f.original.origin === 'voice_template' ? '预设声音 · ' : ''}{f.status === 'archived' ? '已归档' : '可邀请试读'}</small></button>)}
     </section>
     <section className="history-detail">{selected ? <FanEditor key={selected.id} ref={editor} fan={selected} onBusyChange={setEditorBusy} onSelect={setSelectedId} onRefresh={onRefresh} /> : <p>选择一位模拟粉丝查看档案。</p>}</section>
   </div>
@@ -118,7 +119,7 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
       {key === 'profile' && <><label>兴趣领域<input disabled={busy || voiceBusy} value={interestsText} placeholder="如：留学、职业发展、个人成长" aria-invalid={Boolean(interestsError)} aria-describedby={interestsError ? 'fan-interests-error' : undefined} onChange={e => setInterestsText(e.target.value)} /></label>
         {interestsError && <p id="fan-interests-error" role="alert">{interestsError}</p>}</>}
     </Fragment>)}
-    <div className="save-row fan-editor-actions"><button disabled={busy || voiceBusy || Boolean(interestsError) || !dirty || !draft.name.trim() || !draft.profile.trim()} onClick={() => void save(saved.status)}>保存修改</button>
+    <div className="save-row fan-editor-actions"><button className="primary" disabled={busy || voiceBusy || Boolean(interestsError) || !dirty || !draft.name.trim() || !draft.profile.trim()} onClick={() => void save(saved.status)}>保存修改</button>
       <span>{refreshing ? '刷新列表中…' : busy ? '保存中…' : error ? '保存失败' : dirty ? '有未保存修改' : '已保存'}</span>
       <button disabled={busy || voiceBusy || dirty || Boolean(refreshError)} onClick={() => void save(saved.status === 'active' ? 'archived' : 'active')}>{saved.status === 'active' ? '归档' : '恢复'}</button>
       <button ref={voiceTrigger} disabled={busy || voiceBusy || (!createdVoices && (dirty || Boolean(refreshError) || saved.status !== 'active'))} onClick={() => void openVoices()}>{createdVoices ? '查看加入结果' : voiceBusy && !voices ? '加载中…' : '添加不同声音'}</button>
@@ -136,7 +137,7 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
       {error && <p role="alert">{error}</p>}
       <div className="save-row fan-switch-actions">
         <button type="button" disabled={busy} onClick={() => setPendingId(null)}>继续编辑</button>
-        {!refreshError && <button type="button" disabled={busy} onClick={() => onSelect(pendingId)}>放弃修改并切换</button>}
+        {!refreshError && <button type="button" className="danger-button" disabled={busy} onClick={() => onSelect(pendingId)}>放弃修改并切换</button>}
         {refreshError && !dirty
           ? <button type="button" className="primary" disabled={busy} onClick={() => void retryRefresh(pendingId)}>{refreshing ? '刷新中…' : '重试刷新并切换'}</button>
           : <button type="button" className="primary" disabled={busy || !canSave} onClick={async () => {if (await save(saved.status)) onSelect(pendingId)}}>{refreshing ? '刷新中…' : busy ? '保存中…' : '保存并切换'}</button>}
@@ -200,6 +201,6 @@ function FanPreview({fan}:{fan:FanDefinition}) {
         {fan.expressionStyle && <><dt>表达</dt><dd>{fan.expressionStyle}</dd></>}
       </>}
     </dl>
-    <button type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? '收起画像' : '展开画像'}</button>
+    <button type="button" className="text-button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? '收起画像' : '展开画像'}</button>
   </div>
 }

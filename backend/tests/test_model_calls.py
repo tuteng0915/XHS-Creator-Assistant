@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,63 @@ def test_qwen_profile_length_stop_is_not_accepted_even_with_parseable_json(monke
         asyncio.run(service.call_operation(ModelOperation.PROFILE, {"historicalPosts": "中文"}))
     assert len(FakeAsyncClient.requests) == 1
     assert FakeAsyncClient.requests[0]["json"]["max_tokens"] == 6000
+
+
+def test_content_collaboration_prompt_uses_one_role_aware_strict_turn_contract():
+    system, user = ModelCallService(settings())._build_prompt(
+        ModelOperation.CONTENT_COLLABORATION_TURN,
+        {
+            "schemaVersion": "content-collaboration-role-packet/v2",
+            "role": "research",
+            "roleTask": {"objective": "建立可写证据"},
+            "creativeBrief": {"target": {"title": "冻结选题"}},
+            "upstreamHandoff": {"content": "先查证", "candidates": []},
+            "evidence": {"allowedSources": [{"id": "target:topic", "text": "原文"}]},
+        },
+    )
+    assert "research：交给 writing 时" in system
+    assert "candidateSuggestions" in system
+    assert "usedCandidateIds" in system
+    assert "artifactRefs" in system
+    assert "不能借一条相关引用把它包装成已知事实" in system
+    assert "不能用“例如”" not in system
+    assert "冻结选题" in user
+    assert "target:topic" in user
+
+
+def test_qwen_content_collaboration_length_stop_is_not_accepted(monkeypatch):
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.response_status_code = 200
+    FakeAsyncClient.response_body = {
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {"content": '{"turn":{"summary":"未完成"}}'},
+            }
+        ]
+    }
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    service = ModelCallService(settings(model_provider="qwen", qwen_api_key="fake"))
+    with pytest.raises(ValidationError, match="协作角色输出达到长度上限"):
+        asyncio.run(
+            service.call_operation(
+                ModelOperation.CONTENT_COLLABORATION_TURN,
+                {"role": "research", "frozenContext": {"allowedSources": []}},
+            )
+        )
+    assert len(FakeAsyncClient.requests) == 1
+    assert FakeAsyncClient.requests[0]["json"]["max_tokens"] == 1800
+
+
+def test_content_collaboration_turn_does_not_unwrap_a_loose_model_envelope():
+    with pytest.raises(
+        ValidationError,
+        match="Model response for content_collaboration_turn missing turn",
+    ):
+        ModelCallService._validate_model_output(
+            ModelOperation.CONTENT_COLLABORATION_TURN,
+            {"data": {"turn": {"summary": "不该接受"}}},
+        )
 
 
 def test_profile_prompt_keeps_contexts_distinct_without_removing_positive_synthesis():
@@ -240,6 +298,10 @@ def test_qwen_provider_uses_openai_compatible_chat_completions(monkeypatch) -> N
     assert response.output == {"painPoints": []}
     assert response.model_metadata == {
         "provider": "qwen",
+        "modelSource": "response",
+        "systemPromptHash": hashlib.sha256(
+            FakeAsyncClient.requests[0]["json"]["messages"][0]["content"].encode("utf-8")
+        ).hexdigest(),
         "model": "qwen-plus",
         "usage": {"total_tokens": 12},
         "operation": "pain_points",

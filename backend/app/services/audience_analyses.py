@@ -21,7 +21,7 @@ from app.services.audience_evidence import (
 )
 from app.services.common import utc_now
 from app.services.creator_analysis_scope import scope_creator_profile
-from app.services.simulated_fans import FanDefinition, SimulatedFanService
+from app.services.simulated_fans import FanDefinition
 
 
 class AudienceAnalysisCreate(APIModel):
@@ -280,10 +280,8 @@ class AudienceAnalysisService:
                 error_message = "所有分组的受众证据引用均未通过核验；具体原因已保存。"
             phase = "saving_result"
             with self.database.transaction() as c:
-                if result:
-                    SimulatedFanService(self.database).save_generated(
-                        c, run.workspace_id, run.id, result, run.input_snapshot,
-                    )
+                # Analysis produces candidates. A creator explicitly adopts each
+                # reader through the simulated-fan API before it enters their library.
                 c.execute(
                     "UPDATE audience_analyses SET status=?,result_json=?,"
                     "diagnostics_json=?,error=?,completed_at=? WHERE id=?",

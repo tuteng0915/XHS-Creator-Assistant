@@ -373,8 +373,20 @@ export interface AnalysisRun extends AnalysisRunSummary {
   modelMetadata: Record<string, unknown>
 }
 
+export type SimulationCategory = 'account' | 'published_note' | 'creation'
+export type SimulationPersonaOverrides = Record<string, {
+  profile?: string
+  coreConcern?: string
+  expressionStyle?: string
+}>
+
 export interface SimulationRunSummary {
   id: string
+  simulationCategory?: SimulationCategory
+  targetTitle?: string
+  sourceMaterialId?: string | null
+  noteId?: string | null
+  parentSimulationId?: string | null
   workspaceId: string
   topicId: string | null
   draftId: string | null
@@ -392,6 +404,59 @@ export interface PanelTask {
   readingMode: 'natural' | 'guided'
   discussionEnabled: boolean
   focusQuestions: string[]
+}
+
+export interface PanelRetestPreview {
+  parentSimulationId: string
+  workspaceId: string
+  topicId: string
+  expectedUpdatedAt: string
+  title: string
+  body: string
+  panelTask: PanelTask
+  mode: 'demo' | 'live'
+  readers: Array<{id: string; name: string; profile: string}>
+  limitations: string[]
+}
+
+export interface PanelRetestRequest {
+  requestKey: string
+  expectedUpdatedAt: string
+  confirmed: true
+}
+
+export interface PanelReadingSide {
+  initialStatus: string
+  understanding: string
+  stance: string
+  quote: string
+  concerns: string[]
+  opportunities: string[]
+  replyStatus: string
+  reply: string
+  newConcerns: string[]
+  strongerSignals: string[]
+  changeReason: string
+}
+
+export interface PanelComparison {
+  workspaceId: string
+  simulationId: string
+  parentSimulationId: string
+  before: PanelComparisonRun
+  after: PanelComparisonRun
+  readers: Array<{id: string; name: string; profile: string; before: PanelReadingSide; after: PanelReadingSide}>
+  limitations: string[]
+}
+
+export interface PanelComparisonRun {
+  id: string
+  status: RunStatus
+  createdAt: string
+  title: string
+  body: string
+  mode: string
+  recordedModels: Array<{operation?: string; provider?: string; model?: string; modelSource?: string; systemPromptHash?: string}>
 }
 
 export interface SimulationRun extends SimulationRunSummary {

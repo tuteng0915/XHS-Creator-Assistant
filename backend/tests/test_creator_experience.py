@@ -226,6 +226,12 @@ def test_invalid_audience_group_does_not_discard_valid_groups(app):
     assert result.status == "partially_completed"
     assert len(result.result["groups"]) == 3
     assert result.diagnostics["rejectedGroups"][0]["issues"][0]["code"] == "source_not_found"
+    assert send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json() == []
+    for group in result.result["groups"]:
+        adopted = send(app, "POST", f"/api/workspaces/{wid}/simulated-fans", json={
+            "sourceAnalysisId": result.id, "sourceGroupId": group["id"],
+        })
+        assert adopted.status_code == 201
     fans = send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()
     assert {fan["sourceGroupId"] for fan in fans} == {"1", "2", "3"}
 
@@ -281,11 +287,9 @@ def test_canvas_live_context_persistence_and_conflict(app, conflict):
 
     asyncio.run(exercise())
     stored = app.state.topic_service.get(selected["id"])
-    assert stored.body == ("用户的新修改" if conflict else "AI 正文")
+    assert stored.body == ("用户的新修改" if conflict else selected["body"])
     history = service.get(created["id"])
-    assert history.messages[-1].model_metadata["canvasApplyStatus"] == (
-        "conflict" if conflict else "applied"
-    )
+    assert history.messages[-1].model_metadata["canvasApplyStatus"] == "pending_confirmation"
     assert history.messages[-1].model_metadata["canvasUpdate"]["body"] == "AI 正文"
     receipt = history.messages[-1].model_metadata["canvasEditSnapshot"]
     assert receipt["schemaVersion"] == "creator-edit/v1"
@@ -294,14 +298,20 @@ def test_canvas_live_context_persistence_and_conflict(app, conflict):
     assert receipt["before"] == {"title": selected["title"], "body": selected["body"],
                                  "updatedAt": as_iso(datetime.fromisoformat(selected["updatedAt"]))}
     assert receipt["suggested"] == {"title": "新标题", "body": "AI 正文"}
-    if conflict:
-        assert receipt["after"] is None
-    else:
-        refreshed = send(app, "GET", f"/api/topics/{selected['id']}").json()
-        assert receipt["after"] == {
-            "title": refreshed["title"], "body": refreshed["body"],
-            "updatedAt": as_iso(datetime.fromisoformat(refreshed["updatedAt"])),
-        }
+    assert receipt["after"] is None
+    proposal = next(
+        item
+        for item in send(
+            app,
+            "GET",
+            f"/api/agent-conversations/{created['id']}/asset-proposals",
+        ).json()
+        if item["actionType"] == "topic.apply_canvas_edit"
+    )
+    applied = send(app, "POST", f"/api/asset-proposals/{proposal['id']}/apply").json()
+    assert applied["status"] == ("failed" if conflict else "applied")
+    refreshed = send(app, "GET", f"/api/topics/{selected['id']}").json()
+    assert refreshed["body"] == ("用户的新修改" if conflict else "AI 正文")
 
 
 @pytest.mark.parametrize("mode", ["discussion", "title", "opening"])
@@ -360,22 +370,33 @@ def test_canvas_scoped_results_persist_without_touching_other_content(app, mode)
     asyncio.run(exercise())
     assert model.calls == 1
     stored = send(app, "GET", f"/api/topics/{selected['id']}").json()
-    assert stored["title"] == expected_title
-    assert stored["body"] == expected_body
+    assert stored["title"] == selected["title"]
+    assert stored["body"] == original_body
     assert stored["generatedSnapshot"] == selected["generatedSnapshot"]
     if mode == "discussion":
         assert stored["updatedAt"] == selected["updatedAt"]
     history = service.get(conversation["id"])
     assert history.messages[-1].model_metadata.get("canvasApplyStatus") == (
-        None if mode == "discussion" else "applied"
+        None if mode == "discussion" else "pending_confirmation"
     )
     if mode == "discussion":
         assert "canvasEditSnapshot" not in history.messages[-1].model_metadata
     else:
         receipt = history.messages[-1].model_metadata["canvasEditSnapshot"]
         assert receipt["before"]["body"] == original_body
-        assert receipt["after"] == {
-            "title": stored["title"], "body": stored["body"],
-            "updatedAt": as_iso(datetime.fromisoformat(stored["updatedAt"])),
-        }
+        assert receipt["after"] is None
         assert receipt["suggested"] == {"title": expected_title, "body": expected_body}
+        proposal = next(
+            item
+            for item in send(
+                app,
+                "GET",
+                f"/api/agent-conversations/{conversation['id']}/asset-proposals",
+            ).json()
+            if item["actionType"] == "topic.apply_canvas_edit"
+        )
+        applied = send(app, "POST", f"/api/asset-proposals/{proposal['id']}/apply").json()
+        assert applied["status"] == "applied"
+        stored = send(app, "GET", f"/api/topics/{selected['id']}").json()
+        assert stored["title"] == expected_title
+        assert stored["body"] == expected_body

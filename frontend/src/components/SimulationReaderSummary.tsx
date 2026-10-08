@@ -11,6 +11,7 @@ function text(value: unknown): string { return typeof value === 'string' ? value
 export function SimulationReaderSummary({ run }: {run: SimulationRun}) {
   const snapshot = run.inputSnapshot
   const selection = object(snapshot.readerSelection)
+  const overrides = object(snapshot.personaOverrides)
   const proposed = rows(selection.proposedReaders).filter(item => text(item.fanId))
   const definitions = run.personaDefinitions.length ? run.personaDefinitions : rows(snapshot.audiencePersonas)
   const actualIds = Array.isArray(selection.actualFanIds)
@@ -53,7 +54,12 @@ export function SimulationReaderSummary({ run }: {run: SimulationRun}) {
       </div>
       <div className="account-performance-group">
         <b>{run.personaDefinitions.length ? '实际参与者' : '本次选择'}</b>
-        {actualIds.length ? <ol>{actualIds.map(id => <li key={id}>{label(id)}</li>)}</ol>
+        {actualIds.length ? <ol>{actualIds.map(id => <li key={id}>{label(id)}
+          {Object.keys(object(overrides[id])).length>0&&<details><summary>本次画像已调整</summary>
+            {([['profile','视角'],['coreConcern','关切'],['expressionStyle','表达方式']] as const).map(([key,title])=>text(object(overrides[id])[key])&&<p key={key}><b>{title}：</b>{text(object(overrides[id])[key])}</p>)}
+            <small className="muted">仅用于这次讨论，未修改长期读者画像。</small>
+          </details>}
+        </li>)}</ol>
           : <p className="muted">未保存参与者名单</p>}
       </div>
     </div>

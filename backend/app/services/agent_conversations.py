@@ -29,6 +29,9 @@ from app.services.context_access import ContextAccessService
 from app.services.creator_grounding import validate_creator_edit
 from app.services.model_calls import ModelCallService
 
+CANVAS_EDIT_ACTION_TYPE = "topic.apply_canvas_edit"
+_SERVER_CANVAS_EDIT_MARKER = "_serverValidatedCanvasEdit"
+
 
 @dataclass(frozen=True)
 class AgentConversationReply:
@@ -238,8 +241,11 @@ class RealAgentConversationModelProvider:
         if context_pack.get("canvasTopic"):
             fact_sources = [
                 *context_pack.get("creatorFactSources", []),
-                *[{"id": f"user-message-{m['id']}", "text": m["content"]}
-                  for m in messages[-12:] if m["role"] == "user"],
+                *[
+                    {"id": f"user-message-{m['id']}", "text": m["content"]}
+                    for m in messages[-12:]
+                    if m["role"] == "user"
+                ],
                 {"id": "current-user-message", "text": user_content},
             ]
             response = await self.model_call_service.call_operation(
@@ -261,7 +267,8 @@ class RealAgentConversationModelProvider:
                     reply="本次建议未通过事实核验，原稿未改动。请补充或确认相关素材后再修改。",
                     proposed_actions=[],
                     model_metadata={
-                        **response.model_metadata, "canvasApplyStatus": "needs_confirmation",
+                        **response.model_metadata,
+                        "canvasApplyStatus": "needs_confirmation",
                         "suggestedCanvasUpdate": response.output.get("update"),
                         "pendingSuggestions": response.output.get("pendingSuggestions", []),
                         "factCheckError": str(error),
@@ -281,9 +288,12 @@ class RealAgentConversationModelProvider:
             return AgentConversationReply(
                 reply=checked["reply"],
                 proposed_actions=[],
-                model_metadata={**response.model_metadata, "canvasUpdate": update,
-                                "pendingSuggestions": checked["pendingSuggestions"],
-                                "factCheck": checked["factCheck"]},
+                model_metadata={
+                    **response.model_metadata,
+                    "canvasUpdate": update,
+                    "pendingSuggestions": checked["pendingSuggestions"],
+                    "factCheck": checked["factCheck"],
+                },
             )
         response = await self.model_call_service.call_operation(
             ModelOperation.AGENT_CHAT,
@@ -331,6 +341,12 @@ class RealAgentConversationModelProvider:
             description = item.get("description")
             if not isinstance(action_type, str) or not action_type:
                 raise ValidationError("Agent chat proposedAction missing type")
+            # This action represents a fact-checked, frozen canvas revision.
+            # It is only constructed below by the application after the
+            # creator-edit validator runs; a generic agent response must not
+            # mint an equivalent-looking Topic write proposal.
+            if action_type == CANVAS_EDIT_ACTION_TYPE:
+                continue
             if not isinstance(description, str) or not description:
                 raise ValidationError("Agent chat proposedAction missing description")
             actions.append(
@@ -645,64 +661,15 @@ class AgentConversationService:
             workspace = self.workspace_repository.get(connection, conversation["workspace_id"])
             agent = self.agent_repository.get(connection, conversation["agent_asset_id"])
             context_target = json.loads(conversation["context_target_json"] or "{}")
-            selected_asset_item = (
-                self.context_access_service.capability_asset_detail_item(
-                    connection,
-                    workspace_id=conversation["workspace_id"],
-                    context_target=context_target,
-                )
-                if context_target and context_target.get("assetType") != "topic"
-                else None
-            )
-            context_pack = self.context_access_service.build_workspace_pack(
+            context_pack = self.context_access_service.build_agent_conversation_context(
                 connection,
                 workspace=workspace,
-                requester={
-                    "workflowId": "agent_conversation",
-                    "agentId": agent["agent_id"],
-                    "skillId": "agent.chat",
-                    "conversationId": conversation_id,
-                },
-                purpose="agent_conversation_reply",
-                selectors=[
-                    "account_positioning",
-                    "input_assets_overview",
-                    "analysis_history_overview",
-                    "topic_library_overview",
-                    "draft_history_overview",
-                    "simulation_history_overview",
-                    "capability_catalog",
-                    "agent_system_prompt",
-                    "selected_capability_asset",
-                ],
-                deep_items=[selected_asset_item] if selected_asset_item else None,
+                agent=agent,
+                conversation_id=conversation_id,
+                context_target=context_target,
             )
             asset_refs = context_pack["snapshot"]["sourceRefs"]
-            canvas_topic = None
-            if context_target.get("assetType") == "topic":
-                canvas_topic = TopicRepository().get(connection, context_target["assetId"])
-                if canvas_topic["workspace_id"] != conversation["workspace_id"]:
-                    raise ValidationError("选题属于另一个账号")
-                context_pack["canvasTopic"] = {
-                    k: canvas_topic[k] for k in ("id", "title", "body", "angle", "updated_at")
-                }
-                context_pack["canvasTopic"]["pendingSuggestions"] = json.loads(
-                    canvas_topic["generated_snapshot_json"]
-                ).get("pendingSuggestions", [])
-                context_pack["creatorFactSources"] = []
-                if canvas_topic["source_analysis_run_id"]:
-                    source_run = connection.execute(
-                        "SELECT input_snapshot_json FROM analysis_runs "
-                        "WHERE id=? AND workspace_id=?",
-                        (canvas_topic["source_analysis_run_id"], conversation["workspace_id"]),
-                    ).fetchone()
-                    if source_run:
-                        snapshot = json.loads(source_run["input_snapshot_json"])
-                        original_posts = snapshot.get("historicalPosts", {}).get("content", "")
-                        if original_posts:
-                            context_pack["creatorFactSources"].append({
-                                "id": "analysis-original-posts", "text": original_posts,
-                            })
+            canvas_topic = context_pack.get("canvasTopic")
             messages = [
                 message
                 for message in self.repository.list_messages(connection, conversation_id)
@@ -739,6 +706,11 @@ class AgentConversationService:
             )
             reply_metadata = reply.model_metadata
 
+        # A custom/provider implementation must not bypass the same reserved
+        # action boundary enforced for the built-in real provider.  Canvas
+        # edits are appended below only after server-side grounding succeeds.
+        reply = self._without_reserved_canvas_actions(reply)
+
         with self.database.transaction() as connection:
             # History is a server receipt, never a provider-supplied assertion.
             reply_metadata.pop("canvasEditSnapshot", None)
@@ -754,27 +726,40 @@ class AgentConversationService:
                             "workspaceId": conversation["workspace_id"],
                             "topicId": canvas_topic["id"],
                             "before": {
-                                "title": canvas_topic["title"], "body": canvas_topic["body"],
+                                "title": canvas_topic["title"],
+                                "body": canvas_topic["body"],
                                 "updatedAt": canvas_topic["updated_at"],
                             },
                             "suggested": {"title": validated.title, "body": validated.body},
                             "after": None,
                         }
                         reply_metadata["canvasEditSnapshot"] = edit_snapshot
-                        updated_topic = TopicRepository().update(
-                            connection,
-                            topic_id=canvas_topic["id"],
-                            title=validated.title,
-                            angle=None,
-                            body=validated.body,
-                            expected_updated_at=canvas_topic["updated_at"],
-                            now=utc_now(),
+                        # A model may propose a fully fact-checked revision, but it
+                        # still must not overwrite a creator's canvas.  Keep the
+                        # frozen before/suggested pair in the message and hand the
+                        # actual write to the same explicit proposal lifecycle used
+                        # by other product assets and Panel edits.
+                        reply_metadata["canvasApplyStatus"] = "pending_confirmation"
+                        reply = AgentConversationReply(
+                            reply=reply.reply,
+                            proposed_actions=[
+                                *reply.proposed_actions,
+                                {
+                                    "type": "topic.apply_canvas_edit",
+                                    "status": "requires_confirmation",
+                                    "title": "采用 AI 创作建议",
+                                    "description": "已通过本次事实核验，等待你确认后写入当前稿件。",
+                                    "payload": {
+                                        "topicId": canvas_topic["id"],
+                                        "title": validated.title,
+                                        "body": validated.body,
+                                        "expectedUpdatedAt": canvas_topic["updated_at"],
+                                    },
+                                    _SERVER_CANVAS_EDIT_MARKER: True,
+                                },
+                            ],
+                            model_metadata=reply.model_metadata,
                         )
-                        edit_snapshot["after"] = {
-                            "title": updated_topic["title"], "body": updated_topic["body"],
-                            "updatedAt": updated_topic["updated_at"],
-                        }
-                        reply_metadata["canvasApplyStatus"] = "applied"
                     except Exception as error:
                         reply_metadata["canvasApplyStatus"] = "conflict"
                         reply_metadata["canvasApplyError"] = str(error)
@@ -784,7 +769,10 @@ class AgentConversationService:
                 content=reply.reply,
                 context_pack_json=json.dumps(context_pack, ensure_ascii=False),
                 asset_refs_json=json.dumps(asset_refs, ensure_ascii=False),
-                proposed_actions_json=json.dumps(reply.proposed_actions, ensure_ascii=False),
+                proposed_actions_json=json.dumps(
+                    [self._public_proposed_action(action) for action in reply.proposed_actions],
+                    ensure_ascii=False,
+                ),
                 model_metadata_json=json.dumps(reply_metadata, ensure_ascii=False),
                 now=utc_now(),
             )
@@ -834,10 +822,14 @@ class AgentConversationService:
         action_type = str(action.get("type") or "").strip()
         if not action_type:
             return
+        if action_type == CANVAS_EDIT_ACTION_TYPE and not self._is_server_canvas_edit_action(
+            conversation, action
+        ):
+            return
         description = str(action.get("description") or action_type)
         title = str(action.get("title") or self._proposal_title(action_type))
         normalized = {
-            **action,
+            **self._public_proposed_action(action),
             "type": action_type,
             "status": "requires_confirmation",
             "description": description,
@@ -856,9 +848,56 @@ class AgentConversationService:
         )
 
     @staticmethod
+    def _public_proposed_action(action: dict[str, Any]) -> dict[str, Any]:
+        """Drop server-only provenance markers from the user-visible message receipt."""
+        return {
+            key: value
+            for key, value in action.items()
+            if key != _SERVER_CANVAS_EDIT_MARKER
+        }
+
+    @staticmethod
+    def _without_reserved_canvas_actions(
+        reply: AgentConversationReply,
+    ) -> AgentConversationReply:
+        actions = [
+            action
+            for action in reply.proposed_actions
+            if action.get("type") != CANVAS_EDIT_ACTION_TYPE
+        ]
+        if len(actions) == len(reply.proposed_actions):
+            return reply
+        return AgentConversationReply(
+            reply=reply.reply,
+            proposed_actions=actions,
+            model_metadata=reply.model_metadata,
+        )
+
+    @staticmethod
+    def _is_server_canvas_edit_action(conversation: dict, action: dict[str, Any]) -> bool:
+        """Require the provenance and target binding only this service can create."""
+        if action.get(_SERVER_CANVAS_EDIT_MARKER) is not True:
+            return False
+        try:
+            context_target = json.loads(conversation.get("context_target_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return False
+        payload = action.get("payload")
+        return (
+            context_target.get("assetType") == "topic"
+            and isinstance(context_target.get("assetId"), str)
+            and isinstance(payload, dict)
+            and payload.get("topicId") == context_target["assetId"]
+            and isinstance(payload.get("title"), str)
+            and isinstance(payload.get("body"), str)
+            and isinstance(payload.get("expectedUpdatedAt"), str)
+        )
+
+    @staticmethod
     def _proposal_title(action_type: str) -> str:
         labels = {
             "workspace.update_profile": "更新 Account Profile",
+            CANVAS_EDIT_ACTION_TYPE: "采用 AI 创作建议",
             "topic.create_or_update": "创建或更新 Topic",
             "draft.update_editable_content": "更新 Draft",
             "skill.propose_definition": "新增或修改 Skill",

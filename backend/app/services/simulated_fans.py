@@ -201,6 +201,7 @@ class SimulatedFanService:
                     "id": fan.id,
                     "fanAssetId": fan.id,
                     "sourceAnalysisId": fan.source_analysis_id,
+                    "sourceGroupId": fan.source_group_id,
                     "updatedAt": fan.updated_at,
                     "userAdjusted": adjusted,
                     "originalDefinition": fan.original,

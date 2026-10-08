@@ -1,5 +1,5 @@
 import type { ReaderSelection, ReaderSelectionLink } from './readerSelection'
-import type { PanelTask } from './types'
+import type { PanelComparison, PanelRetestPreview, PanelRetestRequest, PanelTask } from './types'
 import type { PanelEditOperation, PanelEditProposal } from './panelEdits'
 import type {
   Agent,
@@ -23,6 +23,7 @@ import type {
   VideoPreviewDeriveResponse,
   SimulationRun,
   SimulationRunSummary,
+  SimulationPersonaOverrides,
   Skill,
   SkillDefinitionUpdate,
   SkillDryRunResponse,
@@ -76,7 +77,7 @@ export const panelEditApi = {
     `/api/workspaces/${workspaceId}/simulation-runs/${runId}/edit-proposals`),
   create: (workspaceId: string, runId: string, payload: {
     requestKey: string; feedbackId: string; expectedUpdatedAt: string
-    operation: PanelEditOperation; text: string
+    operation: PanelEditOperation; text: string; authorMaterial?: string
   }) => request<PanelEditProposal>(`/api/workspaces/${workspaceId}/simulation-runs/${runId}/edit-proposals`, {
     method:'POST', headers:jsonHeaders, body:JSON.stringify(payload),
   }),
@@ -621,7 +622,7 @@ export const analysisRunApi = {
 }
 
 export const readerSelectionApi = {
-  create: (workspaceId: string, payload: {requestKey: string; topicId: string; desiredCount: number; panelTask?: PanelTask}) =>
+  create: (workspaceId: string, payload: {requestKey: string; topicId?: string; sourceMaterialId?: string; noteId?: string; accountProfileId?:string; desiredCount: number; panelTask?: PanelTask}) =>
     request<ReaderSelection>(`/api/workspaces/${workspaceId}/reader-selections`, {
       method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload),
     }),
@@ -630,13 +631,31 @@ export const readerSelectionApi = {
 }
 
 export const simulationRunApi = {
+  adoptTopicIdea: (workspaceId:string, runId:string, ideaId:string) => request<Topic>(
+    `/api/workspaces/${workspaceId}/simulation-runs/${runId}/topic-ideas/${encodeURIComponent(ideaId)}/adopt`,
+    {method:'POST',headers:jsonHeaders,body:JSON.stringify({})},
+  ),
+  comparison: (workspaceId: string, runId: string) => request<PanelComparison>(
+    `/api/workspaces/${workspaceId}/simulation-runs/${runId}/comparison`,
+  ),
+  previewRetest: (workspaceId: string, runId: string) => request<PanelRetestPreview>(
+    `/api/workspaces/${workspaceId}/simulation-runs/${runId}/retest-preview`,
+  ),
+  createRetest: (workspaceId: string, runId: string, payload: PanelRetestRequest) => request<SimulationRun>(
+    `/api/workspaces/${workspaceId}/simulation-runs/${runId}/retests`,
+    {method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload)},
+  ),
   create: (
     workspaceId: string,
     payload: Partial<ReaderSelectionLink> & {
       audienceAnalysisId?: string
       simulatedFanIds?: string[]
+      accountProfileId?: string
+      personaOverrides?: SimulationPersonaOverrides
       panelTask?: PanelTask
       topicId?: string | null
+      sourceMaterialId?: string
+      noteId?: string
       draftId?: string | null
       manualTopic?: string
       mode: 'demo' | 'live'

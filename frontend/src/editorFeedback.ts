@@ -7,6 +7,7 @@ export const text = (v: unknown) => typeof v === 'string' ? v : ''
 export const rows = (v: unknown): Row[] => Array.isArray(v) ? v.map(object) : []
 export const strings = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 export const feedbackKinds: Record<string, string> = {keep:'建议保留',clarify:'讲得更清楚',rewrite:'调整表达',add_material:'补充材料',explore:'可选探索'}
+export const needsAuthorMaterial = (card: Row) => card.kind === 'add_material' || strings(card.materialRequests).length > 0
 export function feedbackCards(data: Row) {
   return rows(data.editorFeedback).filter(c => text(c.id) && Object.hasOwn(feedbackKinds,text(c.kind))
     && ['reader','editor_optional'].includes(text(c.sourceType)) && ['first','optional'].includes(text(c.priority))

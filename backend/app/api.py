@@ -26,6 +26,11 @@ from app.models import (
     AssetProposalUpdate,
     CapabilityDefinitionDiffResponse,
     CapabilityDefinitionRevert,
+    ContentCollaborationMessageCreate,
+    ContentCollaborationSessionCreate,
+    ContentCollaborationSessionResponse,
+    ContentCollaborationSessionSummary,
+    ContentCollaborationSessionUpdate,
     DraftGenerateRequest,
     DraftResponse,
     DraftSummary,
@@ -80,6 +85,7 @@ from app.services import (
     AgentService,
     AnalysisRunService,
     AssetProposalService,
+    ContentCollaborationSessionService,
     DraftGenerationService,
     DraftService,
     InputAssetService,
@@ -103,6 +109,7 @@ from app.services.audience_evidence import (
 from app.services.common import utc_now
 from app.services.panel_edits import PanelEditConfirm, PanelEditCreate, PanelEditService
 from app.services.panel_protocol import DISCUSSION_DISABLED_REASON, panel_discussion_enabled
+from app.services.panel_retests import PanelRetestCreate
 from app.services.xhs_imports import XhsPackageFile
 from app.workflows import (
     ACCOUNT_STAGE_ORDER,
@@ -164,6 +171,7 @@ def create_api_router(
     workflow_worker: WorkflowWorkerService,
     xhs_import_service: XhsOfflineImportService,
     xhs_capture_service: XhsCaptureJobService,
+    content_collaboration_service: ContentCollaborationSessionService,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
     panel_edits = PanelEditService(simulation_service.database)
@@ -646,6 +654,62 @@ def create_api_router(
     ) -> AgentConversationResponse:
         return await agent_conversation_service.send_message(conversation_id, payload)
 
+    @router.post(
+        "/workspaces/{workspace_id}/content-collaboration-sessions",
+        response_model=ContentCollaborationSessionResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_content_collaboration_session(
+        workspace_id: str,
+        payload: ContentCollaborationSessionCreate,
+    ) -> ContentCollaborationSessionResponse:
+        return content_collaboration_service.create(workspace_id, payload)
+
+    @router.get(
+        "/workspaces/{workspace_id}/content-collaboration-sessions",
+        response_model=list[ContentCollaborationSessionSummary],
+    )
+    def list_content_collaboration_sessions(
+        workspace_id: str,
+    ) -> list[ContentCollaborationSessionSummary]:
+        return content_collaboration_service.list(workspace_id)
+
+    @router.get(
+        "/workspaces/{workspace_id}/content-collaboration-sessions/{session_id}",
+        response_model=ContentCollaborationSessionResponse,
+    )
+    def get_content_collaboration_session(
+        workspace_id: str,
+        session_id: str,
+    ) -> ContentCollaborationSessionResponse:
+        return content_collaboration_service.get(workspace_id, session_id)
+
+    @router.patch(
+        "/workspaces/{workspace_id}/content-collaboration-sessions/{session_id}",
+        response_model=ContentCollaborationSessionResponse,
+    )
+    def update_content_collaboration_session(
+        workspace_id: str,
+        session_id: str,
+        payload: ContentCollaborationSessionUpdate,
+    ) -> ContentCollaborationSessionResponse:
+        return content_collaboration_service.update(workspace_id, session_id, payload)
+
+    @router.post(
+        "/workspaces/{workspace_id}/content-collaboration-sessions/{session_id}/messages",
+        response_model=ContentCollaborationSessionResponse,
+    )
+    async def send_content_collaboration_message(
+        workspace_id: str,
+        session_id: str,
+        payload: ContentCollaborationMessageCreate,
+    ) -> ContentCollaborationSessionResponse:
+        return await content_collaboration_service.send_message(
+            workspace_id,
+            session_id,
+            payload,
+        )
+
     @router.get(
         "/workspaces/{workspace_id}/asset-proposals",
         response_model=list[AssetProposalResponse],
@@ -940,6 +1004,26 @@ def create_api_router(
         run = simulation_service.create(workspace_id, payload)
         await workflow_worker.enqueue_simulation_run(run.id)
         return run
+
+    @router.post(
+        "/workspaces/{workspace_id}/simulation-runs/{simulation_id}/retests",
+        response_model=SimulationRunResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_panel_retest(
+        workspace_id: str, simulation_id: str, payload: PanelRetestCreate,
+    ) -> SimulationRunResponse:
+        run = simulation_service.create_retest(workspace_id, simulation_id, payload)
+        await workflow_worker.enqueue_simulation_run(run.id)
+        return run
+
+    @router.get("/workspaces/{workspace_id}/simulation-runs/{simulation_id}/retest-preview")
+    def preview_panel_retest(workspace_id: str, simulation_id: str):
+        return simulation_service.preview_retest(workspace_id, simulation_id)
+
+    @router.get("/workspaces/{workspace_id}/simulation-runs/{simulation_id}/comparison")
+    def compare_panel_retest(workspace_id: str, simulation_id: str):
+        return simulation_service.compare_retest(workspace_id, simulation_id)
 
     @router.get(
         "/workspaces/{workspace_id}/simulation-runs",

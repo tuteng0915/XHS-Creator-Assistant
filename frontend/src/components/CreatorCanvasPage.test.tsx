@@ -1,161 +1,129 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { agentConversationApi, topicApi } from '../api'
+import { contentCollaborationApi } from '../contentCollaboration'
+import type { CollaborationSession } from '../contentCollaboration'
 import type { AgentConversation, Topic } from '../types'
 import { CreatorCanvasPage } from './CreatorCanvasPage'
 
-afterEach(() => {cleanup(); vi.restoreAllMocks(); vi.useRealTimers()})
+const topic: Topic = {id:'topic',workspaceId:'w',title:'原题',body:'原文',angle:'',associatedPainPoint:'',whyItFits:'',generatedSnapshot:{},sourceAnalysisRunId:null,sourceWorkflow:'manual',status:'candidate',createdAt:'v1',updatedAt:'v1'}
+const session: CollaborationSession = {id:'s',workspaceId:'w',title:'协作',status:'active',executionStatus:'waiting_creator',contextTarget:{assetType:'topic',assetId:'topic'},failureCode:'',failureDetail:'',createdAt:'',updatedAt:'',messages:[],runs:[]}
+const candidate = {kind:'copy_option',title:'从选择那刻开场',body:'我在两个选项之间犹豫。',confidence:'inference',evidenceRefs:[]}
+const withSuggestion: CollaborationSession = {...session,messages:[{id:'m',sessionId:'s',sequenceNo:1,sender:'writing',recipient:'review',content:`先把决定的现场写出来。\n\n【${candidate.title}】${candidate.body}`,replyToMessageId:null,modelMetadata:{candidateSuggestions:[candidate]},createdAt:''}]}
+beforeEach(() => {vi.spyOn(agentConversationApi,'list').mockResolvedValue([]); vi.spyOn(contentCollaborationApi,'list').mockResolvedValue([])})
+afterEach(() => {cleanup();vi.restoreAllMocks();vi.useRealTimers()})
+const props = {workspaceId:'w',topic,topics:[topic],onSelect:vi.fn(),onUpdated:vi.fn()}
+function reopen(value: CollaborationSession) {vi.mocked(contentCollaborationApi.list).mockResolvedValue([value]); vi.spyOn(contentCollaborationApi,'get').mockResolvedValue(value)}
 
-const topic: Topic = {id:'topic',workspaceId:'w',title:'原题',body:'原文',angle:'角度',associatedPainPoint:'',whyItFits:'',generatedSnapshot:{},sourceAnalysisRunId:null,sourceWorkflow:'manual',status:'candidate',createdAt:'2026-01-01',updatedAt:'2026-01-01'}
-const conversation: AgentConversation = {id:'chat', workspaceId:'w',agentAssetId:'a',title:'创作',status:'active',executionStatus:'completed',contextTarget:{assetType:'topic',assetId:'topic'},createdAt:'',updatedAt:'',messages:[]}
-
-it('reopens frozen edits without changing current text and resets details on topic/account switch', async () => {
-  const second = {...topic,id:'second',title:'第二题'}
-  function chat(t: Topic): AgentConversation {
-    return {...conversation,id:`chat-${t.id}`,workspaceId:t.workspaceId,
-      contextTarget:{assetType:'topic',assetId:t.id},messages:[{
-        id:`reply-${t.id}`,conversationId:`chat-${t.id}`,role:'assistant',content:'历史回复',
-        contextPack:{},assetRefs:[],proposedActions:[],createdAt:'',modelMetadata:{
-          canvasApplyStatus:'applied',canvasEditSnapshot:{schemaVersion:'creator-edit/v1',
-            workspaceId:t.workspaceId,topicId:t.id,before:{title:'历史原题',body:`改前-${t.id}`},
-            suggested:{title:'历史新题',body:`改后-${t.id}`},after:{title:'历史新题',body:`改后-${t.id}`}},
-        },
-      }]}
-  }
-  vi.spyOn(agentConversationApi,'list').mockResolvedValue([chat(topic),chat(second)])
-  vi.spyOn(agentConversationApi,'get').mockImplementation(async id=>chat(id==='chat-topic'?topic:second))
-  const save=vi.spyOn(topicApi,'update'), send=vi.spyOn(agentConversationApi,'sendMessage')
-  const props={topics:[topic,second],onSelect:vi.fn(),onUpdated:vi.fn()}
-  const {rerender}=render(<CreatorCanvasPage {...props} workspaceId="w" topic={topic} />)
-  fireEvent.click(await screen.findByText('当时已应用 · 查看修改'))
-  expect(screen.getByText('改前-topic').closest('details')).toHaveAttribute('open')
-  expect(screen.getByLabelText('创作正文')).toHaveValue('原文')
-  rerender(<CreatorCanvasPage {...props} workspaceId="w" topic={second} />)
-  await screen.findByText('改前-second')
-  expect(screen.queryByText('改前-topic')).not.toBeInTheDocument()
-  expect(screen.getByText('改前-second').closest('details')).not.toHaveAttribute('open')
-  vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
-  rerender(<CreatorCanvasPage {...props} workspaceId="other" topic={{...second,workspaceId:'other'}} />)
-  await screen.findByText('可以讨论角度，也可以直接要求修改标题和正文。')
-  expect(screen.queryByText('改前-second')).not.toBeInTheDocument()
-  expect(save).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled()
-})
-
-it('saves the edited body before entering reader confirmation, with no conversation creation', async()=>{
-  vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
-  const create=vi.spyOn(agentConversationApi,'create')
-  let finish!:(value:Topic)=>void
-  const save=vi.spyOn(topicApi,'update').mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
-  const onSimulate=vi.fn()
-  render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} onSelect={vi.fn()} onUpdated={vi.fn()} onSimulate={onSimulate} />)
-  await waitFor(()=>expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeEnabled())
-  fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'想测试的新正文'}})
-  fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
-  expect(onSimulate).not.toHaveBeenCalled()
-  expect(screen.getByLabelText('创作正文')).toBeDisabled()
-  fireEvent.click(screen.getByRole('button',{name:'正在保存…'}))
-  expect(save).toHaveBeenCalledTimes(1)
-  const updated={...topic,body:'想测试的新正文',updatedAt:'v2'}
-  await act(async()=>finish(updated))
-  expect(onSimulate).toHaveBeenCalledExactlyOnceWith(updated)
-  expect(create).not.toHaveBeenCalled()
-})
-
-it('keeps edits and stays in the canvas if saving before simulation fails', async()=>{
-  vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
-  vi.spyOn(topicApi,'update').mockRejectedValue(new Error('内容已被修改，请刷新后重试'))
-  const onSimulate=vi.fn()
-  render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} onSelect={vi.fn()} onUpdated={vi.fn()} onSimulate={onSimulate} />)
-  await waitFor(()=>expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeEnabled())
-  fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'未保存内容'}})
-  fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
-  await screen.findByRole('alert')
-  expect(screen.getByLabelText('创作正文')).toHaveValue('未保存内容')
-  expect(onSimulate).not.toHaveBeenCalled()
-})
-
-it('uses already saved content without another save and waits while AI is replying', async()=>{
-  vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
-  const save=vi.spyOn(topicApi,'update')
-  const onSimulate=vi.fn()
-  const page=render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} onSelect={vi.fn()} onUpdated={vi.fn()} onSimulate={onSimulate} />)
-  await waitFor(()=>expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeEnabled())
-  fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
-  expect(onSimulate).toHaveBeenCalledExactlyOnceWith(topic);expect(save).not.toHaveBeenCalled()
-  page.unmount()
-  vi.spyOn(agentConversationApi,'list').mockResolvedValue([conversation])
-  vi.spyOn(agentConversationApi,'get').mockResolvedValue({...conversation,executionStatus:'running'})
-  render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} onSelect={vi.fn()} onUpdated={vi.fn()} onSimulate={onSimulate} />)
-  await screen.findByRole('button',{name:'正在回复…'})
-  expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeDisabled()
-})
-
-it('ignores a late save callback after switching topics', async()=>{
-  vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
-  let finish!:(value:Topic)=>void
-  vi.spyOn(topicApi,'update').mockImplementation(()=>new Promise(resolve=>{finish=resolve}))
-  const onUpdated=vi.fn(),onSimulate=vi.fn()
-  const props={workspaceId:'w',topics:[topic],onSelect:vi.fn(),onUpdated,onSimulate}
-  const {rerender}=render(<CreatorCanvasPage {...props} topic={topic} />)
-  await waitFor(()=>expect(screen.getByRole('button',{name:'选择模拟读者'})).toBeEnabled())
-  fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'旧选题编辑'}})
-  fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
-  rerender(<CreatorCanvasPage {...props} topic={{...topic,id:'other',title:'另一个选题'}} />)
-  await act(async()=>finish({...topic,body:'旧选题编辑'}))
-  expect(onSimulate).not.toHaveBeenCalled();expect(onUpdated).not.toHaveBeenCalled()
-  expect(screen.getByLabelText('创作标题')).toHaveValue('另一个选题')
-})
-
-it('reopens saved conversation without creating another one and saves before sending', async () => {
-  vi.spyOn(agentConversationApi,'list').mockResolvedValue([conversation])
-  vi.spyOn(agentConversationApi,'get').mockResolvedValue(conversation)
-  const create = vi.spyOn(agentConversationApi,'create')
-  const save = vi.spyOn(topicApi,'update').mockResolvedValue({...topic,body:'我的修改',updatedAt:'2026-01-02'})
-  vi.spyOn(topicApi,'get').mockResolvedValue({...topic,body:'我的修改',updatedAt:'2026-01-02'})
-  const send = vi.spyOn(agentConversationApi,'sendMessage').mockResolvedValue(conversation)
-  render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} agentId="a" onSelect={vi.fn()} onUpdated={vi.fn()} />)
+it('uses the collaboration session instead of creating or sending to the legacy assistant', async () => {
+  const oldCreate = vi.spyOn(agentConversationApi,'create'), oldSend = vi.spyOn(agentConversationApi,'sendMessage')
+  const create = vi.spyOn(contentCollaborationApi,'create').mockResolvedValue(session)
+  const send = vi.spyOn(contentCollaborationApi,'send').mockResolvedValue(session)
+  const save = vi.spyOn(topicApi,'update').mockResolvedValue({...topic,body:'我的修改',updatedAt:'v2'})
+  render(<CreatorCanvasPage {...props} />)
   fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'我的修改'}})
-  fireEvent.change(screen.getByLabelText('给创作助手的消息'),{target:{value:'改进开头'}})
+  fireEvent.change(screen.getByLabelText('给创作助手的消息'),{target:{value:'修改开头'}})
   await waitFor(() => expect(screen.getByRole('button',{name:'发送'})).toBeEnabled())
   fireEvent.click(screen.getByRole('button',{name:'发送'}))
-  await waitFor(() => expect(send).toHaveBeenCalled())
-  expect(save).toHaveBeenCalledWith('topic',expect.objectContaining({body:'我的修改',expectedUpdatedAt:topic.updatedAt}))
-  expect(create).not.toHaveBeenCalled()
-  expect(save.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0])
+  await waitFor(() => expect(send).toHaveBeenCalledWith('w','s','修改开头','research',expect.any(String)))
+  expect(save.mock.invocationCallOrder[0]).toBeLessThan(create.mock.invocationCallOrder[0])
+  expect(oldCreate).not.toHaveBeenCalled(); expect(oldSend).not.toHaveBeenCalled()
 })
 
-it('waits for the updated topic before finishing polling and updating the canvas', async () => {
-  vi.useFakeTimers()
-  const running = {...conversation, executionStatus: 'running' as const}
-  vi.spyOn(agentConversationApi, 'list').mockResolvedValue([running])
-  vi.spyOn(agentConversationApi, 'get').mockResolvedValueOnce(running).mockResolvedValue(conversation)
-  let resolveTopic!: (value: Topic) => void
-  vi.spyOn(topicApi, 'get').mockReturnValue(new Promise(resolve => {resolveTopic = resolve}))
-  const onUpdated = vi.fn()
-  render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} agentId="a" onSelect={vi.fn()} onUpdated={onUpdated} />)
-  await act(async () => {})
-  await act(async () => {await vi.advanceTimersByTimeAsync(800)})
-  const updated = {...topic, title: 'AI 新标题', body: 'AI 新正文', updatedAt: '2026-01-03'}
-  await act(async () => {resolveTopic(updated)})
-  expect(screen.getByLabelText('创作标题')).toHaveValue(updated.title)
-  expect(screen.getByLabelText('创作正文')).toHaveValue(updated.body)
-  expect(onUpdated).toHaveBeenCalledWith(updated)
-})
-
-it('reopens pending suggestions without putting the blocked proposal in the editor', async () => {
-  const pending = '请确认是否有后台交流的经历？'
-  const stored: AgentConversation = {...conversation, messages: [{
-    id: 'reply', conversationId: conversation.id, role: 'assistant', content: '原稿未改动',
-    contextPack: {}, assetRefs: [], proposedActions: [], createdAt: '',
-    modelMetadata: {canvasApplyStatus: 'needs_confirmation', pendingSuggestions: [pending],
-      suggestedCanvasUpdate: {title: '后台故事', body: '我去了后台'}},
-  }]}
-  vi.spyOn(agentConversationApi, 'list').mockResolvedValue([stored])
-  vi.spyOn(agentConversationApi, 'get').mockResolvedValue(stored)
-  const update = vi.spyOn(topicApi, 'update')
-  render(<CreatorCanvasPage workspaceId="w" topic={topic} topics={[topic]} agentId="a" onSelect={vi.fn()} onUpdated={vi.fn()} />)
-  await screen.findByText(pending)
+it('shows short role headings and previews a candidate before local adoption and explicit save', async () => {
+  reopen(withSuggestion)
+  const save = vi.spyOn(topicApi,'update').mockResolvedValue({...topic,body:'原文\n\n我的版本',updatedAt:'v2'})
+  render(<CreatorCanvasPage {...props} />)
+  expect(await screen.findByRole('heading',{name:candidate.title})).toBeInTheDocument()
+  expect(screen.getByText('回复 审稿伙伴')).toBeInTheDocument()
+  expect(screen.getAllByText(candidate.body)).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button',{name:'预览并编辑这条建议'}))
   expect(screen.getByLabelText('创作正文')).toHaveValue('原文')
-  expect(screen.queryByText('我去了后台')).not.toBeInTheDocument()
-  expect(update).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByLabelText('编辑写作建议'),{target:{value:'我的版本'}})
+  fireEvent.click(screen.getByRole('button',{name:'确认放入画布'}))
+  expect(screen.getByLabelText('创作正文')).toHaveValue('原文\n\n我的版本')
+  expect(save).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{name:'保存'}))
+  await waitFor(() => expect(save).toHaveBeenCalledWith('topic',expect.objectContaining({body:'原文\n\n我的版本',expectedUpdatedAt:'v1'})))
+})
+
+it('refuses to overwrite edits made after candidate preview opened', async () => {
+  reopen(withSuggestion); render(<CreatorCanvasPage {...props} />)
+  fireEvent.click(await screen.findByRole('button',{name:'预览并编辑这条建议'}))
+  fireEvent.change(screen.getByLabelText('建议放入方式'),{target:{value:'replace'}})
+  fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'后来写的句子'}})
+  fireEvent.click(screen.getByRole('button',{name:'确认放入画布'}))
+  expect(screen.getByLabelText('创作正文')).toHaveValue('后来写的句子')
+  expect(screen.getByRole('alert')).toHaveTextContent('预览期间画布有新修改')
+})
+
+it('lets the author apply a title suggestion locally without changing the body', async () => {
+  reopen(withSuggestion)
+  const save = vi.spyOn(topicApi,'update')
+  render(<CreatorCanvasPage {...props} />)
+  fireEvent.click(await screen.findByRole('button',{name:'预览并编辑这条建议'}))
+  fireEvent.change(screen.getByLabelText('建议用于'),{target:{value:'title'}})
+  fireEvent.change(screen.getByLabelText('编辑写作建议'),{target:{value:'我的新标题'}})
+  fireEvent.click(screen.getByRole('button',{name:'确认放入画布'}))
+  expect(screen.getByLabelText('创作标题')).toHaveValue('我的新标题')
+  expect(screen.getByLabelText('创作正文')).toHaveValue('原文')
+  expect(save).not.toHaveBeenCalled()
+})
+
+it('polls active work, reveals each persisted turn, and stops after completion without replacing the editor', async () => {
+  vi.useFakeTimers()
+  const run = {id:'r',status:'running' as const,triggerMessageId:'creator',graphState:{pendingMessageId:'creator'},errorCode:'',errorDetail:'',createdAt:new Date().toISOString(),startedAt:null,completedAt:null}
+  const active: CollaborationSession = {...session,executionStatus:'running',runs:[run],messages:[{id:'creator',sessionId:'s',sequenceNo:1,sender:'creator',recipient:'research',content:'聊聊',replyToMessageId:null,modelMetadata:{},createdAt:''}]}
+  const research = {...withSuggestion.messages[0],id:'research',sender:'research' as const,recipient:'writing' as const,content:'材料已梳理',modelMetadata:{runId:'r'}}
+  const partial = {...active,messages:[...active.messages,research],runs:[{...run,graphState:{pendingMessageId:'research'}}]}
+  const completed = {...partial,executionStatus:'waiting_creator' as const}
+  vi.mocked(contentCollaborationApi.list).mockResolvedValue([active])
+  const get = vi.spyOn(contentCollaborationApi,'get').mockResolvedValueOnce(active).mockResolvedValueOnce(partial).mockResolvedValue(completed)
+  const topicGet = vi.spyOn(topicApi,'get')
+  render(<CreatorCanvasPage {...props} />)
+  await act(async () => {})
+  fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'等待中写的新稿'}})
+  await act(async () => {await vi.advanceTimersByTimeAsync(500)})
+  expect(screen.getByText('材料已梳理')).toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('写作伙伴正在整理下一部分')
+  await act(async () => {await vi.advanceTimersByTimeAsync(1000)})
+  const count = get.mock.calls.length
+  await act(async () => {await vi.advanceTimersByTimeAsync(5000)})
+  expect(get).toHaveBeenCalledTimes(count)
+  expect(screen.getByLabelText('创作正文')).toHaveValue('等待中写的新稿')
+  expect(topicGet).not.toHaveBeenCalled()
+})
+
+it('keeps legacy messages in a collapsed read-only history without old adoption buttons', async () => {
+  const old = {id:'old',contextTarget:{assetType:'topic',assetId:'topic'},messages:[{id:'m',role:'assistant',content:'过去的建议',modelMetadata:{canvasApplyStatus:'pending_confirmation'}}]} as unknown as AgentConversation
+  vi.mocked(agentConversationApi.list).mockResolvedValue([old]); vi.spyOn(agentConversationApi,'get').mockResolvedValue(old)
+  render(<CreatorCanvasPage {...props} />)
+  const summary = await screen.findByText('旧版创作对话（只读）')
+  expect(summary.closest('details')).not.toHaveAttribute('open')
+  fireEvent.click(summary)
+  expect(screen.getByText('过去的建议')).toBeVisible()
+  expect(screen.queryByRole('button',{name:'采用建议'})).not.toBeInTheDocument()
+})
+
+it('saves edited content before selecting readers and retains content after a failed save', async () => {
+  const onSimulate = vi.fn()
+  const save = vi.spyOn(topicApi,'update').mockRejectedValueOnce(new Error('版本冲突')).mockResolvedValue({...topic,body:'新正文',updatedAt:'v2'})
+  render(<CreatorCanvasPage {...props} onSimulate={onSimulate} />)
+  fireEvent.change(screen.getByLabelText('创作正文'),{target:{value:'新正文'}})
+  fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
+  await screen.findByText('版本冲突')
+  expect(onSimulate).not.toHaveBeenCalled(); expect(screen.getByLabelText('创作正文')).toHaveValue('新正文')
+  fireEvent.click(screen.getByRole('button',{name:'选择模拟读者'}))
+  await waitFor(() => expect(onSimulate).toHaveBeenCalledWith(expect.objectContaining({body:'新正文'})))
+  expect(save).toHaveBeenCalledTimes(2)
+})
+
+it('never retries a failed model run automatically and keeps the previous request editable', async () => {
+  reopen({...session,executionStatus:'failed',failureDetail:'写作伙伴暂时未能完成',messages:[{id:'c',sessionId:'s',sequenceNo:1,sender:'creator',recipient:'writing',content:'先给我一个开头',replyToMessageId:null,modelMetadata:{},createdAt:''}]})
+  const send = vi.spyOn(contentCollaborationApi,'send')
+  render(<CreatorCanvasPage {...props} />)
+  fireEvent.click(await screen.findByRole('button',{name:'把上次要求放回输入框'}))
+  expect(screen.getByLabelText('给创作助手的消息')).toHaveValue('先给我一个开头')
+  expect(screen.getByLabelText('先交给哪位伙伴')).toHaveValue('writing')
+  expect(send).not.toHaveBeenCalled()
 })

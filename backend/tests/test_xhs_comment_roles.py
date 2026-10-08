@@ -155,6 +155,10 @@ def test_import_to_analysis_preserves_hashes_and_only_saves_valid_reader_roles(a
         run.diagnostics["rejectedGroups"][0]["issues"][0]["code"]
         == "author_comment_not_reader_evidence"
     )
+    assert send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json() == []
+    assert send(app, "POST", f"/api/workspaces/{wid}/simulated-fans", json={
+        "sourceAnalysisId": run.id, "sourceGroupId": "reader",
+    }).status_code == 201
     fans = send(app, "GET", f"/api/workspaces/{wid}/simulated-fans").json()
     assert len(fans) == 1
     assert fans[0]["original"]["observedEpisodes"][0]["observedComment"] == "第一步需要什么材料"

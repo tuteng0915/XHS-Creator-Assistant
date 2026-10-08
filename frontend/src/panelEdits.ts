@@ -7,6 +7,7 @@ export type PanelEditProposal = {
   status: 'pending' | 'applied' | 'rejected' | 'undone'; freshness: 'current' | 'stale'
   snapshot: {
     version: string; feedback: Row; before: EditVersion
+    authorMaterial?: string
     proposed: {title: string; body: string}
     edit: {field: 'title' | 'body'; start: number; end: number; operation: PanelEditOperation; text: string}
   }

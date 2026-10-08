@@ -31,6 +31,13 @@ def reader_visible_target(snapshot: dict[str, Any]) -> dict[str, Any]:
         "previewLevel": "text_draft" if topic.get("body") else "concept",
         "limitations": "仅预演提供的文字，不评价未提供的图片或真实传播效果。",
     }
+    if snapshot.get("targetType") == "account":
+        target.update({
+            "simulationCategory": "account", "previewLevel": "account",
+            "accountScope": deepcopy((snapshot.get("sourceAccount") or {}).get("scope", {})),
+            "limitations": "基于本次账号简介和笔记文字样本，讨论长期阅读期待与内容方向。",
+        })
+        return deepcopy(target)
     draft = snapshot.get("draft")
     if draft:
         editable = draft.get("editableContent", {})

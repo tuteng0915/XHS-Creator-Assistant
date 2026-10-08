@@ -5,6 +5,7 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from app.errors import NotFoundError, ValidationError
 from app.repositories.agents import AgentRepository
 from app.repositories.analysis_runs import AnalysisRunRepository
 from app.repositories.drafts import DraftRepository
@@ -15,6 +16,10 @@ from app.repositories.source_materials import SourceMaterialRepository
 from app.repositories.topics import TopicRepository
 from app.repositories.workflow_assets import WorkflowAssetRepository
 from app.services.common import utc_now
+from app.services.context_contract import (
+    WORKSPACE_PACK_SNAPSHOT_VERSION,
+    build_context_envelope,
+)
 
 
 class ContextAccessService:
@@ -60,6 +65,7 @@ class ContextAccessService:
         deep_items: list[dict[str, Any]] | None = None,
         max_summary_chars: int = 4_000,
         selected_evidence_only: bool = False,
+        operation: str | None = None,
     ) -> dict[str, Any]:
         workspace_id = workspace["id"]
         omitted: list[dict[str, Any]] = []
@@ -105,9 +111,7 @@ class ContextAccessService:
                 role="global_context",
                 data=[
                     self._summarize_media_asset(row)
-                    for row in self.media_asset_repository.list(
-                        connection, workspace_id
-                    )
+                    for row in self.media_asset_repository.list(connection, workspace_id)
                 ],
             )
         )
@@ -121,9 +125,7 @@ class ContextAccessService:
                 role="global_context",
                 data=[
                     self._summarize_analysis_run(row)
-                    for row in self.analysis_repository.list(connection, workspace_id)[
-                        :10
-                    ]
+                    for row in self.analysis_repository.list(connection, workspace_id)[:10]
                 ],
             )
         )
@@ -137,9 +139,9 @@ class ContextAccessService:
                 role="global_context",
                 data=[
                     self._summarize_topic(row)
-                    for row in self.topic_repository.list(
-                        connection, workspace_id=workspace_id
-                    )[:20]
+                    for row in self.topic_repository.list(connection, workspace_id=workspace_id)[
+                        :20
+                    ]
                 ],
             )
         )
@@ -167,9 +169,7 @@ class ContextAccessService:
                 role="global_context",
                 data=[
                     self._summarize_simulation(row)
-                    for row in self.simulation_repository.list(connection, workspace_id)[
-                        :10
-                    ]
+                    for row in self.simulation_repository.list(connection, workspace_id)[:10]
                 ],
             )
         )
@@ -206,6 +206,16 @@ class ContextAccessService:
 
         source_refs = [item["assetRef"] for item in items]
         content_hash = self._hash({"items": items, "omitted": omitted})
+        snapshot = {
+            "version": WORKSPACE_PACK_SNAPSHOT_VERSION,
+            "createdAt": utc_now(),
+            "contentHash": content_hash,
+            "sourceRefs": source_refs,
+        }
+        resolved_operation = operation or str(
+            requester.get("workflowId") or requester.get("agentId") or requester.get("id")
+            or "workspace_context"
+        )
         return {
             "requestId": str(uuid4()),
             "workspaceId": workspace_id,
@@ -216,16 +226,147 @@ class ContextAccessService:
             "selectors": selectors,
             "items": items,
             "citations": [
-                {"assetRef": item["assetRef"], "contentHash": item["contentHash"]}
-                for item in items
+                {"assetRef": item["assetRef"], "contentHash": item["contentHash"]} for item in items
             ],
             "omitted": omitted,
-            "snapshot": {
-                "createdAt": utc_now(),
-                "contentHash": content_hash,
-                "sourceRefs": source_refs,
-            },
+            "snapshot": snapshot,
+            "contextEnvelope": build_context_envelope(
+                operation=resolved_operation,
+                purpose=purpose,
+                workspace_id=workspace_id,
+                items=items,
+                snapshot=snapshot,
+                omissions=omitted,
+            ).model_dump(by_alias=True),
         }
+
+    def build_agent_conversation_context(
+        self,
+        connection,
+        *,
+        workspace: dict,
+        agent: dict,
+        conversation_id: str,
+        context_target: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build the exact product context for one creator-assistant turn.
+
+        This is deliberately application-owned rather than agent-framework-owned:
+        the selected asset and its immutable version determine what “this” means.
+        The returned snapshot is stored with the message, so later model or runtime
+        changes cannot silently reinterpret the same conversation turn.
+        """
+        topic: dict[str, Any] | None = None
+        creator_fact_sources: list[dict[str, str]] = []
+        topic_context_items: list[dict[str, Any]] = []
+        if context_target.get("assetType") == "topic":
+            topic = self.topic_repository.get(connection, context_target["assetId"])
+            if topic["workspace_id"] != workspace["id"]:
+                raise ValidationError("选题属于另一个账号")
+            canvas_topic = {
+                key: topic[key] for key in ("id", "title", "body", "angle", "updated_at")
+            }
+            canvas_topic["pendingSuggestions"] = json.loads(
+                topic["generated_snapshot_json"]
+            ).get("pendingSuggestions", [])
+            topic_context_items.append(
+                self.deep_item(
+                    key="selected_topic_canvas",
+                    asset_type="topic",
+                    asset_id=topic["id"],
+                    selector="selected_topic_canvas",
+                    role="selected_topic",
+                    workspace_id=workspace["id"],
+                    data={
+                        "workspaceId": workspace["id"],
+                        "topicId": topic["id"],
+                        "title": topic["title"],
+                        "body": topic["body"],
+                        "angle": topic["angle"],
+                        "updatedAt": topic["updated_at"],
+                        "pendingSuggestions": canvas_topic["pendingSuggestions"],
+                    },
+                )
+            )
+            if topic["source_analysis_run_id"]:
+                try:
+                    source_run = self.analysis_repository.get(
+                        connection, topic["source_analysis_run_id"]
+                    )
+                except NotFoundError:
+                    source_run = None
+                # A malformed or imported Topic can refer to a run owned by a
+                # different workspace.  The old scoped query simply treated
+                # that as missing; retain that fail-closed boundary now that
+                # context assembly uses the repository directly.
+                if source_run is not None and source_run.get("workspace_id") == workspace["id"]:
+                    source_snapshot = json.loads(source_run["input_snapshot_json"])
+                    original_posts = source_snapshot.get("historicalPosts", {}).get("content", "")
+                    if original_posts:
+                        creator_fact_sources.append(
+                            {"id": "analysis-original-posts", "text": original_posts}
+                        )
+                        topic_context_items.append(
+                            self.deep_item(
+                                key="creator_fact_source",
+                                asset_type="analysis_run",
+                                asset_id=source_run["id"],
+                                selector="analysis_original_posts",
+                                role="creator_fact_source",
+                                workspace_id=workspace["id"],
+                                data={
+                                    "workspaceId": workspace["id"],
+                                    "sourceRunId": source_run["id"],
+                                    "sourceContentHash": self._hash(original_posts),
+                                    "version": self._hash(source_snapshot),
+                                },
+                            )
+                        )
+        selected_asset_item = (
+            self.capability_asset_detail_item(
+                connection,
+                workspace_id=workspace["id"],
+                context_target=context_target,
+            )
+            if context_target and context_target.get("assetType") != "topic"
+            else None
+        )
+        pack = self.build_workspace_pack(
+            connection,
+            workspace=workspace,
+            requester={
+                "workflowId": "agent_conversation",
+                "agentId": agent["agent_id"],
+                "skillId": "agent.chat",
+                "conversationId": conversation_id,
+            },
+            purpose="agent_conversation_reply",
+            selectors=[
+                "account_positioning",
+                "input_assets_overview",
+                "analysis_history_overview",
+                "topic_library_overview",
+                "draft_history_overview",
+                "simulation_history_overview",
+                "capability_catalog",
+                "agent_system_prompt",
+                "selected_capability_asset",
+            ],
+            deep_items=(
+                ([selected_asset_item] if selected_asset_item else []) + topic_context_items
+            )
+            or None,
+        )
+        if topic is None:
+            return pack
+        pack["canvasTopic"] = {
+            key: topic[key] for key in ("id", "title", "body", "angle", "updated_at")
+        }
+        pack["canvasTopic"]["pendingSuggestions"] = json.loads(
+            topic["generated_snapshot_json"]
+        ).get("pendingSuggestions", [])
+        pack["creatorFactSources"] = creator_fact_sources
+        return pack
 
     def deep_item(
         self,
@@ -247,6 +388,7 @@ class ContextAccessService:
             "role": role,
             "data": data,
             "text": text,
+            "workspace_id": workspace_id,
         }
 
     def capability_asset_detail_item(
@@ -444,9 +586,7 @@ class ContextAccessService:
         }
 
     @staticmethod
-    def _copy_if_present(
-        target: dict[str, Any], source: dict[str, Any], keys: list[str]
-    ) -> None:
+    def _copy_if_present(target: dict[str, Any], source: dict[str, Any], keys: list[str]) -> None:
         for key in keys:
             value = source.get(key)
             if isinstance(value, (dict, list)):
@@ -548,7 +688,5 @@ class ContextAccessService:
         }
 
     def _hash(self, value: Any) -> str:
-        encoded = json.dumps(
-            value, ensure_ascii=False, sort_keys=True, default=str
-        ).encode("utf-8")
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()

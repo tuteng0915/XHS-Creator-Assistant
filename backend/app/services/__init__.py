@@ -6,6 +6,11 @@ from app.services.agent_conversations import (
 from app.services.agents import AgentService
 from app.services.analysis_runs import AnalysisRunService
 from app.services.asset_proposals import AssetProposalService
+from app.services.content_collaboration_provider import RealContentCollaborationProvider
+from app.services.content_collaboration_sessions import (
+    ContentCollaborationSessionService,
+    DeterministicContentCollaborationProvider,
+)
 from app.services.context_access import ContextAccessService
 from app.services.draft_generation import (
     DraftGenerationService,
@@ -36,9 +41,12 @@ __all__ = [
     "AnalysisRunService",
     "AssetProposalService",
     "ContextAccessService",
+    "ContentCollaborationSessionService",
     "DraftGenerationService",
     "DraftService",
     "FakeStructureModelProvider",
+    "DeterministicContentCollaborationProvider",
+    "RealContentCollaborationProvider",
     "FakeAgentConversationModelProvider",
     "InputAssetService",
     "MediaAssetService",
