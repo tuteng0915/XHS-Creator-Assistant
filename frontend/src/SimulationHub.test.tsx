@@ -7,7 +7,7 @@ import type {SimulationCategory, SimulationRun} from './types'
 beforeEach(()=>{window.history.replaceState({},'','/');vi.stubGlobal('localStorage',memoryStorage())})
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals()})
 
-function setup() {
+function setup(withFeedback=false) {
   const workspace={id:'w',name:'测试账号',accountPositioning:'',positioningVersion:1,currentTopicId:null,createdAt:'',updatedAt:''}
   const runs:SimulationRun[]=([
     ['account','账号整体期待'],['published_note','旧笔记复盘'],['creation','正在写的选题'],
@@ -18,6 +18,12 @@ function setup() {
       topic:{title:targetTitle,body:'这次讨论的正文。'}},
     personaDefinitions:[],reactionResults:[],debateResults:[],synthesis:{},stageErrors:{},modelMetadata:{},
   }))
+  if(withFeedback){
+    const creation=runs.find(row=>row.id==='creation')!
+    creation.topicId='topic'
+    creation.personaDefinitions=[{id:'reader',name:'认真读者'}]
+    creation.reactionResults=[{personaId:'reader',action:'comment',quote:'这段想表达的取舍很有意思，开头可以再直接一点。'}]
+  }
   const fetch=vi.spyOn(globalThis,'fetch').mockImplementation(async(input,init)=>{
     const url=String(input)
     if(url==='/api/workspaces')return Response.json([workspace])
@@ -41,6 +47,18 @@ async function openHub() {
   fireEvent.click(screen.getByRole('button',{name:/👥 受众模拟/}))
   await waitFor(()=>expect(screen.getAllByRole('option',{name:'认真读者'})).toHaveLength(3))
 }
+
+it('brings a selected reader opinion into the corresponding canvas without a model request',async()=>{
+  const fetch=setup(true);await openHub()
+  fireEvent.click(screen.getByRole('tab',{name:/创作级/}))
+  fireEvent.click(screen.getByRole('button',{name:/正在写的选题/}))
+  fireEvent.click(await screen.findByRole('button',{name:'拿这条意见改稿'}))
+  await screen.findByRole('heading',{level:1,name:'AI 创作助手'})
+  expect(screen.getByLabelText('创作标题')).toHaveValue('下一篇创作')
+  expect(screen.getByLabelText('创作正文')).toHaveValue('创作正文')
+  expect(screen.getByText('这段想表达的取舍很有意思，开头可以再直接一点。')).toBeVisible()
+  expect(fetch.mock.calls.filter(([,init])=>init?.method==='POST'||init?.method==='PATCH')).toHaveLength(0)
+})
 
 it('keeps one first-level simulation hub with three independently browsable histories',async()=>{
   setup();await openHub()

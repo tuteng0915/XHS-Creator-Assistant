@@ -13,6 +13,7 @@ import { RetestProgress } from './RetestProgress'
 import { PanelComparisonView } from './PanelComparisonView'
 import {SimulationChat} from './SimulationChat'
 import {simulationCategoryFor, simulationCategoryLabel, simulationStatusLabel} from '../simulationChat'
+import type {ReaderFeedbackIntent} from '../contentCollaboration'
 
 type ReviewDraft = {
   reviewStatus: ReviewStatus
@@ -30,6 +31,7 @@ type Props = {
   onOpenSimulationRun: (runId: string, showInOutput?: boolean) => void
   onSimulationObserved?: (run: SimulationRun) => void
   onTopicAdded?: (topic: Topic) => void
+  onUseReaderFeedback?: (feedback: ReaderFeedbackIntent) => void
   topics?: Topic[]
   onSimulationReviewDraftChange: (draft: ReviewDraft) => void
   onSaveSimulationRunReview: () => void
@@ -48,6 +50,7 @@ export function SimulationHistoryPage({
   onOpenSimulationRun,
   onSimulationObserved,
   onTopicAdded,
+  onUseReaderFeedback,
   topics,
   onSimulationReviewDraftChange,
   onSaveSimulationRunReview,
@@ -114,7 +117,7 @@ export function SimulationHistoryPage({
             /></details>
             {!publicMode && <><label>原始输入快照</label><JsonPreview value={selectedSimulationRun.inputSnapshot} /></>}
             {!publicMode && <label>模拟结果</label>}
-            {publicMode ? <SimulationChat key={`chat:${selectedSimulationRun.id}`} run={selectedSimulationRun} onObserved={onSimulationObserved} onTopicAdded={onTopicAdded} topics={topics}/> : stageSeedFromSimulation(selectedSimulationRun).map((stage) => (
+            {publicMode ? <SimulationChat key={`chat:${selectedSimulationRun.id}`} run={selectedSimulationRun} onObserved={onSimulationObserved} onTopicAdded={onTopicAdded} topics={topics} onUseReaderFeedback={onUseReaderFeedback}/> : stageSeedFromSimulation(selectedSimulationRun).map((stage) => (
               <div className="stage compact" key={stage.key}>
                 <div className="stage-h">
                   <div className="stage-n">{stage.n}</div>

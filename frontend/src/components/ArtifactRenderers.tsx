@@ -198,6 +198,7 @@ export function StageResultRenderer({
       <IncentiveFitView data={result.incentiveFit as Record<string, unknown>} />
     )
   }
+  if (publicMode) return <p className="muted">这部分结果暂时无法展示。</p>
   return <pre className="json-preview">{JSON.stringify(stage.result, null, 2)}</pre>
 }
 

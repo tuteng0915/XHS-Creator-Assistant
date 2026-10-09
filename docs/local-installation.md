@@ -20,7 +20,7 @@ npm --prefix frontend ci
 
 `xhs` extra 和 Chromium 用于我们的短链解析器；它们不能替代下一步的 MediaCrawler 环境。Linux 如提示缺少系统浏览器库，可使用该环境的 `python -m playwright install --with-deps chromium`，这可能需要管理员权限。
 
-按 [README 的模型配置](../README.md#模型配置) 在仓库根目录创建 `.env.local`。文件被忽略，不要把 key 或登录态提交到 Git。已有账号、`_tt` / QSheep 抓取样本都不会随 clone 自动出现，首次启动是空数据库。
+按[模型配置](development.md#模型配置)在仓库根目录创建 `.env.local`。文件被忽略，不要把 key 或登录态提交到 Git。已有账号、`_tt` / QSheep 抓取样本都不会随 clone 自动出现，首次启动是空数据库。已有数据的轻量交付见[数据交接指南](data-handoff.md)，离线导入与旧脚本见[离线导入指南](offline-import.md)。
 
 ## 2. 安装抓取依赖
 
@@ -95,7 +95,7 @@ npm --prefix frontend run dev -- --host 127.0.0.1
 
 “能运行同样的程序”和“看到同一批账号、笔记、图片及历史记录”是两件事。上面的安装步骤完成前者；后者还需要原电脑的本地数据。以下步骤针对默认目录，接收方必须是受信任环境。
 
-只想把**已导入的账号、笔记、封面及应用历史**交给协作者时，优先用 [README 的轻量数据包](../README.md#把现有数据交给协作者推荐)：仅打包 `data/app.sqlite3` 和 `data/uploads/`，无需复制 MediaCrawler、抓取缓存和浏览器登录态。下面的整份 `data/` 备份只适合确实需要保留原始抓取文件、离线导入包等开发现场时使用；它不是给一般协作者的默认方案。
+只想把**已导入的账号、笔记、封面及应用历史**交给协作者时，优先用[轻量数据包](data-handoff.md)：仅打包 `data/app.sqlite3` 和 `data/uploads/`，无需复制 MediaCrawler、抓取缓存和浏览器登录态。下面的整份 `data/` 备份只适合确实需要保留原始抓取文件、离线导入包等开发现场时使用；它不是给一般协作者的默认方案。
 
 ### 原电脑准备
 

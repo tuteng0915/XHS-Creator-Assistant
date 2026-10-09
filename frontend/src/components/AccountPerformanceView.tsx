@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { CreatorNote } from '../creatorNotes'
 import type { MediaAsset } from '../types'
 import { CreatorNoteBrowser } from './CreatorNoteBrowser'
+import './AccountPerformanceView.css'
 
 const metrics = { liked: '点赞', collected: '收藏', comments: '评论', shares: '分享' } as const
 type Metric = keyof typeof metrics
@@ -53,14 +54,20 @@ export function AccountPerformanceView({ observations, summaries, notes, mediaAs
 
   function renderGroup(title: string, entries: PerformanceNote[]) {
     if (!entries.length) return null
-    return <div className="account-performance-group"><b>{title}</b>
+    return <div className="account-performance-group"><h5>{title}</h5>
       {entries.map(note => <div key={note.noteId} className="account-performance-row">
-        <button type="button" className="text-button" disabled={!available.has(note.noteId)} aria-expanded={openNote === note.noteId}
-          onClick={() => setOpenNote(openNote === note.noteId ? null : note.noteId)}>{note.title}</button>
-        {!available.has(note.noteId) && <small>本次分析快照未保留正文</small>}
-        <small>{note.publishedAt ? `${new Date(note.publishedAt).toLocaleDateString('zh-CN')} · ` : '发布时间未知 · '}
-          {label} {note.metrics[metric]} · 本次{label}第 {ranks.get(note.metrics[metric]!)}
-        </small>
+        <div className="account-performance-row-summary">
+          <div className="account-performance-description">
+            <button type="button" className="text-button account-performance-title" disabled={!available.has(note.noteId)} aria-expanded={openNote === note.noteId}
+              onClick={() => setOpenNote(openNote === note.noteId ? null : note.noteId)}>{note.title}</button>
+            <small>{note.publishedAt ? new Date(note.publishedAt).toLocaleDateString('zh-CN') : '发布时间未知'}</small>
+            {!available.has(note.noteId) && <small>本次分析快照未保留正文</small>}
+          </div>
+          <div className="account-performance-value">
+            <span><small>{label}</small> <strong>{note.metrics[metric]}</strong></span>
+            <small>本次{label}第 {ranks.get(note.metrics[metric]!)}</small>
+          </div>
+        </div>
         {openNote === note.noteId && available.has(note.noteId) && <div className="account-performance-note">
           <CreatorNoteBrowser notes={[available.get(note.noteId)!]} mediaAssets={mediaAssets} />
         </div>}
@@ -68,7 +75,7 @@ export function AccountPerformanceView({ observations, summaries, notes, mediaAs
     </div>
   }
 
-  return <section className="account-performance">
+  return <section className="account-performance account-performance-view">
     <div className="account-performance-heading">
       <h4>笔记表现</h4>
       <select aria-label="比较指标" value={metric} onChange={event => {
@@ -78,7 +85,7 @@ export function AccountPerformanceView({ observations, summaries, notes, mediaAs
         {Object.entries(metrics).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
       </select>
     </div>
-    <p className="muted" role="status">
+    <p className="muted account-performance-summary" role="status">
       {sorted.length ? `${label}数据 ${sorted.length} / ${observations.length} 条 · 中位数 ${medianValue}` : `本次未获取${label}数据`}
       {missing > 0 && sorted.length > 0 ? ` · ${missing} 条未获取` : ''}
     </p>

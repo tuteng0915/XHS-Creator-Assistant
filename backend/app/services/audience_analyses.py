@@ -130,11 +130,8 @@ def validate_audience_output(output: dict, context: dict) -> tuple[dict, dict]:
     if not accepted:
         return {}, diagnostics
     summary = (envelope.summary if not rejected
-               else f"已保留 {len(accepted)} 个通过原文核验的阅读视角。")
-    limitations = envelope.limitations
-    if rejected:
-        limitations += f" 另有 {len(rejected)} 个分组未通过核验，未用于模拟粉丝或模拟。"
-    result = AudienceResult(summary=summary, groups=accepted, limitations=limitations)
+               else f"为你整理了 {len(accepted)} 位候选读者。")
+    result = AudienceResult(summary=summary, groups=accepted, limitations=envelope.limitations)
     return result.grounded_result(context), diagnostics
 
 
@@ -277,7 +274,7 @@ class AudienceAnalysisService:
             error_message = ""
             if not result:
                 status = "failed"
-                error_message = "所有分组的受众证据引用均未通过核验；具体原因已保存。"
+                error_message = "本次未生成可用读者，请重新分析。"
             phase = "saving_result"
             with self.database.transaction() as c:
                 # Analysis produces candidates. A creator explicitly adopts each

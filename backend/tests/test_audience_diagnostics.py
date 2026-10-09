@@ -117,6 +117,7 @@ def test_audience_failures_keep_diagnostics_and_provider_output(app, failure):
         )
     else:
         assert len(result.diagnostics["rejectedGroups"]) == 4
+        assert result.error == "本次未生成可用读者，请重新分析。"
         if failure == "quote":
             issue = result.diagnostics["rejectedGroups"][0]["issues"][0]
             assert issue["code"] == "quote_not_exact"
@@ -159,6 +160,10 @@ def test_partial_result_can_feed_fan_and_legacy_simulation(app, invalid):
     result = asyncio.run(run())
     assert result.status == "partially_completed"
     assert result.result["summary"] != output["summary"]
+    assert "核验" not in result.result["summary"]
+    assert "分组未通过核验" not in result.result["limitations"]
+    assert len(result.diagnostics["rejectedGroups"]) == 1
+    assert len(result.result["groups"]) == 3
     assert result.model_metadata == {"model": "test"}
     if invalid in {"non_object", "invalid_name"}:
         assert result.diagnostics["rejectedGroups"][0]["groupName"] is None

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { agentConversationApi } from '../api'
 import type { AgentConversation, Topic } from '../types'
 import { collaborationCandidates, collaborationSummary, contentCollaborationApi } from '../contentCollaboration'
-import type { CollaborationCandidate, CollaborationRole, CollaborationSession, SpecialistRole } from '../contentCollaboration'
+import type { CollaborationCandidate, CollaborationComposeIntent, CollaborationRole, CollaborationSession, SpecialistRole, WritingFocusRequest } from '../contentCollaboration'
 import { CreatorEditSnapshot } from './CreatorEditSnapshot'
 import { PendingSuggestions } from './PendingSuggestions'
 import { ReaderAvatar } from './ReaderAvatar'
@@ -13,11 +13,12 @@ const candidateNames = {evidence: '可用材料', open_question: '等你补充',
 const isRunning = (session: CollaborationSession | null) => !!session && ['queued', 'running'].includes(session.executionStatus)
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
-export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSend, onActivityChange, onPreview}: {
+export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSend, onActivityChange, onPreview, composeIntent}: {
   workspaceId: string; topic: Topic; blocked: boolean
-  beforeSend: () => Promise<{topic: Topic; assertCurrent: () => void}>
+  beforeSend: () => Promise<{topic: Topic; assertCurrent: () => void; writingFocus?: WritingFocusRequest}>
   onActivityChange: (busy: boolean) => void
   onPreview: (candidate: CollaborationCandidate) => void
+  composeIntent?: CollaborationComposeIntent | null
 }) {
   const [session, setSession] = useState<CollaborationSession | null>(null)
   const [legacy, setLegacy] = useState<AgentConversation[]>([])
@@ -29,10 +30,14 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
   const [error, setError] = useState('')
   const [pollPaused, setPollPaused] = useState(false)
   const [elapsed, setElapsed] = useState(0)
+  const [composeFocusRequest, setComposeFocusRequest] = useState('')
   const active = useRef(true)
   const sendLock = useRef(false)
   const creationKey = useRef(crypto.randomUUID())
-  const requestRef = useRef<{content: string; recipient: SpecialistRole; key: string} | null>(null)
+  const requestRef = useRef<{content: string; recipient: SpecialistRole; focusSignature: string; key: string} | null>(null)
+  const composedId = useRef('')
+  const focusedComposeId = useRef('')
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
   const running = isRunning(session)
   const lastRun = session?.runs.at(-1)
@@ -41,6 +46,22 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
   const finishedRoles = session?.messages.filter(item => item.sender !== 'creator' && item.modelMetadata.runId === lastRun?.id).length || 0
 
   useEffect(() => {active.current = true; return () => {active.current = false}}, [])
+  useEffect(() => {
+    if (!composeIntent || composeIntent.id === composedId.current) return
+    composedId.current = composeIntent.id
+    setMessage(value => value.trim() ? `${value}\n\n${composeIntent.text}` : composeIntent.text)
+    setRecipient(composeIntent.recipient)
+    setComposeFocusRequest(composeIntent.id)
+  }, [composeIntent])
+  useEffect(() => {
+    if (!composeFocusRequest || focusedComposeId.current === composeFocusRequest) return
+    focusedComposeId.current = composeFocusRequest
+    const composer = composerRef.current
+    if (!composer) return
+    composer.focus({preventScroll: true})
+    composer.setSelectionRange(composer.value.length, composer.value.length)
+    composer.scrollIntoView?.({block: 'nearest', behavior: 'auto'})
+  }, [composeFocusRequest])
   useEffect(() => {onActivityChange(sending || running)}, [onActivityChange, sending, running])
   useEffect(() => {
     let current = true
@@ -100,17 +121,20 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
     const content = message.trim()
     const submittedMessage = message
     const submittedRecipient = recipient
-    const request = requestRef.current?.content === content && requestRef.current.recipient === submittedRecipient
-      ? requestRef.current : {content, recipient: submittedRecipient, key: crypto.randomUUID()}
-    requestRef.current = request
     try {
       const prepared = await beforeSend()
       if (!active.current) return
+      const focusSignature = JSON.stringify(prepared.writingFocus || null)
+      const request = requestRef.current?.content === content && requestRef.current.recipient === submittedRecipient && requestRef.current.focusSignature === focusSignature
+        ? requestRef.current : {content, recipient: submittedRecipient, focusSignature, key: crypto.randomUUID()}
+      requestRef.current = request
       const current = session || await contentCollaborationApi.create(workspaceId, topic.id, prepared.topic.title, creationKey.current)
       if (!active.current) return
       setSession(current)
       prepared.assertCurrent()
-      const result = await contentCollaborationApi.send(workspaceId, current.id, content, submittedRecipient, request.key)
+      const result = prepared.writingFocus
+        ? await contentCollaborationApi.send(workspaceId, current.id, content, submittedRecipient, request.key, prepared.writingFocus)
+        : await contentCollaborationApi.send(workspaceId, current.id, content, submittedRecipient, request.key)
       if (!active.current) return
       setSession(result); requestRef.current = null
       setMessage(value => value === submittedMessage ? '' : value)
@@ -127,11 +151,11 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
   }
 
   return <section className="canvas-chat collaboration-chat" aria-label="协作创作室">
-    <header className="collaboration-header"><strong>一起把这篇写好</strong><p>研究梳理材料，写作给出表达，审稿指出优先修改处。每位伙伴完成后就会显示结果。</p>
+    <header className="collaboration-header"><strong>一起把这篇写好</strong>
       <div className="collaboration-members">{(['research', 'writing', 'review'] as const).map(role => <span key={role}><ReaderAvatar id={`collaboration-${role}`} name={roleNames[role]} size={26} />{roleNames[role]}</span>)}</div>
     </header>
     <div ref={transcriptRef} className="canvas-messages collaboration-messages" aria-label="创作对话" aria-live="polite" aria-relevant="additions text">
-      {!session?.messages.length && <div className="collaboration-empty"><p>可以先聊角度，也可以直接请写作伙伴起草。</p><div className="collaboration-quick-actions">
+      {!session?.messages.length && <div className="collaboration-empty"><div className="collaboration-quick-actions">
         <button type="button" disabled={running || sending} onClick={() => {setMessage('围绕这篇内容，帮我找一个清晰、有辨识度的表达角度。'); setRecipient('research')}}>先聊角度</button>
         <button type="button" disabled={running || sending} onClick={() => {setMessage('请根据已有材料起草一版正文，缺少的真实经历留空向我确认。'); setRecipient('writing')}}>帮我起草</button>
       </div></div>}
@@ -142,21 +166,22 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
             {collaborationCandidates(item).map((candidate, index) => <section className="collaboration-candidate" key={index}>
               <small>{candidateNames[candidate.kind]}{candidate.confidence === 'needs_creator' ? ' · 待你确认' : candidate.confidence === 'inference' ? ' · 待验证' : ''}</small>
               <h3>{candidate.title}</h3><p>{candidate.body}</p>
-              {['outline', 'copy_option'].includes(candidate.kind) && <button type="button" disabled={blocked || sending || running} onClick={() => onPreview(candidate)}>预览并编辑这条建议</button>}
+              {['outline', 'copy_option'].includes(candidate.kind) && <button type="button" disabled={blocked || sending || running || candidate.focusUnavailable} onClick={() => onPreview(candidate)}>{candidate.writingFocus?.selection ? '对比并修改这一段' : '预览并编辑这条建议'}</button>}
+              {candidate.focusUnavailable && <p>这条建议的原文定位不完整，不能直接替换。请重新选择段落后发送。</p>}
               {candidate.kind === 'open_question' && <button type="button" disabled={sending || running} onClick={() => {setRecipient(item.sender === 'system' || item.sender === 'creator' ? 'research' : item.sender); setMessage(`关于“${candidate.title}”：`)}}>补充给{roleNames[item.sender]}</button>}
             </section>)}
           </div>
         </div>
       </article>)}
-      {running && <div className="collaboration-progress" role="status"><span className="collaboration-pulse" /> <strong>{pollPaused ? '等待恢复进度连接' : `${roleNames[currentRole]}正在整理${finishedRoles ? '下一部分' : '第一部分'}`}</strong><small>已等待 {elapsed} 秒 · 已显示 {finishedRoles} 段结果</small><p>{elapsed > 45 ? '这一段比平时久一些。你可以继续编辑左侧稿件，已完成的结果会保留。' : '各位伙伴会依次回应；有结果就会出现在这里。'}</p></div>}
-      {session?.executionStatus === 'waiting_creator' && <p className="collaboration-status-note">本轮已结束。你可以补充材料、追问，或预览上面的写作建议。</p>}
+      {running && <div className="collaboration-progress" role="status"><span className="collaboration-pulse" /> <strong>{pollPaused ? '等待恢复进度连接' : `${roleNames[currentRole]}正在整理${finishedRoles ? '下一部分' : '第一部分'}`}</strong><small>已等待 {elapsed} 秒 · {finishedRoles} 段结果</small>{elapsed > 45 && <p>耗时较久，可继续编辑稿件。</p>}</div>}
+      {session?.executionStatus === 'waiting_creator' && <p className="collaboration-status-note">本轮完成，可继续追问。</p>}
       {session?.executionStatus === 'failed' && <div className="collaboration-error" role="alert"><p>{session.failureDetail || lastRun?.errorDetail || '这一轮没有完成，前面已完成的结果已经保留。'}</p><button type="button" onClick={retryLastInstruction}>把上次要求放回输入框</button><small>检查后点击发送会开始新一轮，不会自动重试。</small></div>}
     </div>
     {error && <div className="collaboration-error" role="alert"><p>{error}</p>{(!ready || pollPaused) && <button type="button" onClick={() => {setPollPaused(false); setError(''); setLoadVersion(value => value + 1)}}>重新载入进度</button>}</div>}
     <form className="collaboration-composer" onSubmit={event => {event.preventDefault(); void send()}}>
       <label>这次先请 <select aria-label="先交给哪位伙伴" value={recipient} onChange={event => setRecipient(event.target.value as SpecialistRole)}><option value="research">研究伙伴 · 讨论角度与材料</option><option value="writing">写作伙伴 · 起草与改写</option><option value="review">审稿伙伴 · 检查已有稿件</option></select></label>
-      <textarea aria-label="给创作助手的消息" maxLength={8000} value={message} onChange={event => setMessage(event.target.value)} placeholder="例如：开头更像我的口吻，保留第二段的经历。" />
-      <div><small>发送时会先保存当前稿件。建议由你预览、编辑后决定采用。</small><button className="primary" disabled={blocked || !ready || sending || running || !message.trim()}>{sending ? '正在提交…' : running ? '协作进行中…' : '发送'}</button></div>
+      <textarea ref={composerRef} aria-label="给创作助手的消息" maxLength={8000} value={message} onChange={event => setMessage(event.target.value)} placeholder="例如：开头更像我的口吻，保留第二段的经历。" />
+      <div><small>发送时保存当前稿件。</small><button className="primary" disabled={blocked || !ready || sending || running || !message.trim()}>{sending ? '正在提交…' : running ? '协作进行中…' : '发送'}</button></div>
     </form>
     {!!legacy.length && <details className="collaboration-legacy"><summary>旧版创作对话（只读）</summary><p>这些是升级前的记录。继续创作请使用上面的协作室。</p>{legacy.map(chat => <div key={chat.id}>{chat.messages.map(item => <article key={item.id}><small>{item.role === 'user' ? '你' : '旧版创作助手'}</small><p>{item.content}</p>{item.role === 'assistant' && <CreatorEditSnapshot metadata={item.modelMetadata} workspaceId={workspaceId} topicId={topic.id} />}<PendingSuggestions value={item.modelMetadata.pendingSuggestions} /></article>)}</div>)}</details>}
   </section>

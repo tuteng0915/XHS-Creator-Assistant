@@ -63,10 +63,11 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
   const keywords = (portrait?.keywords || []).filter(claimHasEvidence)
   const openKeyword = keywords.find((_, index) => openClaim === `keyword-${index}`)
   const strengths = (portrait?.strengths || []).filter(claimHasEvidence)
-  const hasIntro = claimHasEvidence(portrait?.summary) || keywords.length > 0 || claimHasEvidence(portrait?.encouragement)
+  const hasIntro = claimHasEvidence(portrait?.summary) || keywords.length > 0
+  const encouragement = claimHasEvidence(portrait?.encouragement) ? portrait.encouragement : null
   const recentChange = observations.chronology?.status === 'comparable' && claimHasEvidence(portrait?.recentChange)
     ? portrait.recentChange : null
-  const hasPortrait = hasIntro || strengths.length > 0 || Boolean(recentChange) || validSections.some(([, claims]) => claims.length)
+  const hasPortrait = hasIntro || strengths.length > 0 || Boolean(encouragement) || Boolean(recentChange) || validSections.some(([, claims]) => claims.length)
 
   function renderEvidence(claim: Claim) {
     const evidenceIds = [...new Set(claim.evidence.map(ref => ref.noteId))]
@@ -117,32 +118,42 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
             </div>}
           </div>
         </div>}
-        {claimHasEvidence(portrait?.encouragement) && <div className="account-portrait-encouragement">{renderClaim(portrait.encouragement, 'encouragement')}</div>}
       </div>}
-      {strengths.length > 0 && <section>
+      {strengths.length > 0 && <section className="account-portrait-strengths">
         <h4>这个账号已经做得好的地方</h4>
-        <div className="account-portrait-claims">{strengths.map((claim, index) => renderClaim(claim, `strength-${index}`))}</div>
+        <div className="account-portrait-claims">{strengths.slice(0, 3).map((claim, index) => renderClaim(claim, `strength-${index}`))}</div>
+        {strengths.length > 3 && <details className="account-portrait-more-strengths">
+          <summary>更多优势 <span>· {strengths.length - 3}</span></summary>
+          <div className="account-portrait-claims">{strengths.slice(3).map((claim, index) => renderClaim(claim, `strength-${index + 3}`))}</div>
+        </details>}
       </section>}
     </> : null}
-    <div className="account-portrait-coverage">
-      <span>本次分析 {coverage.selectedCount}{coverage.availableCount ? ` / 已导入 ${coverage.availableCount}` : ''} 条笔记</span>
-      <span>已抓取一级评论 {coverage.capturedCommentCount} 条</span>
-      {coverage.dateRange && <span>笔记发布于 {new Date(coverage.dateRange.earliest).toLocaleDateString('zh-CN')}—{new Date(coverage.dateRange.latest).toLocaleDateString('zh-CN')}</span>}
-      {coverage.sourceFetchedAt && <span>数据导入于 {new Date(coverage.sourceFetchedAt).toLocaleDateString('zh-CN')}</span>}
-      {coverage.snapshotAt && <span>分析于 {new Date(coverage.snapshotAt).toLocaleDateString('zh-CN')}</span>}
-      {coverage.missingDateCount > 0 && <span>{coverage.missingDateCount} 条缺少发布时间</span>}
-    </div>
-    {hasPortrait ? <>
-      {validSections.map(([title, claims]) => claims.length > 0 && <section key={title}>
-        <h4>{title}</h4>
+    {hasPortrait ? <div className="account-portrait-details">
+      {validSections.map(([title, claims]) => claims.length > 0 && <details className="account-portrait-section" key={title}>
+        <summary>{title} <span>· {claims.length}</span></summary>
         <div className="account-portrait-claims">{claims.map((claim, index) => renderClaim(claim, `${title}-${index}`))}</div>
-      </section>)}
-    </> : <p className="muted">本次暂无可展示的账号画像，已保留的内容归纳与笔记数据不受影响。</p>}
-    {recentChange && <section className="account-portrait-change">
-      <h4>内容方向的新变化</h4>
-      {renderClaim(recentChange, 'recent-change')}
-    </section>}
+      </details>)}
+      {recentChange && <details className="account-portrait-section">
+        <summary>内容方向的新变化</summary>
+        {renderClaim(recentChange, 'recent-change')}
+      </details>}
+      {encouragement && <details className="account-portrait-section">
+        <summary>值得继续放大的特点</summary>
+        {renderClaim(encouragement, 'encouragement')}
+      </details>}
+    </div> : <p className="muted">本次暂无可展示的账号画像，已保留的内容归纳与笔记数据不受影响。</p>}
     <AccountPerformanceView observations={observations.notes} summaries={observations.metricSummaries} notes={notes} mediaAssets={mediaAssets} />
+    <details className="account-portrait-source">
+      <summary>分析范围 <span>· {coverage.selectedCount} 条笔记</span></summary>
+      <div className="account-portrait-coverage">
+        <span>本次分析 {coverage.selectedCount}{coverage.availableCount ? ` / 已导入 ${coverage.availableCount}` : ''} 条笔记</span>
+        <span>已抓取一级评论 {coverage.capturedCommentCount} 条</span>
+        {coverage.dateRange && <span>笔记发布于 {new Date(coverage.dateRange.earliest).toLocaleDateString('zh-CN')}—{new Date(coverage.dateRange.latest).toLocaleDateString('zh-CN')}</span>}
+        {coverage.sourceFetchedAt && <span>数据导入于 {new Date(coverage.sourceFetchedAt).toLocaleDateString('zh-CN')}</span>}
+        {coverage.snapshotAt && <span>分析于 {new Date(coverage.snapshotAt).toLocaleDateString('zh-CN')}</span>}
+        {coverage.missingDateCount > 0 && <span>{coverage.missingDateCount} 条缺少发布时间</span>}
+      </div>
+    </details>
   </div>
 }
 

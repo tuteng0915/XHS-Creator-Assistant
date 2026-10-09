@@ -34,6 +34,7 @@ from app.services.content_collaboration import (
     SpecialistTurn,
 )
 from app.services.context_access import ContextAccessService
+from app.services.writing_focus import resolve_writing_focus
 
 DEFAULT_MAX_TURNS = 3
 MAX_CONTEXT_TRANSCRIPT_MESSAGES = 12
@@ -268,14 +269,28 @@ class ContentCollaborationSessionService:
         request_key = payload.request_key.strip()
         recipient = payload.recipient.value
         mode = payload.mode
-        request_fingerprint = _fingerprint(
-            {"content": content, "recipient": recipient, "mode": mode}
-        )
+        request_identity = {"content": content, "recipient": recipient, "mode": mode}
+        if payload.writing_focus is not None:
+            request_identity["writingFocus"] = payload.writing_focus.model_dump(
+                by_alias=True, mode="json", exclude_none=True
+            )
+        request_fingerprint = _fingerprint(request_identity)
         now = utc_now()
         with self.database.transaction() as connection:
             session = self.repository.get_session(
                 connection, workspace_id=workspace_id, session_id=session_id
             )
+            # A lost response must remain replayable after the author has
+            # edited the draft. Validate identity before freshness or scope.
+            existing = connection.execute(
+                "SELECT request_fingerprint FROM content_collaboration_runs "
+                "WHERE session_id=? AND request_key=?",
+                (session_id, request_key),
+            ).fetchone()
+            if existing is not None:
+                if existing["request_fingerprint"] != request_fingerprint:
+                    raise ConflictError("此执行请求标识已用于另一条消息")
+                return self.get(workspace_id, session_id)
             if session["status"] != "active":
                 raise ConflictError("已归档的协作会话不能继续发送消息")
             # Each creator turn starts from the latest saved draft. The
@@ -288,6 +303,13 @@ class ContentCollaborationSessionService:
             session_context = self._build_session_context(
                 connection, workspace=workspace, topic=topic
             )
+            focus = None
+            if payload.writing_focus is not None:
+                focus = resolve_writing_focus(
+                    connection, workspace_id=workspace_id, topic=topic,
+                    payload=payload.writing_focus,
+                )
+                session_context["writingFocus"] = focus
             creator_context = {
                 "schemaVersion": "content-collaboration-message/v1",
                 "sessionContextRef": {
@@ -301,6 +323,11 @@ class ContentCollaborationSessionService:
                 },
                 "executionMode": mode,
             }
+            if focus is not None:
+                creator_context["writingFocus"] = focus
+            creator_metadata = {"origin": "creator", "executionMode": mode}
+            if focus is not None:
+                creator_metadata["writingFocus"] = focus
             message = self.repository.append_message(
                 connection,
                 workspace_id=workspace_id,
@@ -310,7 +337,7 @@ class ContentCollaborationSessionService:
                 content=content,
                 artifact_refs_json="[]",
                 context_snapshot_json=_encoded(creator_context),
-                model_metadata_json=_encoded({"origin": "creator", "executionMode": mode}),
+                model_metadata_json=_encoded(creator_metadata),
                 client_request_key=request_key,
                 client_request_fingerprint=request_fingerprint,
                 now=now,
@@ -594,6 +621,8 @@ class ContentCollaborationSessionService:
                         "executionMode": mode,
                     }
                 )
+                if isinstance(session_context.get("writingFocus"), dict):
+                    message_metadata["writingFocus"] = session_context["writingFocus"]
                 persisted = self.repository.append_message(
                     connection,
                     workspace_id=workspace_id,
@@ -762,6 +791,8 @@ class ContentCollaborationSessionService:
                 "transcript": bounded,
                 "transcriptTruncated": len(transcript) > len(bounded),
             }
+            if isinstance(session_context.get("writingFocus"), dict):
+                context["writingFocus"] = session_context["writingFocus"]
             used_contexts[message.id] = context
             return context
 

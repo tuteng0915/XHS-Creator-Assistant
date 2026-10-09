@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen} from '@testing-library/react'
+import {cleanup, fireEvent, render, screen, within} from '@testing-library/react'
 import {afterEach, expect, it, vi} from 'vitest'
 import type {ActivityEvent, SimulationRun} from '../types'
 import {applySimulationStageEvent, stageSeedFromSimulation} from '../workflowStageViews'
@@ -7,6 +7,7 @@ import {SynthesisView} from './StageResultViews'
 import {SimulationHistoryPage} from './SimulationHistoryPage'
 import type {StageView} from './WorkflowOutputPanel'
 import {feedbackGroups, verifiedConcerns} from '../editorFeedback'
+import {EditorFeedbackView} from './EditorFeedbackView'
 
 afterEach(()=>{cleanup();vi.restoreAllMocks()})
 const card={id:'f1',kind:'keep',sourceType:'reader',sourceMessageIds:['initial:a'],
@@ -54,14 +55,15 @@ it('orders strengths before changes and collapses optional editor suggestions',(
 it.each(['invalid','not_returned','validated'])('keeps string fallback when feedback is %s',status=>{
   render(<SynthesisView data={{...data,editorFeedback:[],editorFeedbackValidation:{status,rejected:status==='invalid'?[{index:0}]:[]}}}/>)
   expect(screen.getByText('旧版调整')).toBeVisible()
-  expect(screen.getByText(status==='validated'?'本次没有生成具体修改卡，可继续参考下面的总结。':'本次未取得可展示的修改卡，下面保留原有总结。')).toBeVisible()
+  expect(screen.getByText(status==='validated'?'本次没有具体修改建议。':'这次未生成可用的修改建议，可查看读者发言或重新试读。')).toBeVisible()
 })
 
-it('retains legacy presentation and reports partial rejection separately',()=>{
+it('retains legacy presentation without surfacing internal rejection counts',()=>{
   const {rerender}=render(<SynthesisView data={{verdict:'旧结论',contentAdjustments:['旧版调整']}}/>)
   expect(screen.queryByRole('region',{name:'创作修改反馈'})).not.toBeInTheDocument()
   rerender(<SynthesisView data={{...data,editorFeedbackValidation:{status:'partial',rejected:[{index:1}]}}} feedbackRun={run}/>)
-  expect(screen.getByText('有 1 条反馈未通过核对，已保留其他有效建议。')).toBeVisible()
+  expect(screen.queryByText(/条反馈未通过/)).not.toBeInTheDocument()
+  expect(screen.getByText('保留这一步')).toBeVisible()
 })
 
 it.each([{contentHash:'other'},{start:1,end:6},{occurrence:1},{coordinateSystem:'utf16'}])('does not highlight an invalid frozen anchor %j',change=>{
@@ -79,7 +81,8 @@ it('shows missing sources rather than substituting another reader',()=>{
 it('falls back on malformed imported cards without rendering unknown enum values',()=>{
   render(<SynthesisView data={{...data,editorFeedback:[null,{...card,kind:'__proto__'},{...card,sourceType:'unknown'}]}} feedbackRun={run}/>)
   expect(screen.getByText('旧版调整')).toBeVisible()
-  expect(screen.getByText('有 3 条反馈未通过核对，未展示这些条目。')).toBeVisible()
+  expect(screen.queryByText(/条反馈未通过/)).not.toBeInTheDocument()
+  expect(screen.getByText('这次未生成可用的修改建议，可查看读者发言或重新试读。')).toBeVisible()
   expect(screen.queryByText('保留这一步')).not.toBeInTheDocument()
 })
 
@@ -114,6 +117,8 @@ it('groups verified alternatives without losing cards or modifying the stored ru
   render(<SynthesisView data={{...data,editorFeedback:[change,other]}} feedbackRun={concernedRun}/>)
   expect(screen.getByRole('region',{name:'同一问题的 2 种改法'})).toBeVisible()
   expect(screen.getAllByText(concern.text)).toHaveLength(1)
+  expect(screen.getByText('安静派 · 试读顾虑记录（非公开原话）')).not.toBeVisible()
+  fireEvent.click(screen.getByText('查看共同关注点'))
   expect(screen.getByText('安静派 · 试读顾虑记录（非公开原话）')).toBeVisible()
   expect(screen.getByText('改法 1')).toBeVisible()
   expect(screen.getByText('改法 2')).toBeVisible()
@@ -158,8 +163,9 @@ it('verifies reply assessments separately from the public response',()=>{
   const replyCard={...change,sourceMessageIds:['reply:a'],readerConcernIds:[c.id],readerConcerns:[c]}
   expect(verifiedConcerns(replyCard,current)).toEqual([c])
   render(<SynthesisView data={{...data,editorFeedback:[replyCard]}} feedbackRun={current}/>)
-  expect(screen.getByText('安静派 · 回应后的顾虑记录（非公开原话）')).toBeVisible()
+  expect(screen.getByText('安静派 · 回应后的顾虑记录（非公开原话）')).not.toBeVisible()
   open()
+  expect(screen.getByText('安静派 · 回应后的顾虑记录（非公开原话）')).toBeVisible()
   expect(screen.getByText('你提的对')).toBeVisible()
   expect(verifiedConcerns(replyCard,{...current,debateResults:[{...current.debateResults[0],response:''}]})).toBeNull()
 })
@@ -168,4 +174,78 @@ it('does not mix optional editor ideas into reader alternatives',()=>{
   const editor={...other,sourceType:'editor_optional',sourceMessageIds:[],readerConcernIds:[],readerConcerns:[],priority:'optional'}
   expect(feedbackGroups([change,editor],concernedRun)).toHaveLength(2)
   expect(verifiedConcerns({...change,readerConcernIds:[concern.id,concern.id]},concernedRun)).toBeNull()
+})
+
+it('puts the concrete suggestion and preview before folded explanation without mutating the result',()=>{
+  const onPrepare=vi.fn(), suggested='先看哪一个版本能让你找到活动时间。\n再核对地点。'
+  const current={...change,suggestedText:suggested,tradeoff:'多占用一行，但比较更直接。'}
+  const before=JSON.stringify(current)
+  render(<EditorFeedbackView data={{editorFeedback:[current]}} run={concernedRun} onPrepare={onPrepare}/>)
+  expect(screen.getByText('正文')).toBeVisible()
+  expect(screen.getByText(suggested,{normalizer:value=>value})).toBeVisible()
+  expect(screen.getByText(current.reason)).not.toBeVisible()
+  expect(screen.getByText(/多占用一行/)).not.toBeVisible()
+  expect(screen.getByText(concern.text)).not.toBeVisible()
+  const button=screen.getByRole('button',{name:'查看改写'})
+  expect(button.compareDocumentPosition(screen.getByText('查看依据与原文')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(onPrepare).not.toHaveBeenCalled()
+  fireEvent.click(button)
+  expect(onPrepare).toHaveBeenCalledWith(current)
+  open()
+  expect(screen.getByText(current.reason)).toBeVisible()
+  expect(screen.getByText(/更适合：安静派/)).toBeVisible()
+  expect(screen.getByText(/多占用一行/)).toBeVisible()
+  expect(JSON.stringify(current)).toBe(before)
+})
+
+it('preserves long expressions in full and does not stringify malformed optional fields',()=>{
+  const suggested='逐条核对，不用一次全改。'.repeat(50)+'https://example.com/'+ 'a'.repeat(140)
+  const {container}=render(<EditorFeedbackView data={{editorFeedback:[{...change,suggestedText:suggested,tradeoff:{text:'不可字符串化'},beneficiaries:null}]}} run={concernedRun}/>)
+  expect(screen.getByText(suggested)).toBeVisible()
+  expect(container.textContent).not.toContain('[object Object]')
+  expect(screen.queryByText(/更适合：/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/尚未写入稿件/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+})
+
+it('keeps material questions visible, leaves old unverified text folded, and offers only verified local actions',()=>{
+  const material={...other,materialRequests:['你实际比较过的两个版本是什么？'],suggestedText:'未经确认的经历'}
+  const whole={...material,id:'whole',target:{field:'whole',quote:'',occurrence:1,contentHash:'hash'}}
+  render(<EditorFeedbackView data={{editorFeedback:[material,whole]}} run={concernedRun} onPrepare={vi.fn()}/>)
+  expect(screen.getByText('整篇内容')).toBeVisible()
+  for(const question of screen.getAllByText(material.materialRequests[0])) expect(question).toBeVisible()
+  expect(screen.getAllByText('未经确认的经历')[0]).not.toBeVisible()
+  expect(screen.getAllByRole('button',{name:'补充素材'})).toHaveLength(1)
+  expect(screen.queryByText('可参考的表达')).not.toBeInTheDocument()
+  fireEvent.click(screen.getAllByText('查看旧版参考文字（未核实）')[0])
+  expect(screen.getAllByText('未经确认的经历')[0]).toBeVisible()
+})
+
+it('never exposes a local action for an invalid anchor and respects edit blocking',()=>{
+  const onPrepare=vi.fn()
+  const {rerender}=render(<EditorFeedbackView data={{editorFeedback:[change]}} run={concernedRun} onPrepare={onPrepare} editDisabled/>)
+  const button=screen.getByRole('button',{name:'查看改写'})
+  expect(button).toBeDisabled()
+  fireEvent.click(button); expect(onPrepare).not.toHaveBeenCalled()
+  rerender(<EditorFeedbackView data={{editorFeedback:[{...change,target:{...change.target,contentHash:'wrong'}}]}} run={concernedRun} onPrepare={onPrepare}/>)
+  expect(screen.queryByText('正文')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+})
+
+it('retains separate cards with identical headings but different reader concerns',()=>{
+  const second={...concern,id:'concern:2',text:'可以补一个实际例子吗？'}
+  const secondCard={...change,id:'f2',readerConcernIds:[second.id],readerConcerns:[second]}
+  render(<EditorFeedbackView data={{editorFeedback:[change,secondCard]}} run={{...concernedRun,reactionResults:[{...concernedRun.reactionResults[0],concerns:[concern.text,second.text]}]}}/>)
+  expect(screen.getAllByRole('heading',{name:change.observation})).toHaveLength(2)
+  expect(screen.queryByText('同一问题的 2 种改法')).not.toBeInTheDocument()
+  for(const article of screen.getAllByRole('article')) expect(within(article).getByText('查看依据与原文')).toBeVisible()
+})
+
+it('shows the explanation when a change has no concrete replacement instead of leaving an empty card',()=>{
+  render(<EditorFeedbackView data={{editorFeedback:[{...change,suggestedText:'',target:{field:'whole',quote:'',occurrence:1,contentHash:'hash'}}]}} run={concernedRun} onPrepare={vi.fn()}/>)
+  expect(screen.getByText(change.reason)).toBeVisible()
+  expect(screen.getAllByText(change.reason)).toHaveLength(1)
+  expect(screen.queryByText('可参考的表达')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  expect(screen.queryByText(/先预览/)).not.toBeInTheDocument()
 })

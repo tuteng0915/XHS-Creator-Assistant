@@ -1,46 +1,55 @@
-# 文档索引
+# 文档导航
 
-最新实施进展与限制先读 [status-and-todo.md](status-and-todo.md)，功能口径读 [product-requirements.md](product-requirements.md)。[creator-experience-iteration.md](creator-experience-iteration.md) 保留四组导航、账号创建、选题与创作助手的阶段设计；其中早期 Top 3 不是当前人数上限：现在默认三个槽位、可继续增加。按选题推荐读者已接通后端、真实 Qwen、过期／采用校验及公开入口的统一确认页；历史页已展示冻结的推荐／实际名单，旧记录缺姓名时不从当前资产补造。公开创作助手编辑 Topic 正文，独立 Draft 仍是内部兼容功能，不在本轮重新开放。
+[返回项目首页](../README.md)
 
-当前产品已经进入“创作者聚焦版 V2”改造。公开产品范围、账号空间模型、URL 导入链路和分阶段验收以 [creator-focused-v2-execution-manual.md](creator-focused-v2-execution-manual.md) 为准；旧的开发者工作台说明只用于理解保留代码和内部调试能力。
+先按你要完成的事情选择文档，不必从头读完。**当前产品口径以 PRD 中最新决定为准，完成情况与验证限制以状态记录为准**；设计文档中的计划不等于已经上线。
 
-顶层只保留当前仍然有效的产品、设计、架构和实现文档。已经完成或明显过时的迁移文档统一放在 `docs/backup/`，作为历史参考，不再作为当前实现依据。
+## 安装、交接与复现
 
-## 推荐阅读顺序
+| 文档 | 内容 |
+| --- | --- |
+| [本地安装](local-installation.md) | 主应用、固定版本 MediaCrawler、补丁、扫码登录与常见故障 |
+| [数据交接](data-handoff.md) | 轻量数据包、可信配置交付、恢复与验收 |
+| [开发与验证](development.md) | 启动、模型配置、测试、付费验证、内部入口与旧原型 |
+| [离线导入](offline-import.md) | 旧浏览器脚本、JSON schema、MediaCrawler 输出与离线封面包 |
+| [发布检查](release-checklist.md) | 提交或发布前检查；其中带日期的旧验收结论不是本轮验证结果 |
 
-1. `creator-focused-v2-execution-manual.md` — 当前公开版的产品范围、交互原则、默认值和实施状态。
-2. `product-design.md`、`product-requirements.md` — 原有内部工作台的功能基线及保留实现；公开版差异以 V2 手册为准。
-3. `pm-capability-tuning-plan.md` — 内部能力调优界面的历史规划。
-4. `status-and-todo.md` — 查看当前完成状态、明确限制和下一步 TODO。
-5. `architecture-review.md` — 查看当前架构风险、已解决问题和工程优先级。
-6. `release-checklist.md` — 准备提交 GitHub 或打 tag 前做发布检查。
+## 产品与当前进展
 
-## 当前有效文档
+| 文档 | 内容 |
+| --- | --- |
+| [产品需求](product-requirements.md) | 当前功能与交互决定，优先看文首最新更新 |
+| [状态与待办](status-and-todo.md) | 每轮完成项、测试、已知限制和下一步交接 |
+| [创作者聚焦版执行手册](creator-focused-v2-execution-manual.md) | 公开产品的改造范围、流程与阶段验收 |
+| [产品设计基线](product-design.md) | 资产、能力、工作流及保留的内部工作台设计 |
+| [创作者体验迭代](creator-experience-iteration.md) | 导航、账号、选题和创作体验的阶段记录 |
 
-- `audience-panel-four-stage-plan.md` — 画像、检索组队、独立试读与回应、创作反馈四阶段改造计划；含字段、Prompt 分工、来源借鉴程度及验收。可选任务协议、快照和关闭讨论的执行底座已完成，页面模式选择、改稿反馈及同组复测待实现。
-- `creator-writing-collaboration-design.md` — 账号复盘如何用于人机共创的待实施设计，涵盖外部 Skill 借鉴、经验与偏好、改稿确认、字段及分阶段验收；不代表当前功能已上线。
-- `creator-journey-acceptance.md` — 09-27 真实 Qwen 与公开页面链路验收、工程修复及尚未解决的内容质量问题。
-- `account-diagnosis-design.md` — 账号诊断的设计与首轮实施记录：先帮助创作者认识账号，再进入选题；明确字段、证据边界和后续验证方法。
-- `audience-simulation-methods.md` — few-shot 受众发现、行为案例、状态化评论互动的文献借鉴与轻量实现记录；当前不要求效果实验。
-- `simulated-fan-model-design.md` — 当前简短人物字段、资产编辑、模拟快照和按选题推荐读者的实现及剩余切片；后半部分保留未启用的原型匹配和多维画像备选设计。
-- `audience-simulation-research.md` — 受众模拟的文献依据、改动前审计及首轮证据化实现；保留的效果实验提案暂不执行。
-- `local-installation.md` — 从 Git 克隆后的本地安装、固定版本 MediaCrawler、封面补丁、浏览器登录及故障排查。
-- `product-design.md` — 当前产品的主设计说明，集中解释功能全貌、设计思想、内容资产、能力资产、workflow、Context Access Layer、Demo/Live、多模态和设计边界。
-- `product-requirements.md` — 基于当前实现反向整理的产品 PRD，描述产品定位、资产模型、核心流程、非目标和验收清单。
-- `status-and-todo.md` — 当前实现状态、已完成事项、明确限制、部署/API 路径说明和 TODO。
-- `pm-capability-tuning-plan.md` — 面向施琦姗实际调优 Skill / Agent / Workflow 的前端能力建设计划。
-- `architecture-review.md` — 当前架构 review 与优先风险。
-- `release-checklist.md` — GitHub 发布前检查清单，包括敏感信息、自动化测试、真实 API smoke 和建议 tag。
+## 业务设计
 
-## 历史参考
+| 文档 | 内容 |
+| --- | --- |
+| [账号诊断](account-diagnosis-design.md) | 账号认识、关键词、优势与内容表现复盘 |
+| [人机共创](creator-writing-collaboration-design.md) | 研究／写作／审稿协作、局部改写与人工采用 |
+| [模拟读者](simulated-fan-model-design.md) | 人物候选、手动收录、画像编辑和冻结快照 |
+| [受众 Panel 四阶段计划](audience-panel-four-stage-plan.md) | 建立画像、检索组队、试读与回应、反馈改稿 |
+| [模拟方法](audience-simulation-methods.md) | 人物发现、行为案例和状态化互动的方法借鉴 |
+| [模拟研究](audience-simulation-research.md) | 文献来源、上下文审计与研究性方案 |
 
-- `backup/current-prototype.md` — 原始单文件 `index.html` 原型审计。
-- `backup/migration-plan.md` — 从原型迁移到 React/FastAPI/SQLite/LangGraph 的早期计划。
-- `backup/workspace-model.md` — 引入能力资产之前的早期 workspace 模型。
-- `backup/agent-context-access.md` — Context Access Layer 的早期设计。
-- `backup/input-asset-model.md` — 内容输入资产抽象的早期设计。
-- `backup/llm-context-audit.md` — 早期 LLM 调用上下文审计。
-- `backup/skill-catalog.md` — Skill / Agent / Workflow 能力资产早期模型。
-- `backup/product-evolution.md` — 后续产品方向和路线的历史整理。
+早期文档保留过 Top 3、自动收录、单助手等方案，不能据此覆盖最新决定：模拟默认三个空槽且可增加，候选由作者手动收录，创作已接入多角色协作。账号／已发布笔记／创作共用一级受众模拟入口，结论用途各不相同。
 
-维护规则：如果某个文档描述的是已经完成的迁移切片，或模型已经不再符合当前代码，就移动到 `docs/backup/`，不要继续放在顶层误导后续实现。
+## 工程与质量验证
+
+- [Agent Runtime 与上下文架构](agent-runtime-architecture.md)：业务模块、任务包、消息、状态和持久化边界。
+- [架构审查](architecture-review.md)：架构问题、已解决事项与工程优先级。
+- [本地导入集成](xhs-local-import-integration.md)：主页导入与 MediaCrawler 适配链路。
+- [四账号回归](four-account-regression.md)：跨账号样例、真实模型观察及尚未通过的质量问题。
+- [创作者链路验收](creator-journey-acceptance.md)：带日期的真实 Qwen 与公开界面验收记录。
+- [能力调优计划](pm-capability-tuning-plan.md)：内部能力调优工具的阶段规划。
+
+自动化测试、界面验收和模型内容质量是不同层面的检查；请以各记录注明的样本、日期和限制理解结果。
+
+## 历史资料
+
+[归档索引](backup/README.md)保留原型审计、早期迁移、资产模型、Context Access Layer 与能力目录的演变，不作为当前实现依据。根目录 `index.html` 是早期单文件原型，打开方法见[开发与验证](development.md)。
+
+维护约定：安装与复现步骤放操作指南，业务取舍放设计文档，每轮进展放状态记录。README 保持简洁；新增文档补到本索引，过期方案明确标注历史状态。

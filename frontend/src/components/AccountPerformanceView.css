@@ -1,0 +1,112 @@
+.account-performance-view .account-performance-heading h4 {
+  font-size: var(--text-section, 16px);
+  font-weight: 600;
+}
+
+.account-performance-view .account-performance-summary {
+  margin: 8px 0 16px;
+  color: var(--sub);
+  font-size: var(--text-sm, 13px);
+  line-height: 1.6;
+}
+
+.account-performance-view .account-performance-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+
+.account-performance-view .account-performance-group {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.account-performance-view .account-performance-group > h5 {
+  margin: 0 0 6px;
+  color: var(--sub);
+  font-size: var(--text-sm, 13px);
+  font-weight: 400;
+}
+
+.account-performance-view .account-performance-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.account-performance-view .account-performance-row-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(88px, 32%);
+  align-items: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.account-performance-view .account-performance-description,
+.account-performance-view .account-performance-value {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.account-performance-view .account-performance-title {
+  --button-foreground: var(--ink);
+  --button-hover-background: transparent;
+  --button-active-background: transparent;
+  justify-self: start;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  color: var(--ink);
+  font-size: var(--text-body, 14px);
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.account-performance-view .account-performance-title:enabled:hover {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.account-performance-view .account-performance-title:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.account-performance-view .account-performance-row small {
+  color: var(--sub);
+  font-size: var(--text-xs, 12px);
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.account-performance-view .account-performance-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-performance-view .account-performance-value strong {
+  color: var(--ink);
+  font-size: var(--text-body, 14px);
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.account-performance-view .account-performance-note {
+  min-width: 0;
+}
+
+.account-performance-view .account-performance-method {
+  margin-top: 12px;
+  font-size: var(--text-sm, 13px);
+  line-height: 1.6;
+}
+
+@media (max-width: 480px) {
+  .account-performance-view .account-performance-row-summary { gap: 10px; }
+}

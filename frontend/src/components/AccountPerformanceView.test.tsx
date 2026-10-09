@@ -78,3 +78,25 @@ it('keeps an empty snapshot readable without creating ranks or fetching data', (
   expect(screen.getByRole('status')).toHaveTextContent('本次未获取点赞数据')
   expect(screen.queryByText(/本次点赞第/)).not.toBeInTheDocument()
 })
+
+it('separates note context from aligned counts without shortening the saved title', () => {
+  const title = '这是一条需要完整保留的长标题：https://example.com/a-very-long-source-with-no-spaces'
+  const {container} = setup([{noteId:'a',title,publishedAt:'2026-10-01T08:00:00Z',metrics:{liked:9007199254740991}}])
+  const row = container.querySelector('.account-performance-row-summary') as HTMLElement
+  const description = row.querySelector('.account-performance-description') as HTMLElement
+  const value = row.querySelector('.account-performance-value') as HTMLElement
+  expect(within(description).getByRole('button', {name:title})).toHaveTextContent(title)
+  expect(description).toHaveTextContent(new Date('2026-10-01T08:00:00Z').toLocaleDateString('zh-CN'))
+  expect(value).toHaveTextContent('点赞 9007199254740991')
+  expect(value).toHaveTextContent('本次点赞第 1')
+  expect(within(row).getAllByRole('button')).toHaveLength(1)
+})
+
+it('keeps missing frozen bodies readable without making them look like zero-count notes', () => {
+  render(<AccountPerformanceView observations={[notes[0], {...notes[1], metrics:{liked:null}}]} notes={[]} mediaAssets={[]} />)
+  expect(screen.getByRole('button', {name:'点赞突出'})).toBeDisabled()
+  expect(screen.getByText('本次分析快照未保留正文')).toBeInTheDocument()
+  expect(screen.getByText('100')).toBeInTheDocument()
+  expect(screen.queryByRole('button', {name:'收藏突出'})).not.toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('点赞数据 1 / 2 条 · 中位数 100 · 1 条未获取')
+})

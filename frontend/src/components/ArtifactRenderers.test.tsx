@@ -20,6 +20,15 @@ const topic: Topic = {
   createdAt: '2026-09-27', updatedAt: '2026-09-27T01:00:00Z',
 }
 
+it('keeps unsupported result JSON out of public reports but available in developer views', () => {
+  const props = {stage:{key:'unknown',n:'1',title:'结果',status:'completed' as const,result:{internalShape:'original-value'}},currentRun:run,onSaveGeneratedTopic:vi.fn(),onSelectTopic:vi.fn(),onGenerateBrief:vi.fn(),onGenerateDraft:vi.fn(),onFillSimulationTopic:vi.fn()}
+  const {rerender} = render(<StageResultRenderer {...props} publicMode />)
+  expect(screen.getByText('这部分结果暂时无法展示。')).toBeInTheDocument()
+  expect(screen.queryByText(/original-value/)).not.toBeInTheDocument()
+  rerender(<StageResultRenderer {...props} publicMode={false} />)
+  expect(screen.getByText(/original-value/).tagName).toBe('PRE')
+})
+
 it.each(['AI 创作助手', '受众模拟'])('passes the selected topic version to %s', async button => {
   const selected: Topic = { ...topic, status: 'selected', updatedAt: '2026-09-27T02:00:00Z' }
   const save = vi.fn().mockResolvedValue(topic)

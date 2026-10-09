@@ -7,12 +7,13 @@ import {EditorFeedbackView} from './EditorFeedbackView'
 import {SimulationReviewSummary} from './SimulationReviewSummary'
 import './TrialRoom.css'
 import {simulationCategoryFor, visibleReply} from '../simulationChat'
+import type {ReaderFeedbackIntent} from '../contentCollaboration'
 
 const text = (v:unknown) => typeof v === 'string' ? v : ''
 const obj = (v:unknown):Record<string,unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string,unknown> : {}
 const strings = (v:unknown) => Array.isArray(v) ? v.filter((x):x is string=>typeof x==='string') : []
 
-export function SimulationChat({run, onObserved,onTopicAdded,topics}:{run:SimulationRun; onObserved?:(run:SimulationRun)=>void;onTopicAdded?:(topic:Topic)=>void;topics?:Topic[]}) {
+export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderFeedback}:{run:SimulationRun; onObserved?:(run:SimulationRun)=>void;onTopicAdded?:(topic:Topic)=>void;topics?:Topic[];onUseReaderFeedback?:(feedback:ReaderFeedbackIntent)=>void}) {
   const observing = useRef(onObserved)
   useEffect(()=>{observing.current=onObserved},[onObserved])
   const [now,setNow]=useState(Date.now())
@@ -21,6 +22,15 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics}:{run:Simula
   const running = ['pending','running'].includes(run.status)
   const category=simulationCategoryFor(run)
   const review=category!=='creation'
+  const feedbackReaderIds=new Set(run.personaDefinitions.map(person=>text(person.id)).filter(Boolean))
+  const canUseFeedback=category==='creation'&&!run.draftId&&!run.inputSnapshot.draft&&run.inputSnapshot.targetType!=='draft'&&!!run.topicId
+    &&['completed','partially_completed'].includes(run.status)&&!!onUseReaderFeedback
+    &&!!topics?.some(topic=>topic.id===run.topicId&&topic.workspaceId===run.workspaceId&&topic.status!=='archived')
+  function handleFeedback(stage:ReaderFeedbackIntent['stage'], messageId:string, senderName:string, quote:string, interviewId?:string, authorQuestion?:string) {
+    if(!canUseFeedback||!run.topicId||!quote.trim())return
+    onUseReaderFeedback?.({id:crypto.randomUUID(),workspaceId:run.workspaceId,topicId:run.topicId,
+      simulationId:run.id,stage,messageId,senderName,quote,...(interviewId?{interviewId}:{}),...(authorQuestion?{authorQuestion}:{})})
+  }
   useEffect(()=>{
     if(!running) return
     let active=true; let timer:ReturnType<typeof setTimeout>
@@ -61,6 +71,7 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics}:{run:Simula
       <ReaderAvatar id={avatarId(item.personaId)} name={speaker}/><div className="trial-message-main">
         <div className="trial-message-meta"><b>{speaker}</b>{reply&&target&&<span>回复 {name(target)}</span>}</div>
         {content ? <p className="trial-bubble">{visibleReply(content,people)}</p> : <p className="trial-silent-note">{item.action==='skip'?'选择划走':'读完了，暂时没有留言'}</p>}
+        {canUseFeedback&&feedbackReaderIds.has(text(item.personaId))&&content&&<button className="text-button trial-use-feedback" onClick={()=>handleFeedback(reply?'reply':'initial',text(item.messageId)||`${reply?'reply':'initial'}:${text(item.personaId)}`,speaker,content)}>拿这条意见改稿</button>}
         {!reply&&(text(item.understanding)||strings(item.concerns).length>0)&&<details className="trial-reading-notes"><summary>查看试读记录</summary>
           {text(item.understanding)&&<p><b>读到了什么</b><br/>{text(item.understanding)}</p>}
           {strings(item.concerns).length>0&&<p><b>困惑或阻力</b><br/>{strings(item.concerns).join('；')}</p>}
@@ -72,8 +83,8 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics}:{run:Simula
   const scope=obj(obj(run.inputSnapshot.sourceAccount).scope)
   return <section className="trial-room" aria-label="读者试读群聊">
     <header className="trial-room-head"><div><h3>{category==='account'?'账号读者群聊':category==='published_note'?'笔记复盘群聊':'试读讨论'}</h3><p>{run.targetTitle||text(topic.title)}</p></div><span>{people.length} 位读者</span></header>
-    {category==='account'&&<p className="trial-context">从账号内容样本出发，聊读者为什么留下，以及希望你接下来持续分享什么。{text(scope.omissionNotice)}</p>}
-    {category==='published_note'&&<p className="trial-context">已发布笔记保持原样，讨论下一篇同类型内容可以怎么做。</p>}
+    {category==='account'&&<p className="trial-context">基于账号样本，讨论读者为何留下、接下来想看什么。{text(scope.omissionNotice)}</p>}
+    {category==='published_note'&&<p className="trial-context">讨论下一篇同类内容；已发布笔记不作修改。</p>}
     {category==='creation'&&!text(topic.body)&&!run.inputSnapshot.draft&&<p className="trial-context">本次只看标题，讨论阅读意愿与期待。</p>}
     <div className="trial-conversation" role="log" aria-label="试读发言" aria-live="polite">
       {!run.reactionResults.length&&!running&&<p className="muted">这次还没有读者发言。</p>}
@@ -81,14 +92,14 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics}:{run:Simula
       {!!run.debateResults.length&&<div className="trial-divider">读者互相回应</div>}
       {run.debateResults.map(item=>bubble(item,true))}
     </div>
-    {running&&<div className="trial-progress" role="status"><span className="trial-working-dot"/><div><b>{stage}</b><small>已等待 {elapsed} 秒 · 每位返回后立即展示，可先阅读已完成的发言。</small></div></div>}
+    {running&&<div className="trial-progress" role="status"><span className="trial-working-dot"/><div><b>{stage}</b><small>已等待 {elapsed} 秒</small></div></div>}
     {loadError&&<p role="alert">{loadError} <button onClick={()=>setRetry(x=>x+1)}>恢复查看</button></p>}
     {!running&&Object.keys(run.stageErrors).length>0&&<details className="trial-errors"><summary>部分环节未完成，已保留现有发言</summary>{Object.entries(run.stageErrors).map(([key,e])=>{
       const id=key.slice(key.indexOf('.')+1)
       return <p key={key}>{people.some(p=>p.id===id)?`${name(id)}：`:''}{text(e)}</p>
     })}</details>}
-    {!running&&people.length>0&&['completed','partially_completed'].includes(run.status)&&<InterviewComposer key={run.id} run={run} people={people} name={name} avatarId={avatarId}/>}
-    {Object.keys(run.synthesis).length>0&&(review?<SimulationReviewSummary key={`review:${run.workspaceId}:${run.id}`} run={run} onTopicAdded={onTopicAdded} topics={topics}/>:<section className="trial-takeaways"><h3>这次试读带来的修改方向</h3>
+    {!running&&people.length>0&&['completed','partially_completed'].includes(run.status)&&<InterviewComposer key={run.id} run={run} people={people} name={name} avatarId={avatarId} feedbackReaderIds={feedbackReaderIds} onUseFeedback={canUseFeedback?handleFeedback:undefined}/>}
+    {Object.keys(run.synthesis).length>0&&(review?<SimulationReviewSummary key={`review:${run.workspaceId}:${run.id}`} run={run} onTopicAdded={onTopicAdded} topics={topics}/>:<section className="trial-takeaways"><h3>修改方向</h3>
       {text(run.synthesis.verdict)&&<p>{text(run.synthesis.verdict)}</p>}
       {text(run.synthesis.mainResistance)&&<p><b>最需要解决</b><br/>{text(run.synthesis.mainResistance)}</p>}
       <EditorFeedbackView data={run.synthesis} run={run}/>
@@ -96,7 +107,7 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics}:{run:Simula
   </section>
 }
 
-function InterviewComposer({run,people,name,avatarId}:{run:SimulationRun;people:Array<Record<string,unknown>>;name:(id:unknown)=>string;avatarId:(id:unknown)=>string}){
+function InterviewComposer({run,people,name,avatarId,feedbackReaderIds,onUseFeedback}:{run:SimulationRun;people:Array<Record<string,unknown>>;name:(id:unknown)=>string;avatarId:(id:unknown)=>string;feedbackReaderIds:ReadonlySet<string>;onUseFeedback?:(stage:'interview',messageId:string,senderName:string,quote:string,interviewId:string,authorQuestion:string)=>void}){
   const [rounds,setRounds]=useState<PanelInterview[]>([])
   const [question,setQuestion]=useState('')
   const [recipient,setRecipient]=useState(text(people[0]?.id))
@@ -128,16 +139,19 @@ function InterviewComposer({run,people,name,avatarId}:{run:SimulationRun;people:
     <div role="log" aria-label="访谈发言" aria-live="polite">{rounds.map(round=><div key={round.id}>
       {round.messages.map(m=><article key={m.id} className={`trial-message ${m.role==='author'?'trial-author':''}`}>
         <ReaderAvatar id={m.role==='author'?'creator':avatarId(m.personaId)} name={m.role==='author'?'作者':m.senderName}/>
-        <div className="trial-message-main"><div className="trial-message-meta"><b>{m.role==='author'?'作者 · 你':m.senderName}</b><span>{m.role==='author'?`询问 ${m.recipientName||'所有读者'}`:'回复 作者'}</span></div><p className="trial-bubble">{visibleReply(m.content,people)}</p></div>
+        <div className="trial-message-main"><div className="trial-message-meta"><b>{m.role==='author'?'作者 · 你':m.senderName}</b><span>{m.role==='author'?`询问 ${m.recipientName||'所有读者'}`:'回复 作者'}</span></div><p className="trial-bubble">{visibleReply(m.content,people)}</p>
+          {m.role==='reader'&&feedbackReaderIds.has(text(m.personaId))&&onUseFeedback&&m.content.trim()&&<button className="text-button trial-use-feedback" onClick={()=>onUseFeedback('interview',m.id,m.senderName,m.content,round.id,round.question)}>拿这条意见改稿</button>}
+        </div>
       </article>)}
       {['pending','running'].includes(round.status)&&<div className="trial-progress" role="status"><span className="trial-working-dot"/><div><b>{round.currentParticipantName||'读者'} 正在回应</b><small>{round.completedReplies}/{round.totalReplies} 已回复 · {Math.round(round.elapsedSeconds)} 秒</small></div><button onClick={()=>void cancel(round.id)}>停止等待</button></div>}
       {round.error&&<p role="status">{round.error}</p>}
     </div>)}</div>
-    <label className="trial-composer-target">向谁追问<select aria-label="访谈对象" value={recipient} disabled={busy||sending} onChange={e=>setRecipient(e.target.value)}>
+    {feedbackReaderIds.size>0?<><label className="trial-composer-target">向谁追问<select aria-label="访谈对象" value={recipient} disabled={busy||sending} onChange={e=>setRecipient(e.target.value)}>
       {people.map(p=><option key={text(p.id)} value={text(p.id)}>{name(p.id)}</option>)}<option value="">所有参与读者</option>
     </select></label>
-    <textarea aria-label="作者追问" value={question} maxLength={2000} rows={3} disabled={busy||sending} placeholder="例如：是哪句话让你觉得不适合自己？如果换一种说法呢？" onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();void send()}}}/>
-    <div className="trial-composer-footer"><small>可以解释、追问或提出新写法 · Ctrl/⌘ + Enter 发送</small><button className="primary" disabled={busy||sending||!question.trim()} onClick={()=>void send()}>{sending?'正在发送…':'加入讨论'}</button></div>
+    <textarea aria-label="作者追问" value={question} maxLength={2000} rows={3} disabled={busy||sending} placeholder="例如：哪句话让你犹豫？" onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();void send()}}}/>
+    <div className="trial-composer-footer"><small>Ctrl/⌘ + Enter 发送</small><button className="primary" disabled={busy||sending||!question.trim()} onClick={()=>void send()}>{sending?'正在发送…':'加入讨论'}</button></div>
+    </>:<p className="muted">这次旧记录只有展示用的读者资料，原发言仍可阅读。重新试读后即可继续访谈或使用意见改稿。</p>}
     {error&&<p role="alert">{error} <button onClick={()=>setRefresh(v=>v+1)}>重新读取</button></p>}
   </section>
 }

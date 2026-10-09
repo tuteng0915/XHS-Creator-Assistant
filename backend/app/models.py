@@ -443,6 +443,50 @@ class ContentCollaborationSessionUpdate(APIModel):
         return value
 
 
+class WritingSelection(APIModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Code-point offsets, not the browser's UTF-16 textarea offsets.
+    start: int = Field(ge=0, strict=True)
+    end: int = Field(ge=1, strict=True)
+    text: str = Field(min_length=1, max_length=100_000)
+
+    @model_validator(mode="after")
+    def valid_range(self):
+        if self.end <= self.start or not self.text.strip():
+            raise ValueError("请选择需要改写的正文片段")
+        return self
+
+
+class WritingReaderReference(APIModel):
+    model_config = ConfigDict(extra="forbid")
+
+    simulation_id: str = Field(min_length=1, max_length=120)
+    stage: Literal["initial", "reply", "interview"]
+    message_id: str = Field(min_length=1, max_length=300)
+    interview_id: str | None = Field(default=None, min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def valid_interview(self):
+        if (self.stage == "interview") != (self.interview_id is not None):
+            raise ValueError("访谈来源需要对应的访谈标识")
+        return self
+
+
+class ContentWritingFocus(APIModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_updated_at: datetime
+    selection: WritingSelection | None = None
+    reader_reference: WritingReaderReference | None = None
+
+    @model_validator(mode="after")
+    def has_focus(self):
+        if self.selection is None and self.reader_reference is None:
+            raise ValueError("请提供改写片段或读者意见")
+        return self
+
+
 class ContentCollaborationMessageCreate(APIModel):
     content: str = Field(min_length=1, max_length=8_000)
     recipient: Literal[
@@ -454,6 +498,7 @@ class ContentCollaborationMessageCreate(APIModel):
     # Collaboration is a quality-facing product surface. It uses the product
     # default Qwen path unless a caller explicitly asks for the local demo.
     mode: Literal["demo", "live"] = "live"
+    writing_focus: ContentWritingFocus | None = None
 
     @field_validator("content", "request_key")
     @classmethod

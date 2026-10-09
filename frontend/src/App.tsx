@@ -101,6 +101,7 @@ import { SimulatedFansPage } from './components/SimulatedFansPage'
 import { CreatorSimulationSetup } from './components/CreatorSimulationSetup'
 import { SimulationCategoryTabs } from './components/SimulationCategoryTabs'
 import { simulationCategoryFor } from './simulationChat'
+import type { ReaderFeedbackIntent } from './contentCollaboration'
 import type { ReaderSelectionLink } from './readerSelection'
 import type { PanelTask, SimulationCategory, SimulationPersonaOverrides } from './types'
 import type { AnalysisScope } from './creatorNotes'
@@ -206,6 +207,7 @@ function WorkspaceApp() {
   }, [selectedWorkspaceId])
   const [simulationRuns, setSimulationRuns] = useState<SimulationRunSummary[]>([])
   const [simulationCategory, setSimulationCategory] = useState<SimulationCategory>('account')
+  const [readerFeedback, setReaderFeedback] = useState<ReaderFeedbackIntent | null>(null)
   const simulationCategoryRef = useRef(simulationCategory)
   useEffect(() => { simulationCategoryRef.current = simulationCategory }, [simulationCategory])
   const [selectedSimulationRun, setSelectedSimulationRun] =
@@ -423,6 +425,7 @@ function WorkspaceApp() {
     setWorkflowAssets([])
     setDrafts([])
     setTopics([])
+    setReaderFeedback(null)
     setSelectedTopic(null)
     setWorkspaceName('')
     setPositioning('')
@@ -1730,6 +1733,18 @@ function WorkspaceApp() {
     setActivePage('simulations')
   }
 
+  function bringReaderFeedbackToCanvas(feedback: ReaderFeedbackIntent) {
+    const source = selectedSimulationRunRef.current
+    if (!source || source.id !== feedback.simulationId || source.workspaceId !== feedback.workspaceId
+      || selectedWorkspaceRef.current !== feedback.workspaceId || source.topicId !== feedback.topicId
+      || simulationCategoryFor(source) !== 'creation' || source.draftId) return
+    const target = topics.find(topic => topic.id === feedback.topicId && topic.workspaceId === feedback.workspaceId && topic.status !== 'archived')
+    if (!target) {setRunError('这篇创作已不在当前选题库中，原讨论仍然保留。'); return}
+    setReaderFeedback(feedback)
+    setSelectedTopic(target)
+    setActivePage('drafts')
+  }
+
   function changeSimulationCategory(category: SimulationCategory) {
     setSimulationCategory(category)
     simulationCategoryRef.current = category
@@ -2882,6 +2897,8 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'drafts' && !internalMode && <CreatorCanvasPage
         key={workspace.id} workspaceId={workspace.id} topic={selectedTopic} topics={topics.filter(t => t.sourceWorkflow !== 'trend_analysis')}
+        readerFeedback={readerFeedback?.workspaceId===workspace.id&&readerFeedback.topicId===selectedTopic?.id?readerFeedback:undefined}
+        onReaderFeedbackConsumed={() => setReaderFeedback(null)}
         onSimulate={prepareAudienceSimulation}
         onRetestCreated={(run, navigate) => {
           if (selectedWorkspaceRef.current !== run.workspaceId) return
@@ -2897,7 +2914,7 @@ function WorkspaceApp() {
         }}
         simulationRuns={simulationRuns}
         agentId={agents.find(a => a.agentId === 'topic_draft_editor')?.id}
-        onSelect={setSelectedTopic} onUpdated={topic => {if(selectedWorkspaceRef.current !== topic.workspaceId) return; setSelectedTopic(topic); setTopics(current => current.map(t => t.id === topic.id ? topic : t))}}
+        onSelect={topic => {setReaderFeedback(null); setSelectedTopic(topic)}} onUpdated={topic => {if(selectedWorkspaceRef.current !== topic.workspaceId) return; setSelectedTopic(topic); setTopics(current => current.map(t => t.id === topic.id ? topic : t))}}
       />}
       {!loading && workspace && activePage === 'drafts' && internalMode && (
         <DraftsPage
@@ -2942,6 +2959,7 @@ function WorkspaceApp() {
           loadState={simulationHistoryLoad}
           reviewStatusLabel={reviewStatusLabel}
           onOpenSimulationRun={openSimulationRun}
+          onUseReaderFeedback={bringReaderFeedbackToCanvas}
           onTopicAdded={topic => {
             if (selectedWorkspaceRef.current !== topic.workspaceId) return
             setTopics(current => [topic, ...current.filter(item => item.id !== topic.id)])

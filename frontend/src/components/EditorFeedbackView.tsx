@@ -1,4 +1,5 @@
 import {object, text, rows, strings, feedbackKinds as kinds, feedbackCards, feedbackGroups, verifiedConcerns, frozenTargetMatches, needsAuthorMaterial, type FeedbackRun, type Row} from '../editorFeedback'
+import './EditorFeedbackView.css'
 
 function Concerns({card, run}: {card:Row; run?:FeedbackRun}) {
   const concerns = verifiedConcerns(card, run)
@@ -52,37 +53,46 @@ export function EditorFeedbackView({data, run, onPrepare, editDisabled = false}:
 }) {
   const cards = feedbackCards(data)
   const diagnostics = object(data.editorFeedbackValidation)
-  const rejected = rows(diagnostics.rejected).length + Math.max(0, rows(data.editorFeedback).length - cards.length)
+  const hasUnavailableCards = rows(diagnostics.rejected).length > 0 || rows(data.editorFeedback).length > cards.length
   const keep = cards.filter(c => c.kind === 'keep')
   const changes = cards.filter(c => c.kind !== 'keep' && c.priority === 'first')
   const optional = cards.filter(c => c.kind !== 'keep' && c.priority !== 'first')
   function renderCard(card:Row, index:number, grouped = false) {
     const ids = strings(card.sourceMessageIds)
     const optionalEditor = card.sourceType === 'editor_optional'
+    const target = object(card.target)
+    const located = frozenTargetMatches(target, run)
+    const isKeep = card.kind === 'keep'
+    const material = needsAuthorMaterial(card)
+    const showReason = isKeep || (!material && !text(card.suggestedText).trim())
     return <article className={`editor-feedback-card ${card.kind === 'keep' ? 'feedback-keep' : ''}`} key={`${text(card.id)}:${index}`}>
-      <span className="feedback-kind">{kinds[text(card.kind)]}{optionalEditor ? ' · 编辑补充' : ''}</span>
-      {grouped && <span className="feedback-option-label">改法 {index + 1}</span>}
-      <h5>{text(card.observation)}</h5><p>{text(card.reason)}</p>
-      {!grouped && !optionalEditor && card.kind !== 'keep' && strings(card.readerConcernIds).length > 0 && <Concerns card={card} run={run}/>}
-      {needsAuthorMaterial(card) ? <div className="feedback-suggestion"><b>等你补充的素材</b>
+      <div className="feedback-card-meta">
+        <span className="feedback-kind">{kinds[text(card.kind)]}{optionalEditor ? ' · 编辑补充' : ''}</span>
+        {located && <span>{target.field === 'title' ? '标题' : target.field === 'body' ? '正文' : '整篇内容'}</span>}
+        {grouped && <span className="feedback-option-label">改法 {index + 1}</span>}
+      </div>
+      <h5>{text(card.observation)}</h5>
+      {showReason && <p>{text(card.reason)}</p>}
+      {material ? <div className="feedback-suggestion"><b>等你补充的素材</b>
         {strings(card.materialRequests).length ? <ul>{strings(card.materialRequests).map((question, i) => <li key={i}>{question}</li>)}</ul>
           : <p>这条旧建议需要你的实际材料，请按上面的建议补充。</p>}
         {text(card.suggestedText) && <details><summary>查看旧版参考文字（未核实）</summary><p>{text(card.suggestedText)}</p></details>}
       </div> : text(card.suggestedText) && <div className="feedback-suggestion"><b>可参考的表达</b><p>{text(card.suggestedText)}</p></div>}
-      {strings(card.beneficiaries).length > 0 && <p className="muted">更适合：{strings(card.beneficiaries).map(id => {
-        const p=run?.personaDefinitions.find(p=>p.id===id)
-        return text(p?.name) || text(p?.archetype) || '当时的读者（姓名未保存）'
-      }).join('、')}</p>}
-      {text(card.tradeoff) && <p><b>取舍：</b>{text(card.tradeoff)}</p>}
-      <details><summary>查看依据与原文</summary>
-        {!optionalEditor && card.kind !== 'keep' && !strings(card.readerConcernIds).length && <Concerns card={card} run={run}/>}
+      {onPrepare && !isKeep && ['title','body'].includes(text(target.field)) && located
+        && <div className="feedback-card-actions"><button disabled={editDisabled} onClick={() => onPrepare(card)}>{material ? '补充素材' : '查看改写'}</button></div>}
+      <details className="feedback-evidence"><summary>查看依据与原文</summary>
+        {!showReason && <p>{text(card.reason)}</p>}
+        {strings(card.beneficiaries).length > 0 && <p className="muted">更适合：{strings(card.beneficiaries).map(id => {
+          const p=run?.personaDefinitions.find(p=>p.id===id)
+          return text(p?.name) || text(p?.archetype) || '当时的读者（姓名未保存）'
+        }).join('、')}</p>}
+        {text(card.tradeoff) && <p><b>取舍：</b>{text(card.tradeoff)}</p>}
+        {!grouped && !optionalEditor && !isKeep && <Concerns card={card} run={run}/>}
         {optionalEditor ? <p className="muted">这是编辑助手的额外建议，不是读者已经提出的问题。</p>
           : ids.length ? ids.map((id,i)=><Source key={`${id}:${i}`} id={id} run={run}/>)
             : <p className="muted">此建议未保存可核对的读者来源。</p>}
-        <FrozenTarget target={object(card.target)} run={run}/>
+        <FrozenTarget target={target} run={run}/>
       </details>
-      {onPrepare && card.kind !== 'keep' && ['title','body'].includes(text(object(card.target).field))
-        && frozenTargetMatches(object(card.target), run) && <button disabled={editDisabled} onClick={() => onPrepare(card)}>{needsAuthorMaterial(card) ? '补充素材' : '查看改写'}</button>}
     </article>
   }
   function renderGroups(items:Row[]) {
@@ -90,18 +100,18 @@ export function EditorFeedbackView({data, run, onPrepare, editDisabled = false}:
       <section className="feedback-alternatives" aria-label={`同一问题的 ${group.length} 种改法`} key={`group:${text(group[0].id)}:${index}`}>
         <h5>同一问题的 {group.length} 种改法</h5>
         <p className="muted">针对同一处原文，可择一参考或自行组合，不必逐条都改。</p>
-        <Concerns card={group[0]} run={run}/>
+        <details className="feedback-shared-concerns"><summary>查看共同关注点</summary><Concerns card={group[0]} run={run}/></details>
         {group.map((card, i) => renderCard(card, i, true))}
       </section>)
   }
   return <section className="editor-feedback" aria-label="创作修改反馈">
-    <p className="muted">{onPrepare ? '先选择修改方式并预览，确认采用后才会更新稿件。' : '以下建议尚未写入稿件，可按你的创作取舍使用。'}</p>
-    {rejected > 0 && <p role="status">有 {rejected} 条反馈未通过核对，{cards.length ? '已保留其他有效建议。' : '未展示这些条目。'}</p>}
-    {!cards.length && <p className="muted">{diagnostics.status === 'validated' && rejected === 0
-      ? '本次没有生成具体修改卡，可继续参考下面的总结。'
-      : '本次未取得可展示的修改卡，下面保留原有总结。'}</p>}
-    {!!keep.length && <div><h4>值得保留</h4>{keep.map((card, i) => renderCard(card, i))}</div>}
-    {!!changes.length && <div><h4>关键调整</h4>{renderGroups(changes)}</div>}
+    {onPrepare && cards.some(c => c.kind !== 'keep' && ['title','body'].includes(text(object(c.target).field)) && frozenTargetMatches(object(c.target), run))
+      && <p className="feedback-intro">先预览，确认采用后才更新稿件。</p>}
+    {!cards.length && <p className="feedback-intro">{diagnostics.status === 'validated' && !hasUnavailableCards
+      ? '本次没有具体修改建议。'
+      : '这次未生成可用的修改建议，可查看读者发言或重新试读。'}</p>}
+    {!!keep.length && <div className="feedback-section"><h4>值得保留</h4>{keep.map((card, i) => renderCard(card, i))}</div>}
+    {!!changes.length && <div className="feedback-section"><h4>关键调整</h4>{renderGroups(changes)}</div>}
     {!!optional.length && <details className="feedback-optional"><summary>其他可选建议（{optional.length}）</summary>{renderGroups(optional)}</details>}
   </section>
 }

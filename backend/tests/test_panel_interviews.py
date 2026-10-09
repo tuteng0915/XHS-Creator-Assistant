@@ -149,12 +149,49 @@ def test_frozen_target_roster_and_only_public_history_reach_reader(app, panel):
     assert [m["senderName"] for m in history] == ["读者 0", "读者 2", "作者", "读者 0"]
     assert history[1]["content"] == "@读者 0 我也想试试。"
     system, prompt = build_interview_prompt(captured)
+    projected = json.loads(prompt)
+    assert projected["publicHistory"] == history
+    assert projected["authorQuestion"] == captured["authorQuestion"]
+    assert projected["publicHistory"][0]["content"] == "我愿意试一下。"
     assert "内部推理" in system
     for private in ("绝不能公开", "内部顾虑", "其他内部记录", "并未公开", "内部创作策略"):
         assert private not in prompt
     assert '"id"' not in prompt
     assert len(service.list(wid, sid)) == 2
     assert service.get(wid, sid, second.id).recipient_name == "读者 2"
+
+
+def test_revisit_uses_only_public_words_as_prior_concerns_and_preserves_intent():
+    public_history = [{"senderName": "先试一步的读者", "content": "这一句让我想试试。"}]
+    context = {
+        "reader": {"id": "reader-a", "name": "先试一步的读者",
+                   "coreConcern": "遇到阻力时如何继续行动", "expressionStyle": "直接说感受"},
+        "participants": [{"id": "reader-a", "name": "先试一步的读者"}],
+        "target": {"targetType": "topic", "title": "从今天开始", "body": "此刻就触手可及。"},
+        "publicHistory": public_history,
+        "authorQuestion": "我改了那句话，你现在怎么看？",
+        "independentReaction": {"concerns": ["未公开的疑问"], "understanding": "内部理解"},
+        "synthesis": {"recommendation": "不是聊天的编辑判断"},
+    }
+    before = deepcopy(context)
+    system, prompt = build_interview_prompt(context)
+    projected = json.loads(prompt)
+    assert set(projected) == {"reader", "participants", "target", "publicHistory", "authorQuestion"}
+    assert projected["publicHistory"] == public_history
+    assert projected["reader"]["coreConcern"] == "遇到阻力时如何继续行动"
+    encoded_history = json.dumps(projected["publicHistory"], ensure_ascii=False)
+    assert "遇到阻力时如何继续行动" not in encoded_history
+    assert "未公开的疑问" not in prompt
+    assert "内部理解" not in prompt
+    assert "不是聊天的编辑判断" not in prompt
+    assert context == before
+    assert "只有 publicHistory 中你本人实际说过的话" in system
+    assert "不是既有聊天记录" in system
+    assert "不能追认成上次的疑问" in system
+    assert "上次只有认可时，可以继续认可" in system
+    assert "行动重点或作者表达意图" in system
+    assert "更喜欢原句" in system
+    assert "不将新增的制度、事件、处境或个人经历安到作者或自己身上" in system
 
 
 def test_same_request_key_is_idempotent_even_after_shutdown_and_changes_conflict(app, panel):

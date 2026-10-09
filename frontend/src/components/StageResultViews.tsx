@@ -104,13 +104,17 @@ export function ProfileView({ data, observations, notes = [], mediaAssets = [] }
   notes?: CreatorNote[]
   mediaAssets?: MediaAsset[]
 }) {
+  const structure = data.viralStructure as { name?: string; steps?: string[] } | undefined
+  const contrast = data.contrast as { takeaways?: string[] } | undefined
+  const hasDetails = ['pillars', 'titleFormulas', 'hookStyles'].some(key => Array.isArray(data[key]) && data[key].length > 0)
+    || Boolean(structure?.name || structure?.steps?.length || contrast?.takeaways?.length)
   if (observations?.schemaVersion === 'xhs-account-observations/v1') {
     return <>
       <AccountPortraitView portrait={data.accountPortrait as Portrait | null} observations={observations} notes={notes} mediaAssets={mediaAssets} />
-      <details className="account-legacy-profile" open={!data.accountPortrait}>
+      {hasDetails && <details className="account-legacy-profile" open={!data.accountPortrait}>
         <summary>更多内容归纳</summary>
         <LegacyProfileView data={data} showPerformanceContrast={false} />
-      </details>
+      </details>}
     </>
   }
   return <LegacyProfileView data={data} />
@@ -137,7 +141,7 @@ function LegacyProfileView({ data, showPerformanceContrast = true }: {
       }
     | undefined
   return (
-    <div className="stage-block">
+    <div className="stage-block account-profile-legacy-view">
       {/* Structured reports use frozen counts above, not model-written metrics or title matching. */}
       {contrast && showPerformanceContrast && (
         <>
@@ -170,44 +174,42 @@ function LegacyProfileView({ data, showPerformanceContrast = true }: {
           <ol>{contrast.takeaways.map((item) => <li key={item}>{item}</li>)}</ol>
         </div>
       )}
-      <label>📚 内容支柱</label>
+      {pillars.length > 0 && <>
+      <h4>内容方向</h4>
       <div className="pill-row">
         {pillars.map((pillar) => (
-          <span className="quote red" key={String(pillar)}>
+          <span className="account-profile-tag" key={String(pillar)}>
             {String(pillar)}
           </span>
         ))}
       </div>
-      <label>✍️ 惯用标题公式</label>
-      <div className="outline">
+      </>}
+      {formulas.length > 0 && <>
+      <h4>标题写法</h4>
+      <div className="account-profile-formulas">
         {formulas.map((formula) => {
           const item = formula as { formula?: string; examples?: string[] }
           return (
-            <div className="ol" key={item.formula}>
-              <div className="sec">公式</div>
-              <div className="ct">
+            <div className="account-profile-formula" key={item.formula}>
                 <b>{item.formula}</b>
                 {(item.examples || []).map((example) => (
-                  <div className="quote" key={example}>
+                  <p key={example}>
                     例：{example}
-                  </div>
+                  </p>
                 ))}
-              </div>
             </div>
           )
         })}
       </div>
-      <label>🪝 开头钩子习惯</label>
+      </>}
+      {hooks.length > 0 && <>
+      <h4>开头习惯</h4>
       <ul>{hooks.map((hook) => <li key={String(hook)}>{String(hook)}</li>)}</ul>
-      <label>🧱 惯用爆款结构 · {structure.name}</label>
-      <div className="titles">
-        {(structure.steps || []).map((step, index) => (
-          <div className="titlev" key={step}>
-            <span>{index + 1}</span>
-            {step}
-          </div>
-        ))}
-      </div>
+      </>}
+      {Boolean(structure.name || structure.steps?.length) && <>
+      <h4>表达结构{structure.name ? ` · ${structure.name}` : ''}</h4>
+      {Boolean(structure.steps?.length) && <ol>{structure.steps!.map(step => <li key={step}>{step}</li>)}</ol>}
+      </>}
     </div>
   )
 }

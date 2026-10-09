@@ -94,3 +94,14 @@ it('resolves legacy fallback IDs with the same positions as the model input', as
   expect(screen.getByText('无ID评论')).toBeInTheDocument()
   expect(screen.getByRole('button',{name:/旧快照 赞/})).toBeInTheDocument()
 })
+
+it('does not repeat an exact full comment as both excerpt and original text', async () => {
+  const exact:AudienceAnalysis={...detail,result:{groups:[{...run.result.groups![0],evidenceRefs:[{noteId:'n',commentId:'c',sourceType:'comment',quote:'请问第一步怎么做？'}]}]}}
+  const original=JSON.stringify(exact)
+  render(<AudienceAnalysisPage {...props} analyses={[exact]} />)
+  await openEvidence()
+  expect(screen.getByText('引用评论').parentElement).toHaveTextContent('请问第一步怎么做？')
+  expect(screen.queryByText('评论原文：')).not.toBeInTheDocument()
+  expect(screen.getByRole('button',{name:/当时的笔记标题 赞/})).toBeVisible()
+  expect(JSON.stringify(exact)).toBe(original)
+})

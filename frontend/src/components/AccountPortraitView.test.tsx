@@ -87,6 +87,40 @@ it('keeps long original statements and quotes intact when expanded', () => {
   expect(screen.getByText(`“${quote}”`)).toBeInTheDocument()
 })
 
+it('shows the first three strengths and keeps all remaining original claims behind one disclosure', () => {
+  const strengths = Array.from({length:5}, (_,index) => ({...summary, statement:`优势 ${index + 1}：${'完整说明。'.repeat(5)}`}))
+  const original = JSON.stringify(strengths)
+  render(<AccountPortraitView portrait={{strengths}} observations={observations} notes={[note]} mediaAssets={[]} />)
+  for (const claim of strengths.slice(0, 3)) expect(screen.getByText(claim.statement).closest('details')).toBeNull()
+  const more = screen.getByText('更多优势').closest('details')!
+  expect(more).not.toHaveAttribute('open')
+  for (const claim of strengths.slice(3)) expect(more).toContainElement(screen.getByText(claim.statement))
+  fireEvent.click(screen.getByText('更多优势'))
+  expect(more).toHaveAttribute('open')
+  fireEvent.click(screen.getAllByRole('button',{name:'查看依据 · 1 条笔记'})[4])
+  expect(screen.getByText('“先列成本”')).toBeInTheDocument()
+  expect(JSON.stringify(strengths)).toBe(original)
+})
+
+it('folds supporting sections and places source metadata after note performance without losing content', () => {
+  const theme = {...summary, statement:'长期分享准备过程',evidence:[...summary.evidence,{noteId:'n2',quote:'第二次准备'}]}
+  render(<AccountPortraitView portrait={{summary,recurringThemes:[theme],readerValue:[{...summary,statement:'让准备更省心'}],expressionPatterns:[],encouragement:{...summary,statement:'细致值得继续'}}} observations={observations} notes={[note]} mediaAssets={[]} />)
+  const themes = screen.getByText('主要内容方向').closest('details')!
+  expect(themes).not.toHaveAttribute('open')
+  expect(themes).toContainElement(screen.getByText(theme.statement))
+  fireEvent.click(screen.getByText('主要内容方向'))
+  expect(themes).toHaveAttribute('open')
+  expect(screen.getByText('让准备更省心').closest('details')).not.toHaveAttribute('open')
+  expect(screen.getByText('细致值得继续').closest('details')).not.toHaveAttribute('open')
+  expect(screen.queryByText('表达特点')).not.toBeInTheDocument()
+  const source = screen.getByText('分析范围').closest('details')!
+  expect(source).not.toHaveAttribute('open')
+  expect(screen.getByText('笔记表现').compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  fireEvent.click(screen.getByText('分析范围'))
+  expect(source).toHaveAttribute('open')
+  expect(screen.getByText('1 条缺少发布时间')).toBeInTheDocument()
+})
+
 it('counts and browses unique notes while retaining every quoted passage', () => {
   render(<AccountPortraitView portrait={{summary}} observations={observations} notes={[note]} mediaAssets={[]} />)
   fireEvent.click(screen.getByRole('button',{name:'查看依据 · 1 条笔记'}))

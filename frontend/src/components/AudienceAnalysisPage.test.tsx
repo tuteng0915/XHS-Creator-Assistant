@@ -9,13 +9,33 @@ it('makes history loading failures visible rather than appearing as empty histor
   render(<AudienceAnalysisPage workspaceId="w" analyses={[]} selectedId="" onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} loadError="网络中断" />)
   expect(screen.getByRole('alert')).toHaveTextContent('受众分析历史加载失败：网络中断')
 })
-it('shows valid partial results and specific rejected reference reasons', () => {
+it('shows usable readers without exposing internal rejection diagnostics', () => {
   const run: AudienceAnalysis = {id:'partial',workspaceId:'w',sourceMaterialId:'p',status:'partially_completed',error:'',createdAt:'2026-09-29',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:10}},result:{summary:'保留有效分组',groups:[{id:'good',name:'有效视角',profile:'关注费用',coreConcern:'费用',evidence:['费用多少']}]},diagnostics:{acceptedGroups:1,rejectedGroups:[{groupIndex:1,groupId:'bad',groupName:'未核验视角',issues:[{code:'quote_not_exact',message:'引文不是来源中的连续原文',referenceIndex:0}]}]}}
   render(<AudienceAnalysisPage workspaceId="w" analyses={[run]} selectedId={run.id} onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} />)
-  expect(screen.getByRole('option')).toHaveTextContent('部分完成')
+  expect(screen.getByRole('option')).toHaveTextContent('已生成')
   expect(screen.getByText('有效视角')).toBeInTheDocument()
-  expect(screen.getByText(/引用 1：引文不是来源中的连续原文/)).toBeInTheDocument()
+  expect(screen.queryByText(/未通过核验|引文不是来源中的连续原文|下方已核验/)).not.toBeInTheDocument()
   expect(screen.getAllByRole('button', {name:'收录为模拟读者'})).toHaveLength(1)
+})
+
+it('cleans only fixed legacy diagnostic prose without changing saved results', () => {
+  const run:AudienceAnalysis={id:'legacy',workspaceId:'w',sourceMaterialId:'p',status:'partially_completed',error:'',createdAt:'2026-09-29',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:10}},result:{summary:'已保留 1 个通过原文核验的阅读视角。',limitations:'只参考最近十篇笔记。 另有 3 个分组未通过核验，未用于模拟粉丝或模拟。',groups:[{id:'g',name:'读者视角',profile:'关注成本',coreConcern:'成本',evidence:[]}]}}
+  const original=JSON.stringify(run)
+  render(<AudienceAnalysisPage workspaceId="w" analyses={[run]} selectedId={run.id} onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()}/>)
+  fireEvent.click(screen.getByText('分析说明'))
+  expect(screen.getByText('只参考最近十篇笔记。')).toBeVisible()
+  expect(screen.getByRole('status')).toHaveTextContent('1 位 · 已收录 0 位')
+  expect(screen.queryByText('为你整理了 1 位候选读者。')).not.toBeInTheDocument()
+  expect(screen.queryByText(/未通过核验|通过原文核验/)).not.toBeInTheDocument()
+  expect(JSON.stringify(run)).toBe(original)
+})
+
+it('keeps an actionable empty-result error for older failed analyses', () => {
+  const run:AudienceAnalysis={id:'failed',workspaceId:'w',sourceMaterialId:'p',status:'failed',error:'所有分组的受众证据引用均未通过核验；具体原因已保存。',createdAt:'2026-09-29',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:10}},result:{}}
+  render(<AudienceAnalysisPage workspaceId="w" analyses={[run]} selectedId={run.id} onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()}/>)
+  expect(screen.getByRole('alert')).toHaveTextContent('本次未生成可用读者，请重新分析。')
+  expect(screen.queryByText(/未通过核验/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'收录为模拟读者'})).not.toBeInTheDocument()
 })
 
 it('shows all audience groups as saveable fan candidates without population estimates', () => {
@@ -25,7 +45,9 @@ it('shows all audience groups as saveable fan candidates without population esti
   expect(screen.getAllByRole('button', {name:'收录为模拟读者'})).toHaveLength(4)
   expect(screen.getByText('受众3')).toBeInTheDocument()
   expect(screen.queryByText('兴趣领域：')).not.toBeInTheDocument()
-  expect(screen.getByText('这些角色用于模拟不同声音，并非真实粉丝的个人档案。')).toBeInTheDocument()
+  expect(screen.getByText(/这些角色用于模拟不同声音/)).not.toBeVisible()
+  fireEvent.click(screen.getByText('分析说明'))
+  expect(screen.getByText(/这些角色用于模拟不同声音/)).toBeVisible()
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   expect(screen.queryByText('约 40%')).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button',{name:'选择内容，邀请读者试读'}))
@@ -36,9 +58,9 @@ it('separates broad interests from a concrete need and expression style', () => 
   const result: AudienceAnalysis = {id:'interest',workspaceId:'w',sourceMaterialId:'p',status:'completed',error:'',createdAt:'2026-10-01',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:1}},result:{groups:[{id:'g',name:'先算账再行动',profile:'做决定前喜欢把账算清',interests:['留学','职业发展'],coreConcern:'想拿到能直接对照预算的费用清单',expressionStyle:'先追问遗漏项，再说自己会不会选',evidence:[]}]}}
   render(<AudienceAnalysisPage workspaceId="w" analyses={[result]} selectedId={result.id} onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} />)
   expect(screen.getByText('留学 · 职业发展')).toBeVisible()
-  expect(screen.getByText('具体需求：').parentElement).toHaveTextContent('想拿到能直接对照预算的费用清单')
+  expect(screen.getByText('想获得').parentElement).toHaveTextContent('想拿到能直接对照预算的费用清单')
   fireEvent.click(screen.getByText('阅读与表达习惯'))
-  expect(screen.getByText('说话风格：').parentElement).toHaveTextContent('先追问遗漏项，再说自己会不会选')
+  expect(screen.getByText('先追问遗漏项，再说自己会不会选')).toBeVisible()
 })
 
 it('shows verified source references without population percentages', () => {
@@ -59,7 +81,7 @@ it('marks note-only views as content inference rather than observed commenters',
 it('shows eight concise voices and keeps supporting details collapsed', () => {
   const result: AudienceAnalysis = {id:'voices',workspaceId:'w',sourceMaterialId:'p',status:'completed',error:'',createdAt:'2026-10-01',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:10}},result:{summary:'八种不同声音',limitations:'角色为模拟设定',sampling:{sentNotes:10,sentComments:20,availableComments:20},groups:Array.from({length:8},(_,i) => ({id:String(i),name:`声音${i+1}`,profile:`人物简介${i+1}`,coreConcern:`关注点${i+1}`,expressionStyle:`说话风格${i+1}`,evidence:['原文依据']}))}}
   render(<AudienceAnalysisPage workspaceId="w" analyses={[result]} selectedId="voices" onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} />)
-  expect(screen.getAllByRole('heading', {level:2})).toHaveLength(8)
+  expect(screen.getAllByRole('article')).toHaveLength(8)
   expect(screen.getAllByRole('button', {name:'收录为模拟读者'})).toHaveLength(8)
   expect(screen.getByText('人物简介8')).toBeVisible()
   expect(screen.getByText('说话风格8')).not.toBeVisible()
@@ -88,5 +110,43 @@ it('keeps candidates separate until explicitly adopted and does not repeat a sav
   await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   expect(create).toHaveBeenCalledTimes(1)
   expect(refresh).toHaveBeenCalledTimes(2)
-  expect(screen.getByText('已收录读者')).toBeVisible()
+  expect(screen.getByRole('status')).toHaveTextContent('1 位 · 已收录 1 位')
+})
+
+it('keeps the full distinctive description and adoption action before supplementary details', () => {
+  const profile = '看到成功经历时先比较自己的起点，再决定是否照做。'.repeat(6)
+  const concern = '需要列出时间和成本，才能判断是否适合自己。'.repeat(6)
+  const result:AudienceAnalysis={id:'readable',workspaceId:'w',sourceMaterialId:'p',status:'completed',error:'',createdAt:'2026-10-09',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:1}},result:{summary:'同样的兴趣背后，有不同的决策方式。',groups:[{id:'g',name:'比较起点再行动',profile,coreConcern:concern,interests:['职业发展'],expressionStyle:'先问适用条件',evidence:['原文证据']}]}}
+  const original=JSON.stringify(result)
+  render(<AudienceAnalysisPage workspaceId="w" analyses={[result]} selectedId={result.id} onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} />)
+  expect(screen.getByText(profile)).toBeVisible()
+  expect(screen.getByText(concern,{exact:false})).toBeVisible()
+  expect(screen.getByText(result.result.summary!)).toBeVisible()
+  const action=screen.getByRole('button',{name:'收录为模拟读者'})
+  const evidence=screen.getByText('依据',{selector:'summary'})
+  expect(action.compareDocumentPosition(evidence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  fireEvent.click(evidence)
+  expect(action).toBeVisible()
+  expect(action).toBeEnabled()
+  expect(screen.getByText('原文证据')).toBeVisible()
+  expect(JSON.stringify(result)).toBe(original)
+})
+
+it('omits blank fields and empty disclosures without inventing replacement traits', () => {
+  const result:AudienceAnalysis={id:'sparse',workspaceId:'w',sourceMaterialId:'p',status:'completed',error:'',createdAt:'2026-10-09',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:1}},result:{groups:[{id:'g',name:'旧读者',profile:'',coreConcern:' ',interests:[' '],expressionStyle:' ',evidence:[]}]}}
+  render(<AudienceAnalysisPage workspaceId="w" analyses={[result]} selectedId={result.id} onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} />)
+  expect(screen.getByText('旧读者')).toBeVisible()
+  expect(screen.queryByText('想获得')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('兴趣领域')).not.toBeInTheDocument()
+  expect(screen.queryByText('阅读与表达习惯')).not.toBeInTheDocument()
+  expect(screen.queryByText('依据',{selector:'summary'})).not.toBeInTheDocument()
+  expect(screen.getByRole('button',{name:'收录为模拟读者'})).toBeEnabled()
+})
+
+it('offers a concise recovery hint for an empty completed result without showing empty reader cards', () => {
+  const result:AudienceAnalysis={id:'empty',workspaceId:'w',sourceMaterialId:'p',status:'completed',error:'',createdAt:'2026-10-09',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:1}},result:{groups:[]}}
+  render(<AudienceAnalysisPage workspaceId="w" analyses={[result]} selectedId={result.id} onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} />)
+  expect(screen.getByText('这次没有可收录的读者，可以调整范围后重新分析。')).toBeVisible()
+  expect(screen.queryByRole('article')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'收录为模拟读者'})).not.toBeInTheDocument()
 })

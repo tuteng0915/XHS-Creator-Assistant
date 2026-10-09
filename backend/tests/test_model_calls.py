@@ -68,6 +68,10 @@ def test_content_collaboration_prompt_uses_one_role_aware_strict_turn_contract()
             "schemaVersion": "content-collaboration-role-packet/v2",
             "role": "research",
             "roleTask": {"objective": "建立可写证据"},
+            "writingFocus": {
+                "selection": {"start": 0, "end": 2, "text": "原文"},
+                "readerMessage": {"content": "这里想看得更清楚"},
+            },
             "creativeBrief": {"target": {"title": "冻结选题"}},
             "upstreamHandoff": {"content": "先查证", "candidates": []},
             "evidence": {"allowedSources": [{"id": "target:topic", "text": "原文"}]},
@@ -81,6 +85,15 @@ def test_content_collaboration_prompt_uses_one_role_aware_strict_turn_contract()
     assert "不能用“例如”" not in system
     assert "冻结选题" in user
     assert "target:topic" in user
+    assert '"writingFocus"' in user
+    assert "这里想看得更清楚" in user
+    assert "只精修这一个片段" in system
+    assert "而非整篇或讲解" in system
+    assert "不必硬凑 copy_option" in system
+    assert "核心动作、责任主体、立场和判断强度" in system
+    assert "把它们改成反问" in system
+    assert "不要求作者从读者猜测的原因中选答案" in system
+    assert "直接给有收益的 copy_option" in system
 
 
 def test_qwen_content_collaboration_length_stop_is_not_accepted(monkeypatch):

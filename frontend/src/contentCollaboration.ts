@@ -25,6 +25,55 @@ export interface CollaborationSession extends CollaborationSummary {
 export interface CollaborationCandidate {
   kind: 'evidence' | 'open_question' | 'outline' | 'copy_option' | 'review_note'
   title: string; body: string; confidence: 'supported' | 'inference' | 'needs_creator'
+  writingFocus?: FrozenWritingFocus
+  focusUnavailable?: boolean
+}
+export interface ReaderFeedbackIntent {
+  id: string; workspaceId: string; topicId: string; simulationId: string
+  stage: 'initial' | 'reply' | 'interview'; messageId: string; interviewId?: string
+  senderName: string; quote: string; authorQuestion?: string
+}
+export interface WritingSelection {start: number; end: number; text: string}
+export interface ReaderReference {
+  simulationId: string; stage: 'initial' | 'reply' | 'interview'; messageId: string; interviewId?: string
+}
+export interface WritingFocusRequest {
+  expectedUpdatedAt: string; selection?: WritingSelection; readerReference?: ReaderReference
+}
+export interface FrozenWritingFocus {
+  baseTopicId: string; baseTitle: string; baseBody: string; baseUpdatedAt: string
+  selection?: WritingSelection; readerReference?: ReaderReference
+  readerMessage?: {personaId: string; senderName: string; content: string; authorQuestion?: string; sourceTarget?: unknown}
+}
+export interface CollaborationComposeIntent {id: string; text: string; recipient: SpecialistRole}
+
+export function selectionFromTextarea(body: string, start: number, end: number): WritingSelection | null {
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > body.length) return null
+  const prefix = body.slice(0, start), selected = body.slice(start, end)
+  // Browser offsets are UTF-16, while the API deliberately uses Unicode code points.
+  const points = Array.from(body), pointStart = Array.from(prefix).length, pointEnd = pointStart + Array.from(selected).length
+  if (points.slice(pointStart, pointEnd).join('') !== selected || !selected.trim()) return null
+  return {start: pointStart, end: pointEnd, text: selected}
+}
+export function validWritingSelection(body: string, value: unknown): value is WritingSelection {
+  if (!value || typeof value !== 'object') return false
+  const selected = value as WritingSelection, points = Array.from(body)
+  return Number.isInteger(selected.start) && Number.isInteger(selected.end) && selected.start >= 0
+    && selected.end > selected.start && selected.end <= points.length && typeof selected.text === 'string'
+    && !!selected.text.trim() && points.slice(selected.start, selected.end).join('') === selected.text
+}
+export function frozenWritingFocus(value: unknown): FrozenWritingFocus | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const focus = value as FrozenWritingFocus
+  if (typeof focus.baseTopicId !== 'string' || typeof focus.baseTitle !== 'string'
+    || typeof focus.baseBody !== 'string' || typeof focus.baseUpdatedAt !== 'string'
+    || (focus.selection !== undefined && !validWritingSelection(focus.baseBody, focus.selection))) return undefined
+  return focus
+}
+export function replaceSelectedText(body: string, focus: FrozenWritingFocus, replacement: string): string | null {
+  if (body !== focus.baseBody || !validWritingSelection(body, focus.selection)) return null
+  const points = Array.from(body), {start, end} = focus.selection
+  return points.slice(0, start).join('') + replacement + points.slice(end).join('')
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -42,16 +91,20 @@ export const contentCollaborationApi = {
   list: (workspaceId: string) => request<CollaborationSummary[]>(base(workspaceId)),
   get: (workspaceId: string, id: string) => request<CollaborationSession>(`${base(workspaceId)}/${encodeURIComponent(id)}`),
   create: (workspaceId: string, topicId: string, title: string, requestKey: string) => request<CollaborationSession>(base(workspaceId), json({title: title.slice(0, 160), contextTarget: {assetType: 'topic', assetId: topicId}, requestKey})),
-  send: (workspaceId: string, id: string, content: string, recipient: SpecialistRole, requestKey: string) => request<CollaborationSession>(`${base(workspaceId)}/${encodeURIComponent(id)}/messages`, json({content, recipient, requestKey, mode: 'live'})),
+  send: (workspaceId: string, id: string, content: string, recipient: SpecialistRole, requestKey: string, writingFocus?: WritingFocusRequest) => request<CollaborationSession>(`${base(workspaceId)}/${encodeURIComponent(id)}/messages`, json({content, recipient, requestKey, mode: 'live', ...(writingFocus ? {writingFocus} : {})})),
 }
 
 export function collaborationCandidates(message: CollaborationMessage): CollaborationCandidate[] {
   const value = message.modelMetadata.candidateSuggestions
   if (!Array.isArray(value)) return []
+  const focus = frozenWritingFocus(message.modelMetadata.writingFocus)
   return value.filter((item): item is CollaborationCandidate => !!item && typeof item === 'object'
     && typeof item.title === 'string' && typeof item.body === 'string'
     && ['evidence', 'open_question', 'outline', 'copy_option', 'review_note'].includes(item.kind)
     && ['supported', 'inference', 'needs_creator'].includes(item.confidence))
+    .map(item => ({kind: item.kind, title: item.title, body: item.body, confidence: item.confidence,
+      ...(item.kind === 'copy_option' && focus ? {writingFocus: focus} : {}),
+      ...(item.kind === 'copy_option' && message.modelMetadata.writingFocus && !focus ? {focusUnavailable: true} : {})}))
 }
 
 export function collaborationSummary(message: CollaborationMessage): string {

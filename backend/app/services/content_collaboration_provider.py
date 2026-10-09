@@ -258,6 +258,18 @@ class RealContentCollaborationProvider:
         if isinstance(target, dict):
             add("target:topic", "冻结选题", target, limit=_MAX_TARGET_SOURCE_CHARS)
 
+        focus = context.get("writingFocus")
+        if isinstance(focus, dict):
+            selection = focus.get("selection")
+            if isinstance(selection, dict):
+                add("writing:selected_text", "作者选中的正文片段", selection.get("text", ""),
+                    limit=100_000)
+            reader = focus.get("readerMessage")
+            if isinstance(reader, dict):
+                add("writing:reader_opinion", "模拟读者公开意见（不是作者事实）",
+                    {key: reader[key] for key in ("senderName", "content", "authorQuestion")
+                     if key in reader}, limit=8_000)
+
         session_context = context.get("sessionContext")
         workspace_context = (
             session_context.get("workspaceContext") if isinstance(session_context, dict) else None
@@ -307,6 +319,7 @@ class RealContentCollaborationProvider:
         the already-frozen pack, never a fresh database read.
         """
         requested_ids = ["target:topic"]
+        requested_ids.extend(["writing:selected_text", "writing:reader_opinion"])
         requested_ids.extend(f"workspace:{key}" for key in _ROLE_SOURCE_KEYS[role])
         requested_ids.append(f"message:{message.id}")
 
@@ -355,7 +368,7 @@ class RealContentCollaborationProvider:
             message=message,
             sources=sources,
         )
-        return {
+        packet = {
             "schemaVersion": "content-collaboration-role-packet/v2",
             "role": role,
             "roleTask": _ROLE_TASKS[role],
@@ -383,6 +396,25 @@ class RealContentCollaborationProvider:
                 "transcriptTruncated": bool(context.get("transcriptTruncated")),
             },
         }
+        focus = context.get("writingFocus")
+        if isinstance(focus, dict):
+            packet["writingFocus"] = focus
+            packet["roleTask"] = {
+                **_ROLE_TASKS[role],
+                "writingFocusRules": [
+                    "writingFocus 是服务端核对过的本次修改范围，所有角色都必须遵守。",
+                    "有 selection 时只改选中片段：copy_option.body 是可直接替换的片段正文，"
+                    "不得返回整篇、标题、范围外段落或用说明包裹替换片段；其余正文保持原样。",
+                    "无 selection 时先根据读者意见与当前稿的差异讨论或起草，不自动覆盖正文。",
+                    "readerMessage 是模拟读者的可选择建议，不是作者已确认的事实；"
+                    "authorQuestion 是当次追问语境，不将问句和假设当成事实承诺。",
+                    "读者意见针对 sourceTarget 的历史版本；当前改稿以 baseBody/baseTitle 为准，"
+                    "明确哪些问题最新稿已解决，不机械把旧意见重新执行。",
+                    "保留作者口吻和已确认事实；材料不足以支持新增经历、数据或结论时，"
+                    "提出一个具体问题，不能把补造内容写入 copy_option。",
+                ],
+            }
+        return packet
 
     @staticmethod
     def _source_groups(
