@@ -83,6 +83,7 @@ class AudienceResult(APIModel):
 
 class AudienceAnalysisResponse(APIModel):
     id: str
+    origin: str | None = None
     workspace_id: str
     source_material_id: str
     status: str
@@ -219,6 +220,7 @@ class AudienceAnalysisService:
         data.pop("model_output_json")  # Raw provider output stays in local execution history.
         for field in ["input_snapshot", "result", "model_metadata", "diagnostics"]:
             data[field] = json.loads(data.pop(field + "_json"))
+        data["origin"] = data["input_snapshot"].get("origin")
         return AudienceAnalysisResponse.model_validate(data)
 
     def list(self, workspace_id):

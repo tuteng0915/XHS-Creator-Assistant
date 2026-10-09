@@ -47,6 +47,14 @@ it('distinguishes manual selection from histories with no source record', () => 
   expect(screen.queryByText('手动选择')).not.toBeInTheDocument()
 })
 
+it('labels a prewritten participant list without inventing a recommendation or adoption',()=>{
+  render(<SimulationReaderSummary run={{...run,inputSnapshot:{readerSelection:{source:'oracle_showcase',proposedReaders:[],actualFanIds:['b']}}}}/>)
+  expect(screen.getByText('预写示例名单')).toBeVisible()
+  expect(screen.getByText('本示例未执行读者推荐')).toBeVisible()
+  expect(screen.getByText('当时的行动派')).toBeVisible()
+  expect(screen.queryByText(/推荐后调整|使用推荐|手动选择|旧记录未保存选择方式/)).not.toBeInTheDocument()
+})
+
 it('does not overwrite actual definitions with the recommended name if historical snapshots differ', () => {
   render(<SimulationReaderSummary run={{...run,inputSnapshot:{readerSelection:{source:'recommended',proposedReaders:[{fanId:'b',name:'推荐时的名字'}],actualFanIds:['b']}}}} />)
   expect(screen.getByText('推荐时的名字')).toBeInTheDocument()

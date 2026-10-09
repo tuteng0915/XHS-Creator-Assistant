@@ -355,6 +355,7 @@ export type ReviewStatus = 'unreviewed' | 'useful' | 'rejected'
 
 export interface AnalysisRunSummary {
   id: string
+  origin?: string
   workspaceId: string
   workflowType: WorkflowType
   status: RunStatus
@@ -382,6 +383,7 @@ export type SimulationPersonaOverrides = Record<string, {
 
 export interface SimulationRunSummary {
   id: string
+  origin?: string
   simulationCategory?: SimulationCategory
   targetTitle?: string
   sourceMaterialId?: string | null

@@ -5,6 +5,7 @@ import type {
 } from './components/WorkflowOutputPanel'
 import type { ActivityEvent, AnalysisRun, SimulationRun } from './types'
 import { withSimulationPersonaLabels } from './simulationPersonaLabels'
+import { isOracleShowcase, ORACLE_SHOWCASE_ORIGIN } from './recordOrigin'
 import {
   ACCOUNT_STAGES,
   TREND_STAGES,
@@ -95,8 +96,9 @@ export function stageSeedFromRun(run: AnalysisRun): StageView[] {
       : run.workflowType === 'video_creator_quality'
         ? 'video'
         : 'trend'
-  return stageSeed(tab).map((stage) => ({
+  return stageSeed(tab).filter(stage => !isOracleShowcase(run) || Boolean(run.stageResults[stage.key])).map((stage) => ({
     ...stage,
+    ...(isOracleShowcase(run) ? {origin: ORACLE_SHOWCASE_ORIGIN} : {}),
     status: run.stageErrors[stage.key]
       ? 'failed'
       : run.stageResults[stage.key]

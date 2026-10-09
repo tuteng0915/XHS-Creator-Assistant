@@ -812,6 +812,7 @@ class AnalysisStageUpdate(APIModel):
 
 class AnalysisRunSummary(APIModel):
     id: str
+    origin: str | None = None
     workspace_id: str
     workflow_type: WorkflowType
     status: AnalysisRunStatus
@@ -1025,6 +1026,7 @@ class SimulationRunCreate(APIModel):
 
 class SimulationRunSummary(APIModel):
     id: str
+    origin: str | None = None
     parent_simulation_id: str | None = None
     workspace_id: str
     topic_id: str | None

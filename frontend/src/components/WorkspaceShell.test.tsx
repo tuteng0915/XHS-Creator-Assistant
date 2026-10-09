@@ -63,6 +63,7 @@ describe('WorkspaceShell', () => {
     expect(screen.queryByText('Skills')).not.toBeInTheDocument()
     expect(screen.queryByText('Agents')).not.toBeInTheDocument()
     expect(screen.queryByText('Workflows')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', {name: /查看演示案例/})).not.toBeInTheDocument()
   })
 
   it('switches creator profiles and creates a new profile', () => {

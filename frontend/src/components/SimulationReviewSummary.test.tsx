@@ -47,6 +47,40 @@ it('keeps topic actions and angles visible while unfolding the complete rational
   expect(screen.getByText(rationale)).toBeVisible()
 })
 
+it('preserves read-only review details while removing adoption actions',()=>{
+  const adopt=vi.spyOn(simulationRunApi,'adoptTopicIdea').mockResolvedValue(topic)
+  const onTopicAdded=vi.fn()
+  render(<SimulationReviewSummary readOnly run={run} onTopicAdded={onTopicAdded}/>)
+  expect(screen.getByText('读者喜欢轻量而具体的读写练习。')).toBeVisible()
+  expect(screen.getByText('用系列回答读者的新问题')).toBeVisible()
+  expect(screen.getByText('写下第一句话')).toBeVisible()
+  expect(screen.getByText('从一件小事开始')).toBeVisible()
+  fireEvent.click(screen.getByText('读者在意什么'))
+  fireEvent.click(screen.getByText('值得继续保持'))
+  fireEvent.click(screen.getByText('为什么适合'))
+  expect(screen.getByText('想在碎片时间开始')).toBeVisible()
+  expect(screen.getByText('保持具体示例')).toBeVisible()
+  expect(screen.getByText('回应读者的起步需求')).toBeVisible()
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  expect(adopt).not.toHaveBeenCalled()
+  expect(onTopicAdded).not.toHaveBeenCalled()
+})
+
+it.each(['account','published_note'] as const)('forwards read-only mode from %s chat to its review summary',(simulationCategory)=>{
+  const adopt=vi.spyOn(simulationRunApi,'adoptTopicIdea').mockResolvedValue(topic)
+  const create=vi.spyOn(panelInterviewApi,'create')
+  render(<SimulationChat readOnly run={{...run,simulationCategory,personaDefinitions:[{id:'a',name:'读者甲'}]}}/>)
+  expect(screen.getByText('读者喜欢轻量而具体的读写练习。')).toBeVisible()
+  expect(screen.getByText('写下第一句话')).toBeVisible()
+  fireEvent.click(screen.getByText('为什么适合'))
+  expect(screen.getByText('回应读者的起步需求')).toBeVisible()
+  expect(screen.queryByRole('button',{name:'加入选题库'})).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('作者追问')).not.toBeInTheDocument()
+  expect(adopt).not.toHaveBeenCalled()
+  expect(panelInterviewApi.list).not.toHaveBeenCalled()
+  expect(create).not.toHaveBeenCalled()
+})
+
 it.each([
   {review:{nextTimeSuggestions:['用系列回答读者的新问题']},visible:'用系列回答读者的新问题'},
   {review:{readerNeeds:['想在碎片时间开始']},visible:'读者在意什么'},

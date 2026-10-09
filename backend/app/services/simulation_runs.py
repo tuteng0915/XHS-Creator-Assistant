@@ -362,7 +362,7 @@ class SimulationRunService:
                         if target_type == "note" or snapshot.get("sourceNote") else "creation")
         source = (snapshot.get("sourceAccount") if category == "account"
                   else snapshot.get("sourceNote")) or {}
-        return {"simulation_category": category,
+        return {"origin": snapshot.get("origin"), "simulation_category": category,
                 "target_title": (snapshot.get("topic") or {}).get("title", ""),
                 "source_material_id": source.get("sourceMaterialId"),
                 "note_id": source.get("noteId")}

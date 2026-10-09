@@ -1,0 +1,70 @@
+.oracle-record-badge,
+.run-row .oracle-record-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #eef4ff;
+  color: #496387;
+  font-size: var(--text-xs, 12px);
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.oracle-record-notice {
+  margin: 8px 0 14px;
+  color: var(--sub, #64748b);
+  font-size: var(--text-sm, 13px);
+  line-height: 1.65;
+}
+
+.oracle-history-settings,
+.oracle-source-note {
+  margin: 0 0 16px;
+  font-size: var(--text-sm, 13px);
+}
+
+.oracle-history-settings > summary,
+.oracle-source-note > summary {
+  cursor: pointer;
+  color: var(--sub, #64748b);
+  line-height: 1.7;
+}
+
+.oracle-history-settings > summary small {
+  color: inherit;
+  font-size: inherit;
+}
+
+.analysis-history-materials {
+  display: grid;
+  gap: 18px;
+  margin: 14px 0;
+  min-width: 0;
+}
+
+.analysis-history-materials h3,
+.oracle-source-note h3 {
+  margin: 0 0 8px;
+  font-size: var(--text-body, 14px);
+}
+
+.analysis-history-materials p,
+.analysis-history-material-text,
+.oracle-source-note p {
+  margin: 0;
+  color: var(--sub, #64748b);
+  font-size: var(--text-sm, 13px);
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.oracle-source-note article {
+  margin-top: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

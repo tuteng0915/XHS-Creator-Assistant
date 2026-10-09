@@ -224,7 +224,9 @@ class AnalysisRunService:
         with self.database.read() as connection:
             self.workspace_repository.get(connection, workspace_id)
             rows = self.repository.list(connection, workspace_id)
-        return [AnalysisRunSummary.model_validate(row) for row in rows]
+        return [AnalysisRunSummary.model_validate({
+            **row, "origin": json.loads(row["input_snapshot_json"]).get("origin"),
+        }) for row in rows]
 
     def get(self, run_id: str) -> AnalysisRunResponse:
         with self.database.read() as connection:
@@ -1537,10 +1539,12 @@ class AnalysisRunService:
 
     @staticmethod
     def _to_response(row: dict) -> AnalysisRunResponse:
+        snapshot = json.loads(row["input_snapshot_json"])
         return AnalysisRunResponse.model_validate(
             {
                 **row,
-                "input_snapshot": json.loads(row["input_snapshot_json"]),
+                "origin": snapshot.get("origin"),
+                "input_snapshot": snapshot,
                 "stage_results": json.loads(row["stage_results_json"]),
                 "stage_errors": json.loads(row["stage_errors_json"]),
                 "model_metadata": json.loads(row["model_metadata_json"]),

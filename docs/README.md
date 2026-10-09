@@ -11,6 +11,7 @@
 | [本地安装](local-installation.md) | 主应用、固定版本 MediaCrawler、补丁、扫码登录与常见故障 |
 | [数据交接](data-handoff.md) | 轻量数据包、可信配置交付、恢复与验收 |
 | [开发与验证](development.md) | 启动、模型配置、测试、付费验证、内部入口与旧原型 |
+| [档案内预写示例](oracle-showcases.md) | 四份真实档案的账号认识、读者候选和笔记讨论；查看不调用模型 |
 | [离线导入](offline-import.md) | 旧浏览器脚本、JSON schema、MediaCrawler 输出与离线封面包 |
 | [发布检查](release-checklist.md) | 提交或发布前检查；其中带日期的旧验收结论不是本轮验证结果 |
 

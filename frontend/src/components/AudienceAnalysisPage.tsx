@@ -4,6 +4,8 @@ import { ANALYSIS_SCOPE_LABELS, type AnalysisScope } from '../creatorNotes'
 import type { AudienceAnalysis, TextInputAsset } from '../types'
 import { CreatorDialog } from './CreatorDialog'
 import { AudienceGroups } from './AudienceGroups'
+import { isOracleShowcase } from '../recordOrigin'
+import { OracleBadge, OracleNotice } from './OracleNotice'
 
 export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId, onSelect, onRefresh, onSimulate, savedFanKeys = [], onFansChanged, loadError = ''}: {
   workspaceId: string; profile?: TextInputAsset; analyses: AudienceAnalysis[]; selectedId: string;
@@ -32,7 +34,7 @@ export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId
   // Legacy results embedded developer diagnostics in prose; keep stored records intact.
   const limitations = selected?.result.limitations?.replace(/\s*另有\s*\d+\s*个分组未通过核验，未用于模拟粉丝或模拟。/g, '').trim()
   const summary = selected?.result.summary?.replace(/^已保留 \d+ 个通过原文核验的阅读视角。$/, `为你整理了 ${selected?.result.groups?.length || 0} 位候选读者。`)
-  const descriptiveSummary = summary && !/^为你整理了 \d+ 位候选读者。$/.test(summary.trim()) ? summary : ''
+  const descriptiveSummary = summary && !/^(?:为你整理了 \d+ 位候选读者|\d+ 位(?:可收录示例|可供收录的示例)读者)[。！!]?$/u.test(summary.trim()) ? summary : ''
   const selectedError = selected?.error === '所有分组的受众证据引用均未通过核验；具体原因已保存。'
     ? '本次未生成可用读者，请重新分析。' : selected?.error
   const running = workspaceAnalyses.some(r => ['pending', 'running'].includes(r.status))
@@ -80,7 +82,7 @@ export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId
     {!profile && <p>请先导入账号笔记。</p>}{error && <p role="alert">{error}</p>}
     {loadError && <p role="alert">受众分析历史加载失败：{loadError}</p>}
     {refreshNeeded && <button disabled={Boolean(savingGroup)} onClick={() => void refreshFans()}>重试刷新读者列表</button>}
-    {workspaceAnalyses.length > 0 && <select className="audience-history-select" aria-label="受众分析历史" value={selected?.id || ''} onChange={e => onSelect(e.target.value)}>{workspaceAnalyses.map(r => <option key={r.id} value={r.id}>{new Date(r.createdAt).toLocaleString()} · {r.inputSnapshot.scope.selectedNoteCount} 条 · {({completed:'已生成', partially_completed:'已生成', running:'分析中', pending:'等待中', failed:'失败'} as Record<string,string>)[r.status]}</option>)}</select>}
+    {workspaceAnalyses.length > 0 && <select className="audience-history-select" aria-label="受众分析历史" value={selected?.id || ''} onChange={e => onSelect(e.target.value)}>{workspaceAnalyses.map(r => <option key={r.id} value={r.id}>{isOracleShowcase(r) ? '预写示例 · ' : ''}{new Date(r.createdAt).toLocaleString()} · {r.inputSnapshot.scope.selectedNoteCount} 条 · {({completed:'已生成', partially_completed:'已生成', running:'分析中', pending:'等待中', failed:'失败'} as Record<string,string>)[r.status]}</option>)}</select>}
     {selectedError && <p role="alert">{selectedError}</p>}
     {selected && ['pending', 'running'].includes(selected.status) && <div className="audience-progress" role="status" aria-live="polite">
       <strong>{selected.status === 'pending' ? '准备阅读历史图文' : '正在整理读者视角'}</strong>
@@ -88,9 +90,10 @@ export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId
     </div>}
     {selected && ['completed', 'partially_completed'].includes(selected.status) && <>
       <div className="audience-results-heading">
-        <div><h2>候选读者</h2><p className="audience-adoption-summary" role="status">{selected.result.groups?.length || 0} 位 · 已收录 {adoptedCount} 位</p></div>
+        <div><h2>候选读者</h2>{isOracleShowcase(selected) && <OracleBadge />}<p className="audience-adoption-summary" role="status">{selected.result.groups?.length || 0} 位 · 已收录 {adoptedCount} 位</p></div>
         <button disabled={refreshNeeded} onClick={onSimulate}>选择内容，邀请读者试读</button>
       </div>
+      {isOracleShowcase(selected) && <OracleNotice />}
       {descriptiveSummary && <p className="audience-result-summary">{descriptiveSummary}</p>}
       {!selected.result.groups?.length && <p className="muted">这次没有可收录的读者，可以调整范围后重新分析。</p>}
       <AudienceGroups key={`${workspaceId}:${selected.id}`} run={selected} savingGroup={savingGroup} savedFanKeys={adoptedKeys} onSave={id => void saveFan(id)} />

@@ -5,6 +5,24 @@ import type { StageView } from './WorkflowOutputPanel'
 import type { AnalysisRun, AnalysisRunSummary, ReviewStatus } from '../types'
 import { reviewStatusLabel, workflowLabel } from '../appUtils'
 import { stageSeedFromRun } from '../workflowStageViews'
+import { isOracleShowcase } from '../recordOrigin'
+import { OracleBadge, OracleNotice } from './OracleNotice'
+import { creatorNotesFromPayload } from '../creatorNotes'
+import type { RunStatus } from '../types'
+
+const analysisStatusLabel = (status: RunStatus) => ({pending:'等待开始',running:'正在分析',completed:'已完成',partially_completed:'已有部分结果',failed:'未完成'}[status])
+
+function AnalysisMaterials({ run }: {run: AnalysisRun}) {
+  const notes = creatorNotesFromPayload(run.inputSnapshot.xhsCreatorProfile)
+  const historical = run.inputSnapshot.historicalPosts as {content?: unknown} | undefined
+  if (notes.length) return <div className="analysis-history-materials">
+    {notes.map(note => <article key={note.noteId}>
+      <h3>{note.title}</h3>
+      <p>{note.desc || '这条笔记未保存正文。'}</p>
+    </article>)}
+  </div>
+  return <p className="analysis-history-material-text">{typeof historical?.content === 'string' && historical.content ? historical.content : '未保存笔记正文'}</p>
+}
 
 type ReviewDraft = { userNotes: string; reviewStatus: ReviewStatus }
 
@@ -52,7 +70,7 @@ export function RunReviewEditor({
       <textarea
         id={`${idPrefix}-notes`}
         rows={4}
-        placeholder="记录这次结果是否可复用、哪里需要调整、后续如何改 prompt 或资产。"
+        placeholder="记录值得保留的发现，或下次想试的调整。"
         value={draft.userNotes}
         onChange={(event) =>
           onDraftChange({ ...draft, userNotes: event.target.value })
@@ -106,8 +124,8 @@ export function AnalysisHistoryPage({
               className={`run-row ${selectedRun?.id === run.id ? 'active' : ''}`}
               onClick={() => onOpenRun(run.id)}
             >
-              <span>{workflowLabel(run.workflowType)}</span>
-              <b>{run.status}</b>
+              <span>{workflowLabel(run.workflowType)}{isOracleShowcase(run) && <> <OracleBadge /></>}</span>
+              <b>{publicMode ? analysisStatusLabel(run.status) : run.status}</b>
               <small>{reviewStatusLabel(run.reviewStatus)}</small>
               <small>{new Date(run.createdAt).toLocaleString()}</small>
             </button>
@@ -122,27 +140,27 @@ export function AnalysisHistoryPage({
             <div className="detail-head">
               <div>
                 <h2>{workflowLabel(selectedRun.workflowType)}</h2>
+                {isOracleShowcase(selectedRun) && <OracleBadge />}
                 <p>
-                  {selectedRun.status} ·{' '}
+                  {publicMode ? analysisStatusLabel(selectedRun.status) : selectedRun.status} ·{' '}
                   {new Date(selectedRun.createdAt).toLocaleString()}
                 </p>
               </div>
-              <button onClick={() => onOpenRun(selectedRun.id, true)}>
+              {!publicMode && <button onClick={() => onOpenRun(selectedRun.id, true)}>
                 在输出区打开
-              </button>
+              </button>}
             </div>
+            {isOracleShowcase(selectedRun) && <OracleNotice />}
             <details open={!publicMode}><summary>复盘备注</summary><RunReviewEditor
               idPrefix="analysis-run-review"
               draft={analysisReviewDraft}
               onDraftChange={onAnalysisReviewDraftChange}
               onSave={onSaveAnalysisRunReview}
               saveState={analysisReviewSaveState}
-              hint="执行输入、阶段结果和模型元数据是不可变历史；这里仅保存人工复盘判断。"
+              hint={publicMode ? '你的判断会单独保存，不改动这次分析。' : '执行输入、阶段结果和模型元数据是不可变历史；这里仅保存人工复盘判断。'}
             /></details>
             <details open={!publicMode}><summary>{publicMode ? '本次分析的材料' : '原始输入快照'}</summary>
-            <pre className="json-preview">
-              {publicMode ? String((selectedRun.inputSnapshot.historicalPosts as {content?: string})?.content || '未保存笔记正文') : JSON.stringify(selectedRun.inputSnapshot, null, 2)}
-            </pre>
+              {publicMode ? <AnalysisMaterials run={selectedRun} /> : <pre className="json-preview">{JSON.stringify(selectedRun.inputSnapshot, null, 2)}</pre>}
             </details>
             {!publicMode && <label>生成结果</label>}
             {stageSeedFromRun(selectedRun).map((stage) => (

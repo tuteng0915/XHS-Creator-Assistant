@@ -14,10 +14,26 @@ import { PanelComparisonView } from './PanelComparisonView'
 import {SimulationChat} from './SimulationChat'
 import {simulationCategoryFor, simulationCategoryLabel, simulationStatusLabel} from '../simulationChat'
 import type {ReaderFeedbackIntent} from '../contentCollaboration'
+import {isOracleShowcase} from '../recordOrigin'
+import {OracleBadge, OracleNotice} from './OracleNotice'
 
 type ReviewDraft = {
   reviewStatus: ReviewStatus
   userNotes: string
+}
+
+function FrozenPublishedNote({ run }: {run: SimulationRun}) {
+  const raw = run.inputSnapshot.sourceNote
+  const note = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
+  const title = typeof note.title === 'string' && note.title.trim() ? note.title : run.targetTitle || '本次笔记'
+  const body = typeof note.body === 'string' ? note.body : ''
+  return <details className="oracle-source-note">
+    <summary>查看本次笔记</summary>
+    <article aria-label="本次笔记原文">
+      <h3>{title}</h3>
+      <p>{body.trim() ? body : '这条历史记录未保存笔记正文。'}</p>
+    </article>
+  </details>
 }
 
 type Props = {
@@ -57,6 +73,21 @@ export function SimulationHistoryPage({
   stageSeedFromSimulation,
   renderStageResult,
 }: Props) {
+  const compactOracle = publicMode && selectedSimulationRun?.status === 'completed' && isOracleShowcase(selectedSimulationRun)
+  const reviewChanged = selectedSimulationRun && (simulationReviewDraft.userNotes !== selectedSimulationRun.userNotes
+    || simulationReviewDraft.reviewStatus !== selectedSimulationRun.reviewStatus)
+  const readerSettings = selectedSimulationRun && <>
+    <SimulationTaskSummary run={selectedSimulationRun} />
+    <SimulationReaderSummary key={`readers:${selectedSimulationRun.id}`} run={selectedSimulationRun} />
+    <details open={!publicMode}><summary>复盘备注</summary><RunReviewEditor
+      idPrefix="simulation-run-review"
+      draft={simulationReviewDraft}
+      onDraftChange={onSimulationReviewDraftChange}
+      onSave={onSaveSimulationRunReview}
+      saveState={simulationReviewSaveState}
+      hint={publicMode ? '记下这次讨论对你的启发，不改动原有发言。' : '受众角色、反应、辩论和综合结论是不可变历史；这里仅保存人工复盘判断。'}
+    /></details>
+  </>
   return (
     <div className={`workspace-page${publicMode?' creator-simulation-history':''}`}>
       <section className="history-list">
@@ -70,7 +101,7 @@ export function SimulationHistoryPage({
               className={`run-row ${selectedSimulationRun?.id === run.id ? 'active' : ''}`}
               onClick={() => onOpenSimulationRun(run.id)}
             >
-              <span>{run.parentSimulationId ? '同组复测' : run.simulationCategory?`${simulationCategoryLabel(simulationCategoryFor(run))}模拟`:'受众模拟'}</span>
+              <span>{run.parentSimulationId ? '同组复测' : run.simulationCategory?`${simulationCategoryLabel(simulationCategoryFor(run))}模拟`:'受众模拟'}{isOracleShowcase(run) && <> <OracleBadge /></>}</span>
               {run.targetTitle&&<span className="simulation-history-target">{run.targetTitle}</span>}
               <b>{simulationStatusLabel(run.status)}</b>
               <small>{reviewStatusLabel(run.reviewStatus)}</small>
@@ -87,6 +118,7 @@ export function SimulationHistoryPage({
             <div className="detail-head">
               <div>
                 <h2>{publicMode?`${simulationCategoryLabel(simulationCategoryFor(selectedSimulationRun))}模拟记录`:'受众模拟'}</h2>
+                {isOracleShowcase(selectedSimulationRun) && <OracleBadge />}
                 <p>
                   {simulationStatusLabel(selectedSimulationRun.status)} ·{' '}
                   {new Date(selectedSimulationRun.createdAt).toLocaleString()}
@@ -96,6 +128,9 @@ export function SimulationHistoryPage({
                 在输出区打开
               </button>}
             </div>
+            {isOracleShowcase(selectedSimulationRun) && <OracleNotice />}
+            {publicMode && isOracleShowcase(selectedSimulationRun) && simulationCategoryFor(selectedSimulationRun) === 'published_note'
+              && <FrozenPublishedNote key={`source-note:${selectedSimulationRun.id}`} run={selectedSimulationRun} />}
             {selectedSimulationRun.parentSimulationId && <section aria-label="复测来源">
               <p>本次沿用上次人物与阅读任务，独立阅读新版稿件。模型与提示版本尚未配对核验。</p>
               {simulationRuns.some(r => r.id === selectedSimulationRun.parentSimulationId && r.workspaceId === selectedSimulationRun.workspaceId)
@@ -103,18 +138,12 @@ export function SimulationHistoryPage({
                 : <p className="muted">上次试读不在当前历史列表中。</p>}
               <PanelComparisonView key={`comparison:${selectedSimulationRun.id}`} run={selectedSimulationRun}/>
             </section>}
-            {!publicMode && selectedSimulationRun.parentSimulationId && ['pending', 'running'].includes(selectedSimulationRun.status)
+            {!publicMode && !isOracleShowcase(selectedSimulationRun) && selectedSimulationRun.parentSimulationId && ['pending', 'running'].includes(selectedSimulationRun.status)
               && onSimulationObserved && <RetestProgress key={`retest-progress:${selectedSimulationRun.id}`} run={selectedSimulationRun} onObserved={onSimulationObserved}/>}
-            <SimulationTaskSummary run={selectedSimulationRun} />
-            <SimulationReaderSummary key={`readers:${selectedSimulationRun.id}`} run={selectedSimulationRun} />
-            <details open={!publicMode}><summary>复盘备注</summary><RunReviewEditor
-              idPrefix="simulation-run-review"
-              draft={simulationReviewDraft}
-              onDraftChange={onSimulationReviewDraftChange}
-              onSave={onSaveSimulationRunReview}
-              saveState={simulationReviewSaveState}
-              hint="受众角色、反应、辩论和综合结论是不可变历史；这里仅保存人工复盘判断。"
-            /></details>
+            {compactOracle ? <details className="oracle-history-settings" key={`settings:${selectedSimulationRun.id}`}>
+              <summary>本次读者与设置{reviewChanged && <small> · 复盘未保存</small>}</summary>
+              {readerSettings}
+            </details> : readerSettings}
             {!publicMode && <><label>原始输入快照</label><JsonPreview value={selectedSimulationRun.inputSnapshot} /></>}
             {!publicMode && <label>模拟结果</label>}
             {publicMode ? <SimulationChat key={`chat:${selectedSimulationRun.id}`} run={selectedSimulationRun} onObserved={onSimulationObserved} onTopicAdded={onTopicAdded} topics={topics} onUseReaderFeedback={onUseReaderFeedback}/> : stageSeedFromSimulation(selectedSimulationRun).map((stage) => (

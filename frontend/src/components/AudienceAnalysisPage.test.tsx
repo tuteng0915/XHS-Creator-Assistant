@@ -5,9 +5,35 @@ import type { AudienceAnalysis } from '../types'
 import { AudienceAnalysisPage } from './AudienceAnalysisPage'
 
 afterEach(() => {cleanup(); vi.restoreAllMocks()})
+
+it('keeps prewritten readers within the existing history and waits for manual adoption',async()=>{
+  const create=vi.spyOn(simulatedFanApi,'create').mockResolvedValue({} as Awaited<ReturnType<typeof simulatedFanApi.create>>)
+  const run:AudienceAnalysis={id:'oracle-a',workspaceId:'w',sourceMaterialId:'p',status:'completed',error:'',createdAt:'2026-10-09',
+    inputSnapshot:{scope:{scope:'all',selectedNoteCount:2},notes:[]},result:{origin:'oracle_showcase',summary:'有人找入门路径，也有人判断经验如何迁移。',groups:[
+      {id:'g',name:'先试一小步',profile:'先用一个小任务判断是否适合自己',coreConcern:'希望明确今天可以做什么',evidence:[]}]}}
+  render(<AudienceAnalysisPage workspaceId="w" analyses={[run]} selectedId={run.id} onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()}/>)
+  expect(screen.getByRole('option')).toHaveTextContent('预写示例')
+  expect(screen.getByText('预写示例',{selector:'span'})).toBeVisible()
+  expect(screen.getByText('基于本账号已保存笔记人工编排，未调用模型。')).toBeVisible()
+  expect(create).not.toHaveBeenCalled()
+  expect(screen.getByRole('status')).toHaveTextContent('已收录 0 位')
+  fireEvent.click(screen.getByRole('button',{name:'收录为模拟读者'}))
+  await waitFor(()=>expect(screen.getByRole('button',{name:'已收录'})).toBeDisabled())
+  expect(create).toHaveBeenCalledExactlyOnceWith('w','oracle-a','g')
+})
 it('makes history loading failures visible rather than appearing as empty history', () => {
   render(<AudienceAnalysisPage workspaceId="w" analyses={[]} selectedId="" onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} loadError="网络中断" />)
   expect(screen.getByRole('alert')).toHaveTextContent('受众分析历史加载失败：网络中断')
+})
+it('hides only repetitive prewritten counts and preserves meaningful audience summaries',()=>{
+  const run:AudienceAnalysis={id:'oracle-count',workspaceId:'w',sourceMaterialId:'p',status:'completed',error:'',createdAt:'2026-10-09',
+    inputSnapshot:{scope:{scope:'all',selectedNoteCount:2}},result:{origin:'oracle_showcase',summary:'6 位可供收录的示例读者。',groups:[]}}
+  const props={workspaceId:'w',analyses:[run],selectedId:run.id,onSelect:vi.fn(),onRefresh:vi.fn(),onSimulate:vi.fn()}
+  const page=render(<AudienceAnalysisPage {...props}/>)
+  expect(screen.queryByText('6 位可供收录的示例读者。')).not.toBeInTheDocument()
+  const summary='6 位候选读者中，有人关心入门成本，也有人更想看到你的判断。'
+  page.rerender(<AudienceAnalysisPage {...props} analyses={[{...run,result:{...run.result,summary}}]}/>)
+  expect(screen.getByText(summary)).toBeVisible()
 })
 it('shows usable readers without exposing internal rejection diagnostics', () => {
   const run: AudienceAnalysis = {id:'partial',workspaceId:'w',sourceMaterialId:'p',status:'partially_completed',error:'',createdAt:'2026-09-29',inputSnapshot:{scope:{scope:'recent_10',selectedNoteCount:10}},result:{summary:'保留有效分组',groups:[{id:'good',name:'有效视角',profile:'关注费用',coreConcern:'费用',evidence:['费用多少']}]},diagnostics:{acceptedGroups:1,rejectedGroups:[{groupIndex:1,groupId:'bad',groupName:'未核验视角',issues:[{code:'quote_not_exact',message:'引文不是来源中的连续原文',referenceIndex:0}]}]}}

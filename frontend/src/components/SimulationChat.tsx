@@ -8,22 +8,25 @@ import {SimulationReviewSummary} from './SimulationReviewSummary'
 import './TrialRoom.css'
 import {simulationCategoryFor, visibleReply} from '../simulationChat'
 import type {ReaderFeedbackIntent} from '../contentCollaboration'
+import {isOracleShowcase} from '../recordOrigin'
 
 const text = (v:unknown) => typeof v === 'string' ? v : ''
 const obj = (v:unknown):Record<string,unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string,unknown> : {}
 const strings = (v:unknown) => Array.isArray(v) ? v.filter((x):x is string=>typeof x==='string') : []
 
-export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderFeedback}:{run:SimulationRun; onObserved?:(run:SimulationRun)=>void;onTopicAdded?:(topic:Topic)=>void;topics?:Topic[];onUseReaderFeedback?:(feedback:ReaderFeedbackIntent)=>void}) {
+export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderFeedback,readOnly=false}:{run:SimulationRun; onObserved?:(run:SimulationRun)=>void;onTopicAdded?:(topic:Topic)=>void;topics?:Topic[];onUseReaderFeedback?:(feedback:ReaderFeedbackIntent)=>void;readOnly?:boolean}) {
+  const oracle=isOracleShowcase(run)
+  const viewOnly=readOnly||oracle
   const observing = useRef(onObserved)
   useEffect(()=>{observing.current=onObserved},[onObserved])
   const [now,setNow]=useState(Date.now())
   const [loadError,setLoadError]=useState('')
   const [retry,setRetry]=useState(0)
-  const running = ['pending','running'].includes(run.status)
+  const running = !oracle&&['pending','running'].includes(run.status)
   const category=simulationCategoryFor(run)
   const review=category!=='creation'
   const feedbackReaderIds=new Set(run.personaDefinitions.map(person=>text(person.id)).filter(Boolean))
-  const canUseFeedback=category==='creation'&&!run.draftId&&!run.inputSnapshot.draft&&run.inputSnapshot.targetType!=='draft'&&!!run.topicId
+  const canUseFeedback=!viewOnly&&category==='creation'&&!run.draftId&&!run.inputSnapshot.draft&&run.inputSnapshot.targetType!=='draft'&&!!run.topicId
     &&['completed','partially_completed'].includes(run.status)&&!!onUseReaderFeedback
     &&!!topics?.some(topic=>topic.id===run.topicId&&topic.workspaceId===run.workspaceId&&topic.status!=='archived')
   function handleFeedback(stage:ReaderFeedbackIntent['stage'], messageId:string, senderName:string, quote:string, interviewId?:string, authorQuestion?:string) {
@@ -32,7 +35,7 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
       simulationId:run.id,stage,messageId,senderName,quote,...(interviewId?{interviewId}:{}),...(authorQuestion?{authorQuestion}:{})})
   }
   useEffect(()=>{
-    if(!running) return
+    if(viewOnly||!running) return
     let active=true; let timer:ReturnType<typeof setTimeout>
     async function poll(){try {
       const latest=await simulationRunApi.get(run.id)
@@ -43,7 +46,7 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
     } catch {if(active)setLoadError('连接暂时中断，已收到的发言保留。')}}
     timer=setTimeout(()=>void poll(),500)
     return()=>{active=false;clearTimeout(timer)}
-  },[run.id,run.workspaceId,running,retry])
+  },[run.id,run.workspaceId,running,retry,viewOnly])
   const people = run.personaDefinitions.length ? run.personaDefinitions : Array.isArray(run.inputSnapshot.audiencePersonas) ? run.inputSnapshot.audiencePersonas.map(obj) : []
   const name = (id:unknown) => {
     const p=people.find(p=>p.id===id)
@@ -81,6 +84,9 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
   }
   const topic=obj(run.inputSnapshot.topic)
   const scope=obj(obj(run.inputSnapshot.sourceAccount).scope)
+  const oracleInterview=oracle?obj(run.inputSnapshot.oracleInterview):{}
+  const oracleAnswers=Array.isArray(oracleInterview.answers)?oracleInterview.answers.map(obj)
+    .filter(answer=>text(answer.quote).trim()&&people.some(person=>person.id===answer.personaId)):[]
   return <section className="trial-room" aria-label="读者试读群聊">
     <header className="trial-room-head"><div><h3>{category==='account'?'账号读者群聊':category==='published_note'?'笔记复盘群聊':'试读讨论'}</h3><p>{run.targetTitle||text(topic.title)}</p></div><span>{people.length} 位读者</span></header>
     {category==='account'&&<p className="trial-context">基于账号样本，讨论读者为何留下、接下来想看什么。{text(scope.omissionNotice)}</p>}
@@ -92,14 +98,27 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
       {!!run.debateResults.length&&<div className="trial-divider">读者互相回应</div>}
       {run.debateResults.map(item=>bubble(item,true))}
     </div>
+    {oracle&&text(oracleInterview.question).trim()&&<section className="trial-interview" aria-label="预写作者访谈">
+      <div className="trial-divider">作者追问 · 预写示例</div>
+      <div role="log" aria-label="预写访谈发言">
+        <article className="trial-message trial-author">
+          <ReaderAvatar id="creator" name="作者"/>
+          <div className="trial-message-main"><div className="trial-message-meta"><b>作者</b><span>询问 参与读者</span></div><p className="trial-bubble">{text(oracleInterview.question)}</p></div>
+        </article>
+        {oracleAnswers.map((answer,index)=><article className="trial-message" key={`${text(answer.personaId)}:${index}`}>
+          <ReaderAvatar id={avatarId(answer.personaId)} name={name(answer.personaId)}/>
+          <div className="trial-message-main"><div className="trial-message-meta"><b>{name(answer.personaId)}</b><span>回复 作者</span></div><p className="trial-bubble">{visibleReply(text(answer.quote),people)}</p></div>
+        </article>)}
+      </div>
+    </section>}
     {running&&<div className="trial-progress" role="status"><span className="trial-working-dot"/><div><b>{stage}</b><small>已等待 {elapsed} 秒</small></div></div>}
-    {loadError&&<p role="alert">{loadError} <button onClick={()=>setRetry(x=>x+1)}>恢复查看</button></p>}
+    {!viewOnly&&loadError&&<p role="alert">{loadError} <button onClick={()=>setRetry(x=>x+1)}>恢复查看</button></p>}
     {!running&&Object.keys(run.stageErrors).length>0&&<details className="trial-errors"><summary>部分环节未完成，已保留现有发言</summary>{Object.entries(run.stageErrors).map(([key,e])=>{
       const id=key.slice(key.indexOf('.')+1)
       return <p key={key}>{people.some(p=>p.id===id)?`${name(id)}：`:''}{text(e)}</p>
     })}</details>}
-    {!running&&people.length>0&&['completed','partially_completed'].includes(run.status)&&<InterviewComposer key={run.id} run={run} people={people} name={name} avatarId={avatarId} feedbackReaderIds={feedbackReaderIds} onUseFeedback={canUseFeedback?handleFeedback:undefined}/>}
-    {Object.keys(run.synthesis).length>0&&(review?<SimulationReviewSummary key={`review:${run.workspaceId}:${run.id}`} run={run} onTopicAdded={onTopicAdded} topics={topics}/>:<section className="trial-takeaways"><h3>修改方向</h3>
+    {!viewOnly&&!running&&people.length>0&&['completed','partially_completed'].includes(run.status)&&<InterviewComposer key={run.id} run={run} people={people} name={name} avatarId={avatarId} feedbackReaderIds={feedbackReaderIds} onUseFeedback={canUseFeedback?handleFeedback:undefined}/>}
+    {Object.keys(run.synthesis).length>0&&(review?<SimulationReviewSummary key={`review:${run.workspaceId}:${run.id}`} run={run} onTopicAdded={onTopicAdded} topics={topics} readOnly={readOnly}/>:<section className="trial-takeaways"><h3>修改方向</h3>
       {text(run.synthesis.verdict)&&<p>{text(run.synthesis.verdict)}</p>}
       {text(run.synthesis.mainResistance)&&<p><b>最需要解决</b><br/>{text(run.synthesis.mainResistance)}</p>}
       <EditorFeedbackView data={run.synthesis} run={run}/>

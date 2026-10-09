@@ -256,6 +256,11 @@ class PanelInterviewService:
         identity = self._identity(simulation_id, payload)
         with self.database.transaction() as connection:
             parent = self._parent(connection, workspace_id, simulation_id)
+            source = json.loads(parent["input_snapshot_json"])
+            metadata = json.loads(parent["model_metadata_json"])
+            if (source.get("origin") == "oracle_showcase"
+                    or metadata.get("origin") == "oracle_showcase"):
+                raise ValidationError("这是预写示例，可查看已保存的访谈；自由提问请新建一次试读。")
             existing = connection.execute(
                 "SELECT * FROM panel_interviews WHERE workspace_id=? AND request_key=?",
                 (workspace_id, payload.request_key),
@@ -271,7 +276,6 @@ class PanelInterviewService:
                 "AND status IN ('pending','running')", (simulation_id,),
             ).fetchone():
                 raise ConflictError("读者正在回复上一条提问，请等回复结束或先停止等待")
-            source = json.loads(parent["input_snapshot_json"])
             mode = source.get("mode", "demo")
             if mode not in {"live", "demo"}:
                 raise ValidationError("当时试读方式不完整，请重新发起试读")

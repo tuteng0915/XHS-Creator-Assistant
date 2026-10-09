@@ -137,6 +137,100 @@ it('removes unknown long mention IDs from public dialogue',()=>{
 
 const writingTopic={id:'topic',workspaceId:'w',title:'每天记一个词',body:'试着记一个词，漏一天也不用补。',status:'candidate'} as Topic
 
+it.each(['summary','metadata','snapshot'] as const)('makes an oracle %s record read-only internally and shows its frozen interview',async(source)=>{
+  vi.useFakeTimers()
+  const get=vi.spyOn(simulationRunApi,'get'),create=vi.spyOn(panelInterviewApi,'create'),adopt=vi.spyOn(simulationRunApi,'adoptTopicIdea')
+  const useFeedback=vi.fn()
+  const origin=source==='summary'?{origin:'oracle_showcase'}:source==='metadata'?{modelMetadata:{origin:'oracle_showcase'}}:{}
+  const inputSnapshot={...run.inputSnapshot,...(source==='snapshot'?{origin:'oracle_showcase'}:{}),oracleInterview:{
+    question:'什么样的第一步，你愿意今天就试？',answers:[{personaId:'a',quote:'留一个词就够了，我不想补作业。'},
+      {personaId:'not-in-this-panel',quote:'不能伪装成这场的参与者'},{personaId:'b',quote:''}]}}
+  render(<SimulationChat run={{...run,...origin,status:'running',inputSnapshot}} readOnly={false} topics={[writingTopic]} onUseReaderFeedback={useFeedback}/>)
+  const interview=screen.getByRole('region',{name:'预写作者访谈'})
+  expect(within(interview).getByText('什么样的第一步，你愿意今天就试？')).toBeVisible()
+  expect(within(interview).getByText('留一个词就够了，我不想补作业。')).toBeVisible()
+  expect(within(interview).getByRole('img',{name:'轻松尝试型的头像'})).toBeVisible()
+  expect(screen.queryByText('不能伪装成这场的参与者')).not.toBeInTheDocument()
+  expect(screen.queryByText(/已等待|正在准备|正在整理|正在完成/)).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('作者追问')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'加入讨论'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'拿这条意见改稿'})).not.toBeInTheDocument()
+  await act(async()=>{await vi.advanceTimersByTimeAsync(8000)})
+  expect(get).not.toHaveBeenCalled()
+  expect(panelInterviewApi.list).not.toHaveBeenCalled()
+  expect(create).not.toHaveBeenCalled()
+  expect(adopt).not.toHaveBeenCalled()
+  expect(useFeedback).not.toHaveBeenCalled()
+})
+
+it('does not present frozen oracle dialogue on an unmarked ordinary record',async()=>{
+  render(<SimulationChat run={{...run,inputSnapshot:{...run.inputSnapshot,oracleInterview:{question:'示例追问',answers:[{personaId:'a',quote:'示例回答'}]}}}}/>)
+  expect(screen.queryByText('示例追问')).not.toBeInTheDocument()
+  expect(screen.queryByRole('region',{name:'预写作者访谈'})).not.toBeInTheDocument()
+  expect(screen.getByLabelText('作者追问')).toBeVisible()
+  await waitFor(()=>expect(panelInterviewApi.list).toHaveBeenCalledOnce())
+})
+
+it('lets an author explicitly adopt an oracle review topic without a model or interview request',async()=>{
+  const adopt=vi.spyOn(simulationRunApi,'adoptTopicIdea').mockResolvedValue(writingTopic)
+  const get=vi.spyOn(simulationRunApi,'get'),create=vi.spyOn(panelInterviewApi,'create'),added=vi.fn()
+  const oracle={...run,modelMetadata:{origin:'oracle_showcase'},simulationCategory:'published_note' as const,
+    synthesis:{review:{summary:'把这次反馈留给下一篇。',topicIdeas:[{id:'idea',title:'一次只记一个词',angle:'先让第一步足够轻。'}]}}}
+  render(<SimulationChat run={oracle} onTopicAdded={added}/>)
+  expect(screen.getByRole('button',{name:'加入选题库'})).toBeEnabled()
+  expect(adopt).not.toHaveBeenCalled()
+  expect(panelInterviewApi.list).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{name:'加入选题库'}))
+  await waitFor(()=>expect(added).toHaveBeenCalledExactlyOnceWith(writingTopic))
+  expect(adopt).toHaveBeenCalledExactlyOnceWith('w','run','idea')
+  expect(screen.getByRole('button',{name:'已加入选题库'})).toBeDisabled()
+  expect(get).not.toHaveBeenCalled()
+  expect(create).not.toHaveBeenCalled()
+  expect(panelInterviewApi.list).not.toHaveBeenCalled()
+})
+
+it.each(['pending','running','completed','partially_completed'] as const)('keeps a read-only %s snapshot readable without requesting live data or offering writes',async(status)=>{
+  vi.useFakeTimers()
+  const get=vi.spyOn(simulationRunApi,'get').mockResolvedValue(run)
+  const create=vi.spyOn(panelInterviewApi,'create').mockResolvedValue(round)
+  const adopt=vi.spyOn(simulationRunApi,'adoptTopicIdea')
+  const observed=vi.fn(),useFeedback=vi.fn()
+  render(<SimulationChat readOnly run={{...run,status,synthesis:{verdict:'保留低负担的练习方式。',mainResistance:'让读者看见第一步。'}}} topics={[writingTopic]} onObserved={observed} onUseReaderFeedback={useFeedback}/>)
+  expect(screen.getByText('每天记一个词')).toBeVisible()
+  expect(screen.getByText('不用补，我愿意试一次。')).toBeVisible()
+  expect(screen.getByText('@轻松尝试型 我也更喜欢这个节奏。')).toBeVisible()
+  expect(screen.getByRole('img',{name:'轻松尝试型的头像'})).toBeVisible()
+  expect(screen.getByText('读完了，暂时没有留言')).toBeVisible()
+  expect(screen.queryByText('这句旧评论不该显示')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByText('查看试读记录'))
+  expect(screen.getByText('可以断续进行')).toBeVisible()
+  expect(screen.getByText('保留低负担的练习方式。')).toBeVisible()
+  expect(screen.getByText('让读者看见第一步。')).toBeVisible()
+  expect(screen.queryByRole('region',{name:'作者访谈'})).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('作者追问')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'拿这条意见改稿'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'加入选题库'})).not.toBeInTheDocument()
+  await act(async()=>{await vi.advanceTimersByTimeAsync(8000)})
+  expect(get).not.toHaveBeenCalled()
+  expect(panelInterviewApi.list).not.toHaveBeenCalled()
+  expect(create).not.toHaveBeenCalled()
+  expect(adopt).not.toHaveBeenCalled()
+  expect(observed).not.toHaveBeenCalled()
+  expect(useFeedback).not.toHaveBeenCalled()
+})
+
+it('cancels a scheduled poll when switched to read-only and resumes only after it is disabled',async()=>{
+  vi.useFakeTimers()
+  const get=vi.spyOn(simulationRunApi,'get').mockResolvedValue(run)
+  const page=render(<SimulationChat run={{...run,status:'running'}}/>)
+  page.rerender(<SimulationChat readOnly run={{...run,status:'running'}}/>)
+  await act(async()=>{await vi.advanceTimersByTimeAsync(8000)})
+  expect(get).not.toHaveBeenCalled()
+  page.rerender(<SimulationChat readOnly={false} run={{...run,status:'running'}}/>)
+  await act(async()=>{await vi.advanceTimersByTimeAsync(500)})
+  expect(get).toHaveBeenCalledExactlyOnceWith(run.id)
+})
+
 it('takes only the chosen public opinion to the matching creation without sending anything',async()=>{
   const useFeedback=vi.fn(),create=vi.spyOn(panelInterviewApi,'create')
   render(<SimulationChat run={run} topics={[writingTopic]} onUseReaderFeedback={useFeedback}/>)

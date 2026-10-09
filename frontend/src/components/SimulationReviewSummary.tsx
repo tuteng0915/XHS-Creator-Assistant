@@ -9,7 +9,7 @@ const text = (value:unknown) => typeof value==='string'?value:''
 const object = (value:unknown):Record<string,unknown> => value && typeof value==='object' && !Array.isArray(value)?value as Record<string,unknown>:{}
 const strings = (value:unknown) => Array.isArray(value)?value.filter((item):item is string=>typeof item==='string'&&!!item.trim()):[]
 
-export function SimulationReviewSummary({run,onTopicAdded,topics=[]}:{run:SimulationRun;onTopicAdded?:(topic:Topic)=>void;topics?:Topic[]}) {
+export function SimulationReviewSummary({run,onTopicAdded,topics=[],readOnly=false}:{run:SimulationRun;onTopicAdded?:(topic:Topic)=>void;topics?:Topic[];readOnly?:boolean}) {
   const account=simulationCategoryFor(run)==='account'
   const review=object(run.synthesis.review)
   const ideas=Array.isArray(review.topicIdeas)?review.topicIdeas.map(object).filter(idea=>text(idea.id).trim()&&text(idea.title).trim()):[]
@@ -35,7 +35,7 @@ export function SimulationReviewSummary({run,onTopicAdded,topics=[]}:{run:Simula
   },[run.workspaceId,run.id])
 
   async function adopt(ideaId:string) {
-    if(!ready||adoptedIds.has(ideaId)||locks.current.has(ideaId)||states[ideaId]?.phase==='saved')return
+    if(readOnly||!ready||adoptedIds.has(ideaId)||locks.current.has(ideaId)||states[ideaId]?.phase==='saved')return
     const requestIdentity=`${run.workspaceId}:${run.id}`
     locks.current.add(ideaId)
     setStates(previous=>({...previous,[ideaId]:{phase:'saving'}}))
@@ -73,7 +73,7 @@ export function SimulationReviewSummary({run,onTopicAdded,topics=[]}:{run:Simula
             <div className="simulation-review-idea-copy"><h5>{text(idea.title)}</h5>{text(idea.angle).trim()&&<p>{text(idea.angle)}</p>}
               {text(idea.whyItFits).trim()&&<details><summary>为什么适合</summary><p>{text(idea.whyItFits)}</p></details>}
             </div>
-            <button disabled={!ready||state?.phase==='saving'||saved} onClick={()=>void adopt(id)}>{saved?'已加入选题库':state?.phase==='saving'?'正在加入…':!ready?'等待复盘完成':'加入选题库'}</button>
+            {!readOnly&&<button disabled={!ready||state?.phase==='saving'||saved} onClick={()=>void adopt(id)}>{saved?'已加入选题库':state?.phase==='saving'?'正在加入…':!ready?'等待复盘完成':'加入选题库'}</button>}
             {state?.phase==='error'&&<p className="simulation-review-error" role="alert">{state.message}</p>}
           </article>
         })}

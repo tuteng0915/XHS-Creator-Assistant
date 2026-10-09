@@ -5,9 +5,12 @@ import { withSimulationPersonaLabels } from '../simulationPersonaLabels'
 import { SimulationStageNotice } from './SimulationStageNotice'
 import { stageDisplayStatus } from '../simulationStageStatus'
 import type { FeedbackRun } from '../editorFeedback'
+import { isOracleShowcase } from '../recordOrigin'
+import { OracleBadge, OracleNotice } from './OracleNotice'
 
 export type StageView = {
   key: string
+  origin?: string
   n: string
   title: string
   status: 'waiting' | 'running' | 'completed' | 'failed'
@@ -41,6 +44,7 @@ export function WorkflowOutputPanel({
   const renderedViews = isSimulation ? withSimulationPersonaLabels(views) : views
   return (
     <section className="output-panel">
+      {views.some(isOracleShowcase) && <><OracleBadge /><OracleNotice /></>}
       {runError && <div className="error-banner">⚠ {runError}</div>}
       {!views.length ? (
         <div className="output-empty">
