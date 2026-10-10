@@ -141,12 +141,53 @@ def test_metric_summary_uses_selection_not_available_count_or_captured_comments(
     snapshot["xhsCreatorProfile"]["notes"] = snapshot["xhsCreatorProfile"]["notes"][:1]
     snapshot.update(accountPositioning="写自己的经历", historicalPosts={"content": "历史笔记原文"})
     model_input, result = profile_stage_input(snapshot, "2026-10-03T00:00:00Z")
-    assert model_input == {"positioning": "写自己的经历", "historicalPosts": "历史笔记原文"}
+    packet = json.loads(model_input["historicalPosts"])
+    assert packet["schemaVersion"] == "account-reading-input/v2"
+    assert packet["readingScope"]["selectedNoteCount"] == 1
+    assert [note["noteId"] for note in packet["notes"]] == ["n1"]
+    assert packet["notes"][0]["body"] == "中文正文甲"
+    assert packet["notes"][0]["metrics"]["comments"] == 2
+    assert packet["metricSummaries"] == result["metricSummaries"]
+    assert packet["chronology"] == result["chronology"]
+    assert "历史笔记原文" not in model_input["historicalPosts"]
+    assert "你好" not in model_input["historicalPosts"]
     assert all(item["validCount"] == 1 for item in result["metricSummaries"])
     assert result["metricSummaries"][2]["median"] == 2
     assert result["coverage"]["capturedCommentCount"] == 1
     assert result["coverage"]["availableCount"] == 100
     assert all(item["noteId"] == "n1" for item in result["notes"])
+
+
+def test_profile_reading_packet_preserves_selected_text_without_media_or_comment_claims():
+    snapshot = selected_snapshot()
+    source = snapshot["xhsCreatorProfile"]
+    source["creator"] = {"displayName": "测试账号"}
+    source["notes"][0].update(
+        desc="完整正文，保留空格 和换行\n" * 1000,
+        tags=["不作为已读正文"], comments=[{"content": "作者和读者的话都不混入正文"}],
+        coverMediaId="未读取的封面", noteUrl="https://example.invalid/note",
+    )
+    source["notes"][1]["desc"] = "一句话也可能是完整表达。"
+    before = deepcopy(snapshot)
+    context, _ = profile_stage_input(snapshot, "2026-10-10T00:00:00Z")
+    packet = json.loads(context["historicalPosts"])
+    assert context["positioning"] == "账号名称：测试账号"
+    for original, item in zip(source["notes"], packet["notes"], strict=True):
+        assert item["body"] == original["desc"]
+        assert item["title"] == original["title"]
+        assert item["availableBodyCharacters"] == len(original["desc"])
+        assert not {"comments", "tags", "coverMediaId", "noteUrl"} & item.keys()
+        assert "bodyComplete" not in item
+    assert "未读取图片" in packet["readingScope"]["textScope"]
+    assert "不按字数推断完整性" in packet["readingScope"]["textScope"]
+    assert snapshot == before
+
+
+def test_profile_plain_text_legacy_input_is_unchanged():
+    snapshot = {"accountPositioning": "用户定位", "historicalPosts": {"content": "旧文字\n原样"}}
+    context, observations = profile_stage_input(snapshot, "2026-10-10T00:00:00Z")
+    assert context == {"positioning": "用户定位", "historicalPosts": "旧文字\n原样"}
+    assert observations is None
 
 
 def test_stitched_quotes_do_not_pass_and_original_ellipsis_is_allowed():

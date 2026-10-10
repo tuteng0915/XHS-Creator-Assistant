@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -138,9 +139,10 @@ def test_profile_prompt_keeps_contexts_distinct_without_removing_positive_synthe
     }
     system, user = ModelCallService(settings())._build_prompt(ModelOperation.PROFILE, context)
     assert "主体与场景" in system
-    assert "不要把学校导师的关心写成实习团队的特点" in system
-    assert "你擅长写清支持与成长的具体过程" in system
-    assert "不要说作者已用该理论解决技术问题" in system
+    assert "不同内容线可以并列成立" in system
+    assert "若结论限定某个具体场景，依据也须来自该场景" in system
+    assert "不必硬造融合身份或把不同经历接成一个故事" in system
+    assert "真实笔记例子及它让阅读更好的地方" in system
     assert "语气真诚、积极、有鼓励感" in system
     assert context["historicalPosts"] in user
 
@@ -149,7 +151,8 @@ def test_profile_prompt_teaches_short_contiguous_quotes_without_banning_source_e
     system, _ = ModelCallService(settings())._build_prompt(ModelOperation.PROFILE, {})
     assert "建议 10～40 字" in system
     assert "分成两个 evidence" in system
-    assert "不可改成“先核对费用……预留时间”" in system
+    assert "不用省略号拼接" in system
+    assert "先核对费用" not in system
     assert "原文本来有省略号可以照抄" in system
 
 
@@ -159,11 +162,11 @@ def test_profile_review_handles_missing_metrics_and_scene_specific_claims():
     })
     assert "跨场景的材料可以支持共同的写作方式" in system
     assert "依据也须来自该场景" in system
-    assert "省略该项或写“未提供”" in system
-    assert "不能原样输出 None/null，也不能补零" in system
-    assert "没有超出互动数字本身的具体内容依据就留空" in system
-    assert "可以肯定它的记录价值" in system
-    assert "样例仅示范表达方法，不是输入账号的事实" in system
+    assert "null 是未获取，不补零" in system
+    assert "不因一篇互动少就否定它的记录价值" in system
+    assert "数字排序由页面展示，不再生成一套榜单" in system
+    assert "按实际可读文字分析" in system
+    assert "不要为没读到的正文臆造步骤、结论，或批评它缺少论证" in system
     assert "分享 None" in user  # Instructions do not mutate the frozen source.
 
 
@@ -176,15 +179,34 @@ def test_profile_review_methods_preserve_schema_and_use_only_supplied_context():
     })
     assert "分别看点赞、收藏、评论、分享" in system
     assert "未提供曝光时不计算互动率" in system
-    assert "核心表达、具体例子或论据、标题承诺" in system
+    assert "主题、场景、核心表达与写法" in system
     assert "不要求每篇都有冲突、金句或固定篇幅" in system
-    assert "参考哪篇的什么做法 → 什么情况下可复用 → 下次可尝试的具体调整" in system
-    assert "沿用字符串数组，不新增字段" in system
-    assert "假设示例（不是本账号事实）" in system
+    assert "参考哪篇的哪个做法、适合什么写作场景、下一次可以尝试的一个动作" in system
+    assert "examples 只用输入中的原始标题" in system
+    assert "各栏各司其职" in system
+    assert "800～1200" in system
+    assert "假设示例" not in system
+    assert "winners、losers、winFactors、loseFactors 均留空数组" in system
     assert user == (
         "账号定位：\n本人经验分享\n\n历史笔记：\n"
         "笔记甲：赞 0，收藏 8；正文是一次选择的取舍。"
     )
+
+
+def test_profile_report_distinguishes_case_identity_and_requests_actions_not_invented_scenes():
+    system, _ = ModelCallService(settings())._build_prompt(ModelOperation.PROFILE, {})
+    assert "同一篇里有多个申请人、学生、朋友或案例，也须各自独立" in system
+    assert "一个人的学校、工作、项目或经历不能移给另一个人" in system
+    assert "选一处自己确实记得的细节" in system
+    assert "不代写虚构现场、身体反应、数字或个人经历" in system
+    assert "summary 不是字符串" in system
+    assert "与 accountPortrait 同级" in system
+    schema = json.loads(system.split("schema:\n", 1)[1])
+    profile = schema["profile"]
+    assert isinstance(profile["accountPortrait"]["summary"], dict)
+    assert profile["contrast"]["winners"] == []
+    assert profile["contrast"]["losers"] == []
+    assert "voiceFingerprint" not in profile["accountPortrait"]
 
 
 def test_profile_review_roundtrip_keeps_existing_output_and_single_request(monkeypatch):
@@ -205,7 +227,7 @@ def test_profile_review_roundtrip_keeps_existing_output_and_single_request(monke
     }))
     assert len(FakeAsyncClient.requests) == 1
     request = FakeAsyncClient.requests[0]["json"]
-    assert "复盘方法：先认识账号" in request["messages"][0]["content"]
+    assert "先认识账号，再谈可尝试的改进" in request["messages"][0]["content"]
     assert request["max_tokens"] == 6000
     assert FakeAsyncClient.options["timeout"].as_dict() == dict(
         connect=90, read=180, write=90, pool=90,

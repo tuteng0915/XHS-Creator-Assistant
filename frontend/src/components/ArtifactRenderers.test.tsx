@@ -94,7 +94,7 @@ it('shows grounded account keywords and creator strengths without adding them to
   expect(screen.getByText('实用经验')).toBeInTheDocument()
   expect(screen.getByText('把准备过程讲得具体')).toBeInTheDocument()
   expect(screen.getByText('这份细致值得继续发挥')).toBeInTheDocument()
-  expect(screen.getByText('这个账号已经做得好的地方')).toBeInTheDocument()
+  expect(screen.getByText('值得继续放大的优势')).toBeInTheDocument()
   expect(screen.queryByText(/解释是否成立仍需结合/)).not.toBeInTheDocument()
 })
 

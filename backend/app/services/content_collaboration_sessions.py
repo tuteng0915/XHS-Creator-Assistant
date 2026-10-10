@@ -34,7 +34,11 @@ from app.services.content_collaboration import (
     SpecialistTurn,
 )
 from app.services.context_access import ContextAccessService
-from app.services.creator_context import canonical_selection, resolve_creator_context
+from app.services.creator_context import (
+    canonical_selection,
+    imported_note_versions,
+    resolve_creator_context,
+)
 from app.services.writing_focus import resolve_writing_focus
 
 DEFAULT_MAX_TURNS = 3
@@ -321,11 +325,13 @@ class ContentCollaborationSessionService:
                     raise ValidationError("请明确本轮参考材料；不使用参考时传入空列表")
                 prior = self._current_creator_context(connection, session)
                 context_revision = prior["contextRevision"]
-                if not context_revision or prior["creatorContextSelection"] != selection:
-                    context_revision += 1
                 context_snapshot = resolve_creator_context(
                     connection, workspace_id=workspace_id, selection=selection,
                 )
+                if (not context_revision or prior["creatorContextSelection"] != selection
+                        or imported_note_versions(prior.get("creatorContextSnapshot"))
+                        != imported_note_versions(context_snapshot)):
+                    context_revision += 1
             elif selection is not None:
                 raise ValidationError("请新建创作助手会话后使用参考材料")
             # Each creator turn starts from the latest saved draft. The
@@ -1158,6 +1164,7 @@ class ContentCollaborationSessionService:
                 "schemaVersion": "creator-context-selection/v1", "references": [],
             }),
             "contextRevision": value.get("contextRevision", 0),
+            "creatorContextSnapshot": value.get("creatorContextSnapshot"),
         }
 
     @staticmethod

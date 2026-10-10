@@ -52,15 +52,43 @@ def topic_profile_context(
 def profile_stage_input(snapshot: dict[str, Any], snapshot_at: str) -> tuple[dict, dict | None]:
     """The exact profile model input, shared with the read-only check script."""
     observations = build_account_observations(snapshot, snapshot_at)
-    historical_posts = str(snapshot["historicalPosts"]["content"])
-    chronology = (observations or {}).get("chronology", {})
-    if chronology.get("status") == "comparable":
-        historical_posts += (
-            "\n\n可比较的前后发布时间组（只比较内容方向，不比较累计互动）：\n"
-            + json.dumps(chronology, ensure_ascii=False)
+    if observations is not None:
+        source = snapshot["xhsCreatorProfile"]
+        notes = [note for note in source["notes"] if isinstance(note, dict)]
+        # Use the selected structured snapshot, not a second derived overview
+        # that ranks titles by likes or embeds unrelated account prose.
+        creator = source.get("creator") if isinstance(source.get("creator"), dict) else {}
+        name = creator.get("displayName")
+        positioning = (
+            f"账号名称：{name}" if isinstance(name, str) and name.strip() else "所选笔记的账号报告"
         )
+        packet = {
+            "schemaVersion": "account-reading-input/v2",
+            "readingScope": {
+                "selectedNoteCount": len(notes),
+                "textScope": (
+                    "已保存的标题和文字正文；未读取图片内文字或视频内容，"
+                    "不保证全文完整，不按字数推断完整性。"
+                ),
+                "metricScope": "所选样本的累计互动，各指标分别比较；null 表示未获取。",
+            },
+            "notes": [{
+                "noteId": observation["noteId"],
+                "title": str(note.get("title") or ""),
+                "body": str(note.get("desc") or ""),
+                "availableBodyCharacters": len(str(note.get("desc") or "")),
+                "type": observation["type"],
+                "publishedAt": observation["publishedAt"],
+                "metrics": observation["metrics"],
+                "metricRanksInSelection": observation["metricRanksInSelection"],
+            } for note, observation in zip(notes, observations["notes"], strict=True)],
+            "metricSummaries": observations["metricSummaries"],
+            "chronology": observations["chronology"],
+        }
+        return {"positioning": positioning,
+                "historicalPosts": json.dumps(packet, ensure_ascii=False)}, observations
     return {"positioning": str(snapshot["accountPositioning"]),
-            "historicalPosts": historical_posts}, observations
+            "historicalPosts": str(snapshot["historicalPosts"]["content"])}, observations
 
 
 def _nonnegative_int(value: Any) -> int | None:

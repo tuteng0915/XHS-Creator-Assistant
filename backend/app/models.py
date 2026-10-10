@@ -2,7 +2,14 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 
 def to_camel(value: str) -> str:
@@ -491,8 +498,9 @@ class ContentWritingFocus(APIModel):
 class CreatorContextReference(APIModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["account_analysis", "audience_analysis"]
+    kind: Literal["account_analysis", "audience_analysis", "imported_note"]
     id: str = Field(min_length=1, max_length=120)
+    note_id: str | None = Field(default=None, min_length=1, max_length=120)
 
     @field_validator("id")
     @classmethod
@@ -500,6 +508,25 @@ class CreatorContextReference(APIModel):
         if not value.strip():
             raise ValueError("参考记录标识不能为空")
         return value.strip()
+
+    @model_validator(mode="after")
+    def valid_note_reference(self):
+        if self.kind == "imported_note":
+            if self.note_id is None or not self.note_id.strip():
+                raise ValueError("原笔记参考需要明确的笔记标识")
+            self.note_id = self.note_id.strip()
+        elif self.note_id is not None:
+            raise ValueError("分析参考不能附带笔记标识")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_reference(self, handler):
+        value = handler(self)
+        if self.note_id is None:
+            # Keep analysis-only API responses/cache payloads wire-compatible.
+            value.pop("note_id", None)
+            value.pop("noteId", None)
+        return value
 
 
 class CreatorContextSelection(APIModel):

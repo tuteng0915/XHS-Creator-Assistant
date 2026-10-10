@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { collaborationCandidates, contentCollaborationApi, creatorContextSignature, emptyCreatorContext, replaceSelectedText, selectionFromTextarea, type CollaborationMessage, type FrozenWritingFocus } from './contentCollaboration'
+import { collaborationCandidates, contentCollaborationApi, creatorContextSignature, creatorReferenceKey, emptyCreatorContext, replaceSelectedText, selectionFromTextarea, type CollaborationMessage, type CreatorContextReference, type FrozenWritingFocus } from './contentCollaboration'
 
 afterEach(() => vi.restoreAllMocks())
 const body = '开头🙂重复。\n中间。\n重复。结尾'
@@ -53,4 +53,17 @@ it('keeps reference-set identity independent from chip order', () => {
   const references = [{kind:'account_analysis' as const,id:'a'}, {kind:'audience_analysis' as const,id:'b'}]
   expect(creatorContextSignature({...emptyCreatorContext(),references})).toBe(creatorContextSignature({...emptyCreatorContext(),references:[...references].reverse()}))
   expect(creatorContextSignature({...emptyCreatorContext(),references})).not.toBe(creatorContextSignature(emptyCreatorContext()))
+})
+
+it('distinguishes two original notes in one material and sends their exact identities', async () => {
+  const first: CreatorContextReference = {kind:'imported_note', id:'material', noteId:'note-a'}
+  const second: CreatorContextReference = {...first, noteId:'note-b'}
+  expect(creatorReferenceKey(first)).not.toBe(creatorReferenceKey(second))
+  expect(creatorReferenceKey({...first,id:'a:b',noteId:'c'})).not.toBe(creatorReferenceKey({...first,id:'a',noteId:'b:c'}))
+  const selection = {...emptyCreatorContext(), references:[first,second]}
+  expect(creatorContextSignature(selection)).toBe(creatorContextSignature({...selection,references:[second,first]}))
+  expect(creatorContextSignature(selection)).not.toBe(creatorContextSignature({...selection,references:[first]}))
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ok:true,json:async()=>({})} as Response)
+  await contentCollaborationApi.send('w','s','参考这两篇的口吻','writing','notes-key',undefined,selection)
+  expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).creatorContextSelection).toEqual(selection)
 })

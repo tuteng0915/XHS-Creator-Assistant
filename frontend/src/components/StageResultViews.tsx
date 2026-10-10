@@ -1,6 +1,7 @@
 import type { MediaAsset, SavePhase } from '../types'
 import type { CreatorNote } from '../creatorNotes'
 import { AccountPortraitView, type Observations, type Portrait } from './AccountPortraitView'
+import { accountStatementKey } from '../accountReportText'
 import { replyPersonaId, simulationPersonaLabels } from '../simulationPersonaLabels'
 import { EditorFeedbackView } from './EditorFeedbackView'
 import { feedbackCards, type FeedbackRun } from '../editorFeedback'
@@ -104,33 +105,96 @@ export function ProfileView({ data, observations, notes = [], mediaAssets = [] }
   notes?: CreatorNote[]
   mediaAssets?: MediaAsset[]
 }) {
-  const structure = data.viralStructure as { name?: string; steps?: string[] } | undefined
-  const contrast = data.contrast as { takeaways?: string[] } | undefined
-  const hasDetails = ['pillars', 'titleFormulas', 'hookStyles'].some(key => Array.isArray(data[key]) && data[key].length > 0)
-    || Boolean(structure?.name || structure?.steps?.length || contrast?.takeaways?.length)
   if (observations?.schemaVersion === 'xhs-account-observations/v1') {
-    return <>
-      <AccountPortraitView portrait={data.accountPortrait as Portrait | null} observations={observations} notes={notes} mediaAssets={mediaAssets} />
-      {hasDetails && <details className="account-legacy-profile" open={!data.accountPortrait}>
-        <summary>更多内容归纳</summary>
-        <LegacyProfileView data={data} showPerformanceContrast={false} />
-      </details>}
-    </>
+    const portrait = data.accountPortrait as Portrait | null
+    const displayedClaims = [portrait?.summary, ...(portrait?.strengths || []), portrait?.encouragement,
+      ...(portrait?.readerValue || []), ...(portrait?.expressionPatterns || []),
+      ...(portrait?.recurringThemes || []).filter(claim => new Set((claim.evidence || []).map(ref => ref.noteId)).size >= 2),
+      ...(observations.chronology?.status === 'comparable' ? [portrait?.recentChange] : [])]
+    const alreadyDisplayed = new Set(displayedClaims.filter(claim => claim?.statement && claim.evidence?.length).map(claim => accountStatementKey(claim!.statement)))
+    const sections = profileDetails(data, alreadyDisplayed, notes)
+    return <AccountPortraitView portrait={portrait} observations={observations} notes={notes} mediaAssets={mediaAssets}
+      contentDetails={sections.content} expressionDetails={sections.expression} nextSteps={sections.nextSteps} />
   }
-  return <LegacyProfileView data={data} />
+  return <LegacyProfileView data={data} notes={notes} />
 }
 
-function LegacyProfileView({ data, showPerformanceContrast = true }: {
-  data: Record<string, unknown>
-  showPerformanceContrast?: boolean
-}) {
-  const pillars = Array.isArray(data.pillars) ? data.pillars : []
-  const formulas = Array.isArray(data.titleFormulas) ? data.titleFormulas : []
-  const hooks = Array.isArray(data.hookStyles) ? data.hookStyles : []
-  const structure = (data.viralStructure || {}) as {
-    name?: string
-    steps?: string[]
+function profileText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object' && 'statement' in value && typeof value.statement === 'string') return value.statement
+  return ''
+}
+
+function uniqueProfileTexts(value: unknown, seen = new Set<string>()): string[] {
+  return (Array.isArray(value) ? value : []).flatMap(item => {
+    const text = profileText(item), key = accountStatementKey(text)
+    if (!key || seen.has(key)) return []
+    seen.add(key)
+    return [text]
+  })
+}
+
+function profileDetails(data: Record<string, unknown>, alreadyDisplayed = new Set<string>(), notes: CreatorNote[] = []) {
+  const noteTitles = new Map<string, string>()
+  const noteCounts = new Map<string, number>()
+  for (const note of notes) noteCounts.set(note.noteId, (noteCounts.get(note.noteId) || 0) + 1)
+  for (const note of notes) if (noteCounts.get(note.noteId) === 1 && note.title.trim()) noteTitles.set(note.noteId, note.title.trim())
+  // These are source annotations, not fuzzy title matches. Unknown/ambiguous
+  // IDs stay verbatim and the saved analysis is never rewritten.
+  const displayText = (text: string) => text.replace(/（\s*noteId\s*[:：]\s*([^（）\s]+)\s*）|\(\s*noteId\s*[:：]\s*([^()\s]+)\s*\)/g,
+    (original, fullwidthId: string | undefined, asciiId: string | undefined) => {
+      const title = noteTitles.get(fullwidthId || asciiId || '')
+      return title ? `（《${title}》）` : original
+    })
+  const seen = new Set(alreadyDisplayed)
+  const pillars = uniqueProfileTexts(data.pillars, seen)
+  const voice = uniqueProfileTexts(data.voiceFingerprint, seen)
+  const formulaGroups = new Map<string, {formula: string | undefined; examples: string[]}>()
+  const formulas = (Array.isArray(data.titleFormulas) ? data.titleFormulas : []).flatMap(value => {
+    if (!value || typeof value !== 'object') return []
+    const item = value as {formula?: unknown; examples?: unknown}
+    const key = accountStatementKey(profileText(item.formula))
+    const existing = key ? formulaGroups.get(key) : undefined
+    if (existing) {
+      existing.examples = uniqueProfileTexts([...existing.examples, ...uniqueProfileTexts(item.examples)])
+      return []
+    }
+    const formula = uniqueProfileTexts([item.formula], seen)[0]
+    // An example remains readable even when its formula repeats a claim above.
+    const examples = uniqueProfileTexts(item.examples)
+    if (!formula && !examples.length) return []
+    const group = {formula, examples}
+    if (key) formulaGroups.set(key, group)
+    return [group]
+  })
+  const hooks = uniqueProfileTexts(data.hookStyles, seen)
+  const structure = (data.viralStructure || {}) as {name?: unknown; steps?: unknown}
+  const structureName = profileText(structure.name)
+  // Sequence is part of the finding: the same action may recur later in a note.
+  const steps = (Array.isArray(structure.steps) ? structure.steps : []).map(profileText).filter(value => value.trim())
+  const hasExpression = voice.length > 0 || formulas.length > 0 || hooks.length > 0 || !!structureName || steps.length > 0
+  const contrast = data.contrast as {takeaways?: unknown} | undefined
+  // An action can build on a finding but should not repeat it verbatim.
+  const takeaways = uniqueProfileTexts(contrast?.takeaways, seen)
+  return {
+    content: pillars.length > 0 ? <div className="account-report-topics">{pillars.map(pillar => <span className="account-profile-tag" key={pillar}>{pillar}</span>)}</div> : null,
+    expression: hasExpression ? <div className="account-report-expression-details">
+      {voice.length > 0 && <div className="account-report-subsection"><h5>措辞与节奏</h5><ul>{voice.map(value => <li key={value}>{displayText(value)}</li>)}</ul></div>}
+      {formulas.length > 0 && <div className="account-report-subsection"><h5>标题写法</h5><div className="account-profile-formulas">{formulas.map((item, index) => <div className="account-profile-formula" key={index}>
+        {item.formula && <p>{displayText(item.formula)}</p>}
+        {item.examples.map(example => <p className="account-report-example" key={example}>例：{displayText(example)}</p>)}
+      </div>)}</div></div>}
+      {hooks.length > 0 && <div className="account-report-subsection"><h5>开头习惯</h5><ul>{hooks.map(hook => <li key={hook}>{displayText(hook)}</li>)}</ul></div>}
+      {(!!structureName || steps.length > 0) && <div className="account-report-subsection"><h5>表达结构{structureName ? ` · ${displayText(structureName)}` : ''}</h5>
+        {steps.length > 0 && <ol>{steps.map((step, index) => <li key={index}>{displayText(step)}</li>)}</ol>}
+      </div>}
+    </div> : null,
+    nextSteps: takeaways.length > 0 ? <section className="account-report-next-steps"><h4>接下来值得试什么</h4><ol>{takeaways.map(item => <li key={item}>{displayText(item)}</li>)}</ol></section> : null,
   }
+}
+
+function LegacyProfileView({ data, notes }: {data: Record<string, unknown>; notes: CreatorNote[]}) {
+  const sections = profileDetails(data, new Set(), notes)
   const contrast = data.contrast as
     | {
         winners?: Array<{ title: string; metric: string }>
@@ -141,14 +205,16 @@ function LegacyProfileView({ data, showPerformanceContrast = true }: {
       }
     | undefined
   return (
-    <div className="stage-block account-profile-legacy-view">
+    <div className="stage-block account-profile-legacy-view account-report">
+      {sections.content && <section><h4>内容方向与读者价值</h4>{sections.content}</section>}
+      {sections.expression && <section><h4>你的表达方式</h4>{sections.expression}</section>}
       {/* Structured reports use frozen counts above, not model-written metrics or title matching. */}
-      {contrast && showPerformanceContrast && (
-        <>
-          <label>📊 高表现 vs 低表现 · 对比诊断</label>
+      {contrast && [contrast.winners, contrast.losers, contrast.winFactors, contrast.loseFactors].some(items => items?.length) && (
+        <section className="account-report-legacy-performance">
+          <h4>历史笔记表现</h4>
           <div className="cmp">
             <div className="cmp-col cmp-win">
-              <h5>✅ 高表现共性</h5>
+              <h5>较高表现</h5>
               {(contrast.winners || []).map((item) => (
                 <div className="cmp-item" key={item.title}>
                   <b>{item.title}</b> · {item.metric}
@@ -157,7 +223,7 @@ function LegacyProfileView({ data, showPerformanceContrast = true }: {
               <ul>{(contrast.winFactors || []).map((item) => <li key={item}>{item}</li>)}</ul>
             </div>
             <div className="cmp-col cmp-lose">
-              <h5>⚠️ 低表现共性</h5>
+              <h5>较低表现</h5>
               {(contrast.losers || []).map((item) => (
                 <div className="cmp-item" key={item.title}>
                   <b>{item.title}</b> · {item.metric}
@@ -166,50 +232,9 @@ function LegacyProfileView({ data, showPerformanceContrast = true }: {
               <ul>{(contrast.loseFactors || []).map((item) => <li key={item}>{item}</li>)}</ul>
             </div>
           </div>
-        </>
+        </section>
       )}
-      {Array.isArray(contrast?.takeaways) && contrast.takeaways.length > 0 && (
-        <div className="takeaway">
-          <b>可尝试的写法：</b>
-          <ol>{contrast.takeaways.map((item) => <li key={item}>{item}</li>)}</ol>
-        </div>
-      )}
-      {pillars.length > 0 && <>
-      <h4>内容方向</h4>
-      <div className="pill-row">
-        {pillars.map((pillar) => (
-          <span className="account-profile-tag" key={String(pillar)}>
-            {String(pillar)}
-          </span>
-        ))}
-      </div>
-      </>}
-      {formulas.length > 0 && <>
-      <h4>标题写法</h4>
-      <div className="account-profile-formulas">
-        {formulas.map((formula) => {
-          const item = formula as { formula?: string; examples?: string[] }
-          return (
-            <div className="account-profile-formula" key={item.formula}>
-                <b>{item.formula}</b>
-                {(item.examples || []).map((example) => (
-                  <p key={example}>
-                    例：{example}
-                  </p>
-                ))}
-            </div>
-          )
-        })}
-      </div>
-      </>}
-      {hooks.length > 0 && <>
-      <h4>开头习惯</h4>
-      <ul>{hooks.map((hook) => <li key={String(hook)}>{String(hook)}</li>)}</ul>
-      </>}
-      {Boolean(structure.name || structure.steps?.length) && <>
-      <h4>表达结构{structure.name ? ` · ${structure.name}` : ''}</h4>
-      {Boolean(structure.steps?.length) && <ol>{structure.steps!.map(step => <li key={step}>{step}</li>)}</ol>}
-      </>}
+      {sections.nextSteps}
     </div>
   )
 }

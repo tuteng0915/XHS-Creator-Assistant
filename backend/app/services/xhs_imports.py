@@ -20,6 +20,7 @@ from app.models import (
 )
 from app.services.input_assets import InputAssetService
 from app.services.media_assets import MediaAssetService
+from app.services.xhs_comment_refresh import preserve_unfetched_comments
 from app.services.xhs_comment_roles import author_hash
 
 SUPPORTED_XHS_SCHEMA = "xhs-profile-import/v1"
@@ -162,6 +163,24 @@ class XhsOfflineImportService:
             parsed = self._parse_profile_import_export(raw)
             creator_profile = self._legacy_import_to_creator_profile(parsed)
 
+        default_name = self._default_creator_profile_asset_name(
+            creator_profile, safe_profile_filename
+        )
+        material_name = (name.strip() or default_name)[:160]
+        existing_material = (
+            None
+            if save_as_new or name.strip()
+            else self._find_existing_creator_profile(workspace_id, material_name)
+        )
+        if existing_material is not None:
+            try:
+                previous_profile = json.loads(existing_material.content)
+                if not isinstance(previous_profile, dict):
+                    raise ValueError("Invalid profile")
+            except (ValueError, TypeError) as error:
+                raise ValidationError("已有账号资料暂时无法读取，未覆盖原资料。") from error
+            preserve_unfetched_comments(previous_profile, creator_profile)
+
         package_files = self._normalize_package_files(files)
         warnings = list(parsed["warnings"])
         media_assets: list[MediaAssetResponse] = []
@@ -230,15 +249,6 @@ class XhsOfflineImportService:
             }
 
         asset_content = json.dumps(creator_profile, ensure_ascii=False, indent=2)
-        default_name = self._default_creator_profile_asset_name(
-            creator_profile, safe_profile_filename
-        )
-        material_name = (name.strip() or default_name)[:160]
-        existing_material = (
-            None
-            if save_as_new or name.strip()
-            else self._find_existing_creator_profile(workspace_id, material_name)
-        )
         if existing_material is None:
             material = self.input_asset_service.create_text(
                 workspace_id,
@@ -466,16 +476,24 @@ class XhsOfflineImportService:
                             "content": self._clean(
                                 comment.get("content"), max_chars=12_000
                             ),
-                            "likeCount": comment.get("likeCount")
-                            or comment.get("like_count"),
-                            "subCommentCount": comment.get("subCommentCount")
-                            or comment.get("sub_comment_count"),
+                            "likeCount": (
+                                comment.get("likeCount")
+                                if comment.get("likeCount") is not None
+                                else comment.get("like_count")
+                            ),
+                            "subCommentCount": (
+                                comment.get("subCommentCount")
+                                if comment.get("subCommentCount") is not None
+                                else comment.get("sub_comment_count")
+                            ),
                             "createTime": comment.get("createTime")
                             or comment.get("create_time"),
                         }
                         for comment in comments
                         if isinstance(comment, dict)
                     ],
+                    **({"commentsObservedAt": raw_note["commentsObservedAt"]}
+                       if "commentsObservedAt" in raw_note else {}),
                 }
             )
         if not normalized_notes:

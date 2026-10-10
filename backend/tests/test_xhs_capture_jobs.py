@@ -398,3 +398,64 @@ def test_runner_imports_package_and_reuses_profile_on_refresh(app, settings, tmp
     assert result.imported.input_asset.id == repeated.imported.input_asset.id
     assert "中文正文" in repeated.imported.input_asset.content
     assert json.loads(repeated.imported.input_asset.content)["source"]["profileUrl"] == url
+
+
+@pytest.mark.parametrize("include_comments", [False, True])
+def test_runner_refresh_without_returned_comments_keeps_saved_comments(
+    app, settings, tmp_path, monkeypatch, include_comments,
+):
+    workspace = create_workspace(app)
+    crawler = tmp_path / "crawler"
+    crawler.mkdir()
+    (crawler / "main.py").touch()
+    runner = MediaCrawlerXhsCaptureRunner(
+        replace(settings, xhs_capture_directory=tmp_path / "captures",
+                xhs_mediacrawler_directory=crawler),
+        app.state.xhs_capture_service.runner.import_service,
+    )
+    url = "https://www.xiaohongshu.com/user/profile/test-account"
+    commands = []
+
+    def capture(command, *args):
+        commands.append(command)
+        return f"使用主页 URL：{url}"
+
+    monkeypatch.setattr(runner, "_capture", capture)
+    exports = 0
+
+    def export(command, **kwargs):
+        nonlocal exports
+        exports += 1
+        output = Path(command[command.index("--output") + 1])
+        output.mkdir(parents=True)
+        (output / "xhs_creator_profile.json").write_text(json.dumps({
+            "schemaVersion": "xhs-creator-profile/v1", "source": {},
+            "creator": {"displayName": "测试账号"},
+            "notes": [{
+                "noteId": "n1", "title": "笔记", "desc": f"正文 {exports}",
+                "authorHash": "1234567890abcdef",
+                "metrics": {"liked": 10 if exports == 1 else 0, "comments": 5},
+                "comments": [
+                    {"commentId": "author-reply", "content": "作者回复",
+                     "authorHash": "1234567890abcdef", "likeCount": 3},
+                    {"commentId": "reader-comment", "content": "读者提问",
+                     "authorHash": "fedcba0987654321", "likeCount": 2},
+                ] if exports == 1 else [],
+            }],
+        }), encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", export)
+    first = runner.run(job_id="first", workspace_id=workspace["id"], profile_url=url,
+                       note_limit=10, include_comments=True, progress=lambda *args: None)
+    original = json.loads(first.imported.input_asset.content)
+    refreshed = runner.run(job_id="refresh", workspace_id=workspace["id"], profile_url=url,
+                           note_limit=10, include_comments=include_comments,
+                           progress=lambda *args: None)
+    stored = json.loads(refreshed.imported.input_asset.content)
+    assert ("--comments" in commands[1]) is include_comments
+    assert refreshed.imported.input_asset.id == first.imported.input_asset.id
+    assert len(stored["notes"]) == 1
+    assert stored["notes"][0]["desc"] == "正文 2"
+    assert stored["notes"][0]["metrics"] == {"liked": 0, "comments": 5}
+    assert stored["notes"][0]["comments"] == original["notes"][0]["comments"]

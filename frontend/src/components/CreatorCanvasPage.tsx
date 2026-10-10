@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { panelEditApi, simulationRunApi, topicApi } from '../api'
-import type { PanelRetestRequest, SimulationRun, SimulationRunSummary, Topic } from '../types'
+import type { MediaAsset, PanelRetestRequest, SimulationRun, SimulationRunSummary, TextInputAsset, Topic } from '../types'
 import type { PanelEditProposal } from '../panelEdits'
 import { replaceSelectedText, selectionFromTextarea, type CollaborationCandidate, type CollaborationComposeIntent, type ReaderFeedbackIntent, type WritingSelection } from '../contentCollaboration'
 import { creatorDraftFrom, draftHasSameBase, draftMatchesSaved, readCreatorDraft, writeCreatorCache, type CreatorDraft } from '../creatorDraftCache'
@@ -15,8 +15,9 @@ import './CreatorCanvasPage.css'
 const narrowCanvasQuery = '(max-width: 900px)'
 type CanvasPane = 'chat' | 'draft'
 
-export function CreatorCanvasPage({workspaceId, topic, topics, onSelect, onUpdated, onSimulate, onRetestCreated, simulationRuns = [], readerFeedback, onReaderFeedbackConsumed, onLeaveGuardChange}: {
+export function CreatorCanvasPage({workspaceId, topic, topics, profile, mediaAssets, onSelect, onUpdated, onSimulate, onRetestCreated, simulationRuns = [], readerFeedback, onReaderFeedbackConsumed, onLeaveGuardChange}: {
   workspaceId: string; topic: Topic | null; topics: Topic[]; agentId?: string;
+  profile?: TextInputAsset; mediaAssets?: MediaAsset[];
   onSelect: (topic: Topic) => void; onUpdated: (topic: Topic) => void;
   onSimulate?: (topic: Topic) => void;
   onRetestCreated?: (run: SimulationRun, navigate: boolean) => void;
@@ -26,11 +27,11 @@ export function CreatorCanvasPage({workspaceId, topic, topics, onSelect, onUpdat
 }) {
   return <section className="creator-canvas-page">
     <div className="creator-page-head"><h1>AI 创作助手</h1><select className="creator-topic-select" aria-label="创作选题" value={topic?.id || ''} onChange={e => {const selected = topics.find(t => t.id === e.target.value); if (selected) onSelect(selected)}}><option value="">选择选题</option>{topics.filter(t => t.status !== 'archived').map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></div>
-    {topic ? <Canvas key={`${workspaceId}:${topic.id}`} workspaceId={workspaceId} topic={topic} onUpdated={onUpdated} onSimulate={onSimulate} onRetestCreated={onRetestCreated} simulationRuns={simulationRuns} readerFeedback={readerFeedback} onReaderFeedbackConsumed={onReaderFeedbackConsumed} onLeaveGuardChange={onLeaveGuardChange} /> : <p>先从选题库选择一个题目。</p>}
+    {topic ? <Canvas key={`${workspaceId}:${topic.id}`} workspaceId={workspaceId} topic={topic} profile={profile} mediaAssets={mediaAssets} onUpdated={onUpdated} onSimulate={onSimulate} onRetestCreated={onRetestCreated} simulationRuns={simulationRuns} readerFeedback={readerFeedback} onReaderFeedbackConsumed={onReaderFeedbackConsumed} onLeaveGuardChange={onLeaveGuardChange} /> : <p>先从选题库选择一个题目。</p>}
   </section>
 }
 
-function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, simulationRuns, readerFeedback, onReaderFeedbackConsumed, onLeaveGuardChange}: {workspaceId: string; topic: Topic; onUpdated: (t: Topic) => void; onSimulate?: (t: Topic) => void; onRetestCreated?: (run: SimulationRun, navigate: boolean) => void; simulationRuns: SimulationRunSummary[]; readerFeedback?: ReaderFeedbackIntent | null; onReaderFeedbackConsumed?: () => void; onLeaveGuardChange?: (message: string | null) => void}) {
+function Canvas({workspaceId, topic, profile, mediaAssets, onUpdated, onSimulate, onRetestCreated, simulationRuns, readerFeedback, onReaderFeedbackConsumed, onLeaveGuardChange}: {workspaceId: string; topic: Topic; profile?: TextInputAsset; mediaAssets?: MediaAsset[]; onUpdated: (t: Topic) => void; onSimulate?: (t: Topic) => void; onRetestCreated?: (run: SimulationRun, navigate: boolean) => void; simulationRuns: SimulationRunSummary[]; readerFeedback?: ReaderFeedbackIntent | null; onReaderFeedbackConsumed?: () => void; onLeaveGuardChange?: (message: string | null) => void}) {
   const [initialCache] = useState(() => readCreatorDraft(workspaceId, topic.id))
   const recoverable = initialCache.value && !draftMatchesSaved(initialCache.value, topic) ? initialCache.value : null
   const [draftConflict, setDraftConflict] = useState<CreatorDraft | null>(() => recoverable && !draftHasSameBase(recoverable, topic) ? recoverable : null)
@@ -259,7 +260,7 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
       <details><summary>对照两份内容</summary><div className="canvas-draft-comparison"><section><h3>本地未保存</h3><strong>{draftConflict.title}</strong><p>{draftConflict.body || '正文为空'}</p></section><section><h3>当前已保存</h3><strong>{saved.title}</strong><p>{saved.body || '正文为空'}</p></section></div></details>
       <div className="canvas-draft-recovery-actions"><button type="button" onClick={() => {editRevision.current++; setTitle(draftConflict.title); setBody(draftConflict.body); setDraftConflict(null); setRestoredDraft(true)}}>恢复本地草稿</button><button type="button" onClick={() => {setDraftConflict(null); setRestoredDraft(false)}}>使用已保存稿</button></div>
     </section>}
-    {leaveWarning && <p className="canvas-draft-storage-warning" role="alert">本页无法暂存，离开前请保存稿件，并复制未发送的消息。</p>}
+    {leaveWarning && <p className="canvas-draft-storage-warning" role="alert">本页无法暂存，离开前请保存稿件；未发送消息和参考调整不会保留。</p>}
     {narrow && <div className="canvas-pane-tabs" role="tablist" aria-label="创作工作区"
       onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -277,7 +278,7 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
       <blockquote>{feedback.quote}</blockquote>
       <button type="button" disabled={collaborating || saving || applying || retesting} onClick={() => requestRewrite(focusedSelection ? '请结合引用的读者意见，只改写我选中的这一段，保留其余内容。' : '请结合引用的读者意见，先讨论这篇稿件哪些地方值得调整，别直接重写整篇。')}>和助手讨论</button>
     </section>}
-        <ContentCollaborationChat workspaceId={workspaceId} topic={saved} blocked={!!draftConflict || retesting || applying || preparing || saving || !title.trim()}
+        <ContentCollaborationChat workspaceId={workspaceId} topic={saved} profile={profile} mediaAssets={mediaAssets} blocked={!!draftConflict || retesting || applying || preparing || saving || !title.trim()}
           beforeSend={prepareCollaboration} onActivityChange={onActivityChange} onPreview={previewCandidate} composeIntent={composeIntent} onDraftStorageIssue={onMessageStorageIssue} />
       </div>
       <div className="canvas-divider" role="separator" aria-label="调整对话和稿件宽度" aria-valuenow={split} aria-valuetext={`对话 ${split}% · 稿件 ${100 - split}%`} aria-valuemin={30} aria-valuemax={70} aria-orientation="vertical" tabIndex={0} hidden={narrow}

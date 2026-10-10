@@ -60,3 +60,14 @@ it('keeps negative or unknown metrics absent in the card and supports top N brow
   fireEvent.change(screen.getByLabelText('显示'),{target:{value:'0'}})
   expect(screen.getByRole('button',{name:/缺失指标 赞/})).toHaveTextContent('赞 —')
 })
+
+it('can preview saved text and images without displaying comment or observation-time sections', () => {
+  render(<CreatorNoteBrowser notes={[{...note, comments: [{content: '不在本次参考范围的评论'}]}]} mediaAssets={[media('cover', '/one.jpg')]} showComments={false} showObservationTimes={false} />)
+  fireEvent.click(screen.getByRole('button', {name: /已保存笔记 赞/}))
+  const detail = screen.getByRole('dialog', {name: '已保存笔记'})
+  expect(within(detail).getByText('正文')).toBeVisible()
+  expect(within(detail).getByRole('img')).toHaveAttribute('src', '/one.jpg')
+  expect(within(detail).queryByRole('region', {name: '笔记评论'})).not.toBeInTheDocument()
+  expect(within(detail).queryByText(/指标截至|指标时间未记录|评论更新于|暂未读取到评论/)).not.toBeInTheDocument()
+  expect(within(detail).queryByText('不在本次参考范围的评论')).not.toBeInTheDocument()
+})

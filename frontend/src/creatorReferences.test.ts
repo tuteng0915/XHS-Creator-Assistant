@@ -1,9 +1,9 @@
 import {beforeEach, expect, it, vi} from 'vitest'
-import {analysisRunApi, audienceAnalysisApi} from './api'
-import {accountReferencePreview, audienceReferencePreview, loadCreatorReference, referenceDate} from './creatorReferences'
-import type {AnalysisRun, AudienceAnalysis} from './types'
+import {analysisRunApi, audienceAnalysisApi, inputAssetApi} from './api'
+import {accountReferencePreview, audienceReferencePreview, importedReferenceNotes, loadCreatorReference, referenceDate} from './creatorReferences'
+import type {AnalysisRun, AudienceAnalysis, TextInputAsset} from './types'
 
-vi.mock('./api', () => ({analysisRunApi: {get: vi.fn()}, audienceAnalysisApi: {get: vi.fn()}}))
+vi.mock('./api', () => ({analysisRunApi: {get: vi.fn()}, audienceAnalysisApi: {get: vi.fn()}, inputAssetApi: {get: vi.fn()}}))
 beforeEach(() => vi.resetAllMocks())
 
 function account(overrides: Partial<AnalysisRun> = {}): AnalysisRun {
@@ -16,6 +16,10 @@ function audience(overrides: Partial<AudienceAnalysis> = {}): AudienceAnalysis {
   return {id: 'audience-1', workspaceId: 'workspace-1', sourceMaterialId: 'material-1', status: 'completed',
     inputSnapshot: {scope: {scope: 'recent_10', selectedNoteCount: 6}}, result: {}, error: '',
     createdAt: '2026-10-10T10:00:00Z', ...overrides}
+}
+function profile(notes: unknown[] = [{noteId: 'saved-1', title: '保存的完整标题', desc: '保存的完整正文\n第二段', coverMediaAssetId: 'cover-1', metrics: {liked: 3}, comments: [{content: 'PRIVATE_COMMENT'}]}], overrides: Partial<TextInputAsset> = {}): TextInputAsset {
+  return {id: 'profile-1', workspaceId: 'workspace-1', type: 'xhs_creator_profile', name: '账号原文', createdAt: '', updatedAt: '',
+    content: JSON.stringify({notes, creator: {biography: 'UNSELECTED_ACCOUNT_CONTEXT'}}), ...overrides}
 }
 
 it('previews meaningful account statements without exposing raw snapshots or JSON', () => {
@@ -85,4 +89,52 @@ it('propagates missing-source errors without inventing or loading a replacement'
   vi.mocked(analysisRunApi.get).mockRejectedValue(new Error('这份记录已删除'))
   await expect(loadCreatorReference('workspace-1', {kind: 'account_analysis', id: 'deleted'})).rejects.toThrow('已删除')
   expect(analysisRunApi.get).toHaveBeenCalledTimes(1)
+})
+
+it('loads the exact imported note with the full saved title and body, without comments or account context', async () => {
+  const body = '完整正文，不做摘要。'.repeat(300) + '\n最后一段'
+  vi.mocked(inputAssetApi.get).mockResolvedValue(profile([{noteId: 'saved-1', title: '保存的完整标题', desc: body, coverMediaAssetId: 'cover-1', comments: [{content: 'PRIVATE_COMMENT'}]}]))
+  const preview = await loadCreatorReference('workspace-1', {kind: 'imported_note', id: 'profile-1', noteId: 'saved-1'})
+  expect(inputAssetApi.get).toHaveBeenCalledExactlyOnceWith('profile-1')
+  expect(preview.reference).toEqual({kind: 'imported_note', id: 'profile-1', noteId: 'saved-1'})
+  expect(preview.label).toBe('原笔记 · 保存的完整标题')
+  expect(preview.summary).toBe(body)
+  expect(preview.note).toMatchObject({noteId: 'saved-1', title: '保存的完整标题', desc: body, coverMediaAssetId: 'cover-1', comments: []})
+  expect(JSON.stringify(preview)).not.toContain('PRIVATE_COMMENT')
+  expect(JSON.stringify(preview)).not.toContain('UNSELECTED_ACCOUNT_CONTEXT')
+  expect(analysisRunApi.get).not.toHaveBeenCalled()
+  expect(audienceAnalysisApi.get).not.toHaveBeenCalled()
+})
+
+it('offers only stable exact unique imported note IDs and rejects missing, positional and malformed IDs', () => {
+  const notes = importedReferenceNotes(profile([
+    {noteId: 'saved-1', title: '只保存标题', desc: ''}, {noteId: 'body-only', title: '', desc: '只保存正文'},
+    {title: '无标识正文', desc: '不能按索引认领'}, {noteId: 123, title: '数字标识'}, {noteId: ' ', title: '空标识'},
+    {noteId: 'note-0', title: '位置兜底标识'}, {noteId: 'duplicate', title: '重名一'}, {noteId: 'duplicate', title: '重名二'},
+    {noteId: 'empty', title: ' ', desc: ''},
+  ]))
+  expect(notes.map(note => note.noteId)).toEqual(['saved-1', 'body-only'])
+  expect(notes[1].title).toBe('')
+  expect(importedReferenceNotes()).toEqual([])
+  expect(importedReferenceNotes(profile([], {type: 'comments'}))).toEqual([])
+  expect(importedReferenceNotes(profile([], {content: 'malformed json'}))).toEqual([])
+})
+
+it('rejects unavailable or ambiguous imported notes without falling back to an array position', async () => {
+  const reference = {kind: 'imported_note' as const, id: 'profile-1', noteId: 'saved-1'}
+  for (const value of [profile(undefined, {id: 'other'}), profile(undefined, {workspaceId: 'workspace-2'}), profile(undefined, {type: 'historical_posts'}),
+    profile([{noteId: 'other', title: '别篇'}]), profile([{noteId: 'saved-1', title: '第一篇'}, {noteId: 'saved-1', title: '第二篇'}]), profile([], {content: '{'})]) {
+    vi.mocked(inputAssetApi.get).mockResolvedValue(value)
+    await expect(loadCreatorReference('workspace-1', reference)).rejects.toThrow('不可用')
+  }
+  vi.mocked(inputAssetApi.get).mockResolvedValue(profile([{title: '没有 noteId 的原文'}]))
+  await expect(loadCreatorReference('workspace-1', {...reference, noteId: '0'})).rejects.toThrow('不可用')
+})
+
+it('keeps title-only notes explicit and propagates original-note transport failures', async () => {
+  const reference = {kind: 'imported_note' as const, id: 'profile-1', noteId: 'saved-1'}
+  vi.mocked(inputAssetApi.get).mockResolvedValue(profile([{noteId: 'saved-1', title: '只保存标题', desc: ''}]))
+  expect((await loadCreatorReference('workspace-1', reference)).summary).toBe('这篇笔记只保存了标题。')
+  vi.mocked(inputAssetApi.get).mockRejectedValue(new Error('读取原笔记中断'))
+  await expect(loadCreatorReference('workspace-1', reference)).rejects.toThrow('读取原笔记中断')
 })

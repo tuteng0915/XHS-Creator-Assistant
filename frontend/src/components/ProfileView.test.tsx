@@ -24,10 +24,11 @@ const observations: Observations = {
   ],
 }
 
-it('uses frozen counts instead of the model contrast even when more content is expanded', () => {
+it('uses frozen counts and directly displays content and actions without legacy nested disclosures', () => {
   const original = JSON.stringify({ data, observations })
   render(<ProfileView data={data} observations={observations} />)
-  expect(screen.getByText('更多内容归纳').closest('details')).toHaveAttribute('open')
+  expect(screen.queryByText('更多内容归纳')).not.toBeInTheDocument()
+  expect(screen.getByText(data.contrast.takeaways[0]).closest('details')).toBeNull()
   expect(screen.getByRole('status')).toHaveTextContent('点赞数据 2 / 2 条 · 中位数 15')
   expect(screen.queryByText(/None|999|30%|15%|模型指定/)).not.toBeInTheDocument()
   expect(screen.queryByText(/高表现 vs 低表现/)).not.toBeInTheDocument()
@@ -81,7 +82,7 @@ it('omits empty legacy disclosures and headings while preserving genuine legacy 
   const {rerender} = render(<ProfileView data={{pillars:[],titleFormulas:[],hookStyles:[],viralStructure:{},contrast:{winners:[{title:'不使用的模型对比'}]}}} observations={observations} />)
   expect(screen.queryByText('更多内容归纳')).not.toBeInTheDocument()
   rerender(<ProfileView data={{pillars:['生活记录']}} />)
-  expect(screen.getByRole('heading',{name:'内容方向'})).toBeInTheDocument()
+  expect(screen.getByRole('heading',{name:'内容方向与读者价值'})).toBeInTheDocument()
   expect(screen.queryByRole('heading',{name:'标题写法'})).not.toBeInTheDocument()
   expect(screen.queryByRole('heading',{name:'开头习惯'})).not.toBeInTheDocument()
   expect(screen.queryByRole('heading',{name:/表达结构/})).not.toBeInTheDocument()
@@ -94,4 +95,95 @@ it('omits empty legacy disclosures and headings while preserving genuine legacy 
   rerender(<ProfileView data={{viralStructure:{steps:[]}}} />)
   expect(screen.queryByText('0')).not.toBeInTheDocument()
   expect(screen.queryByRole('heading')).not.toBeInTheDocument()
+})
+
+it.each([observations, undefined])('shows voice-only reports and preserves full legacy wording', snapshot => {
+  const voice = '先用口语短句提出疑问，再用长句解释自己的取舍。'.repeat(15)
+  render(<ProfileView data={{voiceFingerprint:[voice,{statement:'常用“我觉得”区分个人判断与事实'}]}} observations={snapshot} />)
+  expect(screen.getByRole('heading', {name:'你的表达方式'})).toBeInTheDocument()
+  expect(screen.getByText(voice).closest('details')).toBeNull()
+  expect(screen.getByText('常用“我觉得”区分个人判断与事实')).toBeInTheDocument()
+  expect(screen.queryByText(/本次暂无可展示/)).not.toBeInTheDocument()
+})
+
+it('combines report parts in reading order without repeating findings or hiding examples', () => {
+  const statement = '短句开场，随后展开具体场景'
+  const report = {
+    accountPortrait:{summary:{statement:'用亲身记录解释选择',evidence:[{noteId:'first',quote:'真实场景'}]},
+      strengths:[{statement,evidence:[{noteId:'first',quote:'具体做法'}]}],
+      readerValue:[{statement:'帮助读者看清取舍',evidence:[{noteId:'second',quote:'取舍原文'}]}]},
+    pillars:['生活记录'], voiceFingerprint:[statement,'常用“但”转入自己的判断'],
+    titleFormulas:[{formula:'先说实际场景，再写反差',examples:['下班很晚，但我不想直接回家']}],
+    hookStyles:['从一个现场动作切入'],viralStructure:{name:'经历推进',steps:['还原场景','解释选择']},
+    contrast:{takeaways:['下次借鉴“下班很晚”的动作开头，保留一处具体细节。']},
+  }
+  const original = JSON.stringify(report)
+  render(<ProfileView data={report} observations={observations} />)
+  const headings = screen.getAllByRole('heading', {level:4}).map(heading => heading.textContent?.trim())
+  expect(headings).toEqual(['这个账号给人的印象','值得继续放大的优势','内容方向与读者价值','你的表达方式','笔记表现','接下来值得试什么'])
+  expect(screen.getAllByText(statement)).toHaveLength(1)
+  for (const text of ['常用“但”转入自己的判断','先说实际场景，再写反差','例：下班很晚，但我不想直接回家','从一个现场动作切入','解释选择',report.contrast.takeaways[0]]) {
+    expect(screen.getByText(text).closest('details')).toBeNull()
+  }
+  expect(JSON.stringify(report)).toBe(original)
+})
+
+it('preserves repeated steps in their saved order and does not merge different English word boundaries', () => {
+  render(<ProfileView data={{voiceFingerprint:['now here','nowhere','值得继续？','值得继续。'],viralStructure:{steps:['回到现场','补充解释','回到现场']}}} />)
+  expect(screen.getByText('now here')).toBeInTheDocument()
+  expect(screen.getByText('nowhere')).toBeInTheDocument()
+  expect(screen.getByText('值得继续？')).toBeInTheDocument()
+  expect(screen.getByText('值得继续。')).toBeInTheDocument()
+  const ordered = screen.getByRole('heading',{name:'表达结构'}).parentElement!.querySelectorAll('li')
+  expect([...ordered].map(item => item.textContent)).toEqual(['回到现场','补充解释','回到现场'])
+})
+
+it('retains unique title examples when formulas repeat findings or earlier formula groups', () => {
+  const statement = '从具体场景写起'
+  const report = {accountPortrait:{strengths:[{statement,evidence:[{noteId:'first',quote:'具体现场'}]}]},titleFormulas:[
+    {formula:statement,examples:['夜跑以后']},
+    {formula:'直接提出疑问',examples:['为什么想继续写？']},
+    {formula:statement,examples:['夜跑以后','下班以前']},
+  ]}
+  const original = JSON.stringify(report)
+  render(<ProfileView data={report} observations={observations} />)
+  expect(screen.getAllByText(statement)).toHaveLength(1)
+  const sceneExamples = screen.getByText('例：夜跑以后').closest('.account-profile-formula')!
+  expect(sceneExamples).toContainElement(screen.getByText('例：下班以前'))
+  expect(sceneExamples).not.toContainElement(screen.getByText('例：为什么想继续写？'))
+  expect(screen.getAllByText('例：夜跑以后')).toHaveLength(1)
+  expect(JSON.stringify(report)).toBe(original)
+})
+
+it.each([observations, undefined])('renders exact frozen note annotations as titles across writing advice without changing stored text', snapshot => {
+  const notes = [{noteId:'n1',title:'准备之前的两件小事',desc:'冻结正文',metrics:{},comments:[]}]
+  const report = {
+    voiceFingerprint:['短句有停顿（noteId: n1）'],
+    titleFormulas:[{formula:'先说场景（noteId：n1）',examples:['准备开始之前 (noteId: n1)']}],
+    hookStyles:['先从现场动作开始（noteId: n1）'],
+    viralStructure:{name:'场景推进（noteId: n1）',steps:['先写环境（noteId: n1）']},
+    contrast:{takeaways:['下一次保留具体动作（noteId: n1）']},
+  }
+  const original = JSON.stringify({report,notes})
+  const {container} = render(<ProfileView data={report} observations={snapshot} notes={notes} />)
+  for (const prefix of ['短句有停顿','先说场景','先从现场动作开始','先写环境','下一次保留具体动作']) {
+    expect(screen.getByText(`${prefix}（《准备之前的两件小事》）`)).toBeInTheDocument()
+  }
+  expect(screen.getByText('例：准备开始之前 （《准备之前的两件小事》）')).toBeInTheDocument()
+  expect(screen.getByRole('heading',{name:'表达结构 · 场景推进（《准备之前的两件小事》）'})).toBeInTheDocument()
+  expect(container).not.toHaveTextContent('noteId')
+  expect(JSON.stringify({report,notes})).toBe(original)
+})
+
+it('preserves unknown, duplicate and untitled note IDs rather than guessing by matching titles', () => {
+  const makeNote = (noteId: string, title: string) => ({noteId,title,desc:'冻结正文',metrics:{},comments:[]})
+  const notes = [makeNote('duplicate','同一个标题'),makeNote('duplicate','另一个标题'),makeNote('empty',' '),
+    makeNote('known','同一个标题'),makeNote('also-known','同一个标题')]
+  render(<ProfileView notes={notes} data={{hookStyles:[
+    '重复身份（noteId: duplicate）','未知身份（noteId: unknown）','空标题 (noteId: empty)',
+    '有明确身份（noteId: known）','标题不是身份（noteId: 同一个标题）','正文中的 noteId: known 不处理',
+  ]}} />)
+  for (const text of ['重复身份（noteId: duplicate）','未知身份（noteId: unknown）','空标题 (noteId: empty)',
+    '标题不是身份（noteId: 同一个标题）','正文中的 noteId: known 不处理']) expect(screen.getByText(text)).toBeInTheDocument()
+  expect(screen.getByText('有明确身份（《同一个标题》）')).toBeInTheDocument()
 })

@@ -50,13 +50,16 @@ export interface FrozenWritingFocus {
 }
 export interface CollaborationComposeIntent {id: string; text: string; recipient: SpecialistRole}
 
-export interface CreatorContextReference {kind: 'account_analysis' | 'audience_analysis'; id: string}
+export type CreatorContextReference =
+  | {kind: 'account_analysis' | 'audience_analysis'; id: string}
+  | {kind: 'imported_note'; id: string; noteId: string}
 export interface CreatorContextSelection {
   schemaVersion: 'creator-context-selection/v1'
   references: CreatorContextReference[]
 }
 export const emptyCreatorContext = (): CreatorContextSelection => ({schemaVersion: 'creator-context-selection/v1', references: []})
-export const creatorReferenceKey = (reference: CreatorContextReference): string => `${reference.kind}:${reference.id}`
+export const creatorReferenceKey = (reference: CreatorContextReference): string => reference.kind === 'imported_note'
+  ? `imported_note:${JSON.stringify([reference.id, reference.noteId])}` : `${reference.kind}:${reference.id}`
 export const creatorContextSignature = (selection: CreatorContextSelection): string => selection.references.map(creatorReferenceKey).sort().join('|')
 
 export function selectionFromTextarea(body: string, start: number, end: number): WritingSelection | null {

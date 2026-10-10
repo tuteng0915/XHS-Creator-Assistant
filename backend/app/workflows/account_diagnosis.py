@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from app.db.database import SQLiteDatabase
@@ -25,6 +25,7 @@ from app.services.account_diagnosis_evidence import (
     topic_profile_context,
     verified_portrait,
 )
+from app.services.account_profile_shape import normalize_profile_stage_result
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
@@ -78,6 +79,11 @@ class ProfileData(BaseModel):
 
 class ProfileStageResult(BaseModel):
     profile: ProfileData
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_known_nesting(cls, value):
+        return normalize_profile_stage_result(value)
 
 
 class PainPoint(BaseModel):

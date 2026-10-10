@@ -410,7 +410,7 @@ it('requires explicit account note confirmation before recommending or starting 
   await ready()
   expect(screen.getByRole('region',{name:'待模拟账号'})).toHaveTextContent('创作者')
   expect(screen.getByText('2 篇已导入笔记 · 尚未选择')).toBeVisible()
-  expect(screen.getByRole('button',{name:'推荐读者'})).toBeDisabled()
+  expect(await screen.findByRole('button',{name:'推荐读者'})).toBeDisabled()
   fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'a'}})
   expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
   expect(screen.queryByText(/12 篇/)).not.toBeInTheDocument()

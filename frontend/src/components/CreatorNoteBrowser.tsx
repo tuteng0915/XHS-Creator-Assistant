@@ -5,10 +5,11 @@ import { CreatorDialog } from './CreatorDialog'
 import { CreatorNoteFilters } from './CreatorNoteFilters'
 
 // Shared browsing surface for My Notes and the diagnosis selection dialog.
-export function CreatorNoteBrowser({ notes, mediaAssets, selectedIds, onToggle, showFilters = false, selectionMode = 'multiple' }: {
+export function CreatorNoteBrowser({ notes, mediaAssets, selectedIds, onToggle, showFilters = false, selectionMode = 'multiple', showComments = true, showObservationTimes = true }: {
   notes: CreatorNote[]; mediaAssets: MediaAsset[];
   selectedIds?: string[]; onToggle?: (id: string) => void;
   showFilters?: boolean; selectionMode?: 'single' | 'multiple';
+  showComments?: boolean; showObservationTimes?: boolean;
 }) {
   const [detailId, setDetailId] = useState<string | null>(null)
   const [range, setRange] = useState<CreatorNoteRange>('all')
@@ -47,13 +48,13 @@ export function CreatorNoteBrowser({ notes, mediaAssets, selectedIds, onToggle, 
       <div className="creator-note-detail">
         {images(detail).length > 0 && <div className="creator-note-gallery">{images(detail).map((url, index) => <img key={url} src={url} alt={`${detail.title} · 图片 ${index + 1}`} />)}</div>}
         {notePublishedAt(detail) && <time>{new Date(notePublishedAt(detail)!).toLocaleDateString('zh-CN')}</time>}
-        <p className="creator-note-data-time">{noteDataTimeLabel(detail) || '指标时间未记录'}</p>
+        {showObservationTimes && <p className="creator-note-data-time">{noteDataTimeLabel(detail) || '指标时间未记录'}</p>}
         <p className="creator-note-body">{detail.desc || '暂未读取到正文'}</p>
-        <section aria-label="笔记评论">
+        {showComments && <section aria-label="笔记评论">
           <h3>评论 · {detail.comments.length}</h3>
-          {noteCommentsTimeLabel(detail) && <p className="creator-note-data-time">{noteCommentsTimeLabel(detail)}</p>}
+          {showObservationTimes && noteCommentsTimeLabel(detail) && <p className="creator-note-data-time">{noteCommentsTimeLabel(detail)}</p>}
           {detail.comments.length ? detail.comments.map((comment, index) => <p className="creator-note-comment" key={comment.commentId || index}>{comment.content || '图片评论'}<small>赞 {comment.likeCount ?? '—'}</small></p>) : <p>暂未读取到评论</p>}
-        </section>
+        </section>}
       </div>
     </CreatorDialog>}
   </>

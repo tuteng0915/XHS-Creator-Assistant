@@ -1,16 +1,17 @@
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react'
 import {afterEach, beforeEach, expect, it, vi} from 'vitest'
 import {agentConversationApi} from '../api'
-import {contentCollaborationApi, emptyCreatorContext, type CollaborationSession, type CreatorContextSelection} from '../contentCollaboration'
+import {contentCollaborationApi, creatorReferenceKey, emptyCreatorContext, type CollaborationSession, type CreatorContextSelection} from '../contentCollaboration'
 import type {Topic} from '../types'
 import {ContentCollaborationChat} from './ContentCollaborationChat'
 
 vi.mock('./CreatorReferencePicker', () => ({CreatorReferencePicker: ({selection, onChange, disabled}: {
   selection: CreatorContextSelection; onChange: (selection: CreatorContextSelection) => void; disabled: boolean
 }) => <div>
-  <output aria-label="已选参考">{selection.references.map(item => `${item.kind}:${item.id}`).join(',') || '无'}</output>
+  <output aria-label="已选参考">{selection.references.map(creatorReferenceKey).join(',') || '无'}</output>
   <button disabled={disabled} onClick={() => onChange({schemaVersion:'creator-context-selection/v1',references:[{kind:'account_analysis',id:'account-a'}]})}>选账号分析</button>
   <button disabled={disabled} onClick={() => onChange({schemaVersion:'creator-context-selection/v1',references:[{kind:'audience_analysis',id:'audience-b'}]})}>选受众分析</button>
+  <button disabled={disabled} onClick={() => onChange({schemaVersion:'creator-context-selection/v1',references:[{kind:'imported_note',id:'material',noteId:'note-a'},{kind:'imported_note',id:'material',noteId:'note-b'}]})}>选原笔记</button>
   <button disabled={disabled} onClick={() => onChange({schemaVersion:'creator-context-selection/v1',references:[]})}>清空参考</button>
 </div>}))
 
@@ -207,4 +208,43 @@ it('retains over-limit shortcut text and asks for trimming instead of discarding
   expect(screen.getByRole('alert')).toHaveTextContent('已保留完整输入')
   expect(screen.getByRole('button',{name:'发送'})).toBeDisabled()
   expect(contentCollaborationApi.send).not.toHaveBeenCalled()
+})
+
+it('recovers selected original notes without needing an unsent message, then sends both exact notes', async () => {
+  const first = render(<ContentCollaborationChat {...props} />)
+  await waitFor(() => expect(screen.getByRole('button',{name:'选原笔记'})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button',{name:'选原笔记'}))
+  first.unmount()
+  render(<ContentCollaborationChat {...props} />)
+  expect(screen.getByLabelText('给创作助手的消息')).toHaveValue('')
+  expect(screen.getByLabelText('已选参考')).toHaveTextContent('note-a')
+  expect(screen.getByLabelText('已选参考')).toHaveTextContent('note-b')
+  await submit('参考这两篇写法')
+  await waitFor(() => expect(contentCollaborationApi.send).toHaveBeenCalledWith('w','s','参考这两篇写法','writing',expect.any(String),undefined,
+    {...emptyCreatorContext(),references:[{kind:'imported_note',id:'material',noteId:'note-a'},{kind:'imported_note',id:'material',noteId:'note-b'}]}))
+})
+
+it('retains an explicitly cleared reference set without message text instead of restoring last sent notes', async () => {
+  reopen({...session,creatorContextSelection:{...emptyCreatorContext(),references:[{kind:'imported_note',id:'material',noteId:'note-a'}]},messages:[writerMessage]})
+  const first = render(<ContentCollaborationChat {...props} />)
+  await screen.findByText('之前的一条建议')
+  expect(screen.getByLabelText('已选参考')).toHaveTextContent('note-a')
+  fireEvent.click(screen.getByRole('button',{name:'清空参考'}))
+  first.unmount()
+  render(<ContentCollaborationChat {...props} />)
+  await screen.findByText('之前的一条建议')
+  expect(screen.getByLabelText('已选参考')).toHaveTextContent('无')
+})
+
+it('warns about unsaved references alone when session storage is unavailable', async () => {
+  vi.spyOn(window,'sessionStorage','get').mockReturnValue({getItem:() => null,removeItem:() => {},setItem:() => {throw new Error('storage unavailable')}} as unknown as Storage)
+  const onDraftStorageIssue = vi.fn()
+  render(<ContentCollaborationChat {...props} onDraftStorageIssue={onDraftStorageIssue} />)
+  await waitFor(() => expect(screen.getByRole('button',{name:'选原笔记'})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button',{name:'选原笔记'}))
+  expect(screen.getByLabelText('给创作助手的消息')).toHaveValue('')
+  await waitFor(() => expect(onDraftStorageIssue).toHaveBeenLastCalledWith(true))
+  const event = new Event('beforeunload',{cancelable:true})
+  window.dispatchEvent(event)
+  expect(event.defaultPrevented).toBe(true)
 })

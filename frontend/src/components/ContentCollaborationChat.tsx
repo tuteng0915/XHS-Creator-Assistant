@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { agentConversationApi } from '../api'
-import type { AgentConversation, Topic } from '../types'
+import type { AgentConversation, MediaAsset, TextInputAsset, Topic } from '../types'
 import { collaborationCandidates, collaborationSummary, contentCollaborationApi, creatorContextSignature, emptyCreatorContext } from '../contentCollaboration'
 import { readCreatorMessage, writeCreatorCache } from '../creatorDraftCache'
 import type { CollaborationCandidate, CollaborationComposeIntent, CollaborationRole, CollaborationSession, CollaborationSummary, CreatorContextSelection, WritingFocusRequest } from '../contentCollaboration'
@@ -15,8 +15,9 @@ const candidateNames = {evidence: '可用材料', open_question: '等你补充',
 const isRunning = (session: CollaborationSession | null) => !!session && ['queued', 'running'].includes(session.executionStatus)
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
-export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSend, onActivityChange, onPreview, composeIntent, onDraftStorageIssue}: {
+export function ContentCollaborationChat({workspaceId, topic, profile, mediaAssets, blocked, beforeSend, onActivityChange, onPreview, composeIntent, onDraftStorageIssue}: {
   workspaceId: string; topic: Topic; blocked: boolean
+  profile?: TextInputAsset; mediaAssets?: MediaAsset[]
   beforeSend: () => Promise<{topic: Topic; assertCurrent: () => void; writingFocus?: WritingFocusRequest}>
   onActivityChange: (busy: boolean) => void
   onPreview: (candidate: CollaborationCandidate) => void
@@ -52,19 +53,21 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
   const running = isRunning(session)
   const lastRun = session?.runs.at(-1)
   const referenceChanged = !!session?.messages.length && creatorContextSignature(selection) !== creatorContextSignature(session.creatorContextSelection || emptyCreatorContext())
+  const unsavedReferences = selectionTouched.current && creatorContextSignature(selection) !== creatorContextSignature(session?.creatorContextSelection || emptyCreatorContext())
+  const needsDraftProtection = !!message || unsavedReferences
 
   useEffect(() => {active.current = true; return () => {active.current = false}}, [])
   useEffect(() => {
-    setCacheUnavailable(!writeCreatorCache('message', workspaceId, topic.id, message ? {version: 1, message, selection} : null))
+    setCacheUnavailable(!writeCreatorCache('message', workspaceId, topic.id, message || selectionTouched.current ? {version: 1, message, selection} : null))
   }, [workspaceId, topic.id, message, selection])
-  useEffect(() => {onDraftStorageIssue?.(cacheUnavailable && !!message)}, [cacheUnavailable, message, onDraftStorageIssue])
+  useEffect(() => {onDraftStorageIssue?.(cacheUnavailable && needsDraftProtection)}, [cacheUnavailable, needsDraftProtection, onDraftStorageIssue])
   useEffect(() => () => onDraftStorageIssue?.(false), [onDraftStorageIssue])
   useEffect(() => {
-    if (!message) return
+    if (!needsDraftProtection) return
     const guard = (event: BeforeUnloadEvent) => {event.preventDefault(); event.returnValue = ''}
     window.addEventListener('beforeunload', guard)
     return () => window.removeEventListener('beforeunload', guard)
-  }, [message])
+  }, [needsDraftProtection])
   useEffect(() => {
     if (!composeIntent || composeIntent.id === composedId.current) return
     composedId.current = composeIntent.id
@@ -192,7 +195,7 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
 
   return <section className="canvas-chat collaboration-chat" aria-label="创作对话区">
     <header className="collaboration-header"><strong>一起把这篇写好</strong>
-      <CreatorReferencePicker key={workspaceId} workspaceId={workspaceId} selection={selection} disabled={!ready || sending} onChange={value => {selectionTouched.current = true; setSelection(value)}} />
+      <CreatorReferencePicker key={workspaceId} workspaceId={workspaceId} profile={profile} mediaAssets={mediaAssets} selection={selection} disabled={!ready || sending} onChange={value => {selectionTouched.current = true; setSelection(value)}} />
       {referenceChanged && <p>{running ? '本轮仍按发送时的参考生成。' : ''}参考已调整，下次发送会开启一段新对话。</p>}
     </header>
     <div ref={transcriptRef} className="canvas-messages collaboration-messages" aria-label="创作对话" aria-live="polite" aria-relevant="additions text">
@@ -222,7 +225,7 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
     {error && <div className="collaboration-error" role="alert"><p>{error}</p>{(!ready || pollPaused) && <button type="button" onClick={() => {setPollPaused(false); setError(''); setLoadVersion(value => value + 1)}}>重新载入进度</button>}</div>}
     <form className="collaboration-composer" onSubmit={event => {event.preventDefault(); void send()}}>
       <textarea ref={composerRef} aria-label="给创作助手的消息" maxLength={8000} value={message} onChange={event => setMessage(event.target.value)} placeholder="例如：开头更像我的口吻，保留第二段的经历。" />
-      {cacheUnavailable && !!message && !onDraftStorageIssue && <p role="alert">本页无法暂存，请在离开前复制未发送的消息。</p>}
+      {cacheUnavailable && needsDraftProtection && !onDraftStorageIssue && <p role="alert">本页无法暂存，离开会丢失未发送的消息或参考调整。</p>}
       {message.trim().length > 8000 && <p role="alert">已保留完整输入，请精简至 8000 字以内再发送。</p>}
       <div><small>发送时保存当前稿件。</small><button className="primary" disabled={blocked || !ready || sending || running || !message.trim() || message.trim().length > 8000}>{sending ? '正在提交…' : running ? '正在创作…' : '发送'}</button></div>
     </form>

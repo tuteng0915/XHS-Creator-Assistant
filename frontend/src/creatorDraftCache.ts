@@ -42,7 +42,10 @@ export function readCreatorMessage(workspaceId: string, topicId: string) {
   return read<CreatorMessageDraft>('message', workspaceId, topicId, (value): value is CreatorMessageDraft => record(value) && value.version === 1
     && typeof value.message === 'string' && record(value.selection) && value.selection.schemaVersion === 'creator-context-selection/v1'
     && Array.isArray(value.selection.references) && value.selection.references.length <= 8
-    && value.selection.references.every(item => record(item) && ['account_analysis', 'audience_analysis'].includes(String(item.kind)) && typeof item.id === 'string'))
+    && value.selection.references.every(item => record(item) && typeof item.id === 'string' && !!item.id.trim()
+      && (item.kind === 'imported_note'
+        ? typeof item.noteId === 'string' && !!item.noteId.trim()
+        : ['account_analysis', 'audience_analysis'].includes(String(item.kind)) && (item.noteId === undefined || item.noteId === null))))
 }
 
 export function writeCreatorCache(kind: CacheKind, workspaceId: string, topicId: string, value: CreatorDraft | CreatorMessageDraft | null): boolean {

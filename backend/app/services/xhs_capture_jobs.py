@@ -33,6 +33,7 @@ from app.repositories.workspaces import WorkspaceRepository
 from app.repositories.xhs_capture_jobs import XhsCaptureJobRepository
 from app.services.common import utc_now
 from app.services.workspaces import WorkspaceService
+from app.services.xhs_comment_refresh import preserve_unfetched_comments
 from app.services.xhs_imports import XhsOfflineImportService, XhsPackageFile
 
 ProgressCallback = Callable[
@@ -379,6 +380,7 @@ class MediaCrawlerXhsCaptureRunner:
                 )
             if not same:
                 raise ValidationError("链接属于另一个账号，请先点击“添加账号”再导入。")
+            preserve_unfetched_comments(previous, incoming)
             incoming["notes"].extend(
                 note
                 for note in previous.get("notes", [])

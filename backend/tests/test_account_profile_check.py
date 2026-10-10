@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import json
+import sqlite3
 import sys
 from copy import deepcopy
 from dataclasses import replace
@@ -10,6 +11,7 @@ import httpx
 import pytest
 from test_audience_analysis_check import raw_export
 
+from app.db.database import SQLiteDatabase
 from app.models import ModelCallResponse, ModelOperation
 from app.services.account_diagnosis_evidence import build_account_observations, profile_stage_input
 
@@ -68,21 +70,30 @@ def test_report_replay_rejects_incomplete_inputs_before_model_configuration(tmp_
 
 
 @pytest.mark.parametrize("comparable", [False, True])
-def test_shared_input_matches_previous_controller_exactly_without_mutating_snapshot(comparable):
+def test_shared_input_uses_structured_notes_and_observations_without_mutating_snapshot(comparable):
     notes = [{"noteId": str(i), "publishedAt": f"2026-{i+1:02d}-01T00:00:00Z"}
              for i in range(6 if comparable else 2)]
     snapshot = {"accountPositioning": "中文定位", "historicalPosts": {"content": "逐字历史\n"},
                 "xhsCreatorProfile": {"notes": notes}}
     original = deepcopy(snapshot)
     observations = build_account_observations(snapshot, "2026-10-03")
-    expected = "逐字历史\n"
-    if comparable:
-        expected += ("\n\n可比较的前后发布时间组（只比较内容方向，不比较累计互动）：\n"
-                     + json.dumps(observations["chronology"], ensure_ascii=False))
     context, actual = profile_stage_input(snapshot, "2026-10-03")
-    assert context == {"positioning": "中文定位", "historicalPosts": expected}
+    packet = json.loads(context["historicalPosts"])
+    assert context["positioning"] == "所选笔记的账号报告"
+    assert packet["schemaVersion"] == "account-reading-input/v2"
+    assert [item["noteId"] for item in packet["notes"]] == [item["noteId"] for item in notes]
+    assert packet["chronology"] == observations["chronology"]
+    assert packet["metricSummaries"] == observations["metricSummaries"]
+    assert "逐字历史" not in context["historicalPosts"]
     assert actual == observations
     assert snapshot == original
+
+
+def test_shared_input_keeps_text_only_legacy_path():
+    snapshot = {"accountPositioning": "中文定位", "historicalPosts": {"content": "逐字历史\n"}}
+    context, observations = profile_stage_input(snapshot, "2026-10-03")
+    assert context == {"positioning": "中文定位", "historicalPosts": "逐字历史\n"}
+    assert observations is None
 
 
 def test_check_makes_one_profile_call_and_keeps_raw_and_filtered_results(tmp_path):
@@ -530,3 +541,224 @@ def test_diagnostic_cli_prints_only_summary(tmp_path, monkeypatch, settings, cap
         assert report["context"] == case["context"]
         assert report["snapshot"] == case["snapshot"]
         assert report["requestAttempts"] == 1
+
+
+def saved_workspace_database(tmp_path, *, notes=None):
+    database = tmp_path / "saved.sqlite3"
+    # Use production migrations so a fake fixture schema cannot hide SQL mistakes.
+    SQLiteDatabase(database).migrate()
+    profile = {
+        "creator": {"nickname": "已保存账号", "profileText": "不能混入的全账号归纳"},
+        "source": {"importedAt": "2026-10-09T10:00:00Z"},
+        "notes": notes if notes is not None else [
+            {"noteId": f"saved-{i}", "title": f"私有标题{i}", "desc": f"私有正文{i}",
+             "publishedAt": f"2026-10-{i + 1:02d}T00:00:00Z",
+             "metrics": {"liked": i, "collected": 0, "comments": None, "shares": 1}}
+            for i in range(7)
+        ],
+    }
+    with sqlite3.connect(database) as connection:
+        connection.executemany(
+            "INSERT INTO creator_workspaces(id,name,created_at,updated_at) VALUES (?,?,?,?)",
+            [(item, item, "2026-10-01", "2026-10-01") for item in ("current", "other", "empty")],
+        )
+        for item_id, owner, kind, content, updated in [
+            ("old", "current", "xhs_creator_profile", {"notes": [
+                {"noteId": "old-only", "title": "不读取旧资料", "desc": "旧资料正文"},
+            ]}, "2026-10-01"),
+            ("current-profile", "current", "xhs_creator_profile", profile, "2026-10-09"),
+            ("not-profile", "current", "historical_posts", {"private": "不读取别的资料"},
+             "2026-10-10"),
+            ("foreign-profile", "other", "xhs_creator_profile", {"notes": [
+                {"noteId": "foreign-only", "title": "不读取别的账号", "desc": "跨账号正文"},
+            ]}, "2026-10-11"),
+        ]:
+            connection.execute("INSERT INTO source_materials "
+                               "(id,workspace_id,type,name,text_content,created_at,updated_at) "
+                               "VALUES (?,?,?,?,?,?,?)", (
+                item_id, owner, kind, item_id, json.dumps(content, ensure_ascii=False),
+                updated, updated,
+            ))
+    return database, profile
+
+
+def test_workspace_default_selects_recent_five_and_freezes_only_that_subset(tmp_path):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    before = database.read_bytes()
+    case = check.prepare_workspace_case(database, "current")
+    selected = [f"saved-{i}" for i in range(6, 1, -1)]
+    assert case["snapshot"]["analysisRange"]["selectedNoteIds"] == selected
+    assert case["observations"]["coverage"]["selectedNoteIds"] == selected
+    assert case["observations"]["coverage"]["selectedCount"] == 5
+    assert case["observations"]["coverage"]["availableCount"] == 7
+    assert case["inputSource"] == {
+        "type": "saved_workspace_notes", "workspaceId": "current",
+        "sourceMaterialId": "current-profile", "selectedNoteIds": selected,
+    }
+    encoded = json.dumps(case, ensure_ascii=False)
+    for absent in ("私有正文0", "私有正文1", "旧资料正文", "跨账号正文", "不能混入的全账号归纳"):
+        assert absent not in encoded
+    assert "私有正文6" in case["context"]["historicalPosts"]
+    assert database.read_bytes() == before
+
+
+def test_workspace_explicit_ids_do_not_get_clipped_by_default_limit(tmp_path):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    ids = [f"saved-{i}" for i in range(6)]
+    case = check.prepare_workspace_case(database, "current", note_ids=ids)
+    assert case["snapshot"]["analysisRange"]["selectedNoteIds"] == ids
+    assert case["snapshot"]["analysisRange"]["selectionMethod"] == "explicit_ids"
+    assert "私有正文6" not in json.dumps(case, ensure_ascii=False)
+    assert len(check.prepare_workspace_case(database, "current", limit=50)[
+        "snapshot"
+    ]["xhsCreatorProfile"]["notes"]) == 7
+
+
+@pytest.mark.parametrize("ids", [[], ["missing"], ["foreign-only"], ["old-only"],
+                                     ["saved-0", "saved-0"], [""], [" saved-0"]])
+def test_workspace_rejects_invalid_noncurrent_or_duplicate_requested_ids(tmp_path, ids):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    with pytest.raises(ValueError):
+        check.prepare_workspace_case(database, "current", note_ids=ids)
+
+
+@pytest.mark.parametrize("notes", [[], [{"title": "没有 ID", "desc": "不补索引"}],
+    [{"noteId": "same", "desc": "一"}, {"noteId": "same", "desc": "二"}],
+    [{"noteId": 1, "desc": "不字符串转换"}]])
+def test_workspace_rejects_empty_or_ambiguous_saved_note_identities(tmp_path, notes):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path, notes=notes)
+    with pytest.raises(ValueError):
+        check.prepare_workspace_case(database, "current")
+
+
+@pytest.mark.parametrize("workspace", ["missing", "empty", " "])
+def test_workspace_requires_existing_account_with_saved_notes(tmp_path, workspace):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    with pytest.raises(ValueError):
+        check.prepare_workspace_case(database, workspace)
+
+
+def test_workspace_open_is_actually_readonly_and_missing_database_is_not_created(
+    tmp_path, monkeypatch,
+):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    original_connect = sqlite3.connect
+    observed = []
+
+    def readonly_connect(database_uri, **kwargs):
+        assert database_uri.endswith("?mode=ro")
+        assert kwargs == {"uri": True}
+        connection = original_connect(database_uri, **kwargs)
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            connection.execute("UPDATE creator_workspaces SET name='mutated'")
+        connection.rollback()
+        connection.set_trace_callback(observed.append)
+        return connection
+
+    monkeypatch.setattr(check.sqlite3, "connect", readonly_connect)
+    check.prepare_workspace_case(database, "current", limit=2)
+    assert all(sql.startswith(("BEGIN", "SELECT")) for sql in observed)
+    missing = tmp_path / "not-created.sqlite3"
+    with pytest.raises(FileNotFoundError):
+        check.prepare_workspace_case(missing, "current")
+    assert not missing.exists()
+
+
+@pytest.mark.parametrize("explicit_database", [False, True])
+def test_workspace_preview_prints_only_safe_summary_and_creates_nothing(
+    tmp_path, monkeypatch, settings, capsys, explicit_database,
+):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    output = tmp_path / "unused-output"
+    argv = [check.__file__, "--workspace-id", "current", "--output", str(output)]
+    if explicit_database:
+        argv.extend(["--database", str(database)])
+        monkeypatch.setattr(check.Settings, "from_environment", lambda: pytest.fail("explicit DB"))
+    else:
+        monkeypatch.setattr(check.Settings, "from_environment", lambda: replace(
+            settings, database_path=database, qwen_api_key="must-not-print-key",
+        ))
+    monkeypatch.setattr(check, "DiagnosticProfileCalls", lambda *a, **kw: pytest.fail("no model"))
+    monkeypatch.setattr(sys, "argv", argv)
+    before = database.read_bytes()
+    assert check.main() == 0
+    stdout = capsys.readouterr().out
+    assert "私有" not in stdout and "must-not-print-key" not in stdout
+    assert json.loads(stdout)["requestAttempts"] == 0
+    assert len(json.loads(stdout)["selection"]["selectedNoteIds"]) == 5
+    assert not output.exists()
+    assert database.read_bytes() == before
+
+
+@pytest.mark.parametrize("arguments", [
+    ["source", "--workspace-id", "current"],
+    ["--input-from", "old.json", "--workspace-id", "current"],
+    ["source", "--database", "some.sqlite3"],
+    ["source", "--note-ids", "saved-0"],
+    ["source", "--limit", "2"],
+    ["--workspace-id", "current", "--limit", "0"],
+    ["--workspace-id", "current", "--limit", "51"],
+    ["--workspace-id", "current", "--limit", "2", "--note-ids", "saved-0"],
+    ["--workspace-id", "current", "--live", "--output", "/tmp/not-ignored-output"],
+])
+def test_workspace_cli_rejects_ambiguous_or_unsafe_options_before_reading(
+    monkeypatch, arguments,
+):
+    check = load_check()
+    monkeypatch.setattr(check.Settings, "from_environment", lambda: pytest.fail("no config"))
+    monkeypatch.setattr(check, "prepare_workspace_case", lambda *a, **kw: pytest.fail("no read"))
+    monkeypatch.setattr(sys, "argv", [check.__file__, *arguments])
+    with pytest.raises(SystemExit) as error:
+        check.main()
+    assert error.value.code == 2
+
+
+def test_workspace_live_uses_one_qwen_request_and_preserves_database(
+    tmp_path, monkeypatch, settings, capsys,
+):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    monkeypatch.setattr(check, "ROOT", tmp_path)
+    output = tmp_path / "data/evals/workspace-check"
+    requests = []
+    configured = replace(settings, qwen_api_key="private-key", model_provider="qwen")
+    monkeypatch.setattr(check.Settings, "from_environment", lambda: configured)
+    monkeypatch.setattr(sys, "argv", [
+        check.__file__, "--workspace-id", "current", "--database", str(database),
+        "--note-ids", "saved-0,saved-6", "--live", "--output", str(output),
+    ])
+
+    def client(self, operation):
+        def respond(request):
+            requests.append(request)
+            return httpx.Response(200, json={"model": "qwen-plus", "choices": [{
+                "finish_reason": "stop", "message": {"content": '{"profile":{}}'},
+            }]})
+        return httpx.AsyncClient(transport=httpx.MockTransport(respond), event_hooks={
+            "request": [self._record_request], "response": [self._record_response],
+        })
+
+    monkeypatch.setattr(check.DiagnosticProfileCalls, "_qwen_client", client)
+    before = database.read_bytes()
+    assert check.main() == 0
+    assert len(requests) == 1
+    assert database.read_bytes() == before
+    stdout = capsys.readouterr().out
+    assert "私有" not in stdout and "private-key" not in stdout
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["inputSource"]["selectedNoteIds"] == ["saved-0", "saved-6"]
+    assert report["requestAttempts"] == 1
+    assert report["configuredModel"] == "qwen-plus"
+    assert report["promptVersion"] == check.PROFILE_PROMPT_VERSION
+    assert len(report["promptHash"]) == len(report["inputHash"]) == 64
+    assert report["responseDiagnostic"]["phase"] == "parsed"
+    encoded = json.dumps(report["context"], ensure_ascii=False)
+    assert "私有正文0" in encoded and "私有正文6" in encoded and "私有正文1" not in encoded
+    assert "private-key" not in json.dumps(report)

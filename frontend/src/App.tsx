@@ -2919,6 +2919,7 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'drafts' && !internalMode && <CreatorCanvasPage
         key={workspace.id} workspaceId={workspace.id} topic={selectedTopic} topics={topics.filter(t => t.sourceWorkflow !== 'trend_analysis')}
+        profile={xhsCreatorProfileMaterial} mediaAssets={mediaAssets}
         onLeaveGuardChange={onEditorLeaveGuardChange}
         readerFeedback={readerFeedback?.workspaceId===workspace.id&&readerFeedback.topicId===selectedTopic?.id?readerFeedback:undefined}
         onReaderFeedbackConsumed={() => setReaderFeedback(null)}

@@ -1,8 +1,10 @@
-import { useId, useState } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import type { MediaAsset } from '../types'
 import type { CreatorNote } from '../creatorNotes'
+import { accountStatementKey } from '../accountReportText'
 import { CreatorNoteBrowser } from './CreatorNoteBrowser'
 import { AccountPerformanceView, type MetricSummary, type PerformanceNote } from './AccountPerformanceView'
+import './AccountReport.css'
 
 type Evidence = { noteId: string; quote: string }
 type Claim = { statement: string; evidence: Evidence[]; counterexamples?: Evidence[] }
@@ -42,32 +44,58 @@ function claimHasEvidence(value: Claim | null | undefined): value is Claim {
   return Boolean(value?.statement && Array.isArray(value.evidence) && value.evidence.length)
 }
 
-export function AccountPortraitView({ portrait, observations, notes, mediaAssets }: {
+function appendEvidence(existing: Evidence[], incoming: Evidence[]): Evidence[] {
+  const seen = new Set(existing.map(ref => JSON.stringify([ref.noteId, ref.quote])))
+  return [...existing, ...incoming.filter(ref => {
+    const key = JSON.stringify([ref.noteId, ref.quote])
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })]
+}
+
+export function AccountPortraitView({ portrait, observations, notes, mediaAssets, contentDetails, expressionDetails, nextSteps }: {
   portrait?: Portrait | null
   observations: Observations
   notes: CreatorNote[]
   mediaAssets: MediaAsset[]
+  contentDetails?: ReactNode
+  expressionDetails?: ReactNode
+  nextSteps?: ReactNode
 }) {
   const [openClaim, setOpenClaim] = useState<string | null>(null)
   const keywordEvidenceId = useId()
   const coverage = observations.coverage
   const selectable = new Map(notes.map(note => [note.noteId, note]))
-  const sections: Array<[string, Claim[]]> = [
-    ['主要内容方向', portrait?.recurringThemes || []],
-    ['给读者的价值', portrait?.readerValue || []],
-    ['表达特点', portrait?.expressionPatterns || []],
-  ]
-  const validSections = sections.map(([title, claims]) => [title, claims.filter(claim =>
-    claimHasEvidence(claim) && (title !== '主要内容方向' || new Set(claim.evidence.map(ref => ref.noteId)).size >= 2)
-  )] as const)
-  const keywords = (portrait?.keywords || []).filter(claimHasEvidence)
+  // Merge only equivalent written statements, never guessed semantic overlap.
+  // The display copies collect every supporting/exception quote across fields.
+  const seenClaims = new Map<string, Claim>()
+  function claimsOnce(values: Array<Claim | null | undefined>, registry = seenClaims): Claim[] {
+    return values.filter(claimHasEvidence).flatMap(claim => {
+      const key = accountStatementKey(claim.statement)
+      const existing = registry.get(key)
+      if (existing) {
+        existing.evidence = appendEvidence(existing.evidence, claim.evidence)
+        existing.counterexamples = appendEvidence(existing.counterexamples || [], claim.counterexamples || [])
+        return []
+      }
+      const copy = {...claim, evidence: appendEvidence([], claim.evidence), counterexamples: appendEvidence([], claim.counterexamples || [])}
+      registry.set(key, copy)
+      return [copy]
+    })
+  }
+  const summary = claimsOnce([portrait?.summary])[0]
+  const strengths = claimsOnce([...(portrait?.strengths || []), portrait?.encouragement])
+  const themes = claimsOnce((portrait?.recurringThemes || []).filter(claim => claimHasEvidence(claim) && new Set(claim.evidence.map(ref => ref.noteId)).size >= 2))
+  const values = claimsOnce(portrait?.readerValue || [])
+  const changes = claimsOnce(observations.chronology?.status === 'comparable' ? [portrait?.recentChange] : [])
+  const expressions = claimsOnce(portrait?.expressionPatterns || [])
+  const keywords = claimsOnce(portrait?.keywords || [], new Map())
   const openKeyword = keywords.find((_, index) => openClaim === `keyword-${index}`)
-  const strengths = (portrait?.strengths || []).filter(claimHasEvidence)
-  const hasIntro = claimHasEvidence(portrait?.summary) || keywords.length > 0
-  const encouragement = claimHasEvidence(portrait?.encouragement) ? portrait.encouragement : null
-  const recentChange = observations.chronology?.status === 'comparable' && claimHasEvidence(portrait?.recentChange)
-    ? portrait.recentChange : null
-  const hasPortrait = hasIntro || strengths.length > 0 || Boolean(encouragement) || Boolean(recentChange) || validSections.some(([, claims]) => claims.length)
+  const hasIntro = !!summary || keywords.length > 0
+  const hasContent = themes.length > 0 || values.length > 0 || changes.length > 0 || !!contentDetails
+  const hasExpression = expressions.length > 0 || !!expressionDetails
+  const hasPortrait = hasIntro || strengths.length > 0 || hasContent || hasExpression
 
   function renderEvidence(claim: Claim) {
     const evidenceIds = [...new Set(claim.evidence.map(ref => ref.noteId))]
@@ -101,10 +129,11 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
     </div>
   }
 
-  return <div className="account-portrait-view">
+  return <div className="account-portrait-view account-report">
     {hasPortrait ? <>
       {hasIntro && <div className="account-portrait-intro">
-        {claimHasEvidence(portrait?.summary) && <div className="account-portrait-summary">{renderClaim(portrait.summary, 'summary')}</div>}
+        <h4>这个账号给人的印象</h4>
+        {summary && <div className="account-portrait-summary">{renderClaim(summary, 'summary')}</div>}
         {keywords.length > 0 && <div className="account-portrait-keyword-section">
           <div className="account-portrait-keywords" role="group" aria-label="账号关键词">
             {keywords.map((claim, index) => <button type="button" className="account-portrait-keyword" key={index}
@@ -120,29 +149,31 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
         </div>}
       </div>}
       {strengths.length > 0 && <section className="account-portrait-strengths">
-        <h4>这个账号已经做得好的地方</h4>
-        <div className="account-portrait-claims">{strengths.slice(0, 3).map((claim, index) => renderClaim(claim, `strength-${index}`))}</div>
-        {strengths.length > 3 && <details className="account-portrait-more-strengths">
-          <summary>更多优势 <span>· {strengths.length - 3}</span></summary>
-          <div className="account-portrait-claims">{strengths.slice(3).map((claim, index) => renderClaim(claim, `strength-${index + 3}`))}</div>
-        </details>}
+        <h4>值得继续放大的优势</h4>
+        <div className="account-portrait-claims">{strengths.map((claim, index) => renderClaim(claim, `strength-${index}`))}</div>
       </section>}
     </> : null}
-    {hasPortrait ? <div className="account-portrait-details">
-      {validSections.map(([title, claims]) => claims.length > 0 && <details className="account-portrait-section" key={title}>
-        <summary>{title} <span>· {claims.length}</span></summary>
-        <div className="account-portrait-claims">{claims.map((claim, index) => renderClaim(claim, `${title}-${index}`))}</div>
-      </details>)}
-      {recentChange && <details className="account-portrait-section">
-        <summary>内容方向的新变化</summary>
-        {renderClaim(recentChange, 'recent-change')}
-      </details>}
-      {encouragement && <details className="account-portrait-section">
-        <summary>值得继续放大的特点</summary>
-        {renderClaim(encouragement, 'encouragement')}
-      </details>}
-    </div> : <p className="muted">本次暂无可展示的账号画像，已保留的内容归纳与笔记数据不受影响。</p>}
+    {hasContent && <section className="account-report-content">
+      <h4>内容方向与读者价值</h4>
+      {contentDetails}
+      {themes.length > 0 && <div className="account-report-subsection">
+        {values.length > 0 && <h5>内容方向</h5>}
+        <div className="account-portrait-claims">{themes.map((claim, index) => renderClaim(claim, `theme-${index}`))}</div>
+      </div>}
+      {values.length > 0 && <div className="account-report-subsection">
+        {themes.length > 0 && <h5>读者从中获得什么</h5>}
+        <div className="account-portrait-claims">{values.map((claim, index) => renderClaim(claim, `value-${index}`))}</div>
+      </div>}
+      {changes.length > 0 && <div className="account-report-subsection"><h5>内容方向的新变化</h5>{renderClaim(changes[0], 'recent-change')}</div>}
+    </section>}
+    {hasExpression && <section className="account-report-expression">
+      <h4>你的表达方式</h4>
+      <div className="account-portrait-claims">{expressions.map((claim, index) => renderClaim(claim, `expression-${index}`))}</div>
+      {expressionDetails}
+    </section>}
+    {!hasPortrait && !nextSteps && <p className="muted">本次暂无可展示的账号画像，已保留的内容归纳与笔记数据不受影响。</p>}
     <AccountPerformanceView observations={observations.notes} summaries={observations.metricSummaries} notes={notes} mediaAssets={mediaAssets} />
+    {nextSteps}
     <details className="account-portrait-source">
       <summary>分析范围 <span>· {coverage.selectedCount} 条笔记</span></summary>
       <div className="account-portrait-coverage">

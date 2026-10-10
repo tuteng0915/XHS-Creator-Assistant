@@ -170,6 +170,8 @@ xhs_import_package/
 
 **文件夹导入**重复遇到同名主页时，默认更新已有资产；需要保留版本时选择“另存为新主页”。这一更新行为不适用于旧版单文件上传入口，后者会创建新资产。Agent 通过现有 Context Access Layer 读取导入后的资产，不直接读取 MediaCrawler 原始目录。
 
+更新时，同一稳定 noteId 的评论缺失、为 null 或空数组，会保留原评论，不因这次没有取得评论而清空；原评论观察时间和作者标识一并保留。评论点赞／回复数为 0 会正常保存。非空新评论目前仍替换旧样本，尚非逐条增量合并；缺少稳定 ID 的笔记不按标题或位置借用旧评论。“另存为新主页”不会继承原资产的评论。此规则只影响后续导入，不自动恢复此前已丢失的内容。
+
 ## 4. 将已有固定 fixture 直接导入 SQLite
 
 [`import_xhs_fixture_to_workspace.py`](../scripts/import_xhs_fixture_to_workspace.py) 只接受 `_tt` 和 `QSheep` 两个固定样本代号，默认读取 `data/xhs-fixtures/<code>/`。这些样本在被忽略的 `data/` 中，**不随 Git 分发**；没有样本时不能直接运行下面的命令。任意其他创作者输出请使用上一节的离线包流程。

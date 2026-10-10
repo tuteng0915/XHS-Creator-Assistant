@@ -282,10 +282,18 @@ class RealContentCollaborationProvider:
         if context.get("assistantMode") == "single_writer" and isinstance(session_context, dict):
             snapshot = session_context.get("creatorContextSnapshot", {})
             for reference in snapshot.get("references", []):
+                source_id = f"reference:{reference['kind']}:{reference['id']}"
+                if reference["kind"] == "imported_note":
+                    # Multiple selected notes share a material ID. Hash the
+                    # pair to retain uniqueness within the bounded source ID.
+                    source_id = "reference:imported_note:" + _content_hash(_canonical(
+                        {"id": reference["id"], "noteId": reference["noteId"]},
+                    ))
                 add(
-                    f"reference:{reference['kind']}:{reference['id']}",
-                    ("作者选择的账号分析" if reference["kind"] == "account_analysis"
-                     else "作者选择的受众分析"),
+                    source_id,
+                    {"account_analysis": "作者选择的账号分析",
+                     "audience_analysis": "作者选择的受众分析",
+                     "imported_note": "作者选择的原笔记"}[reference["kind"]],
                     {"scope": reference.get("scope", {}), "result": reference["content"],
                      "sourceOrigin": reference.get("sourceOrigin", "unknown")},
                     limit=100_000,
@@ -454,6 +462,8 @@ class RealContentCollaborationProvider:
                     "默认给一个最值得采用的方案和简短理由；只有确有选择价值才给备选。",
                     "只使用当前稿件、这个上下文段内的对话，以及作者显式选择的参考。",
                     "参考分析是建议和观察，不是新稿必须照搬的选题，更不是作者新经历。",
+                    "原笔记是作者选中的历史文本，可借鉴表达或已有材料；"
+                    "不把其中过去的经历、时间、场景或结果自动移植成当前稿的新事实。",
                 ],
                 **({"writingFocusRules": packet["roleTask"]["writingFocusRules"]}
                    if isinstance(focus, dict) else {}),

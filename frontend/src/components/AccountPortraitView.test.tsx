@@ -87,31 +87,24 @@ it('keeps long original statements and quotes intact when expanded', () => {
   expect(screen.getByText(`“${quote}”`)).toBeInTheDocument()
 })
 
-it('shows the first three strengths and keeps all remaining original claims behind one disclosure', () => {
+it('keeps every saved strength directly readable without an extra disclosure', () => {
   const strengths = Array.from({length:5}, (_,index) => ({...summary, statement:`优势 ${index + 1}：${'完整说明。'.repeat(5)}`}))
   const original = JSON.stringify(strengths)
   render(<AccountPortraitView portrait={{strengths}} observations={observations} notes={[note]} mediaAssets={[]} />)
-  for (const claim of strengths.slice(0, 3)) expect(screen.getByText(claim.statement).closest('details')).toBeNull()
-  const more = screen.getByText('更多优势').closest('details')!
-  expect(more).not.toHaveAttribute('open')
-  for (const claim of strengths.slice(3)) expect(more).toContainElement(screen.getByText(claim.statement))
-  fireEvent.click(screen.getByText('更多优势'))
-  expect(more).toHaveAttribute('open')
+  for (const claim of strengths) expect(screen.getByText(claim.statement).closest('details')).toBeNull()
+  expect(screen.queryByText('更多优势')).not.toBeInTheDocument()
   fireEvent.click(screen.getAllByRole('button',{name:'查看依据 · 1 条笔记'})[4])
   expect(screen.getByText('“先列成本”')).toBeInTheDocument()
   expect(JSON.stringify(strengths)).toBe(original)
 })
 
-it('folds supporting sections and places source metadata after note performance without losing content', () => {
+it('shows supporting findings directly and folds only source metadata after note performance', () => {
   const theme = {...summary, statement:'长期分享准备过程',evidence:[...summary.evidence,{noteId:'n2',quote:'第二次准备'}]}
   render(<AccountPortraitView portrait={{summary,recurringThemes:[theme],readerValue:[{...summary,statement:'让准备更省心'}],expressionPatterns:[],encouragement:{...summary,statement:'细致值得继续'}}} observations={observations} notes={[note]} mediaAssets={[]} />)
-  const themes = screen.getByText('主要内容方向').closest('details')!
-  expect(themes).not.toHaveAttribute('open')
-  expect(themes).toContainElement(screen.getByText(theme.statement))
-  fireEvent.click(screen.getByText('主要内容方向'))
-  expect(themes).toHaveAttribute('open')
-  expect(screen.getByText('让准备更省心').closest('details')).not.toHaveAttribute('open')
-  expect(screen.getByText('细致值得继续').closest('details')).not.toHaveAttribute('open')
+  expect(screen.getByRole('heading', {name:'内容方向与读者价值'})).toBeInTheDocument()
+  for (const text of [theme.statement, '让准备更省心', '细致值得继续']) {
+    expect(screen.getByText(text).closest('details')).toBeNull()
+  }
   expect(screen.queryByText('表达特点')).not.toBeInTheDocument()
   const source = screen.getByText('分析范围').closest('details')!
   expect(source).not.toHaveAttribute('open')
@@ -119,6 +112,34 @@ it('folds supporting sections and places source metadata after note performance 
   fireEvent.click(screen.getByText('分析范围'))
   expect(source).toHaveAttribute('open')
   expect(screen.getByText('1 条缺少发布时间')).toBeInTheDocument()
+})
+
+it('merges repeated findings without losing distinct supporting quotes or exceptions', () => {
+  const portrait = {
+    summary,
+    strengths:[{statement:`${summary.statement}。`,evidence:[{noteId:'n2',quote:'第二份依据'}]}],
+    expressionPatterns:[{...summary,counterexamples:[{noteId:'n3',quote:'另一种表达'}]}],
+    encouragement:{...summary,evidence:[{noteId:'n1',quote:'第三句依据'}]},
+  }
+  const original = JSON.stringify(portrait)
+  render(<AccountPortraitView portrait={portrait} observations={observations} notes={[note]} mediaAssets={[]} />)
+  expect(screen.getAllByText(summary.statement)).toHaveLength(1)
+  expect(screen.queryByRole('heading', {name:'值得继续放大的优势'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', {name:'你的表达方式'})).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', {name:'查看依据 · 2 条笔记'}))
+  for (const quote of ['先列成本','再分步骤','第二份依据','第三句依据','另一种表达']) expect(screen.getByText(`“${quote}”`)).toBeInTheDocument()
+  expect(screen.getAllByText('“先列成本”')).toHaveLength(1)
+  expect(JSON.stringify(portrait)).toBe(original)
+})
+
+it('merges equal keyword tags while retaining all their references and exceptions', () => {
+  render(<AccountPortraitView portrait={{keywords:[
+    {statement:'现场观察',evidence:[{noteId:'n1',quote:'第一处现场'}]},
+    {statement:'现场观察',evidence:[{noteId:'n2',quote:'第二处现场'}],counterexamples:[{noteId:'n3',quote:'一次抽象讨论'}]},
+  ]}} observations={observations} notes={[note]} mediaAssets={[]} />)
+  expect(screen.getAllByRole('button',{name:'现场观察：查看 2 条笔记依据'})).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button',{name:'现场观察：查看 2 条笔记依据'}))
+  for (const quote of ['第一处现场','第二处现场','一次抽象讨论']) expect(screen.getByText(`“${quote}”`)).toBeInTheDocument()
 })
 
 it('counts and browses unique notes while retaining every quoted passage', () => {
