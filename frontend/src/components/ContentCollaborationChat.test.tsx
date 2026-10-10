@@ -158,3 +158,53 @@ it('allows an explicit reload after a failed history request without losing type
   expect(screen.getByLabelText('已选参考')).toHaveTextContent('account_analysis:account-a')
   expect(contentCollaborationApi.send).not.toHaveBeenCalled()
 })
+
+it.each(['先聊角度', '帮我起草'])('appends the %s shortcut without replacing a typed instruction or sending it', async name => {
+  render(<ContentCollaborationChat {...props} />)
+  fireEvent.change(screen.getByLabelText('给创作助手的消息'),{target:{value:'保留我开头讲的真实经历。'}})
+  fireEvent.click(screen.getByRole('button',{name}))
+  const composer = screen.getByLabelText('给创作助手的消息') as HTMLTextAreaElement
+  expect(composer.value).toMatch(/^保留我开头讲的真实经历。\n\n/)
+  expect(composer).toHaveFocus()
+  expect(composer.selectionStart).toBe(composer.value.length)
+  expect(contentCollaborationApi.send).not.toHaveBeenCalled()
+})
+
+it('appends a follow-up question and a failed instruction without erasing a new message', async () => {
+  const candidate = {kind:'open_question',title:'你当时怎么决定？',body:'补充一个真实细节',confidence:'inference',evidenceRefs:[]}
+  reopen({...session,executionStatus:'failed',messages:[creatorMessage,{...writerMessage,modelMetadata:{candidateSuggestions:[candidate]}}]})
+  render(<ContentCollaborationChat {...props} />)
+  await screen.findByRole('button',{name:'补充说明'})
+  fireEvent.change(screen.getByLabelText('给创作助手的消息'),{target:{value:'我已经写了一半。'}})
+  fireEvent.click(screen.getByRole('button',{name:'补充说明'}))
+  expect(screen.getByLabelText('给创作助手的消息')).toHaveValue('我已经写了一半。\n\n关于“你当时怎么决定？”：')
+  fireEvent.click(screen.getByRole('button',{name:'把上次要求放回输入框'}))
+  expect(screen.getByLabelText('给创作助手的消息')).toHaveValue('我已经写了一半。\n\n关于“你当时怎么决定？”：\n\n之前的要求')
+  expect(contentCollaborationApi.send).not.toHaveBeenCalled()
+})
+
+it('recovers an unsent message together with its selected references, not the last sent references', async () => {
+  reopen({...session,creatorContextSelection:refsA,messages:[creatorMessage,writerMessage]})
+  const first = render(<ContentCollaborationChat {...props} />)
+  await screen.findByText('之前的一条建议')
+  fireEvent.click(screen.getByRole('button',{name:'选受众分析'}))
+  fireEvent.change(screen.getByLabelText('给创作助手的消息'),{target:{value:'用这组参考继续讨论'}})
+  first.unmount()
+  render(<ContentCollaborationChat {...props} />)
+  await screen.findByText('之前的一条建议')
+  expect(screen.getByLabelText('给创作助手的消息')).toHaveValue('用这组参考继续讨论')
+  expect(screen.getByLabelText('已选参考')).toHaveTextContent('audience_analysis:audience-b')
+  fireEvent.click(screen.getByRole('button',{name:'发送'}))
+  await waitFor(() => expect(contentCollaborationApi.send).toHaveBeenCalledWith('w','s','用这组参考继续讨论','writing',expect.any(String),undefined,refsB))
+})
+
+it('retains over-limit shortcut text and asks for trimming instead of discarding input', async () => {
+  render(<ContentCollaborationChat {...props} />)
+  const original = '字'.repeat(7995)
+  fireEvent.change(screen.getByLabelText('给创作助手的消息'),{target:{value:original}})
+  fireEvent.click(screen.getByRole('button',{name:'先聊角度'}))
+  expect((screen.getByLabelText('给创作助手的消息') as HTMLTextAreaElement).value).toMatch(new RegExp(`^${original}\\n\\n`))
+  expect(screen.getByRole('alert')).toHaveTextContent('已保留完整输入')
+  expect(screen.getByRole('button',{name:'发送'})).toBeDisabled()
+  expect(contentCollaborationApi.send).not.toHaveBeenCalled()
+})

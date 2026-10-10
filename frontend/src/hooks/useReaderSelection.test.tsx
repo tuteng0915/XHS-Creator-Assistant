@@ -145,3 +145,36 @@ it('ignores late results after a task change and rejects mismatched task snapsho
   await act(async()=>result.current.recommend(3))
   expect(result.current.error).toContain('试读设置不一致')
 })
+
+it('isolates account recommendations by the exact selected note set and ignores late results', async()=>{
+  let finish!:(value:ReaderSelection)=>void
+  const create=vi.spyOn(readerSelectionApi,'create').mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve})).mockResolvedValue(record)
+  const get=vi.spyOn(readerSelectionApi,'get').mockResolvedValue(record)
+  const {result,rerender}=renderHook(({ids})=>useReaderSelection('w','','v1',undefined,undefined,undefined,
+    {sourceMaterialId:'profile',selectedNoteIds:ids}),{initialProps:{ids:['n1','n2']}})
+  let pending!:Promise<void>
+  act(()=>{pending=result.current.recommend(3)})
+  const first=create.mock.calls[0][1]
+  expect(first).toMatchObject({accountNoteSelection:{sourceMaterialId:'profile',selectedNoteIds:['n1','n2']}})
+  expect(first).not.toHaveProperty('accountProfileId')
+  expect(first).not.toHaveProperty('topicId')
+  rerender({ids:['n2']})
+  await act(async()=>{finish(record);await pending})
+  expect(result.current.record).toBeNull()
+  expect(get).not.toHaveBeenCalled()
+  await act(async()=>result.current.recommend(3))
+  expect(create.mock.calls[1][1].requestKey).not.toBe(first.requestKey)
+  expect(create.mock.calls[1][1].accountNoteSelection?.selectedNoteIds).toEqual(['n2'])
+})
+
+it('keeps a lost account recommendation receipt when only selection order changes', async()=>{
+  const create=vi.spyOn(readerSelectionApi,'create').mockRejectedValue(new Error('断网'))
+  const {result,rerender}=renderHook(({ids})=>useReaderSelection('w','','v1',undefined,undefined,undefined,
+    {sourceMaterialId:'profile',selectedNoteIds:ids}),{initialProps:{ids:['n1','n2']}})
+  await act(async()=>result.current.recommend(3))
+  const key=create.mock.calls[0][1].requestKey
+  rerender({ids:['n2','n1']})
+  await act(async()=>result.current.recommend(5))
+  expect(create.mock.calls[1][1].requestKey).toBe(key)
+  expect(create.mock.calls[1][1].desiredCount).toBe(3)
+})

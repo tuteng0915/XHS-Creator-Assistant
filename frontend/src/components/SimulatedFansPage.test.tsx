@@ -11,6 +11,22 @@ afterEach(() => {cleanup();vi.restoreAllMocks()})
 const secondFan:SimulatedFan = {...fan,id:'second',editable:{...fan.editable,name:'行动派'}}
 const pageProps = {rows:[fan,secondFan],error:'',onRefresh:vi.fn(),onAnalyze:vi.fn()}
 
+it('offers the role explanation on hover or focus without hiding the save state or profile', async () => {
+  render(<SimulatedFansPage {...pageProps} />)
+  fireEvent.click(screen.getByRole('button', {name:/费用观察员/}))
+  const hint = screen.getByRole('button', {name:'模拟角色说明'})
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  expect(screen.getByText('已保存')).toBeVisible()
+  expect(screen.getByLabelText('阅读视角')).toHaveValue('关心预算')
+  fireEvent.mouseEnter(hint)
+  expect(screen.getByRole('tooltip')).toHaveTextContent('模拟角色，不代表某位真实粉丝。编辑内容属于人工设定。')
+  fireEvent.mouseLeave(hint)
+  await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
+  fireEvent.focus(hint)
+  expect(screen.getByRole('tooltip')).toBeVisible()
+  expect(screen.getByText('已保存')).toBeVisible()
+})
+
 const voiceOptions = [{id:'action_first',name:'直球行动派',outlook:'先试',decisionStyle:'看步骤',expressionStyle:'直说',participationStyle:'提问'}]
 const createdFan:SimulatedFan = {...fan,id:'variant',editable:{...fan.editable,name:'新的行动派'}}
 

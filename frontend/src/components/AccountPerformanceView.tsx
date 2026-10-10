@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { CreatorNote } from '../creatorNotes'
 import type { MediaAsset } from '../types'
 import { CreatorNoteBrowser } from './CreatorNoteBrowser'
+import { InfoHint } from './InfoHint'
 import './AccountPerformanceView.css'
 
 const metrics = { liked: '点赞', collected: '收藏', comments: '评论', shares: '分享' } as const
@@ -77,7 +78,7 @@ export function AccountPerformanceView({ observations, summaries, notes, mediaAs
 
   return <section className="account-performance account-performance-view">
     <div className="account-performance-heading">
-      <h4>笔记表现</h4>
+      <h4>笔记表现 <InfoHint label="笔记表现数据说明">按抓取时的累计互动比较，缺失不算零、同数值并列。评论数不等于已抓取的评论条数；发布日期和累计时间可能不同，不代表点击率、内容质量分或增长趋势。</InfoHint></h4>
       <select aria-label="比较指标" value={metric} onChange={event => {
         setMetric(event.target.value as Metric)
         setOpenNote(null)
@@ -88,13 +89,11 @@ export function AccountPerformanceView({ observations, summaries, notes, mediaAs
     <p className="muted account-performance-summary" role="status">
       {sorted.length ? `${label}数据 ${sorted.length} / ${observations.length} 条 · 中位数 ${medianValue}` : `本次未获取${label}数据`}
       {missing > 0 && sorted.length > 0 ? ` · ${missing} 条未获取` : ''}
+      {sorted.length > 0 && ' · 每组最多展示 2 条'}
     </p>
     <div className="account-performance-grid">
       {renderGroup(equal ? `所选笔记${label}相同` : `按${label}排序`, upper)}
       {renderGroup(`所选笔记中${label}较低`, lower)}
     </div>
-    <details className="account-performance-method"><summary>数据说明</summary>
-      <p className="muted">来自本次所选笔记抓取时的累计互动，缺失不算零，同数值并列。列表每组最多展示 2 条；评论数不等于已抓取的评论条数。发布日期和累计时间可能不同，这不是点击率、内容质量分或增长趋势。</p>
-    </details>
   </section>
 }

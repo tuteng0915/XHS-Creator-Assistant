@@ -41,6 +41,17 @@ it('keeps legacy draft scope distinct from title-only previews',async()=>{
   await waitFor(()=>expect(panelInterviewApi.list).toHaveBeenCalledOnce())
 })
 
+it('keeps sampled account coverage visible and reveals only the general discussion explanation on demand',async()=>{
+  render(<SimulationChat run={{...run,simulationCategory:'account',inputSnapshot:{...run.inputSnapshot,sourceAccount:{scope:{omissionNotice:'从 20 篇中选取 12 篇，正文已节选。'}}}}}/>)
+  expect(screen.getByRole('heading',{name:'账号读者群聊'})).toBeVisible()
+  expect(screen.getByText('从 20 篇中选取 12 篇，正文已节选。')).toBeVisible()
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  fireEvent.mouseEnter(screen.getByRole('button',{name:'讨论范围说明'}))
+  expect(screen.getByRole('tooltip')).toHaveTextContent('基于账号样本，讨论读者为何留下、接下来想看什么。')
+  expect(screen.getByText('不用补，我愿意试一次。')).toBeVisible()
+  await waitFor(()=>expect(panelInterviewApi.list).toHaveBeenCalledOnce())
+})
+
 it('reveals each persisted reader before the simulation finishes and stops after terminal',async()=>{
   vi.useFakeTimers()
   const observed=vi.fn(),get=vi.spyOn(simulationRunApi,'get').mockResolvedValue({...run,status:'running'})

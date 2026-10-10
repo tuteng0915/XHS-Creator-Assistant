@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import { panelTaskKey, useReaderSelection } from '../hooks/useReaderSelection'
 import type { useSimulatedFans } from '../hooks/useSimulatedFans'
 import type { ReaderSelectionLink } from '../readerSelection'
-import type { PanelTask, Topic, TextInputAsset, SimulationCategory, SimulationPersonaOverrides } from '../types'
-import {creatorNotes} from '../creatorNotes'
+import type { AccountNoteSelection, PanelTask, Topic, TextInputAsset, SimulationCategory, SimulationPersonaOverrides, MediaAsset } from '../types'
+import {creatorNotes, type AnalysisScope} from '../creatorNotes'
 import {ReaderAvatar} from './ReaderAvatar'
+import {InfoHint} from './InfoHint'
 import './TrialRoom.css'
 import './SimulationHub.css'
 import { SimulatedFanPicker } from './SimulatedFansPage'
+import { CreatorNoteSelectionDialog } from './CreatorNoteSelectionDialog'
 
 interface Props {
   workspaceId: string
@@ -20,8 +22,9 @@ interface Props {
   onRun: (topic: Topic, recommendation: ReaderSelectionLink | undefined, task: PanelTask, personaOverrides?: SimulationPersonaOverrides) => void
   onAddFans: () => void
   profile?: TextInputAsset
+  mediaAssets?: MediaAsset[]
   onRunNote?: (note: {sourceMaterialId:string;noteId:string}, recommendation:ReaderSelectionLink|undefined, task:PanelTask, personaOverrides?: SimulationPersonaOverrides)=>void
-  onRunAccount?: (accountProfileId:string, recommendation:ReaderSelectionLink|undefined, task:PanelTask, personaOverrides?: SimulationPersonaOverrides)=>void
+  onRunAccount?: (selection:AccountNoteSelection, recommendation:ReaderSelectionLink|undefined, task:PanelTask, personaOverrides?: SimulationPersonaOverrides)=>void
   category?: SimulationCategory
 }
 
@@ -30,14 +33,23 @@ export function CreatorSimulationSetup(props: Props) {
   const [legacyTargetKind,setLegacyTargetKind]=useState<'topic'|'note'>('topic')
   const targetKind=props.category==='account'?'account':props.category==='published_note'?'note':props.category==='creation'?'topic':legacyTargetKind
   const [noteId,setNoteId]=useState('')
+  const [notePickerOpen,setNotePickerOpen]=useState(false)
+  const [accountScope,setAccountScope]=useState<AnalysisScope>('recent_10')
+  const [accountSelection,setAccountSelection]=useState<(AccountNoteSelection&{workspaceId:string})|null>(null)
   const notes=creatorNotes(props.profile)
   const note=targetKind==='note'?notes.find(n=>n.noteId===noteId):null
   const noteRef=note&&props.profile?{sourceMaterialId:props.profile.id,noteId:note.noteId}:undefined
-  const accountProfileId=targetKind==='account'?props.profile?.id:undefined
+  const confirmedAccountSelection=accountSelection?.workspaceId===workspaceId&&accountSelection.sourceMaterialId===props.profile?.id?accountSelection:null
+  const selectedAccountNotes=confirmedAccountSelection?.selectedNoteIds.map(id=>notes.find(note=>note.noteId===id)).filter(note=>!!note)||[]
+  const staleAccountSelection=!!confirmedAccountSelection&&selectedAccountNotes.length!==confirmedAccountSelection.selectedNoteIds.length
+  const accountNoteSelection=targetKind==='account'&&confirmedAccountSelection&&!staleAccountSelection
+    ?{sourceMaterialId:confirmedAccountSelection.sourceMaterialId,selectedNoteIds:confirmedAccountSelection.selectedNoteIds}:undefined
   let accountName=props.profile?.name||'当前账号'
   try {const name=JSON.parse(props.profile?.content||'{}').creator?.displayName;if(typeof name==='string'&&name.trim())accountName=name} catch { /* Keep the saved asset name. */ }
-  const target=targetKind==='account'&&props.profile&&notes.length?{title:accountName,body:''}:targetKind==='topic'?topic:note?{title:note.title,body:note.desc}:null
-  const scope = `${workspaceId}:${targetKind}:${accountProfileId || note?.noteId || topic?.id || ''}`
+  const target=targetKind==='account'&&accountNoteSelection&&selectedAccountNotes.length?{title:accountName,body:''}:targetKind==='topic'?topic:note?{title:note.title,body:note.desc}:null
+  const scope = JSON.stringify([workspaceId,targetKind,targetKind==='account'
+    ?[props.profile?.id,confirmedAccountSelection?.selectedNoteIds]
+    :targetKind==='note'?[props.profile?.id,note?.noteId]:topic?.id])
   const [personaOverrides,setPersonaOverrides]=useState<SimulationPersonaOverrides>({})
   const [readingMode, setReadingMode] = useState<PanelTask['readingMode']>('natural')
   const [discussionEnabled, setDiscussionEnabled] = useState(true)
@@ -45,14 +57,16 @@ export function CreatorSimulationSetup(props: Props) {
   const panelTask: PanelTask = {protocolVersion: 'panel/v1', readingMode, discussionEnabled,
     focusQuestions: readingMode === 'guided' ? questions.map(q => q.trim()) : []}
   const taskValid = readingMode === 'natural' || panelTask.focusQuestions.every(q => q.length > 0 && [...q].length <= 300)
-  const revision = JSON.stringify([target?.title, target?.body, positioning, targetKind==='account'?props.profile?.updatedAt:null,
+  const revision = JSON.stringify([target?.title, target?.body, positioning, targetKind==='account'?selectedAccountNotes.map(note=>[note.noteId,note.title,note.desc]):null,
     fans.rows.map(f => [f.id, f.status, f.updatedAt])])
-  const recommendation = useReaderSelection(workspaceId, targetKind==='topic'?topic?.id || '':'', revision, panelTask,noteRef,accountProfileId)
+  const recommendation = useReaderSelection(workspaceId, targetKind==='topic'?topic?.id || '':'', revision, panelTask,noteRef,undefined,accountNoteSelection)
   const [adopted, setAdopted] = useState<(ReaderSelectionLink & {scope: string}) | null>(null)
   const [applyError, setApplyError] = useState('')
   const [applying, setApplying] = useState(false)
   const [manualChoice,setManualChoice]=useState(false)
   const [waited,setWaited]=useState(0)
+  useEffect(()=>{setNoteId('');setNotePickerOpen(false);setAccountScope('recent_10');setAccountSelection(null)},[workspaceId,props.profile?.id])
+  useEffect(()=>{setNotePickerOpen(false)},[targetKind,running])
   useEffect(()=>{setPersonaOverrides({});setManualChoice(false);setAdopted(null);setApplyError('')},[scope])
   useEffect(()=>{if(!recommendation.busy){setWaited(0);return}const started=Date.now();const timer=setInterval(()=>setWaited(Math.round((Date.now()-started)/1000)),1000);return()=>clearInterval(timer)},[recommendation.busy])
   const record = recommendation.record
@@ -76,6 +90,7 @@ export function CreatorSimulationSetup(props: Props) {
   }
 
   async function apply() {
+    if(!target)return
     setApplyError(''); setApplying(true)
     try {
       const checked = await recommendation.refresh()
@@ -96,27 +111,52 @@ export function CreatorSimulationSetup(props: Props) {
   const rolesChanged=selectedOverrides.length>0
   const invalidPersonaIds=selectedOverrides.filter(([,fields])=>Object.entries(fields).some(([field,value])=>!value?.trim()||value.length>(field==='profile'?4000:2000))).map(([id])=>id)
   const changed=activeAdoption&&(JSON.stringify(proposals.map(p=>p.fanId))!==JSON.stringify(fans.ids)||rolesChanged)
+  const hasActiveFans=fans.rows.some(f=>f.status==='active')
+  const proposalCards=<ul>{proposals.map(p => <li key={p.fanId}>
+    <div className="reader-card-heading"><ReaderAvatar id={(() => {const fan=fans.rows.find(f=>f.id===p.fanId);return fan?`${fan.sourceAnalysisId}:${fan.sourceGroupId}`:p.fanId})()} name={record?.inputSnapshot.candidates.find(f=>f.id===p.fanId)?.name||'读者'}/><strong>{record?.inputSnapshot.candidates.find(f => f.id === p.fanId)?.name || '已保存读者'}</strong></div>
+    <p>{p.fitReason}</p><p className="muted">{p.contribution}</p>
+  </li>)}</ul>
 
   return <section className="creator-diagnosis-controls creator-simulation-setup" aria-label="模拟准备">
     <ol className="simulation-flow-steps" aria-label="试读步骤"><li>1 选择内容</li><li>2 推荐或手选读者</li><li>3 确认名单，进入讨论</li></ol>
-    {!props.category&&!!props.profile&&<div className="simulation-target-kind"><button aria-pressed={targetKind==='topic'} disabled={running} onClick={()=>{setLegacyTargetKind('topic');resetTarget()}}>创作中的选题</button><button aria-pressed={targetKind==='note'} disabled={running} onClick={()=>{setLegacyTargetKind('note');resetTarget()}}>已发布的笔记</button></div>}
+    {!props.category&&!!props.profile&&<div className="simulation-target-kind"><button aria-pressed={targetKind==='topic'} disabled={running||applying} onClick={()=>{setLegacyTargetKind('topic');resetTarget()}}>创作中的选题</button><button aria-pressed={targetKind==='note'} disabled={running||applying} onClick={()=>{setLegacyTargetKind('note');resetTarget()}}>已发布的笔记</button></div>}
     {targetKind==='topic'?<label className="simulation-target">选题
       <select aria-label="模拟选题" value={topic?.id || ''} disabled={running || applying}
         onChange={e => {resetTarget();onSelect(topics.find(t => t.id === e.target.value) || null)}}>
         <option value="">选择选题</option>
         {topics.filter(t => t.status !== 'archived').map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
       </select>
-    </label>:targetKind==='note'?<label className="simulation-target">已导入笔记<select aria-label="试读历史笔记" value={noteId} disabled={running||applying} onChange={e=>{setNoteId(e.target.value);resetTarget()}}><option value="">选择一篇笔记</option>{notes.map(n=><option key={n.noteId} value={n.noteId}>{n.title} · {n.metrics.liked??'—'} 赞 / {n.metrics.collected??'—'} 收藏</option>)}</select></label>:<section className="simulation-account-preview" aria-label="待模拟账号">
-      <h3>{accountName}</h3><p>{notes.length} 篇已导入笔记</p>
-      {notes.length?<p>从整个账号的内容出发，聊聊为什么关注、期待什么，以及哪些方向值得持续讲。</p>:<p role="status">先导入账号笔记，再邀请读者讨论这个账号。</p>}
-      {!!notes.length&&<p className="muted">本次最多选取 12 篇文字样本，较长正文会节选。</p>}
+    </label>:targetKind==='note'?<section className="simulation-note-target" aria-label="待试读笔记"><div><h3>{note?.title||'选择一篇已发布笔记'}</h3>{note&&<p className="muted">{note.metrics.liked??'—'} 赞 · {note.metrics.collected??'—'} 收藏</p>}</div><button type="button" disabled={running||applying||!notes.length} onClick={()=>setNotePickerOpen(true)}>{note?'更换笔记':'选择笔记'}</button>{!notes.length&&<p role="status">先导入账号笔记，再选择试读内容。</p>}</section>:<section className="simulation-account-preview" aria-label="待模拟账号">
+      <div className="simulation-account-range"><div><h3>{accountName}</h3><p>{confirmedAccountSelection?`已选 ${selectedAccountNotes.length} / ${notes.length} 篇笔记`:`${notes.length} 篇已导入笔记 · 尚未选择`}
+        {!!notes.length&&<InfoHint label="账号笔记范围说明">只使用你确认的笔记，每篇都会参与；较长文字每篇最多节选 1200 字。</InfoHint>}</p></div>
+        <button type="button" disabled={running||applying||!notes.length} onClick={()=>setNotePickerOpen(true)}>{confirmedAccountSelection?'更改笔记':'选择笔记'}</button></div>
+      {!notes.length&&<p role="status">先导入账号笔记，再邀请读者讨论这个账号。</p>}
+      {staleAccountSelection&&<p role="alert">已选笔记有变动，范围已过期，请重新选择。</p>}
     </section>}
-    {targetKind==='note'&&<p className="muted">这次复盘用于下一篇同类内容，不会修改已发布的原文。</p>}
-    {targetKind!=='account'&&target&&<p className="muted">{target.body?'读者会看到标题和正文，逐条给出反应，你可以继续追问。':'只测标题吸引力与阅读期待，写出正文后可再做全文试读。'}</p>}
+    {notePickerOpen&&targetKind==='note'&&!running&&!applying&&<CreatorNoteSelectionDialog notes={notes} mediaAssets={props.mediaAssets||[]} scope="all" selectedIds={noteId?[noteId]:[]} selectionMode="single" title="选择试读笔记"
+      onClose={()=>setNotePickerOpen(false)} onConfirm={(_scope,ids)=>{
+        const selected=ids?.[0]
+        if(!selected||!notes.some(n=>n.noteId===selected))return
+        if(selected!==noteId){setNoteId(selected);resetTarget()}
+        setNotePickerOpen(false)
+      }}/>}
+    {notePickerOpen&&targetKind==='account'&&!running&&!applying&&<CreatorNoteSelectionDialog notes={notes} mediaAssets={props.mediaAssets||[]} scope={accountScope} selectedIds={confirmedAccountSelection?.selectedNoteIds} title="选择账号模拟笔记" includeComments={false}
+      onClose={()=>setNotePickerOpen(false)} onConfirm={(nextScope,ids)=>{
+        const selectedNoteIds=[...new Set(ids||[])].sort()
+        if(!props.profile||!selectedNoteIds.length||selectedNoteIds.some(id=>!notes.some(note=>note.noteId===id)))return
+        if(JSON.stringify(selectedNoteIds)!==JSON.stringify(confirmedAccountSelection?.selectedNoteIds))resetTarget()
+        setAccountScope(nextScope)
+        setAccountSelection({workspaceId,sourceMaterialId:props.profile.id,selectedNoteIds})
+        setNotePickerOpen(false)
+      }}/>}
+    {targetKind!=='account'&&target&&!target.body&&<p className="muted">只测标题吸引力与阅读期待，写出正文后可再做全文试读。</p>}
     {targetKind!=='account'&&target && <details className="simulation-target-preview"><summary>{target.body ? '查看待测正文' : '仅预演选题概念'}</summary>
       <p><strong>{target.title}</strong>{target.body && <><br />{target.body}</>}</p></details>}
     <fieldset className="panel-task-controls" disabled={running || applying}>
-      <legend>{targetKind==='account'?'讨论方式':'试读方式'}</legend>
+      <legend>{targetKind==='account'?'讨论方式':'试读方式'} <InfoHint label="模拟范围说明">{targetKind==='account'
+        ?'从所选笔记出发，聊聊为什么关注、期待什么，以及哪些方向值得持续讲。'
+        :targetKind==='note'?'这次复盘用于下一篇同类内容，不会修改已发布的原文。'
+          :'读者会分别表达阅读感受，你可以在讨论后继续追问。'}</InfoHint></legend>
       <div className="panel-task-modes">
         <label><input type="radio" name="panel-reading-mode" checked={readingMode === 'natural'}
           onChange={() => changeTask(() => setReadingMode('natural'))} />{targetKind==='account'?'自由表达期待':target?.body?'自然全文试读':'自然试读'}</label>
@@ -132,48 +172,44 @@ export function CreatorSimulationSetup(props: Props) {
           {questions.length === 1 ? '＋ 添加第二个问题' : '移除第二个问题'}</button>
         {!taskValid && <p role="status">请填写每个重点问题，最多两个，每个不超过 300 字。</p>}
       </div>}
-      <label className="panel-task-discussion"><input type="checkbox" checked={discussionEnabled}
+      <div className="panel-task-discussion"><label><input type="checkbox" checked={discussionEnabled}
         onChange={e => changeTask(() => setDiscussionEnabled(e.target.checked))} />互相回应</label>
-      <p className="muted">{discussionEnabled ? '先各自表达，再回应其他人的公开留言。' : '只做独立表达，省去互相回应。'}</p>
+        <InfoHint label="互相回应说明">{discussionEnabled ? '先各自表达，再回应其他人的公开留言。' : '只做独立表达，省去互相回应。'}</InfoHint>
+      </div>
     </fieldset>
     <div className="reader-recommendation" aria-label="读者推荐">
       <div className="reader-recommendation-actions">
-        <button type="button" disabled={!target || !taskValid || running || recommendation.busy || applying || !fans.rows.some(f=>f.status==='active')}
-          onClick={() => {setApplyError('');setManualChoice(false);setAdopted(null); void recommendation.recommend(Math.max(1, fans.slots.length))}}>
+        <button type="button" disabled={!target || !taskValid || running || recommendation.busy || applying || !hasActiveFans}
+          onClick={() => {setApplyError('');setAdopted(null); void recommendation.recommend(Math.max(1, fans.slots.length))}}>
           {recommendation.busy ? '正在读取推荐…' : record ? '重新推荐读者' : '推荐读者'}</button>
-        {recommendation.error && <button type="button" disabled={!taskValid || running || applying}
+        {recommendation.error && <button type="button" disabled={!target || !taskValid || running || applying}
           onClick={() => void (recommendation.hasReceipt ? recommendation.refresh() : recommendation.recommend(fans.slots.length))}>
           {recommendation.hasReceipt ? '重试读取' : '重试原请求'}</button>}
       </div>
       {recommendation.busy&&<p className="trial-progress" role="status">正在比较读者的需求与当前内容 · {waited} 秒</p>}
-      <p className="muted">最多推荐 {fans.slots.length} 位；只有一位相关，也可以直接开始。</p>
+      {!activeAdoption&&<p className="muted">最多推荐 {fans.slots.length} 位；只有一位相关，也可以直接开始。</p>}
       {recommendation.error && <p role="alert">{recommendation.error}</p>}
       {record?.freshness?.status === 'stale' && <p role="status">内容或读者已变化，请重新推荐，或继续手动选择。</p>}
       {record?.freshness?.status === 'unavailable' && <p role="status">这份推荐的来源暂不可核验，仍可手动选择。</p>}
       {record?.status === 'failed' && <p role="status">{record.errorCode === 'input_too_large' ? '资料较长，请先手动选择读者。' : '本次推荐未完成，可重新推荐或手动选择。'}</p>}
       {record?.status === 'partially_completed' && <p role="status">部分完成，已保留有效读者。</p>}
-      {!!proposals.length && <ul>{proposals.map(p => <li key={p.fanId}>
-        <div className="reader-card-heading"><ReaderAvatar id={(() => {const fan=fans.rows.find(f=>f.id===p.fanId);return fan?`${fan.sourceAnalysisId}:${fan.sourceGroupId}`:p.fanId})()} name={record?.inputSnapshot.candidates.find(f=>f.id===p.fanId)?.name||'读者'}/><strong>{record?.inputSnapshot.candidates.find(f => f.id === p.fanId)?.name || '已保存读者'}</strong></div>
-        <p>{p.fitReason}</p><details><summary>试读角度</summary>{p.contribution}</details>
-      </li>)}</ul>}
+      {!!proposals.length && (activeAdoption?<details className="simulation-recommendation-details"><summary>查看推荐依据 · {proposals.length} 位</summary>{proposalCards}</details>:proposalCards)}
       {record?.status === 'completed' && !proposals.length && <p role="status">{record.result?.unmatchedReason || '暂未找到合适读者。'}</p>}
-      {!!proposals.length && <button type="button" disabled={!valid || running || applying} onClick={() => void apply()}>使用这组</button>}
+      {!!proposals.length && !activeAdoption && <button type="button" disabled={!target || !valid || running || applying} onClick={() => void apply()}>使用这组</button>}
       {applyError && <p role="alert">{applyError}</p>}
       {activeAdoption && <div className="reader-recommendation-actions"><span role="status">{adoptionReady ? '已采用推荐，可继续调整名单。' : '已采用的推荐需要重新核验。'}</span>
         <button type="button" disabled={running} onClick={() => {setAdopted(null);setManualChoice(true)}}>仅按当前手选名单继续</button></div>}
       {!!proposals.length&&!activeAdoption&&!manualChoice&&<p role="status">推荐还未采用。点击“使用这组”，或明确选择下方的手选名单。</p>}
-      {!activeAdoption&&<button disabled={running||applying} onClick={()=>setManualChoice(true)}>{manualChoice?'正在使用手选名单':'我来选择读者'}</button>}
+      {!activeAdoption&&<button disabled={running||applying||!hasActiveFans} onClick={()=>setManualChoice(true)}>{manualChoice?'正在使用手选名单':'我来选择读者'}</button>}
     </div>
-    {fans.error && <p role="alert">{fans.error}</p>}
-    <fieldset className="simulation-reader-controls" disabled={running || applying}>
-      <SimulatedFanPicker rows={fans.rows} slots={fans.slots} onSlotChange={(index,id)=>{fans.setSlot(index,id);clearRemovedOverrides(fans.slots.map((value,i)=>i===index?id:value));if(!activeAdoption)setManualChoice(true)}} onAddSlot={fans.addSlot} onRemoveSlot={index=>{fans.removeSlot(index);clearRemovedOverrides(fans.slots.filter((_,i)=>i!==index))}} />
-    </fieldset>
-    {!fans.rows.some(r => r.status === 'active') && <button type="button" onClick={onAddFans}>从受众分析添加模拟粉丝</button>}
-    <section className="simulation-final-readers" aria-label="确认实际参与者"><h3>本次实际参与 · {fans.ids.length} 位</h3>
-      <p className="muted">{activeAdoption?(changed?'已采用推荐，并调整了名单或本次角色':'使用推荐名单'):manualChoice?`使用你的手选名单${rolesChanged?' · 本次角色已调整':''}`:'尚未确认名单'}</p>
-      <ul>{selectedFans.map(f=><li key={f.id}><ReaderAvatar id={`${f.sourceAnalysisId}:${f.sourceGroupId}`} name={f.editable.name} size={28}/>{f.editable.name}</li>)}</ul>
-      {!!selectedFans.length&&<p className="muted">需要换个观察角度？可展开调整本次角色，不影响读者库里的长期画像。</p>}
-      {selectedFans.map(f=><details className="simulation-role-editor" key={f.id}>
+    <section className="simulation-final-readers" aria-label="确认实际参与者"><div className="reader-card-heading"><h3>本次实际参与 · {fans.ids.length} 位</h3>{!!selectedFans.length&&<InfoHint label="本次角色说明">需要换个观察角度？可展开调整本次角色，不影响读者库里的长期画像。</InfoHint>}</div>
+      {fans.loading&&<p role="status">{fans.loaded?'正在刷新读者，已选名单保留。':'正在读取已保存读者…'}</p>}
+      {fans.error&&<div className="simulation-readers-error"><p role="alert">读者列表暂时未能读取。{fans.loaded?'已保留当前名单。':''}</p><button type="button" disabled={fans.loading||running||applying} onClick={()=>void fans.refresh()}>{fans.loading?'正在重试…':'重试读取读者'}</button></div>}
+      {hasActiveFans&&<>
+      <p className="muted">{activeAdoption?(changed?'已采用推荐，并调整了名单或本次角色':'使用推荐名单'):manualChoice?`使用你的手选名单${rolesChanged?' · 本次角色已调整':''}`:'在下面选择读者，或采用上方推荐'}</p>
+      <fieldset className="simulation-reader-controls" disabled={running || applying}>
+      <SimulatedFanPicker rows={fans.rows} slots={fans.slots} onSlotChange={(index,id)=>{fans.setSlot(index,id);clearRemovedOverrides(fans.slots.map((value,i)=>i===index?id:value));if(!activeAdoption)setManualChoice(true)}} onAddSlot={fans.addSlot} onRemoveSlot={index=>{fans.removeSlot(index);clearRemovedOverrides(fans.slots.filter((_,i)=>i!==index))}}
+        renderSelected={f=><details className="simulation-role-editor" key={f.id}>
         <summary>调整 {f.editable.name} 的本次角色{invalidPersonaIds.includes(f.id)?' · 请补全':personaOverrides[f.id]?' · 已调整':''}</summary>
         <fieldset disabled={running||applying}>
           <label>本次视角<textarea aria-label={`${f.editable.name}的本次视角`} maxLength={4000} rows={2} value={personaOverrides[f.id]?.profile??f.editable.profile} onChange={e=>editPersona(f.id,'profile',e.target.value)}/></label>
@@ -182,20 +218,22 @@ export function CreatorSimulationSetup(props: Props) {
           {invalidPersonaIds.includes(f.id)&&<p role="status">请补全调整后的角色设定，或恢复已保存画像；本次视角最多 4000 字，关切和表达各最多 2000 字。</p>}
           {personaOverrides[f.id]&&<button className="simulation-role-reset" type="button" onClick={()=>setPersonaOverrides(current=>Object.fromEntries(Object.entries(current).filter(([id])=>id!==f.id)))}>恢复已保存画像</button>}
         </fieldset>
-      </details>)}
-      {!fans.ids.length&&<p>先采用推荐，或在上面选择至少一位读者。</p>}
+      </details>} />
+      </fieldset>
+      </>}
+      {fans.loaded&&!fans.loading&&!fans.error&&!hasActiveFans&&<div className="simulation-readers-empty"><p>还没有可用的模拟读者。</p><button type="button" onClick={onAddFans}>从受众分析添加模拟粉丝</button></div>}
       {!!invalidPersonaIds.length&&<p role="status">还有 {invalidPersonaIds.length} 位读者的本次设定需要补全，完成或恢复后即可开始。</p>}
-    </section>
-    <button className="primary" disabled={running || applying || recommendation.busy || !taskValid || !!invalidPersonaIds.length || !fans.ids.length || !target || !adoptionReady || !selectionDecided}
+    <button className="primary simulation-start" disabled={running || applying || !taskValid || !!invalidPersonaIds.length || !fans.ids.length || !target || !adoptionReady || !selectionDecided}
       onClick={() => {const link=activeAdoption ? {
         readerSelectionId: activeAdoption.readerSelectionId,
         readerSelectionInputHash: activeAdoption.readerSelectionInputHash,
       } : undefined;
         const overrides=Object.fromEntries(Object.entries(personaOverrides).filter(([id])=>fans.ids.includes(id)))
         const extra: [SimulationPersonaOverrides?]=Object.keys(overrides).length?[overrides]:[]
-        if(accountProfileId)props.onRunAccount?.(accountProfileId,link,panelTask,...extra)
+        if(accountNoteSelection)props.onRunAccount?.(accountNoteSelection,link,panelTask,...extra)
         else if(noteRef)props.onRunNote?.(noteRef,link,panelTask,...extra)
         else if(topic)onRun(topic,link,panelTask,...extra)
       }}>开始模拟</button>
+    </section>
   </section>
 }

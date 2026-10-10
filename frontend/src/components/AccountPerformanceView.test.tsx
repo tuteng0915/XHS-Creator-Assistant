@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
 import { AccountPerformanceView, type PerformanceNote } from './AccountPerformanceView'
 
@@ -13,6 +13,21 @@ function setup(input = notes) {
   return render(<AccountPerformanceView observations={input} notes={input.map(note => ({...note,metrics:{liked:note.metrics.liked ?? undefined},desc:'历史正文',comments:[]}))} mediaAssets={[]} />)
 }
 function select(value:string) { fireEvent.change(screen.getByRole('combobox',{name:'比较指标'}),{target:{value}}) }
+
+it('keeps the display limit visible and explains the metrics on hover or focus', async () => {
+  setup()
+  const hint = screen.getByRole('button', {name:'笔记表现数据说明'})
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('每组最多展示 2 条')
+  fireEvent.mouseEnter(hint)
+  expect(screen.getByRole('tooltip')).toHaveTextContent('缺失不算零、同数值并列')
+  expect(screen.getByRole('tooltip')).toHaveTextContent('不代表点击率、内容质量分或增长趋势')
+  fireEvent.mouseLeave(hint)
+  await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
+  fireEvent.focus(hint)
+  expect(screen.getByRole('tooltip')).toBeVisible()
+  expect(screen.getByRole('status')).toHaveTextContent('点赞数据 4 / 4 条 · 中位数 15')
+})
 
 it('switches independent metrics and displays medians, missingness and frozen notes', () => {
   const {container} = setup()

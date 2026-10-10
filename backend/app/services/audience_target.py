@@ -32,9 +32,18 @@ def reader_visible_target(snapshot: dict[str, Any]) -> dict[str, Any]:
         "limitations": "仅预演提供的文字，不评价未提供的图片或真实传播效果。",
     }
     if snapshot.get("targetType") == "account":
+        scope = deepcopy((snapshot.get("sourceAccount") or {}).get("scope", {}))
+        if scope.get("selectionMethod") == "explicit_ids":
+            # Account-wide inventory counts belong in the frozen display snapshot,
+            # not the selected reading target or its recommendation freshness hash.
+            scope = {key: scope[key] for key in (
+                "sourceMaterialId", "selectedNoteIds", "selectedNoteCount",
+                "sampledNoteCount", "truncatedNoteCount", "selectionMethod",
+                "samplingMethod", "omissionNotice",
+            ) if key in scope}
         target.update({
             "simulationCategory": "account", "previewLevel": "account",
-            "accountScope": deepcopy((snapshot.get("sourceAccount") or {}).get("scope", {})),
+            "accountScope": scope,
             "limitations": "基于本次账号简介和笔记文字样本，讨论长期阅读期待与内容方向。",
         })
         return deepcopy(target)

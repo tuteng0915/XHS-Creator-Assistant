@@ -1,10 +1,64 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { simulatedFanApi } from '../api'
-import type { AudienceAnalysis } from '../types'
+import { audienceAnalysisApi, simulatedFanApi } from '../api'
+import type { AudienceAnalysis, TextInputAsset } from '../types'
 import { AudienceAnalysisPage } from './AudienceAnalysisPage'
 
 afterEach(() => {cleanup(); vi.restoreAllMocks()})
+
+const importedProfile: TextInputAsset = {id:'profile',workspaceId:'w',name:'测试',type:'xhs_creator_profile',createdAt:'',updatedAt:'',content:JSON.stringify({notes:[
+  {noteId:'n1',title:'笔记一',desc:'正文一',metrics:{liked:1},comments:[]},
+  {noteId:'n2',title:'笔记二',desc:'正文二',metrics:{liked:9},comments:[]},
+]})}
+
+it('uses the shared preview selection and submits the exact confirmed note IDs', async () => {
+  const create = vi.spyOn(audienceAnalysisApi,'create').mockResolvedValue({id:'created'} as AudienceAnalysis)
+  const select = vi.fn()
+  render(<AudienceAnalysisPage workspaceId="w" profile={importedProfile} analyses={[]} selectedId="" onSelect={select} onRefresh={vi.fn().mockResolvedValue(undefined)} onSimulate={vi.fn()} />)
+  fireEvent.click(screen.getByRole('button',{name:'调整范围'}))
+  fireEvent.click(screen.getByRole('button',{name:'取消选择'}))
+  fireEvent.change(screen.getByLabelText('排序'),{target:{value:'liked'}})
+  fireEvent.click(screen.getByRole('checkbox',{name:'选择笔记：笔记二'}))
+  expect(create).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{name:'完成'}))
+  expect(screen.getByText('已选 1 条笔记')).toBeVisible()
+  fireEvent.click(screen.getByRole('button',{name:'分析受众'}))
+  await waitFor(() => expect(create).toHaveBeenCalledExactlyOnceWith('w','profile','most_liked_10',['n2']))
+  await waitFor(() => expect(select).toHaveBeenCalledWith('created'))
+})
+
+it('cancels selection changes and blocks stale confirmed selections', async () => {
+  const create = vi.spyOn(audienceAnalysisApi,'create').mockResolvedValue({id:'created'} as AudienceAnalysis)
+  const props = {workspaceId:'w',profile:importedProfile,analyses:[],selectedId:'',onSelect:vi.fn(),onRefresh:vi.fn().mockResolvedValue(undefined),onSimulate:vi.fn()}
+  const view = render(<AudienceAnalysisPage {...props} />)
+  fireEvent.click(screen.getByRole('button',{name:'调整范围'}))
+  fireEvent.click(screen.getByRole('button',{name:'取消选择'}))
+  fireEvent.click(screen.getByRole('button',{name:'取消'}))
+  expect(screen.getByText('最近 10 条')).toBeVisible()
+  expect(screen.getByRole('button',{name:'分析受众'})).toBeEnabled()
+  fireEvent.click(screen.getByRole('button',{name:'调整范围'}))
+  fireEvent.click(screen.getByRole('button',{name:'取消选择'}))
+  fireEvent.click(screen.getByRole('checkbox',{name:'选择笔记：笔记二'}))
+  fireEvent.click(screen.getByRole('button',{name:'完成'}))
+  view.rerender(<AudienceAnalysisPage {...props} profile={{...importedProfile,content:JSON.stringify({notes:[{noteId:'n1',title:'笔记一',metrics:{},comments:[]}]})}} />)
+  expect(screen.getByRole('alert')).toHaveTextContent('已选笔记有变动')
+  expect(screen.getByRole('button',{name:'分析受众'})).toBeDisabled()
+  expect(create).not.toHaveBeenCalled()
+})
+
+it('shows the page explanation on hover or focus while keeping the analysis range visible', async () => {
+  render(<AudienceAnalysisPage workspaceId="w" analyses={[]} selectedId="" onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} />)
+  const hint = screen.getByRole('button', {name:'受众分析说明'})
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  expect(screen.getByText('最近 10 条')).toBeVisible()
+  fireEvent.mouseEnter(hint)
+  expect(screen.getByRole('tooltip')).toHaveTextContent('从历史图文和评论梳理不同读者，由你选择收录。')
+  fireEvent.mouseLeave(hint)
+  await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
+  fireEvent.focus(hint)
+  expect(screen.getByRole('tooltip')).toBeVisible()
+  expect(screen.getByRole('button', {name:'调整范围'})).toBeVisible()
+})
 
 it('keeps prewritten readers within the existing history and waits for manual adoption',async()=>{
   const create=vi.spyOn(simulatedFanApi,'create').mockResolvedValue({} as Awaited<ReturnType<typeof simulatedFanApi.create>>)

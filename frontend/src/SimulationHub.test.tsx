@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react'
+import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react'
 import {afterEach, beforeEach, expect, it, vi} from 'vitest'
 import App from './App'
 import {memoryStorage} from './test/storage'
@@ -29,8 +29,12 @@ function setup(withFeedback=false) {
     if(url==='/api/workspaces')return Response.json([workspace])
     if(url==='/api/workspaces/w')return Response.json(workspace)
     if(url==='/api/workspaces/w/input-assets')return Response.json([{id:'profile',workspaceId:'w',type:'xhs_creator_profile',name:'账号材料',createdAt:'',updatedAt:'v1',content:JSON.stringify({
-      schemaVersion:'xhs-creator-profile/v1',creator:{displayName:'测试账号'},notes:[{noteId:'note',title:'我的历史笔记',desc:'历史正文',metrics:{liked:3},comments:[]}],
+      schemaVersion:'xhs-creator-profile/v1',creator:{displayName:'测试账号'},notes:[
+        {noteId:'note',title:'我的历史笔记',desc:'历史正文',coverMediaAssetId:'cover',metrics:{liked:3},comments:[]},
+        {noteId:'other-note',title:'另一篇历史笔记',desc:'另一组内容',metrics:{liked:1},comments:[]},
+      ],
     })}])
+    if(url==='/api/workspaces/w/media-assets')return Response.json([{id:'cover',workspaceId:'w',type:'image',name:'笔记封面',mediaType:'image/jpeg',metadata:{noteId:'note'},fileUrl:'/test-note-cover.jpg'}])
     if(url==='/api/workspaces/w/topics')return Response.json([{id:'topic',workspaceId:'w',title:'下一篇创作',body:'创作正文',angle:'',associatedPainPoint:'',whyItFits:'',generatedSnapshot:{},sourceAnalysisRunId:null,sourceWorkflow:'manual',status:'candidate',createdAt:'',updatedAt:''}])
     if(url==='/api/workspaces/w/simulated-fans')return Response.json([{id:'reader',workspaceId:'w',sourceAnalysisId:'analysis',sourceGroupId:'group',original:{},editable:{name:'认真读者',profile:'读到具体步骤再判断',coreConcern:'时间投入',contentPreference:'生活成长',expressionStyle:'直接提问'},status:'active',createdAt:'',updatedAt:''}])
     if(url==='/api/workspaces/w/simulation-runs')return init?.method==='POST'?Response.json({detail:'检查请求后停止，不调用模型'},{status:422}):Response.json(runs)
@@ -46,6 +50,16 @@ async function openHub() {
   await screen.findByText('我的历史笔记')
   fireEvent.click(screen.getByRole('button',{name:'受众模拟'}))
   await waitFor(()=>expect(screen.getAllByRole('option',{name:'认真读者'})).toHaveLength(3))
+}
+
+function chooseAccountNotes(ids=['note']) {
+  fireEvent.click(screen.getByRole('button',{name:'选择笔记'}))
+  const picker=screen.getByRole('dialog',{name:'选择账号模拟笔记'})
+  expect(within(picker).getByRole('status')).not.toHaveTextContent('包含对应评论')
+  fireEvent.click(within(picker).getByRole('button',{name:'取消选择'}))
+  if(ids.includes('note'))fireEvent.click(within(picker).getByRole('checkbox',{name:'选择笔记：我的历史笔记'}))
+  if(ids.includes('other-note'))fireEvent.click(within(picker).getByRole('checkbox',{name:'选择笔记：另一篇历史笔记'}))
+  fireEvent.click(within(picker).getByRole('button',{name:'完成'}))
 }
 
 it('brings a selected reader opinion into the corresponding canvas without a model request',async()=>{
@@ -70,7 +84,11 @@ it('keeps one first-level simulation hub with three independently browsable hist
   await screen.findByRole('region',{name:'读者试读群聊'})
   fireEvent.click(screen.getByRole('tab',{name:/已发布笔记级/}))
   expect(screen.queryByRole('region',{name:'读者试读群聊'})).not.toBeInTheDocument()
-  expect(screen.getByLabelText('试读历史笔记')).toBeVisible()
+  expect(screen.getByRole('button',{name:'选择笔记'})).toBeVisible()
+  fireEvent.click(screen.getByRole('button',{name:'选择笔记'}))
+  const picker=screen.getByRole('dialog',{name:'选择试读笔记'})
+  expect(within(picker).getByRole('radio',{name:'选择笔记：我的历史笔记'})).not.toBeChecked()
+  fireEvent.click(within(picker).getByRole('button',{name:'取消'}))
   expect(screen.getByRole('button',{name:/旧笔记复盘/})).toBeVisible()
   expect(screen.queryByRole('button',{name:/账号整体期待/})).not.toBeInTheDocument()
   fireEvent.keyDown(screen.getByRole('tab',{name:/已发布笔记级/}),{key:'ArrowRight'})
@@ -80,18 +98,46 @@ it('keeps one first-level simulation hub with three independently browsable hist
   expect(screen.getByLabelText('模拟选题')).toBeVisible()
 })
 
+it('reuses the illustrated note picker in single mode and previews before confirming',async()=>{
+  const fetch=setup();await openHub()
+  fireEvent.click(screen.getByRole('tab',{name:/已发布笔记级/}))
+  expect(screen.queryByRole('combobox',{name:'试读历史笔记'})).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'选择笔记'}))
+  const picker=screen.getByRole('dialog',{name:'选择试读笔记'})
+  expect(within(picker).getByRole('img',{name:'我的历史笔记'})).toHaveAttribute('src','/test-note-cover.jpg')
+  expect(within(picker).queryByRole('checkbox')).not.toBeInTheDocument()
+  expect(within(picker).queryByRole('button',{name:/全选|反选|选前/})).not.toBeInTheDocument()
+  fireEvent.click(within(picker).getByRole('button',{name:/我的历史笔记.*赞/}))
+  const detail=screen.getByRole('dialog',{name:'我的历史笔记'})
+  expect(within(detail).getByText('历史正文')).toBeVisible()
+  expect(within(detail).getByRole('img')).toHaveAttribute('src','/test-note-cover.jpg')
+  fireEvent.click(within(detail).getByRole('button',{name:'关闭'}))
+  expect(within(picker).getByRole('radio',{name:'选择笔记：我的历史笔记'})).not.toBeChecked()
+  fireEvent.click(within(picker).getByRole('radio',{name:'选择笔记：我的历史笔记'}))
+  fireEvent.click(within(picker).getByRole('button',{name:'完成'}))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.getByRole('region',{name:'待试读笔记'})).toHaveTextContent('我的历史笔记')
+  expect(fetch.mock.calls.filter(([,init])=>init?.method==='POST'||init?.method==='PATCH')).toHaveLength(0)
+})
+
 it('submits each target without retrieval and keeps one-off role changes out of the next category',async()=>{
   const fetch=setup();await openHub()
+  chooseAccountNotes()
   fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'reader'}})
   fireEvent.change(screen.getByLabelText('认真读者的本次关切'),{target:{value:'希望账号持续讲可执行的小步骤'}})
   fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
   await screen.findByText('检查请求后停止，不调用模型')
   const requests=()=>fetch.mock.calls.filter(([url,init])=>String(url).endsWith('/simulation-runs')&&init?.method==='POST').map(([,init])=>JSON.parse(String(init?.body)))
-  expect(requests()[0]).toMatchObject({accountProfileId:'profile',simulatedFanIds:['reader'],personaOverrides:{reader:{coreConcern:'希望账号持续讲可执行的小步骤'}},mode:'live'})
+  expect(requests()[0]).toMatchObject({accountNoteSelection:{sourceMaterialId:'profile',selectedNoteIds:['note']},simulatedFanIds:['reader'],personaOverrides:{reader:{coreConcern:'希望账号持续讲可执行的小步骤'}},mode:'live'})
+  expect(requests()[0]).not.toHaveProperty('accountProfileId')
   expect(requests()[0]).not.toHaveProperty('topicId')
   expect(requests()[0]).not.toHaveProperty('manualTopic')
   fireEvent.click(screen.getByRole('tab',{name:/已发布笔记级/}))
-  fireEvent.change(screen.getByLabelText('试读历史笔记'),{target:{value:'note'}})
+  fireEvent.click(screen.getByRole('button',{name:'选择笔记'}))
+  const picker=screen.getByRole('dialog',{name:'选择试读笔记'})
+  fireEvent.click(within(picker).getByRole('radio',{name:'选择笔记：我的历史笔记'}))
+  fireEvent.click(within(picker).getByRole('button',{name:'完成'}))
+  expect(screen.getByRole('region',{name:'待试读笔记'})).toHaveTextContent('我的历史笔记')
   expect(screen.getByLabelText('认真读者的本次关切')).toHaveValue('时间投入')
   expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
   fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
@@ -100,6 +146,7 @@ it('submits each target without retrieval and keeps one-off role changes out of 
   await screen.findByText('检查请求后停止，不调用模型')
   expect(requests()[1]).toMatchObject({sourceMaterialId:'profile',noteId:'note',simulatedFanIds:['reader']})
   expect(requests()[1]).not.toHaveProperty('accountProfileId')
+  expect(requests()[1]).not.toHaveProperty('accountNoteSelection')
   expect(requests()[1]).not.toHaveProperty('personaOverrides')
   fireEvent.click(screen.getByRole('tab',{name:/创作级/}))
   fireEvent.change(screen.getByLabelText('模拟选题'),{target:{value:'topic'}})
@@ -108,7 +155,24 @@ it('submits each target without retrieval and keeps one-off role changes out of 
   await waitFor(()=>expect(requests()).toHaveLength(3))
   expect(requests()[2]).toMatchObject({topicId:'topic',simulatedFanIds:['reader']})
   expect(requests()[2]).not.toHaveProperty('noteId')
+  expect(requests()[2]).not.toHaveProperty('accountNoteSelection')
   expect(requests()[2]).not.toHaveProperty('personaOverrides')
   expect(fetch.mock.calls.filter(([url,init])=>String(url).includes('/reader-selections')&&init?.method==='POST')).toHaveLength(0)
   expect(fetch.mock.calls.filter(([url,init])=>String(url).includes('/simulated-fans')&&init?.method==='PATCH')).toHaveLength(0)
+})
+
+it('requires confirmation of multiple account notes before either retrieval or simulation',async()=>{
+  const fetch=setup();await openHub()
+  fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'reader'}})
+  expect(screen.getByRole('button',{name:'推荐读者'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  chooseAccountNotes(['note','other-note'])
+  expect(screen.getByRole('region',{name:'待模拟账号'})).toHaveTextContent('已选 2 / 2 篇笔记')
+  fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  await screen.findByText('检查请求后停止，不调用模型')
+  const requests=fetch.mock.calls.filter(([url,init])=>String(url).endsWith('/simulation-runs')&&init?.method==='POST')
+  expect(requests).toHaveLength(1)
+  expect(JSON.parse(String(requests[0][1]?.body))).toMatchObject({accountNoteSelection:{sourceMaterialId:'profile',selectedNoteIds:['note','other-note']}})
+  expect(fetch.mock.calls.filter(([url,init])=>String(url).includes('/reader-selections')&&init?.method==='POST')).toHaveLength(0)
 })

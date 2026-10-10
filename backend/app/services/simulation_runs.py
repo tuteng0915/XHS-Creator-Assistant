@@ -45,7 +45,8 @@ class SimulationRunService:
     def create(self, workspace_id: str, payload: SimulationRunCreate) -> SimulationRunResponse:
         target_count = sum(
             1 for value in (payload.topic_id, payload.draft_id, payload.manual_topic,
-                            payload.note_id, payload.account_profile_id) if value
+                            payload.note_id, payload.account_profile_id,
+                            payload.account_note_selection) if value
         )
         if target_count != 1:
             raise ValidationError("请选择一个账号、选题、草稿、历史笔记或手动标题")
@@ -82,6 +83,13 @@ class SimulationRunService:
             if payload.account_profile_id:
                 account_snapshot = account_simulation_target(
                     connection, workspace_id, payload.account_profile_id,
+                )
+                topic_snapshot = account_reader_topic(account_snapshot)
+            if payload.account_note_selection is not None:
+                selection = payload.account_note_selection
+                account_snapshot = account_simulation_target(
+                    connection, workspace_id, selection.source_material_id,
+                    selected_note_ids=selection.selected_note_ids,
                 )
                 topic_snapshot = account_reader_topic(account_snapshot)
             if payload.note_id:

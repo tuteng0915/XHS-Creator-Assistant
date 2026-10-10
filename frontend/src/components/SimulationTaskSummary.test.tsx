@@ -1,4 +1,4 @@
-import {cleanup, render, screen, within} from '@testing-library/react'
+import {cleanup, fireEvent, render, screen, within} from '@testing-library/react'
 import {afterEach, expect, it, vi} from 'vitest'
 import type {SimulationRun} from '../types'
 import {SimulationTaskSummary} from './SimulationTaskSummary'
@@ -17,7 +17,9 @@ it('shows frozen guided questions in order without claiming discussion succeeded
   expect(screen.getByText('定向试读')).toBeInTheDocument()
   expect(screen.getByText('互相回应：开启')).toBeInTheDocument()
   expect(screen.getAllByRole('listitem').map(li=>li.textContent)).toEqual(task.focusQuestions)
-  expect(screen.getByText('这是当时的设置；是否完成回应见下方结果。')).toBeInTheDocument()
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  fireEvent.focus(screen.getByRole('button',{name:'试读设置说明'}))
+  expect(screen.getByRole('tooltip')).toHaveTextContent('这是当时的设置；是否完成回应见下方结果。')
   expect(JSON.stringify(run)).toBe(before)
 })
 
@@ -26,6 +28,17 @@ it('shows natural reading with discussion off and does not invent questions',()=
   expect(screen.getByText('自然全文试读')).toBeInTheDocument()
   expect(screen.getByText('互相回应：关闭')).toBeInTheDocument()
   expect(screen.queryByText('当时的重点问题')).not.toBeInTheDocument()
+  fireEvent.mouseEnter(screen.getByRole('button',{name:'试读设置说明'}))
+  expect(screen.getByRole('tooltip')).toHaveTextContent('本次设置为只做独立试读。')
+})
+
+it.each([true,false])('distinguishes selected account notes from legacy account samples (%s)',explicit=>{
+  render(<SimulationTaskSummary run={{...run,simulationCategory:'account',inputSnapshot:{
+    panelTask:{...task,readingMode:'natural',focusQuestions:[]},
+    sourceAccount:{scope:explicit?{selectionMethod:'explicit_ids',selectedNoteIds:['n1','n2']}:{}},
+  }}} />)
+  expect(screen.getByText(explicit?'所选笔记阅读':'账号整体阅读')).toBeVisible()
+  expect(screen.queryByText(explicit?'账号整体阅读':'所选笔记阅读')).not.toBeInTheDocument()
 })
 
 it.each([undefined,null])('keeps legacy missing task %s unknown',panelTask=>{

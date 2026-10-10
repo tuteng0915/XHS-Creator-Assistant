@@ -22,22 +22,22 @@ const record:ReaderSelection={id:'r',workspaceId:'w',inputHash:'a'.repeat(64),st
   freshness:{status:'current',reasons:[]}}
 beforeEach(()=>vi.stubGlobal('localStorage',memoryStorage()))
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals()})
-function setup(saved:ReaderSelection=record, profile?:TextInputAsset, category?:SimulationCategory) {
-  vi.spyOn(simulatedFanApi,'list').mockResolvedValue(rows)
+function setup(saved:ReaderSelection=record, profile?:TextInputAsset, category?:SimulationCategory, loadFans=()=>Promise.resolve(rows)) {
+  const list=vi.spyOn(simulatedFanApi,'list').mockImplementation(loadFans)
   const create=vi.spyOn(readerSelectionApi,'create').mockResolvedValue(saved)
   const get=vi.spyOn(readerSelectionApi,'get').mockResolvedValue(saved)
   const run=vi.fn()
   const runNote=vi.fn()
   const runAccount=vi.fn()
-  function Page(){
+  function Page({currentProfile=profile}:{currentProfile?:TextInputAsset}){
     const fans=useSimulatedFans('w','')
     const [selected,setSelected]=useState<Topic|null>(topic)
     return <CreatorSimulationSetup workspaceId="w" positioning="" topics={[topic,{...topic,id:'other',title:'其他选题'}]}
       topic={selected} fans={fans} running={false} onSelect={setSelected} onRun={run} onAddFans={()=>{}}
-      category={category} profile={profile} onRunNote={runNote} onRunAccount={runAccount} />
+      category={category} profile={currentProfile} onRunNote={runNote} onRunAccount={runAccount} />
   }
-  render(<Page />)
-  return {create,get,run,runNote,runAccount}
+  const view=render(<Page />)
+  return {create,get,run,runNote,runAccount,list,rerenderProfile:(currentProfile:TextInputAsset)=>view.rerender(<Page currentProfile={currentProfile}/>)}
 }
 async function ready(){
   await waitFor(()=>expect(screen.getAllByRole('option',{name:'读者a'})).toHaveLength(3))
@@ -47,6 +47,24 @@ async function recommend(){
   await waitFor(()=>expect(screen.getByRole('button',{name:'推荐读者'})).toBeEnabled())
   fireEvent.click(screen.getByRole('button',{name:'推荐读者'}))
   await screen.findByText('重视开始行动的门槛。')
+}
+function chooseNote(title:string){
+  fireEvent.click(screen.queryByRole('button',{name:'更换笔记'})||screen.getByRole('button',{name:'选择笔记'}))
+  const picker=screen.getByRole('dialog',{name:'选择试读笔记'})
+  fireEvent.click(within(picker).getByRole('radio',{name:`选择笔记：${title}`}))
+  fireEvent.click(within(picker).getByRole('button',{name:'完成'}))
+}
+function openAccountNotePicker(){
+  fireEvent.click(screen.queryByRole('button',{name:'更改笔记'})||screen.getByRole('button',{name:'选择笔记'}))
+  return screen.getByRole('dialog',{name:'选择账号模拟笔记'})
+}
+function chooseAccountNotes(titles?:string[]){
+  const picker=openAccountNotePicker()
+  if(titles){
+    fireEvent.click(within(picker).getByRole('button',{name:'取消选择'}))
+    titles.forEach(title=>fireEvent.click(within(picker).getByRole('checkbox',{name:`选择笔记：${title}`})))
+  }
+  fireEvent.click(within(picker).getByRole('button',{name:'完成'}))
 }
 
 it('previews the target first and does not replace manual choices until explicit adoption', async()=>{
@@ -77,8 +95,7 @@ it('checks freshness again at adoption and preserves the old selection on confli
   await screen.findByText('推荐已变化或暂时无法核验，名单未改变。')
   expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('a')
   expect(screen.getByRole('button',{name:'使用这组'})).toBeDisabled()
-  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
-  fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
+  expect(screen.getByText('使用你的手选名单')).toBeVisible()
   expect(screen.getByRole('button',{name:'开始模拟'})).toBeEnabled()
 })
 
@@ -191,10 +208,88 @@ it('uses one relevant recommendation without filling empty slots and keeps its a
   expect(screen.getByLabelText('第 3 位模拟粉丝')).toHaveValue('')
   const finalReaders=screen.getByRole('region',{name:'确认实际参与者'})
   expect(within(finalReaders).getByRole('heading',{name:'本次实际参与 · 1 位'})).toBeVisible()
-  expect(within(finalReaders).getAllByRole('listitem')).toHaveLength(1)
+  expect(within(finalReaders).getAllByRole('combobox')).toHaveLength(3)
+  expect(within(finalReaders).getAllByRole('img')).toHaveLength(1)
   expect(within(finalReaders).getByRole('img',{name:'读者d的头像'}).innerHTML).toBe(recommendationAvatar)
   fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
   expect(run).toHaveBeenCalledWith(topic,{readerSelectionId:record.id,readerSelectionInputHash:record.inputHash},task)
+})
+
+it('starts with a manual list while recommendation is waiting and keeps it when results arrive',async()=>{
+  const {create,run}=setup()
+  await ready()
+  let resolve!:(result:ReaderSelection)=>void
+  create.mockImplementationOnce(()=>new Promise(done=>{resolve=done}))
+  fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'a'}})
+  await waitFor(()=>expect(screen.getByRole('button',{name:'推荐读者'})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button',{name:'推荐读者'}))
+  expect(create).toHaveBeenCalledOnce()
+  expect(screen.getByRole('button',{name:'正在读取推荐…'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeEnabled()
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(run).toHaveBeenLastCalledWith(topic,undefined,task)
+  await act(async()=>resolve(record))
+  await screen.findByText('重视开始行动的门槛。')
+  expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('a')
+  expect(screen.getByText('使用你的手选名单')).toBeVisible()
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(run).toHaveBeenLastCalledWith(topic,undefined,task)
+})
+
+it('can select readers for the first time after a recommendation request has begun',async()=>{
+  const {create,run}=setup()
+  await ready()
+  let resolve!:(result:ReaderSelection)=>void
+  create.mockImplementationOnce(()=>new Promise(done=>{resolve=done}))
+  // Loading the reader list changes the recommendation revision; wait for its
+  // separate effect to settle before starting the deliberately pending request.
+  await waitFor(()=>expect(screen.getByRole('button',{name:'推荐读者'})).toBeEnabled())
+  fireEvent.click(screen.getByRole('button',{name:'推荐读者'}))
+  expect(create).toHaveBeenCalledOnce()
+  expect(screen.getByRole('button',{name:'正在读取推荐…'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'b'}})
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeEnabled()
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(run).toHaveBeenLastCalledWith(topic,undefined,task)
+  await act(async()=>resolve(record))
+  expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('b')
+})
+
+it('keeps one editable participant list after adoption and puts start immediately below it',async()=>{
+  setup()
+  await recommend()
+  fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
+  await screen.findByText('已采用推荐，可继续调整名单。')
+  const evidence=screen.getByText('查看推荐依据 · 1 位').closest('details')!
+  expect(evidence).not.toHaveAttribute('open')
+  expect(screen.getByText('重视开始行动的门槛。')).not.toBeVisible()
+  expect(screen.queryByRole('button',{name:'使用这组'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('group',{name:/画像预览/})).not.toBeInTheDocument()
+  const participants=screen.getByRole('region',{name:'确认实际参与者'})
+  expect(within(participants).getAllByRole('combobox')).toHaveLength(3)
+  expect(within(participants).getAllByRole('img')).toHaveLength(1)
+  expect(within(participants).getByRole('button',{name:'开始模拟'})).toBeEnabled()
+  expect(screen.getByText('调整 读者d 的本次角色').closest('details')).not.toHaveAttribute('open')
+  fireEvent.click(screen.getByText('查看推荐依据 · 1 位'))
+  expect(screen.getByText('重视开始行动的门槛。')).toBeVisible()
+})
+
+it('distinguishes loading from failure and only offers adding readers after a successful empty read',async()=>{
+  let reject!:(reason:Error)=>void
+  const {list}=setup(record,undefined,undefined,()=>new Promise((_resolve,fail)=>{reject=fail}))
+  expect(screen.getByText('正在读取已保存读者…')).toBeVisible()
+  expect(screen.queryByRole('button',{name:'从受众分析添加模拟粉丝'})).not.toBeInTheDocument()
+  await act(async()=>reject(new Error('断网')))
+  expect(screen.getByRole('alert')).toHaveTextContent('读者列表暂时未能读取。')
+  expect(screen.getByRole('button',{name:'重试读取读者'})).toBeEnabled()
+  expect(screen.queryByRole('button',{name:'从受众分析添加模拟粉丝'})).not.toBeInTheDocument()
+  list.mockResolvedValueOnce([])
+  fireEvent.click(screen.getByRole('button',{name:'重试读取读者'}))
+  await screen.findByText('还没有可用的模拟读者。')
+  expect(screen.getByRole('button',{name:'从受众分析添加模拟粉丝'})).toBeEnabled()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
 })
 
 const historicalProfile:TextInputAsset={id:'profile',workspaceId:'w',type:'xhs_creator_profile',name:'历史图文',createdAt:'',updatedAt:'',content:JSON.stringify({
@@ -210,9 +305,9 @@ it('recommends and invites readers for the original historical note without copy
   await ready()
   fireEvent.click(screen.getByRole('button',{name:'已发布的笔记'}))
   expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
-  fireEvent.change(screen.getByLabelText('试读历史笔记'),{target:{value:'low-performing'}})
+  chooseNote('阅读不佳的旧图文')
   expect(screen.getByText('这是原来的完整正文。')).toBeInTheDocument()
-  expect(screen.getByRole('option',{name:'阅读不佳的旧图文 · 2 赞 / 1 收藏'})).toBeInTheDocument()
+  expect(screen.getByRole('region',{name:'待试读笔记'})).toHaveTextContent('2 赞 · 1 收藏')
   await recommend()
   const payload=create.mock.calls[0][1]
   expect(payload).toMatchObject({sourceMaterialId:'profile',noteId:'low-performing',panelTask:task})
@@ -229,11 +324,11 @@ it('clears adopted provenance when changing historical notes and explains title-
   const {runNote}=setup(record,historicalProfile)
   await ready()
   fireEvent.click(screen.getByRole('button',{name:'已发布的笔记'}))
-  fireEvent.change(screen.getByLabelText('试读历史笔记'),{target:{value:'low-performing'}})
+  chooseNote('阅读不佳的旧图文')
   await recommend()
   fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
   await screen.findByText('已采用推荐，可继续调整名单。')
-  fireEvent.change(screen.getByLabelText('试读历史笔记'),{target:{value:'title-only'}})
+  chooseNote('仅保留标题的旧图文')
   expect(screen.queryByText('已采用推荐，可继续调整名单。')).not.toBeInTheDocument()
   expect(screen.getByText('只测标题吸引力与阅读期待，写出正文后可再做全文试读。')).toBeVisible()
   expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
@@ -242,16 +337,96 @@ it('clears adopted provenance when changing historical notes and explains title-
   expect(runNote).toHaveBeenCalledWith({sourceMaterialId:'profile',noteId:'title-only'},undefined,task)
 })
 
-it('opens account simulation with real profile context and allows direct manual selection', async()=>{
+it('cancels a new note choice without changing the adopted readers or their local roles',async()=>{
+  const {runNote}=setup(record,historicalProfile,'published_note')
+  await ready()
+  chooseNote('阅读不佳的旧图文')
+  await recommend()
+  fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
+  await screen.findByText('已采用推荐，可继续调整名单。')
+  fireEvent.change(screen.getByLabelText('读者d的本次视角'),{target:{value:'只关心这篇表达是否清楚。'}})
+  fireEvent.click(screen.getByRole('button',{name:'更换笔记'}))
+  const picker=screen.getByRole('dialog',{name:'选择试读笔记'})
+  expect(within(picker).getByRole('radio',{name:'选择笔记：阅读不佳的旧图文'})).toBeChecked()
+  fireEvent.click(within(picker).getByRole('radio',{name:'选择笔记：仅保留标题的旧图文'}))
+  fireEvent.click(within(picker).getByRole('button',{name:'取消'}))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.getByRole('region',{name:'待试读笔记'})).toHaveTextContent('阅读不佳的旧图文')
+  expect(screen.getByLabelText('读者d的本次视角')).toHaveValue('只关心这篇表达是否清楚。')
+  chooseNote('阅读不佳的旧图文')
+  expect(screen.getByText('已采用推荐，可继续调整名单。')).toBeVisible()
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(runNote).toHaveBeenCalledWith({sourceMaterialId:'profile',noteId:'low-performing'},
+    {readerSelectionId:record.id,readerSelectionInputHash:record.inputHash},task,{d:{profile:'只关心这篇表达是否清楚。'}})
+})
+
+it('selects the exact note id when two imported notes have the same title',async()=>{
+  const profile={...historicalProfile,content:JSON.stringify({schemaVersion:'xhs-creator-profile/v1',notes:[
+    {noteId:'one',title:'同名笔记',desc:'第一篇原文',metrics:{},comments:[]},
+    {noteId:'two',title:'同名笔记',desc:'第二篇原文',metrics:{},comments:[]},
+  ]})}
+  const {runNote}=setup(record,profile,'published_note')
+  await ready()
+  fireEvent.click(screen.getByRole('button',{name:'选择笔记'}))
+  const picker=screen.getByRole('dialog',{name:'选择试读笔记'})
+  fireEvent.click(within(picker).getAllByRole('radio',{name:'选择笔记：同名笔记'})[1])
+  fireEvent.click(within(picker).getByRole('button',{name:'完成'}))
+  expect(screen.getByText('第二篇原文')).toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'a'}})
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(runNote).toHaveBeenCalledWith({sourceMaterialId:'profile',noteId:'two'},undefined,task)
+})
+
+it('closes a pending selection and clears adopted context when the profile source changes',async()=>{
+  vi.spyOn(simulatedFanApi,'list').mockResolvedValue(rows)
+  vi.spyOn(readerSelectionApi,'create').mockResolvedValue(record)
+  vi.spyOn(readerSelectionApi,'get').mockResolvedValue(record)
+  const runNote=vi.fn()
+  function Page({profile}:{profile:TextInputAsset}){
+    const fans=useSimulatedFans('w','')
+    return <CreatorSimulationSetup workspaceId="w" positioning="" topics={[]} topic={null} fans={fans}
+      running={false} onSelect={()=>{}} onRun={()=>{}} onAddFans={()=>{}} category="published_note" profile={profile} onRunNote={runNote}/>
+  }
+  const {rerender}=render(<Page profile={historicalProfile}/>);
+  await ready()
+  chooseNote('阅读不佳的旧图文')
+  await recommend()
+  fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
+  await screen.findByText('已采用推荐，可继续调整名单。')
+  fireEvent.click(screen.getByRole('button',{name:'更换笔记'}))
+  rerender(<Page profile={{...historicalProfile,id:'replacement-profile'}}/>);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.getByRole('region',{name:'待试读笔记'})).toHaveTextContent('选择一篇已发布笔记')
+  expect(screen.queryByText('已采用推荐，可继续调整名单。')).not.toBeInTheDocument()
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  chooseNote('阅读不佳的旧图文')
+  fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(runNote).toHaveBeenCalledWith({sourceMaterialId:'replacement-profile',noteId:'low-performing'},undefined,task)
+})
+
+it('requires explicit account note confirmation before recommending or starting with manual readers', async()=>{
   const {runAccount,run,runNote,create}=setup(record,historicalProfile,'account')
   await ready()
   expect(screen.getByRole('region',{name:'待模拟账号'})).toHaveTextContent('创作者')
-  expect(screen.getByText('2 篇已导入笔记')).toBeVisible()
+  expect(screen.getByText('2 篇已导入笔记 · 尚未选择')).toBeVisible()
+  expect(screen.getByRole('button',{name:'推荐读者'})).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'a'}})
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  expect(screen.queryByText(/12 篇/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  fireEvent.focus(screen.getByRole('button',{name:'模拟范围说明'}))
+  expect(screen.getByRole('tooltip')).toHaveTextContent('从所选笔记出发，聊聊为什么关注、期待什么，以及哪些方向值得持续讲。')
+  fireEvent.keyDown(document,{key:'Escape'})
   expect(screen.queryByLabelText('模拟选题')).not.toBeInTheDocument()
   expect(screen.queryByRole('button',{name:'已发布的笔记'})).not.toBeInTheDocument()
-  fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'a'}})
+  chooseAccountNotes()
+  expect(screen.getByText('已选 2 / 2 篇笔记')).toBeVisible()
+  fireEvent.focus(screen.getByRole('button',{name:'账号笔记范围说明'}))
+  expect(screen.getByRole('tooltip')).toHaveTextContent('只使用你确认的笔记，每篇都会参与；较长文字每篇最多节选 1200 字。')
+  fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
   fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
-  expect(runAccount).toHaveBeenCalledWith('profile',undefined,task)
+  expect(runAccount).toHaveBeenCalledWith({sourceMaterialId:'profile',selectedNoteIds:['low-performing','title-only']},undefined,task)
   expect(run).not.toHaveBeenCalled()
   expect(runNote).not.toHaveBeenCalled()
   expect(create).not.toHaveBeenCalled()
@@ -259,14 +434,154 @@ it('opens account simulation with real profile context and allows direct manual 
 
 it('retrieves account readers without pretending that the account is a topic', async()=>{
   const {create,runAccount}=setup(record,historicalProfile,'account')
+  chooseAccountNotes(['阅读不佳的旧图文'])
   await recommend()
-  expect(create).toHaveBeenCalledWith('w',expect.objectContaining({accountProfileId:'profile',desiredCount:3}))
+  const selection={sourceMaterialId:'profile',selectedNoteIds:['low-performing']}
+  expect(create).toHaveBeenCalledWith('w',expect.objectContaining({accountNoteSelection:selection,desiredCount:3}))
   expect(create.mock.calls[0][1]).not.toHaveProperty('topicId')
   expect(create.mock.calls[0][1]).not.toHaveProperty('sourceMaterialId')
+  expect(create.mock.calls[0][1]).not.toHaveProperty('accountProfileId')
   fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
   await screen.findByText('已采用推荐，可继续调整名单。')
   fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
-  expect(runAccount).toHaveBeenCalledWith('profile',{readerSelectionId:record.id,readerSelectionInputHash:record.inputHash},task)
+  expect(runAccount).toHaveBeenCalledWith(selection,{readerSelectionId:record.id,readerSelectionInputHash:record.inputHash},task)
+})
+
+it('suggests only the newest ten notes inside the account picker without confirming them automatically',async()=>{
+  const profile={...historicalProfile,content:JSON.stringify({notes:Array.from({length:12},(_,index)=>({
+    noteId:`note-${index}`,title:`笔记 ${index}`,desc:'正文',publishedAt:`2026-10-${String(index+1).padStart(2,'0')}T08:00:00Z`,metrics:{liked:index},comments:[],
+  }))})}
+  const {create,runAccount}=setup(record,profile,'account')
+  await ready()
+  const picker=openAccountNotePicker()
+  expect(within(picker).getByRole('status')).toHaveTextContent('已选 10 / 12 条笔记')
+  expect(within(picker).getByRole('checkbox',{name:'选择笔记：笔记 0'})).not.toBeChecked()
+  expect(within(picker).getByRole('checkbox',{name:'选择笔记：笔记 11'})).toBeChecked()
+  expect(within(picker).getByRole('button',{name:'全选当前范围'})).toBeEnabled()
+  expect(within(picker).getByRole('button',{name:'反选当前范围'})).toBeEnabled()
+  fireEvent.click(within(picker).getByRole('button',{name:'取消'}))
+  expect(screen.getByText('12 篇已导入笔记 · 尚未选择')).toBeVisible()
+  expect(screen.getByRole('button',{name:'推荐读者'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  expect(create).not.toHaveBeenCalled()
+  expect(runAccount).not.toHaveBeenCalled()
+})
+
+it('cancels a changed account selection without discarding the adopted recommendation or local roles',async()=>{
+  const {runAccount}=setup(record,historicalProfile,'account')
+  chooseAccountNotes()
+  await recommend()
+  fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
+  await screen.findByText('已采用推荐，可继续调整名单。')
+  fireEvent.change(screen.getByLabelText('读者d的本次视角'),{target:{value:'关注账号的长期方向。'}})
+  const picker=openAccountNotePicker()
+  fireEvent.click(within(picker).getByRole('checkbox',{name:'选择笔记：仅保留标题的旧图文'}))
+  expect(within(picker).getByRole('status')).toHaveTextContent('已选 1 / 2 条笔记')
+  fireEvent.click(within(picker).getByRole('button',{name:'取消'}))
+  expect(screen.getByText('已选 2 / 2 篇笔记')).toBeVisible()
+  expect(screen.getByText('已采用推荐，可继续调整名单。')).toBeVisible()
+  expect(screen.getByLabelText('读者d的本次视角')).toHaveValue('关注账号的长期方向。')
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(runAccount).toHaveBeenCalledWith({sourceMaterialId:'profile',selectedNoteIds:['low-performing','title-only']},
+    {readerSelectionId:record.id,readerSelectionInputHash:record.inputHash},task,{d:{profile:'关注账号的长期方向。'}})
+})
+
+it('keeps adoption and local roles when the same account note set is confirmed in a different order',async()=>{
+  const {get,runAccount}=setup(record,historicalProfile,'account')
+  chooseAccountNotes()
+  await recommend()
+  fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
+  await screen.findByText('已采用推荐，可继续调整名单。')
+  fireEvent.change(screen.getByLabelText('读者d的本次视角'),{target:{value:'关注账号的长期方向。'}})
+  const lookups=get.mock.calls.length
+  chooseAccountNotes(['仅保留标题的旧图文','阅读不佳的旧图文'])
+  expect(screen.getByText('已采用推荐，可继续调整名单。')).toBeVisible()
+  expect(screen.getByLabelText('读者d的本次视角')).toHaveValue('关注账号的长期方向。')
+  expect(get).toHaveBeenCalledTimes(lookups)
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(runAccount).toHaveBeenCalledWith({sourceMaterialId:'profile',selectedNoteIds:['low-performing','title-only']},
+    {readerSelectionId:record.id,readerSelectionInputHash:record.inputHash},task,{d:{profile:'关注账号的长期方向。'}})
+})
+
+it('clears adopted account provenance and local roles when the confirmed note set changes',async()=>{
+  const {runAccount}=setup(record,historicalProfile,'account')
+  chooseAccountNotes()
+  await recommend()
+  fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
+  await screen.findByText('已采用推荐，可继续调整名单。')
+  fireEvent.change(screen.getByLabelText('读者d的本次视角'),{target:{value:'关注账号的长期方向。'}})
+  chooseAccountNotes(['阅读不佳的旧图文'])
+  expect(screen.getByText('已选 1 / 2 篇笔记')).toBeVisible()
+  expect(screen.queryByText('已采用推荐，可继续调整名单。')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('读者d的本次视角')).toHaveValue(rows[3].editable.profile)
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(runAccount).toHaveBeenCalledWith({sourceMaterialId:'profile',selectedNoteIds:['low-performing']},undefined,task)
+})
+
+it('requires a new account range and clears adopted roles after replacing the source profile',async()=>{
+  const {rerenderProfile,runAccount}=setup(record,historicalProfile,'account')
+  chooseAccountNotes()
+  await recommend()
+  fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
+  await screen.findByText('已采用推荐，可继续调整名单。')
+  fireEvent.change(screen.getByLabelText('读者d的本次视角'),{target:{value:'关注账号的长期方向。'}})
+  openAccountNotePicker()
+  rerenderProfile({...historicalProfile,id:'replacement-profile'})
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.getByText('2 篇已导入笔记 · 尚未选择')).toBeVisible()
+  expect(screen.queryByText('已采用推荐，可继续调整名单。')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('读者d的本次视角')).toHaveValue(rows[3].editable.profile)
+  expect(screen.getByRole('button',{name:'推荐读者'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  chooseAccountNotes(['阅读不佳的旧图文'])
+  fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(runAccount).toHaveBeenCalledWith({sourceMaterialId:'replacement-profile',selectedNoteIds:['low-performing']},undefined,task)
+})
+
+it('marks a deleted selected account note as stale and blocks use until the range is confirmed again',async()=>{
+  const {rerenderProfile,runAccount}=setup(record,historicalProfile,'account')
+  await ready()
+  chooseAccountNotes()
+  fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'a'}})
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeEnabled()
+  const payload=JSON.parse(historicalProfile.content)
+  rerenderProfile({...historicalProfile,content:JSON.stringify({...payload,notes:payload.notes.slice(0,1)})})
+  expect(screen.getByRole('alert')).toHaveTextContent('已选笔记有变动，范围已过期，请重新选择。')
+  expect(screen.getByRole('button',{name:'推荐读者'})).toBeDisabled()
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  expect(runAccount).not.toHaveBeenCalled()
+  chooseAccountNotes()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  expect(screen.getByText('已选 1 / 1 篇笔记')).toBeVisible()
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
+  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(runAccount).toHaveBeenCalledWith({sourceMaterialId:'profile',selectedNoteIds:['low-performing']},undefined,task)
+})
+
+it('rechecks account recommendations only when selected note titles or bodies change',async()=>{
+  const {get,rerenderProfile}=setup(record,historicalProfile,'account')
+  chooseAccountNotes(['阅读不佳的旧图文'])
+  await recommend()
+  fireEvent.click(screen.getByRole('button',{name:'使用这组'}))
+  await screen.findByText('已采用推荐，可继续调整名单。')
+  const lookups=get.mock.calls.length
+  const payload=JSON.parse(historicalProfile.content)
+  payload.notes[1].title='未选笔记的新标题'
+  payload.notes[1].desc='未选笔记的新正文'
+  rerenderProfile({...historicalProfile,updatedAt:'v2',content:JSON.stringify(payload)})
+  expect(get).toHaveBeenCalledTimes(lookups)
+  expect(screen.getByText('已采用推荐，可继续调整名单。')).toBeVisible()
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeEnabled()
+  get.mockResolvedValue({...record,freshness:{status:'stale',reasons:['target_changed']}})
+  payload.notes[0].desc='已选笔记的新正文'
+  rerenderProfile({...historicalProfile,updatedAt:'v3',content:JSON.stringify(payload)})
+  await waitFor(()=>expect(get).toHaveBeenCalledTimes(lookups+1))
+  await screen.findByText('内容或读者已变化，请重新推荐，或继续手动选择。')
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
 })
 
 it('keeps one-off reader edits in the simulation request and clears them on changing the target', async()=>{
@@ -291,8 +606,9 @@ it('does not revive one-off edits after removing and reselecting a reader', asyn
   const {runNote}=setup(record,historicalProfile,'published_note')
   await ready()
   expect(screen.queryByLabelText('模拟选题')).not.toBeInTheDocument()
-  expect(screen.getByText('这次复盘用于下一篇同类内容，不会修改已发布的原文。')).toBeVisible()
-  fireEvent.change(screen.getByLabelText('试读历史笔记'),{target:{value:'low-performing'}})
+  fireEvent.mouseEnter(screen.getByRole('button',{name:'模拟范围说明'}))
+  expect(screen.getByRole('tooltip')).toHaveTextContent('这次复盘用于下一篇同类内容，不会修改已发布的原文。')
+  chooseNote('阅读不佳的旧图文')
   fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'a'}})
   fireEvent.change(screen.getByLabelText('读者a的本次视角'),{target:{value:'只看本次修改。'}})
   fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:''}})
@@ -300,6 +616,21 @@ it('does not revive one-off edits after removing and reselecting a reader', asyn
   expect(screen.getByLabelText('读者a的本次视角')).toHaveValue(rows[0].editable.profile)
   fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
   expect(runNote).toHaveBeenCalledWith({sourceMaterialId:'profile',noteId:'low-performing'},undefined,task)
+})
+
+it('explains mutual replies without toggling the checkbox or nesting the hint inside its label',async()=>{
+  setup()
+  await ready()
+  const checkbox=screen.getByRole('checkbox',{name:'互相回应'})
+  const hint=screen.getByRole('button',{name:'互相回应说明'})
+  expect(checkbox).toBeChecked()
+  expect(hint.closest('label')).toBeNull()
+  fireEvent.focus(hint)
+  expect(screen.getByRole('tooltip')).toHaveTextContent('先各自表达，再回应其他人的公开留言。')
+  expect(checkbox).toBeChecked()
+  fireEvent.click(checkbox)
+  expect(checkbox).not.toBeChecked()
+  expect(screen.getByRole('tooltip')).toHaveTextContent('只做独立表达，省去互相回应。')
 })
 
 it('marks adjusted recommended roles and prevents a blank local override before submitting', async()=>{

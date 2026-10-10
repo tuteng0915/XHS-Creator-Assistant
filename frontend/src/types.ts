@@ -401,6 +401,11 @@ export interface SimulationRunSummary {
   updatedAt: string
 }
 
+export interface AccountNoteSelection {
+  sourceMaterialId: string
+  selectedNoteIds: string[]
+}
+
 export interface PanelTask {
   protocolVersion: 'panel/v1'
   readingMode: 'natural' | 'guided'

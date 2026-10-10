@@ -6,7 +6,7 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from app.errors import ConflictError, NotFoundError, ValidationError
-from app.models import APIModel, PanelTask
+from app.models import AccountNoteSelection, APIModel, PanelTask
 from app.repositories.drafts import DraftRepository
 from app.repositories.simulated_fans import SimulatedFanRepository
 from app.repositories.topics import TopicRepository
@@ -32,6 +32,7 @@ class ReaderSelectionRequest(APIModel):
     source_material_id: str | None = Field(default=None, min_length=1)
     note_id: str | None = Field(default=None, min_length=1)
     account_profile_id: str | None = Field(default=None, min_length=1)
+    account_note_selection: AccountNoteSelection | None = None
     desired_count: int = Field(default=3, ge=1, strict=True)
     panel_task: PanelTask | None = None
 
@@ -50,7 +51,7 @@ class ReaderSelectionRequest(APIModel):
         if bool(self.source_material_id) != bool(self.note_id):
             raise ValueError("请选择完整的笔记来源")
         targets = (self.topic_id, self.draft_id, self.manual_topic, self.note_id,
-                   self.account_profile_id)
+                   self.account_profile_id, self.account_note_selection)
         if sum(value is not None for value in targets) != 1:
             raise ValueError("请选择一个账号、选题、草稿、历史笔记或手动标题")
         return self
@@ -63,6 +64,8 @@ class ReaderSelectionRequest(APIModel):
             exclude.update({"note_id", "source_material_id"})
         if self.account_profile_id is None:
             exclude.add("account_profile_id")
+        if self.account_note_selection is None:
+            exclude.add("account_note_selection")
         return json.dumps(self.model_dump(by_alias=True, exclude=exclude),
                           ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -117,6 +120,13 @@ class ReaderSelectionRequestService:
         account = None
         if payload.account_profile_id:
             account = account_simulation_target(c, workspace_id, payload.account_profile_id)
+            topic = account_reader_topic(account)
+        if payload.account_note_selection is not None:
+            selection = payload.account_note_selection
+            account = account_simulation_target(
+                c, workspace_id, selection.source_material_id,
+                selected_note_ids=selection.selected_note_ids,
+            )
             topic = account_reader_topic(account)
         if payload.note_id:
             note = saved_note_target(c, workspace_id, payload.source_material_id, payload.note_id)

@@ -3,7 +3,7 @@ import { simulationCategoryFor } from '../simulationChat'
 import './SimulationHub.css'
 
 const SIMULATION_CATEGORIES: Array<{id: SimulationCategory; name: string; description: string}> = [
-  {id: 'account', name: '账号级', description: '了解读者对整个账号的期待，找到持续内容方向。'},
+  {id: 'account', name: '账号级', description: '从选中的笔记出发，了解读者对账号的期待与内容方向。'},
   {id: 'published_note', name: '已发布笔记级', description: '复盘已有笔记，为下一篇同类内容积累经验。'},
   {id: 'creation', name: '创作级', description: '试读正在创作的选题或稿件，讨论本篇怎么改。'},
 ]

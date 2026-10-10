@@ -1,4 +1,5 @@
 import type { SimulationRun } from '../types'
+import { InfoHint } from './InfoHint'
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -39,7 +40,7 @@ export function SimulationReaderSummary({ run }: {run: SimulationRun}) {
       : selection.source === 'manual' ? '手动选择' : '旧记录未保存选择方式'
 
   return <section className="simulation-reader-summary" aria-label="本次读者选择">
-    <div className="account-performance-heading"><h3>本次读者</h3><span className="muted">{mode}</span></div>
+    <div className="account-performance-heading"><div className="reader-card-heading"><h3>本次读者</h3><InfoHint label="读者名单说明">按本次保存的名单展示，反应是否完成见下方结果。</InfoHint></div><span className="muted">{mode}</span></div>
     <div className="account-performance-grid">
       <div className="account-performance-group">
         <b>当时推荐</b>
@@ -64,6 +65,5 @@ export function SimulationReaderSummary({ run }: {run: SimulationRun}) {
           : <p className="muted">未保存参与者名单</p>}
       </div>
     </div>
-    <small className="muted">按本次保存的名单展示，反应是否完成见下方结果。</small>
   </section>
 }

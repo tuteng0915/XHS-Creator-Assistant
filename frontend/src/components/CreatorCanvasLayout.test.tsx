@@ -50,6 +50,16 @@ it('places dialogue before the draft in DOM order and resizes the left dialogue 
   expect(divider).toHaveAttribute('aria-valuenow', '70')
 })
 
+it('keeps draft instructions in a focusable hint while save status remains visible', () => {
+  render(<CreatorCanvasPage {...props} />)
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  expect(screen.queryByText('选中文字，局部改写。')).not.toBeInTheDocument()
+  expect(screen.getByText('已保存')).toBeVisible()
+  act(() => screen.getByRole('button', {name:'稿件编辑说明'}).focus())
+  expect(screen.getByRole('tooltip')).toHaveTextContent('确认发送后才生成建议')
+  expect(screen.getByLabelText('创作正文')).toHaveValue(topic.body)
+})
+
 it('uses the same left-pane percentage for pointer resizing and clamps both ends', () => {
   vi.stubGlobal('PointerEvent', MouseEvent)
   render(<CreatorCanvasPage {...props} />)

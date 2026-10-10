@@ -8,7 +8,7 @@ from uuid import uuid4
 from pydantic import Field, model_validator
 from pydantic import ValidationError as SchemaError
 
-from app.errors import NotFoundError, ValidationError
+from app.errors import ConflictError, NotFoundError, ValidationError
 from app.models import APIModel, ModelOperation
 from app.services.audience_evidence import (
     AUDIENCE_METHOD_VERSION,
@@ -27,7 +27,21 @@ from app.services.simulated_fans import FanDefinition
 
 class AudienceAnalysisCreate(APIModel):
     source_material_id: str
-    scope: Literal["recent_10", "last_7_days", "last_30_days", "last_90_days", "all"] = "recent_10"
+    scope: Literal[
+        "recent_10", "most_liked_10", "most_engaged_10",
+        "last_7_days", "last_30_days", "last_90_days", "all", "selected_notes",
+    ] = "recent_10"
+    selected_note_ids: list[str] | None = Field(default=None, min_length=1, max_length=10000)
+    selection_scope: Literal[
+        "recent_10", "most_liked_10", "most_engaged_10",
+        "last_7_days", "last_30_days", "last_90_days", "all",
+    ] | None = None
+
+    @model_validator(mode="after")
+    def explicit_scope_requires_ids(self):
+        if self.scope == "selected_notes" and not self.selected_note_ids:
+            raise ValueError("请先选择本次分析的笔记。")
+        return self
 
 
 class AudienceGroup(FanDefinition):
@@ -137,6 +151,35 @@ def validate_audience_output(output: dict, context: dict) -> tuple[dict, dict]:
     return result.grounded_result(context), diagnostics
 
 
+def frozen_audience_note_ids(raw_snapshot: str) -> set[str] | None:
+    """Read saved identities without recomputing an old scope against current data."""
+    try:
+        snapshot = json.loads(raw_snapshot)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(snapshot, dict):
+        return None
+
+    def stable_ids(values):
+        if not isinstance(values, list) or not values:
+            return None
+        if not all(isinstance(value, str) and value for value in values):
+            return None
+        ids = set(values)
+        return ids if len(ids) == len(values) else None
+
+    saved_scope = snapshot.get("scope")
+    scoped_ids = (stable_ids(saved_scope.get("selectedNoteIds"))
+                  if isinstance(saved_scope, dict) else None)
+    notes = snapshot.get("notes")
+    note_ids = (stable_ids([note.get("noteId") for note in notes])
+                if isinstance(notes, list) and all(isinstance(note, dict) for note in notes)
+                else None)
+    if scoped_ids is not None and note_ids is not None and scoped_ids != note_ids:
+        return None
+    return scoped_ids if scoped_ids is not None else note_ids
+
+
 class AudienceAnalysisService:
     """Product-specific persistent analysis; requests observe an independent task."""
 
@@ -154,16 +197,26 @@ class AudienceAnalysisService:
             ).fetchone()
             if not source:
                 raise ValidationError("请先选择当前账号的创作者档案")
+            profile, scope = scope_creator_profile(
+                json.loads(source["text_content"]),
+                (payload.selection_scope or "all")
+                if payload.scope == "selected_notes" else payload.scope,
+                selected_note_ids=payload.selected_note_ids,
+            )
             active = c.execute(
-                "SELECT id FROM audience_analyses WHERE workspace_id=? "
+                "SELECT id,source_material_id,input_snapshot_json "
+                "FROM audience_analyses WHERE workspace_id=? "
                 "AND status IN ('pending','running')",
                 (workspace_id,),
             ).fetchone()
             if active:
-                return self.get(active["id"])
-            profile, scope = scope_creator_profile(
-                json.loads(source["text_content"]), payload.scope
-            )
+                same_source = active["source_material_id"] == source["id"]
+                same_notes = frozen_audience_note_ids(active["input_snapshot_json"]) == set(
+                    scope["selectedNoteIds"]
+                )
+                if same_source and same_notes:
+                    return self.get(active["id"])
+                raise ConflictError("当前账号已有其他笔记范围的受众分析正在进行，请完成后再分析。")
             snapshot = {
                 "scope": scope,
                 "creator": profile.get("creator", {}),

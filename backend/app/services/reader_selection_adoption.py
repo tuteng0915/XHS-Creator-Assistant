@@ -29,9 +29,11 @@ def selection_adoption_snapshot(c, database, workspace_id: str, payload: Simulat
     if request is None:
         raise ConflictError("旧推荐缺少来源，不能核验，请重新推荐或手动选择")
     if (request.topic_id, request.draft_id, request.manual_topic,
-        request.source_material_id, request.note_id, request.account_profile_id) != (
+        request.source_material_id, request.note_id, request.account_profile_id,
+        request.account_note_selection) != (
         payload.topic_id, payload.draft_id, payload.manual_topic,
         payload.source_material_id, payload.note_id, payload.account_profile_id,
+        payload.account_note_selection,
     ):
         raise ConflictError("推荐不属于当前分析对象，请重新推荐或手动选择")
     if request.panel_task != payload.panel_task:

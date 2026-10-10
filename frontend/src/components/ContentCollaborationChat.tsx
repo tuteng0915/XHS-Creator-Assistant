@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { agentConversationApi } from '../api'
 import type { AgentConversation, Topic } from '../types'
 import { collaborationCandidates, collaborationSummary, contentCollaborationApi, creatorContextSignature, emptyCreatorContext } from '../contentCollaboration'
+import { readCreatorMessage, writeCreatorCache } from '../creatorDraftCache'
 import type { CollaborationCandidate, CollaborationComposeIntent, CollaborationRole, CollaborationSession, CollaborationSummary, CreatorContextSelection, WritingFocusRequest } from '../contentCollaboration'
 import { CreatorEditSnapshot } from './CreatorEditSnapshot'
 import { PendingSuggestions } from './PendingSuggestions'
@@ -14,13 +15,16 @@ const candidateNames = {evidence: '可用材料', open_question: '等你补充',
 const isRunning = (session: CollaborationSession | null) => !!session && ['queued', 'running'].includes(session.executionStatus)
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
-export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSend, onActivityChange, onPreview, composeIntent}: {
+export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSend, onActivityChange, onPreview, composeIntent, onDraftStorageIssue}: {
   workspaceId: string; topic: Topic; blocked: boolean
   beforeSend: () => Promise<{topic: Topic; assertCurrent: () => void; writingFocus?: WritingFocusRequest}>
   onActivityChange: (busy: boolean) => void
   onPreview: (candidate: CollaborationCandidate) => void
   composeIntent?: CollaborationComposeIntent | null
+  onDraftStorageIssue?: (unavailable: boolean) => void
 }) {
+  const [initialCache] = useState(() => readCreatorMessage(workspaceId, topic.id))
+  const [cacheUnavailable, setCacheUnavailable] = useState(initialCache.unavailable)
   const [session, setSession] = useState<CollaborationSession | null>(null)
   const [legacy, setLegacy] = useState<AgentConversation[]>([])
   const [teamHistory, setTeamHistory] = useState<CollaborationSummary[]>([])
@@ -29,8 +33,8 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
   const [teamError, setTeamError] = useState('')
   const [ready, setReady] = useState(false)
   const [loadVersion, setLoadVersion] = useState(0)
-  const [message, setMessage] = useState('')
-  const [selection, setSelection] = useState<CreatorContextSelection>(emptyCreatorContext)
+  const [message, setMessage] = useState(initialCache.value?.message || '')
+  const [selection, setSelection] = useState<CreatorContextSelection>(() => initialCache.value?.selection || emptyCreatorContext())
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [pollPaused, setPollPaused] = useState(false)
@@ -40,7 +44,7 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
   const sendLock = useRef(false)
   const creationKey = useRef(crypto.randomUUID())
   const requestRef = useRef<{content: string; focusSignature: string; contextSignature: string; key: string} | null>(null)
-  const selectionTouched = useRef(false)
+  const selectionTouched = useRef(!!initialCache.value)
   const composedId = useRef('')
   const focusedComposeId = useRef('')
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -50,6 +54,17 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
   const referenceChanged = !!session?.messages.length && creatorContextSignature(selection) !== creatorContextSignature(session.creatorContextSelection || emptyCreatorContext())
 
   useEffect(() => {active.current = true; return () => {active.current = false}}, [])
+  useEffect(() => {
+    setCacheUnavailable(!writeCreatorCache('message', workspaceId, topic.id, message ? {version: 1, message, selection} : null))
+  }, [workspaceId, topic.id, message, selection])
+  useEffect(() => {onDraftStorageIssue?.(cacheUnavailable && !!message)}, [cacheUnavailable, message, onDraftStorageIssue])
+  useEffect(() => () => onDraftStorageIssue?.(false), [onDraftStorageIssue])
+  useEffect(() => {
+    if (!message) return
+    const guard = (event: BeforeUnloadEvent) => {event.preventDefault(); event.returnValue = ''}
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [message])
   useEffect(() => {
     if (!composeIntent || composeIntent.id === composedId.current) return
     composedId.current = composeIntent.id
@@ -166,8 +181,13 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
   function retryLastInstruction() {
     const previous = [...(session?.messages || [])].reverse().find(item => item.sender === 'creator')
     if (!previous) return
-    setMessage(previous.content)
+    appendInstruction(previous.content)
     requestRef.current = null
+  }
+
+  function appendInstruction(text: string) {
+    setMessage(value => !value.trim() ? text : value.trim() === text.trim() ? value : `${value}\n\n${text}`)
+    setComposeFocusRequest(crypto.randomUUID())
   }
 
   return <section className="canvas-chat collaboration-chat" aria-label="创作对话区">
@@ -177,8 +197,8 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
     </header>
     <div ref={transcriptRef} className="canvas-messages collaboration-messages" aria-label="创作对话" aria-live="polite" aria-relevant="additions text">
       {!session?.messages.length && <div className="collaboration-empty"><div className="collaboration-quick-actions">
-        <button type="button" disabled={running || sending} onClick={() => {setMessage('围绕这篇内容，帮我找一个清晰、有辨识度的表达角度。'); composerRef.current?.focus()}}>先聊角度</button>
-        <button type="button" disabled={running || sending} onClick={() => {setMessage('请根据当前稿件和我选择的参考，起草一版正文；确实缺少关键经历时先问我一个问题。'); composerRef.current?.focus()}}>帮我起草</button>
+        <button type="button" disabled={running || sending} onClick={() => appendInstruction('围绕这篇内容，帮我找一个清晰、有辨识度的表达角度。')}>先聊角度</button>
+        <button type="button" disabled={running || sending} onClick={() => appendInstruction('请根据当前稿件和我选择的参考，起草一版正文；确实缺少关键经历时先问我一个问题。')}>帮我起草</button>
       </div></div>}
       {session?.messages.map((item, itemIndex) => <article key={item.id} className={`collaboration-message ${item.sender === 'creator' ? 'is-creator' : ''}`}>
         {item.sender !== 'creator' && <ReaderAvatar id="creator-writing-assistant" name="创作助手" size={30} />}
@@ -191,7 +211,7 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
               <h3>{candidate.title}</h3><p>{candidate.body}</p>
               {['outline', 'copy_option'].includes(candidate.kind) && <button type="button" disabled={blocked || sending || running || candidate.focusUnavailable} onClick={() => onPreview(candidate)}>{candidate.writingFocus?.selection ? '对比并修改这一段' : '预览并编辑这条建议'}</button>}
               {candidate.focusUnavailable && <p>这条建议的原文定位不完整，不能直接替换。请重新选择段落后发送。</p>}
-              {candidate.kind === 'open_question' && <button type="button" disabled={sending || running} onClick={() => {setMessage(`关于“${candidate.title}”：`); composerRef.current?.focus()}}>补充说明</button>}
+              {candidate.kind === 'open_question' && <button type="button" disabled={sending || running} onClick={() => appendInstruction(`关于“${candidate.title}”：`)}>补充说明</button>}
             </section>)}
           </div>
         </div>
@@ -202,7 +222,9 @@ export function ContentCollaborationChat({workspaceId, topic, blocked, beforeSen
     {error && <div className="collaboration-error" role="alert"><p>{error}</p>{(!ready || pollPaused) && <button type="button" onClick={() => {setPollPaused(false); setError(''); setLoadVersion(value => value + 1)}}>重新载入进度</button>}</div>}
     <form className="collaboration-composer" onSubmit={event => {event.preventDefault(); void send()}}>
       <textarea ref={composerRef} aria-label="给创作助手的消息" maxLength={8000} value={message} onChange={event => setMessage(event.target.value)} placeholder="例如：开头更像我的口吻，保留第二段的经历。" />
-      <div><small>发送时保存当前稿件。</small><button className="primary" disabled={blocked || !ready || sending || running || !message.trim()}>{sending ? '正在提交…' : running ? '正在创作…' : '发送'}</button></div>
+      {cacheUnavailable && !!message && !onDraftStorageIssue && <p role="alert">本页无法暂存，请在离开前复制未发送的消息。</p>}
+      {message.trim().length > 8000 && <p role="alert">已保留完整输入，请精简至 8000 字以内再发送。</p>}
+      <div><small>发送时保存当前稿件。</small><button className="primary" disabled={blocked || !ready || sending || running || !message.trim() || message.trim().length > 8000}>{sending ? '正在提交…' : running ? '正在创作…' : '发送'}</button></div>
     </form>
     {!!teamHistory.length && <details className="collaboration-legacy" onToggle={event => {if (event.currentTarget.open && !teamHistoryId) setTeamHistoryId(teamHistory[0].id)}}><summary>旧版多人协作（只读）</summary><select aria-label="旧协作记录" value={teamHistoryId} onChange={event => setTeamHistoryId(event.target.value)}><option value="">选择记录</option>{teamHistory.map(row => <option key={row.id} value={row.id}>{row.title}</option>)}</select>{teamError && <p role="alert">{teamError}</p>}{teamHistoryId && !teamRecord && !teamError && <p>正在读取…</p>}{teamRecord?.messages.map(item => <article key={item.id}><small>{roleNames[item.sender]}</small><p>{item.content}</p></article>)}</details>}
     {!!legacy.length && <details className="collaboration-legacy"><summary>旧版创作对话（只读）</summary>{legacy.map(chat => <div key={chat.id}>{chat.messages.map(item => <article key={item.id}><small>{item.role === 'user' ? '你' : '旧版创作助手'}</small><p>{item.content}</p>{item.role === 'assistant' && <CreatorEditSnapshot metadata={item.modelMetadata} workspaceId={workspaceId} topicId={topic.id} />}<PendingSuggestions value={item.modelMetadata.pendingSuggestions} /></article>)}</div>)}</details>}

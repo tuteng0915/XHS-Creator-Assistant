@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type Ref } from 'react'
+import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from 'react'
 import { simulatedFanApi } from '../api'
 import type { FanDefinition, FanVoiceTemplate, SimulatedFan } from '../types'
 import { CreatorDialog } from './CreatorDialog'
 import { ReaderAvatar } from './ReaderAvatar'
+import { InfoHint } from './InfoHint'
 
 type FanEditorHandle = { requestSwitch: (id: string) => void }
 
@@ -111,7 +112,7 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
     } catch(e) {setVoiceError(String(e))} finally {setVoiceBusy(false)}
   }
   const fields: [Exclude<keyof FanDefinition,'interests'>,string][] = [['name','名称'],['profile','阅读视角'],['coreConcern','具体需求'],['contentPreference','内容偏好'],['expressionStyle','表达习惯']]
-  return <><h2>{saved.editable.name}</h2><p className="muted">模拟角色，不代表某位真实粉丝。编辑内容属于人工设定。</p>
+  return <><h2>{saved.editable.name} <InfoHint label="模拟角色说明">模拟角色，不代表某位真实粉丝。编辑内容属于人工设定。</InfoHint></h2>
     {fan.original.origin === 'curated_preset' && <p className="muted">依据已保存评论预置整理，非模型接口分析；角色偏好和表达习惯是模拟假设。</p>}
     {fields.map(([key,label]) => <Fragment key={key}><label>{label}{key === 'name'
       ? <input aria-label={label} disabled={busy || voiceBusy} value={draft[key]} onChange={e => setDraft({...draft,[key]:e.target.value})} />
@@ -165,16 +166,18 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
   </>
 }
 
-export function SimulatedFanPicker({rows,slots,onSlotChange,onAddSlot,onRemoveSlot}:{
+export function SimulatedFanPicker({rows,slots,onSlotChange,onAddSlot,onRemoveSlot,renderSelected}:{
   rows:SimulatedFan[]; slots:string[]; onSlotChange:(index:number,id:string)=>void;
   onAddSlot:()=>void; onRemoveSlot:(index:number)=>void;
+  renderSelected?:(fan:SimulatedFan)=>ReactNode;
 }) {
   const active = rows.filter(f => f.status === 'active')
-  return <fieldset className="simulated-fan-picker"><legend>模拟粉丝</legend>
+  return <fieldset className={`simulated-fan-picker${renderSelected?' simulation-reader-list':''}`} aria-label="编辑参与读者">{!renderSelected&&<legend>模拟粉丝</legend>}
     {slots.map((id,index) => {
       const selected = active.find(f => f.id === id)
       return <div className="simulated-fan-slot" key={index}>
       <div className="simulated-fan-slot-controls">
+      {renderSelected && selected && <ReaderAvatar id={`${selected.sourceAnalysisId}:${selected.sourceGroupId}`} name={selected.editable.name} size={28}/>}
       <label htmlFor={`simulated-fan-slot-${index}`}>第 {index + 1} 位</label>
       <select id={`simulated-fan-slot-${index}`} aria-label={`第 ${index + 1} 位模拟粉丝`} value={id} onChange={event => onSlotChange(index,event.target.value)}>
         <option value="">选择模拟粉丝</option>
@@ -183,7 +186,7 @@ export function SimulatedFanPicker({rows,slots,onSlotChange,onAddSlot,onRemoveSl
       </select>
       {index >= 3 && <button type="button" aria-label={`移除第 ${index + 1} 位`} onClick={() => onRemoveSlot(index)}>移除</button>}
       </div>
-      {selected && <FanPreview key={selected.id} fan={selected.editable} />}
+      {selected && (renderSelected ? renderSelected(selected) : <FanPreview key={selected.id} fan={selected.editable} />)}
     </div>})}
     <button type="button" className="simulated-fan-add" onClick={onAddSlot}>＋ 新增</button>
   </fieldset>

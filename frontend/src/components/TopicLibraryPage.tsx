@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { CreatorDialog } from './CreatorDialog'
 import { PendingSuggestions } from './PendingSuggestions'
 
@@ -11,8 +11,9 @@ type TopicFilter = TopicSourceWorkflow | 'all'
 type Props = {
   publicMode?: boolean
   busy?: boolean
+  onLeaveGuardChange?: (message: string | null) => void
   onOpenCanvas?: (topic: Topic) => void
-  onTogglePinned?: (topic: Topic) => void
+  onTogglePinned?: (topic: Topic) => void | Promise<unknown>
   onSimulateTopic?: (topic: Topic) => void
   visibleTopics: Topic[]
   selectedTopic: Topic | null
@@ -27,10 +28,10 @@ type Props = {
   onSaveManualTopic: (event: FormEvent<HTMLFormElement>) => void | Promise<boolean>
   onTopicFilterChange: (value: TopicFilter) => void
   onSelectTopicRow: (topic: Topic) => void
-  onSelectCurrentTopic: (topic: Topic) => void
+  onSelectCurrentTopic: (topic: Topic) => void | Promise<unknown>
   onGenerateBrief: (topic: Topic) => void
   onGenerateDraft: (topic: Topic) => void
-  onArchiveTopic: (topic: Topic) => void
+  onArchiveTopic: (topic: Topic) => void | Promise<unknown>
   onTopicDraftChange: (draft: { title: string; angle: string; body?: string }) => void
   onSaveTopicEdits: () => void
 }
@@ -49,6 +50,7 @@ function topicStatusLabel(status: Topic['status']): string {
 export function TopicLibraryPage({
   publicMode = false,
   busy = false,
+  onLeaveGuardChange,
   onOpenCanvas,
   onTogglePinned,
   onSimulateTopic,
@@ -73,8 +75,30 @@ export function TopicLibraryPage({
   onSaveTopicEdits,
 }: Props) {
   const [creating, setCreating] = useState(false)
+  const [more, setMore] = useState(false)
+  const [confirmArchive, setConfirmArchive] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const actionLock = useRef(false)
+  const active = useRef(true)
+  useEffect(() => {active.current = true; return () => {active.current = false}}, [])
   const dirty = Boolean(selectedTopic && (topicDraft.title !== selectedTopic.title || topicDraft.angle !== selectedTopic.angle || (topicDraft.body || '') !== (selectedTopic.body || '')))
-  const actionDisabled = publicMode && (dirty || busy || topicSaveState.phase === 'saving')
+  const actionDisabled = publicMode && (dirty || busy || actionBusy || topicSaveState.phase === 'saving')
+  useEffect(() => {
+    const message = publicMode && dirty ? '选题有未保存修改。请取消并保存，或确定放弃修改后离开。' : null
+    onLeaveGuardChange?.(message)
+    const warn = (event: BeforeUnloadEvent) => {event.preventDefault(); event.returnValue = ''}
+    if (message) window.addEventListener('beforeunload', warn)
+    return () => {onLeaveGuardChange?.(null); window.removeEventListener('beforeunload', warn)}
+  }, [publicMode, dirty, onLeaveGuardChange])
+  useEffect(() => {setMore(false); setConfirmArchive(false); setActionError('')}, [selectedTopic?.id])
+  async function runTopicAction(action: (topic: Topic) => void | Promise<unknown>) {
+    if (!selectedTopic || actionDisabled || actionLock.current) return
+    actionLock.current = true; setActionBusy(true); setActionError('')
+    try {await action(selectedTopic); if (active.current) {setMore(false); setConfirmArchive(false)}}
+    catch (error) {if (active.current) setActionError(error instanceof Error ? error.message : String(error))}
+    finally {actionLock.current = false; if (active.current) setActionBusy(false)}
+  }
   const manualForm = (
     <form className="manual-topic" onSubmit={async (event) => {
       event.preventDefault()
@@ -90,7 +114,7 @@ export function TopicLibraryPage({
       <section className="history-list">
         {publicMode ? <h1 className="creator-topics-title">选题库</h1> : <div className="panel-title">◇ 选题库</div>}
         {publicMode ? <>
-          <button type="button" className="primary" onClick={() => setCreating(true)}>＋ 新建选题</button>
+          <button type="button" className="primary" disabled={actionDisabled} onClick={() => setCreating(true)}>＋ 新建选题</button>
           {creating && <CreatorDialog title="新建选题" onClose={() => setCreating(false)}>{manualForm}</CreatorDialog>}
         </> : <form className="manual-topic" onSubmit={onSaveManualTopic}>
           <input
@@ -130,6 +154,7 @@ export function TopicLibraryPage({
             key={topic.id}
             className={`topic-row ${selectedTopic?.id === topic.id ? 'active' : ''}`}
             aria-pressed={selectedTopic?.id === topic.id}
+            disabled={actionBusy}
             onClick={() => onSelectTopicRow(topic)}
           >
             <span>{topic.pinned ? '📌 ' : ''}{topic.title}</span>
@@ -149,20 +174,33 @@ export function TopicLibraryPage({
                 </p>
               </div>
               <div className="detail-actions">
-                <button disabled={actionDisabled} onClick={() => onSelectCurrentTopic(selectedTopic)}>
+                {!publicMode && <button disabled={actionDisabled} onClick={() => onSelectCurrentTopic(selectedTopic)}>
                   设为当前
-                </button>
-                <button className="primary" disabled={actionDisabled} onClick={() => publicMode ? onOpenCanvas?.(selectedTopic) : onGenerateBrief(selectedTopic)}>
-                  {publicMode ? 'AI 创作助手' : '生成创作 Brief'}
+                </button>}
+                <button className="primary" disabled={actionDisabled} onClick={() => publicMode ? selectedTopic.status === 'archived' ? void runTopicAction(onSelectCurrentTopic) : onOpenCanvas?.(selectedTopic) : onGenerateBrief(selectedTopic)}>
+                  {publicMode ? selectedTopic.status === 'archived' ? '恢复并设为当前' : 'AI 创作助手' : '生成创作 Brief'}
                 </button>
                 {!publicMode && <button disabled={actionDisabled} onClick={() => onGenerateDraft(selectedTopic)}>
                   生成内容结构
                 </button>}
-                {publicMode && <button disabled={actionDisabled} onClick={() => onTogglePinned?.(selectedTopic)}>{selectedTopic.pinned ? '取消置顶' : '置顶'}</button>}
-                {publicMode && <button disabled={actionDisabled} onClick={() => onSimulateTopic?.(selectedTopic)}>受众模拟</button>}
-                <button onClick={() => onArchiveTopic(selectedTopic)}>归档</button>
+                {publicMode && selectedTopic.status !== 'archived' && <button disabled={actionDisabled} onClick={() => onSimulateTopic?.(selectedTopic)}>受众模拟</button>}
+                {publicMode ? <button type="button" disabled={actionDisabled} onClick={() => {setActionError(''); setMore(true)}}>更多</button> : <button onClick={() => onArchiveTopic(selectedTopic)}>归档</button>}
               </div>
             </div>
+            {actionError && !more && <p role="alert">{actionError}</p>}
+            {more && <CreatorDialog title={confirmArchive ? '归档这条选题？' : '选题操作'} onClose={() => {if (!actionBusy) {setMore(false); setConfirmArchive(false)}}}>
+              {confirmArchive ? <>
+                <p>归档后仍保留稿件和历史，可以恢复并设为当前选题。</p>
+                <div className="detail-actions"><button type="button" disabled={actionBusy} onClick={() => setConfirmArchive(false)}>取消</button>
+                  <button type="button" className="danger" disabled={actionBusy} onClick={() => void runTopicAction(onArchiveTopic)}>{actionBusy ? '正在归档…' : '确认归档'}</button></div>
+              </> : <div className="detail-actions">
+                {selectedTopic.status !== 'archived' && <button type="button" disabled={actionBusy} onClick={() => void runTopicAction(onSelectCurrentTopic)}>设为当前</button>}
+                {onTogglePinned && <button type="button" disabled={actionBusy} onClick={() => void runTopicAction(onTogglePinned)}>{selectedTopic.pinned ? '取消置顶' : '置顶'}</button>}
+                {selectedTopic.status !== 'archived' && <button type="button" className="danger" disabled={actionBusy} onClick={() => setConfirmArchive(true)}>归档</button>}
+              </div>}
+              {actionBusy && !confirmArchive && <p role="status">正在更新选题…</p>}
+              {actionError && <p role="alert">操作未完成：{actionError}。可以重试。</p>}
+            </CreatorDialog>}
             <div className="asset-detail-card">
               {!publicMode && <div className="asset-section-head">
                 <h3>可编辑资产字段</h3>
@@ -171,6 +209,7 @@ export function TopicLibraryPage({
               <label htmlFor="topic-title">标题</label>
               <input
                 id="topic-title"
+                disabled={actionBusy}
                 value={topicDraft.title}
                 onChange={(event) =>
                   onTopicDraftChange({
@@ -182,6 +221,7 @@ export function TopicLibraryPage({
               <label htmlFor="topic-angle">切入角度</label>
               <textarea
                 id="topic-angle"
+                disabled={actionBusy}
                 rows={4}
                 value={topicDraft.angle}
                 onChange={(event) =>
@@ -191,9 +231,9 @@ export function TopicLibraryPage({
                   })
                 }
               />
-              {publicMode && <><label htmlFor="topic-body">正文</label><textarea id="topic-body" rows={12} value={topicDraft.body || ''} onChange={event => onTopicDraftChange({...topicDraft,body:event.target.value})} /></>}
+              {publicMode && <><label htmlFor="topic-body">正文</label><textarea id="topic-body" disabled={actionBusy} rows={12} value={topicDraft.body || ''} onChange={event => onTopicDraftChange({...topicDraft,body:event.target.value})} /></>}
               <div className="save-row">
-                <button className="primary" disabled={publicMode && (!dirty || topicSaveState.phase === 'saving')} onClick={onSaveTopicEdits}>
+                <button className="primary" disabled={publicMode && (!dirty || actionBusy || topicSaveState.phase === 'saving')} onClick={onSaveTopicEdits}>
                   {publicMode ? '保存修改' : '保存选题资产'}
                 </button>
                 <SaveIndicator state={topicSaveState} />

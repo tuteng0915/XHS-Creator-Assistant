@@ -7,6 +7,7 @@ export function useSimulatedFans(workspaceId: string, completedAnalyses: string)
   const sequence = useRef(0)
   const [state, setState] = useState<{workspaceId:string; rows:SimulatedFan[]; slots:string[]}>({workspaceId:'',rows:[],slots:['','','']})
   const [error, setError] = useState('')
+  const [pendingWorkspace, setPendingWorkspace] = useState('')
   useEffect(() => {
     current.current = workspaceId; setError('')
     return () => {current.current = ''; sequence.current += 1}
@@ -17,6 +18,7 @@ export function useSimulatedFans(workspaceId: string, completedAnalyses: string)
       return
     }
     const request = ++sequence.current
+    setPendingWorkspace(workspaceId)
     try {
       const rows = await simulatedFanApi.list(workspaceId)
       if (current.current !== workspaceId || sequence.current !== request) {
@@ -30,6 +32,8 @@ export function useSimulatedFans(workspaceId: string, completedAnalyses: string)
     } catch(e) {
       if(current.current === workspaceId && sequence.current === request) setError(String(e))
       if (requireSuccess) throw e
+    } finally {
+      if(current.current === workspaceId && sequence.current === request) setPendingWorkspace('')
     }
   }, [workspaceId])
   const refreshAfterSave = useCallback(() => refresh(true), [refresh])
@@ -59,5 +63,7 @@ export function useSimulatedFans(workspaceId: string, completedAnalyses: string)
     ]} : s)
     return true
   }
-  return {rows,slots,ids,error,refresh,refreshAfterSave,setSlot,addSlot,removeSlot,applySelection}
+  const loading = pendingWorkspace === workspaceId && !!workspaceId
+  const loaded = state.workspaceId === workspaceId
+  return {rows,slots,ids,error,loading,loaded,refresh,refreshAfterSave,setSlot,addSlot,removeSlot,applySelection}
 }

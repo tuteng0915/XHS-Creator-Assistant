@@ -103,7 +103,7 @@ import { SimulationCategoryTabs } from './components/SimulationCategoryTabs'
 import { simulationCategoryFor } from './simulationChat'
 import type { ReaderFeedbackIntent } from './contentCollaboration'
 import type { ReaderSelectionLink } from './readerSelection'
-import type { PanelTask, SimulationCategory, SimulationPersonaOverrides } from './types'
+import type { AccountNoteSelection, PanelTask, SimulationCategory, SimulationPersonaOverrides } from './types'
 import type { AnalysisScope } from './creatorNotes'
 import {
   WorkflowOutputPanel,
@@ -274,6 +274,11 @@ function WorkspaceApp() {
   const [draftEditor, setDraftEditor] = useState('')
   const [topics, setTopics] = useState<Topic[]>([])
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null)
+  const selectedTopicRef = useRef(selectedTopic)
+  useEffect(() => {selectedTopicRef.current = selectedTopic}, [selectedTopic])
+  const editorLeaveGuard = useRef<string | null>(null)
+  const onEditorLeaveGuardChange = useCallback((message: string | null) => {editorLeaveGuard.current = message}, [])
+  const confirmEditorLeave = useCallback(() => !editorLeaveGuard.current || window.confirm(editorLeaveGuard.current), [])
   const [topicFilter, setTopicFilter] = useState<TopicSourceWorkflow | 'all'>('all')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -756,6 +761,7 @@ function WorkspaceApp() {
   }
 
   function createCreatorProfile() {
+    if (!confirmEditorLeave()) return
     captureFormEpoch.current += 1
     setAddingCreator(true)
     setXhsProfileUrl('')
@@ -1755,10 +1761,10 @@ function WorkspaceApp() {
     setRunError('')
   }
 
-  async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic, recommendation?: ReaderSelectionLink, panelTask?: PanelTask, note?: {sourceMaterialId:string;noteId:string}, accountProfileId?: string, personaOverrides?: SimulationPersonaOverrides) {
+  async function runAudienceSimulation(draft?: Draft, targetTab: WorkflowTab = workflowTab, topic?: Topic, recommendation?: ReaderSelectionLink, panelTask?: PanelTask, note?: {sourceMaterialId:string;noteId:string}, accountNoteSelection?: AccountNoteSelection, personaOverrides?: SimulationPersonaOverrides) {
     if (!workspace) return
     const workspaceId = workspace.id
-    const category: SimulationCategory = accountProfileId ? 'account' : note ? 'published_note' : 'creation'
+    const category: SimulationCategory = accountNoteSelection ? 'account' : note ? 'published_note' : 'creation'
     const requestId = ++simulationHistoryRequest.current
     if (!internalMode && !fans.ids.length) { setActivePage('simulated-fans'); return }
     setWorkflowTab(targetTab)
@@ -1769,7 +1775,7 @@ function WorkspaceApp() {
     setSimulationStageViews(simulationStageSeed())
     if (!internalMode) setActivePage('simulations')
     try {
-      const savedInputs = draft || topic || note || accountProfileId
+      const savedInputs = draft || topic || note || accountNoteSelection
         ? { simulationTopic }
         : await ensureInputsSavedForRun(targetTab, true, true)
       if (draft) {
@@ -1778,19 +1784,19 @@ function WorkspaceApp() {
         setSaveState('workspace', { phase: 'saved' })
       }
       const topicForSimulation = savedInputs.simulationTopic.trim()
-      if (!draft && !topic && !note && !accountProfileId && !topicForSimulation) throw new Error('请填写受众模拟选题。')
+      if (!draft && !topic && !note && !accountNoteSelection && !topicForSimulation) throw new Error('请填写受众模拟选题。')
       const useSavedTopic =
-        !draft && !note && !accountProfileId && selectedTopic && topicForSimulation.includes(selectedTopic.title)
+        !draft && !note && !accountNoteSelection && selectedTopic && topicForSimulation.includes(selectedTopic.title)
       const created = await simulationRunApi.create(workspace.id, {
         ...recommendation,
         ...note,
-        ...(accountProfileId ? {accountProfileId} : {}),
+        ...(accountNoteSelection ? {accountNoteSelection} : {}),
         ...(personaOverrides ? {personaOverrides} : {}),
         ...(panelTask ? {panelTask} : {}),
         simulatedFanIds: internalMode ? undefined : fans.ids,
         draftId: draft?.id,
-        topicId: note || accountProfileId ? undefined : topic?.id || (useSavedTopic ? selectedTopic.id : null),
-        manualTopic: draft || topic || note || accountProfileId || useSavedTopic ? undefined : topicForSimulation,
+        topicId: note || accountNoteSelection ? undefined : topic?.id || (useSavedTopic ? selectedTopic.id : null),
+        manualTopic: draft || topic || note || accountNoteSelection || useSavedTopic ? undefined : topicForSimulation,
         mode: internalMode ? mode : 'live',
       })
       if (selectedWorkspaceRef.current === workspaceId) {
@@ -1914,27 +1920,31 @@ function WorkspaceApp() {
   async function saveManualTopic(event: FormEvent) {
     event.preventDefault()
     if (!workspace || !manualTopicTitle.trim()) return false
+    const workspaceId = workspace.id
+    const viewedTopicId = selectedTopicRef.current?.id
     setSaveState('manualTopic', { phase: 'saving' })
     try {
-      const created = await topicApi.create(workspace.id, {
+      const created = await topicApi.create(workspaceId, {
         title: manualTopicTitle.trim(),
         angle: manualTopicAngle,
         sourceWorkflow: 'manual',
       })
+      if (selectedWorkspaceRef.current !== workspaceId) return true
       setManualTopicTitle('')
       setManualTopicAngle('')
-      setSelectedTopic(created)
-      await refreshWorkspaceSummary()
+      setTopics(current => [created, ...current.filter(topic => topic.id !== created.id)])
+      if (selectedTopicRef.current?.id === viewedTopicId) setSelectedTopic(created)
       setSaveState('manualTopic', { phase: 'saved' })
       return true
     } catch (error) {
-      setSaveState('manualTopic', { phase: 'error', message: errorMessage(error) })
+      if (selectedWorkspaceRef.current === workspaceId) setSaveState('manualTopic', { phase: 'error', message: errorMessage(error) })
       return false
     }
   }
 
   async function selectTopic(topic: Topic) {
     const selected = await topicApi.select(topic.id)
+    if (selectedWorkspaceRef.current !== topic.workspaceId) return selected
     setSelectedTopic(selected)
     setSimulationTopic(`${selected.title}\n切入角度：${selected.angle}`)
     await refreshWorkspaceSummary()
@@ -1943,11 +1953,13 @@ function WorkspaceApp() {
 
   async function archiveTopic(topic: Topic) {
     const archived = await topicApi.archive(topic.id)
+    if (selectedWorkspaceRef.current !== topic.workspaceId) return archived
     setTopics((current) =>
       current.map((item) => (item.id === archived.id ? archived : item)),
     )
-    if (selectedTopic?.id === topic.id) setSelectedTopic(archived)
+    if (selectedTopicRef.current?.id === topic.id) setSelectedTopic(archived)
     await refreshWorkspaceSummary()
+    return archived
   }
 
   async function updateSelectedTopic() {
@@ -1960,8 +1972,10 @@ function WorkspaceApp() {
         body: topicDraft.body,
         expectedUpdatedAt: selectedTopic.updatedAt,
       })
+      if (selectedWorkspaceRef.current !== updated.workspaceId || selectedTopicRef.current?.id !== updated.id) return
       setSelectedTopic(updated)
-      await refreshWorkspaceSummary()
+      // Saving a viewed topic must not navigate back to the account's current topic.
+      setTopics(current => current.map(topic => topic.id === updated.id ? updated : topic))
       setSaveState('topic', { phase: 'saved' })
     } catch (error) {
       setSaveState('topic', { phase: 'error', message: errorMessage(error) })
@@ -2721,12 +2735,16 @@ function WorkspaceApp() {
     return <DraftStructureRenderer value={value} />
   }
 
+  const topicDraftSource = useRef<Topic | null>(null)
   useEffect(() => {
-    if (selectedTopic) {
-      setTopicDraft({ title: selectedTopic.title, angle: selectedTopic.angle, body: selectedTopic.body || '' })
-    } else {
-      setTopicDraft({ title: '', angle: '', body: '' })
-    }
+    const previous = topicDraftSource.current
+    topicDraftSource.current = selectedTopic
+    setTopicDraft(current => {
+      // A save/refresh may finish after the author has typed more. Keep those edits.
+      if (previous && selectedTopic?.id === previous.id && selectedTopic.workspaceId === previous.workspaceId &&
+        (current.title !== previous.title || current.angle !== previous.angle || (current.body || '') !== (previous.body || ''))) return current
+      return selectedTopic ? {title: selectedTopic.title, angle: selectedTopic.angle, body: selectedTopic.body || ''} : {title: '', angle: '', body: ''}
+    })
   }, [selectedTopic])
 
   const visibleTopics = topics.filter((topic) =>
@@ -2866,10 +2884,14 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'topics' && (
         <TopicLibraryPage
+          key={workspace.id}
+          onLeaveGuardChange={onEditorLeaveGuardChange}
           onOpenCanvas={(topic) => {setSelectedTopic(topic); setActivePage('drafts')}}
           onTogglePinned={async (topic) => {
-            try {const updated = await topicApi.update(topic.id, {pinned: !topic.pinned, expectedUpdatedAt:topic.updatedAt}); setSelectedTopic(updated); await refreshWorkspaceSummary()}
-            catch (error) {setSaveState('topic', {phase:'error',message:errorMessage(error)})}
+            const updated = await topicApi.update(topic.id, {pinned: !topic.pinned, expectedUpdatedAt:topic.updatedAt})
+            if (selectedWorkspaceRef.current !== topic.workspaceId) return
+            if (selectedTopicRef.current?.id === topic.id) setSelectedTopic(updated)
+            await refreshWorkspaceSummary()
           }}
           publicMode={!internalMode}
           busy={running || saveStates.draft.phase === 'saving'}
@@ -2886,7 +2908,7 @@ function WorkspaceApp() {
           onManualTopicAngleChange={setManualTopicAngle}
           onSaveManualTopic={saveManualTopic}
           onTopicFilterChange={setTopicFilter}
-          onSelectTopicRow={setSelectedTopic}
+          onSelectTopicRow={topic => {if (selectedTopic?.id === topic.id || confirmEditorLeave()) setSelectedTopic(topic)}}
           onSelectCurrentTopic={selectTopic}
           onGenerateBrief={(topic) => void generateBriefForTopic(topic).catch(() => undefined)}
           onGenerateDraft={(topic) => void generateDraftForTopic(topic).catch(() => undefined)}
@@ -2897,6 +2919,7 @@ function WorkspaceApp() {
       )}
       {!loading && workspace && activePage === 'drafts' && !internalMode && <CreatorCanvasPage
         key={workspace.id} workspaceId={workspace.id} topic={selectedTopic} topics={topics.filter(t => t.sourceWorkflow !== 'trend_analysis')}
+        onLeaveGuardChange={onEditorLeaveGuardChange}
         readerFeedback={readerFeedback?.workspaceId===workspace.id&&readerFeedback.topicId===selectedTopic?.id?readerFeedback:undefined}
         onReaderFeedbackConsumed={() => setReaderFeedback(null)}
         onSimulate={prepareAudienceSimulation}
@@ -2914,7 +2937,7 @@ function WorkspaceApp() {
         }}
         simulationRuns={simulationRuns}
         agentId={agents.find(a => a.agentId === 'topic_draft_editor')?.id}
-        onSelect={topic => {setReaderFeedback(null); setSelectedTopic(topic)}} onUpdated={topic => {if(selectedWorkspaceRef.current !== topic.workspaceId) return; setSelectedTopic(topic); setTopics(current => current.map(t => t.id === topic.id ? topic : t))}}
+        onSelect={topic => {if (!confirmEditorLeave()) return; setReaderFeedback(null); setSelectedTopic(topic)}} onUpdated={topic => {if(selectedWorkspaceRef.current !== topic.workspaceId) return; setSelectedTopic(topic); setTopics(current => current.map(t => t.id === topic.id ? topic : t))}}
       />}
       {!loading && workspace && activePage === 'drafts' && internalMode && (
         <DraftsPage
@@ -2942,11 +2965,11 @@ function WorkspaceApp() {
         <div id="simulation-category-content" role={internalMode?undefined:'tabpanel'} aria-labelledby={internalMode?undefined:`simulation-category-${simulationCategory}`}>
         {!internalMode && <details className="trial-setup-disclosure" open={!selectedSimulationRun}><summary>{selectedSimulationRun?'发起新的模拟':'准备模拟 · 选择对象和读者'}</summary><CreatorSimulationSetup key={`${workspace.id}:${simulationCategory}:${selectedTopic?.id || ''}`} workspaceId={workspace.id}
           category={simulationCategory}
-          positioning={workspace.accountPositioning} topic={selectedTopic} topics={topics} fans={fans} profile={xhsCreatorProfileMaterial}
+          positioning={workspace.accountPositioning} topic={selectedTopic} topics={topics} fans={fans} profile={xhsCreatorProfileMaterial} mediaAssets={mediaAssets}
           running={running} onSelect={setSelectedTopic}
           onRun={(topic, recommendation, task, overrides) => void runAudienceSimulation(undefined, 'account', topic, recommendation, task, undefined, undefined, overrides)}
           onRunNote={(note,recommendation,task,overrides)=>void runAudienceSimulation(undefined,'account',undefined,recommendation,task,note,undefined,overrides)}
-          onRunAccount={(profileId,recommendation,task,overrides)=>void runAudienceSimulation(undefined,'account',undefined,recommendation,task,undefined,profileId,overrides)}
+          onRunAccount={(selection,recommendation,task,overrides)=>void runAudienceSimulation(undefined,'account',undefined,recommendation,task,undefined,selection,overrides)}
           onAddFans={() => setActivePage('audience-analysis')} /></details>}
         {!internalMode && !running && runError && <p role="alert">{runError}</p>}
         <SimulationHistoryPage
@@ -2982,7 +3005,7 @@ function WorkspaceApp() {
         activePage === 'conversations' &&
         renderConversationsPage()}
       {!loading && workspace && activePage === 'audience-analysis' && <AudienceAnalysisPage
-        key={workspace.id} workspaceId={workspace.id} profile={xhsCreatorProfileMaterial}
+        key={workspace.id} workspaceId={workspace.id} profile={xhsCreatorProfileMaterial} mediaAssets={mediaAssets}
         analyses={audience.rows} selectedId={audience.selectedId} onSelect={audience.setSelectedId}
         loadError={audience.error}
         onRefresh={audience.refresh} onSimulate={() => setActivePage('simulations')}
@@ -3064,9 +3087,10 @@ function WorkspaceApp() {
       helpContent={helpContent}
       internalMode={internalMode}
       workflowAssets={workflowAssets}
-      onOpenInputAsset={openInputAsset}
-      onSetActivePage={(page) => {setAddingCreator(false); setActivePage(page)}}
+      onOpenInputAsset={panel => {if (confirmEditorLeave()) openInputAsset(panel)}}
+      onSetActivePage={(page) => {if (page !== activePage && !confirmEditorLeave()) return; setAddingCreator(false); setActivePage(page)}}
       onSelectWorkspace={(id) => {
+        if (id !== selectedWorkspaceId && !confirmEditorLeave()) return
         setAddingCreator(false)
         if (!internalMode) setActivePage('creator-overview')
         selectedWorkspaceRef.current = id

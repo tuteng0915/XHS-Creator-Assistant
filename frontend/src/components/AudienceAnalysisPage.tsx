@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { audienceAnalysisApi, simulatedFanApi } from '../api'
-import { ANALYSIS_SCOPE_LABELS, type AnalysisScope } from '../creatorNotes'
-import type { AudienceAnalysis, TextInputAsset } from '../types'
-import { CreatorDialog } from './CreatorDialog'
+import { ANALYSIS_SCOPE_LABELS, creatorNotes, selectCreatorNotes, type AnalysisScope } from '../creatorNotes'
+import type { AudienceAnalysis, MediaAsset, TextInputAsset } from '../types'
+import { CreatorNoteSelectionDialog } from './CreatorNoteSelectionDialog'
 import { AudienceGroups } from './AudienceGroups'
 import { isOracleShowcase } from '../recordOrigin'
 import { OracleBadge, OracleNotice } from './OracleNotice'
+import { InfoHint } from './InfoHint'
 
-export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId, onSelect, onRefresh, onSimulate, savedFanKeys = [], onFansChanged, loadError = ''}: {
+export function AudienceAnalysisPage({workspaceId, profile, mediaAssets = [], analyses, selectedId, onSelect, onRefresh, onSimulate, savedFanKeys = [], onFansChanged, loadError = ''}: {
   workspaceId: string; profile?: TextInputAsset; analyses: AudienceAnalysis[]; selectedId: string;
+  mediaAssets?: MediaAsset[];
   onSelect: (id: string) => void; onRefresh: () => Promise<void>; onSimulate: () => void;
   savedFanKeys?: string[]; onFansChanged?: () => Promise<void>;
   loadError?: string;
 }) {
   const [scope, setScope] = useState<AnalysisScope>('recent_10')
+  const [selectedNoteIds, setSelectedNoteIds] = useState<string[] | undefined>()
   const [settings, setSettings] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -29,6 +32,10 @@ export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId
     setSavingGroup(''); setError(''); setRefreshNeeded(false)
     return () => {currentWorkspace.current = ''; generation.current += 1}
   }, [workspaceId])
+  useEffect(() => {setScope('recent_10'); setSelectedNoteIds(undefined); setSettings(false)}, [workspaceId, profile?.id])
+  const notes = creatorNotes(profile)
+  const selectedNotes = selectedNoteIds === undefined ? selectCreatorNotes(notes, scope) : notes.filter(note => selectedNoteIds.includes(note.noteId))
+  const staleSelection = selectedNoteIds !== undefined && selectedNoteIds.length !== selectedNotes.length
   const workspaceAnalyses = analyses.filter(r => r.workspaceId === workspaceId)
   const selected = workspaceAnalyses.find(r => r.id === selectedId) || workspaceAnalyses[0]
   // Legacy results embedded developer diagnostics in prose; keep stored records intact.
@@ -68,17 +75,18 @@ export function AudienceAnalysisPage({workspaceId, profile, analyses, selectedId
     finally {if (currentWorkspace.current === workspaceId && generation.current === requestGeneration) {saving.current = false; setSavingGroup('')}}
   }
   async function start() {
-    if (!profile) return
+    if (!profile || !selectedNotes.length || staleSelection || busy || running) return
     setBusy(true); setError('')
-    try { const run = await audienceAnalysisApi.create(workspaceId, profile.id, scope); await onRefresh(); onSelect(run.id) }
+    try { const run = await audienceAnalysisApi.create(workspaceId, profile.id, scope, selectedNotes.map(note => note.noteId)); await onRefresh(); onSelect(run.id) }
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
   return <section className="creator-materials-page audience-results-page">
-    <div className="creator-page-head"><h1>受众分析</h1><button className="primary" disabled={!profile || busy || running} onClick={() => void start()}>{running ? '正在分析…' : '分析受众'}</button></div>
-    <p className="muted">从历史图文和评论梳理不同读者，由你选择收录。</p>
-    <div className="creator-range-row"><span>{ANALYSIS_SCOPE_LABELS[scope]}</span><button onClick={() => setSettings(true)}>调整范围</button></div>
-    {settings && <CreatorDialog title="分析范围" onClose={() => setSettings(false)}><select aria-label="受众分析范围" value={scope} onChange={e => setScope(e.target.value as AnalysisScope)}>{Object.entries(ANALYSIS_SCOPE_LABELS).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select><button className="primary" onClick={() => setSettings(false)}>完成</button></CreatorDialog>}
+    <div className="creator-page-head"><h1>受众分析 <InfoHint label="受众分析说明">从历史图文和评论梳理不同读者，由你选择收录。</InfoHint></h1><button className="primary" disabled={!profile || busy || running || !selectedNotes.length || staleSelection} onClick={() => void start()}>{running ? '正在分析…' : '分析受众'}</button></div>
+    <div className="creator-range-row"><span>{selectedNoteIds ? `已选 ${selectedNotes.length} 条笔记` : ANALYSIS_SCOPE_LABELS[scope]}</span><button disabled={busy || running} onClick={() => setSettings(true)}>调整范围</button></div>
+    {staleSelection && <p role="alert">已选笔记有变动，请重新选择。</p>}
+    {settings && <CreatorNoteSelectionDialog notes={notes} mediaAssets={mediaAssets} scope={scope} selectedIds={selectedNoteIds}
+      onClose={() => setSettings(false)} onConfirm={(nextScope, ids) => {setScope(nextScope); setSelectedNoteIds(ids); setSettings(false)}} />}
     {!profile && <p>请先导入账号笔记。</p>}{error && <p role="alert">{error}</p>}
     {loadError && <p role="alert">受众分析历史加载失败：{loadError}</p>}
     {refreshNeeded && <button disabled={Boolean(savingGroup)} onClick={() => void refreshFans()}>重试刷新读者列表</button>}

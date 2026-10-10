@@ -131,6 +131,6 @@ it('does not present a single cited note as a recurring account theme in reopene
     onGenerateBrief={vi.fn()} onGenerateDraft={vi.fn()} onFillSimulationTopic={vi.fn()} />)
   expect(screen.queryByText('经常讲这个方向')).not.toBeInTheDocument()
   expect(screen.getByText(/本次暂无可展示的账号画像/)).toBeInTheDocument()
-  fireEvent.click(screen.getByText('数据说明'))
-  expect(screen.getByText(/发布日期和累计时间可能不同/)).toBeInTheDocument()
+  fireEvent.focus(screen.getByRole('button', {name:'笔记表现数据说明'}))
+  expect(screen.getByRole('tooltip')).toHaveTextContent('发布日期和累计时间可能不同')
 })

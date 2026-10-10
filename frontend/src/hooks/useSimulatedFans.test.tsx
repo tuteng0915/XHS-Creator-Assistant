@@ -118,3 +118,38 @@ it('does not fill open slots when a candidate is adopted or a new analysis compl
   await waitFor(() => expect(list).toHaveBeenCalledTimes(3))
   expect(result.current.slots).toEqual(['first','',''])
 })
+
+it('keeps selected readers through a failed refresh and recovers on retry',async()=>{
+  const list=vi.spyOn(simulatedFanApi,'list').mockResolvedValue([fan('w','first')])
+  const {result}=renderHook(()=>useSimulatedFans('w',''))
+  expect(result.current.loading).toBe(true)
+  expect(result.current.loaded).toBe(false)
+  await waitFor(()=>expect(result.current.loaded).toBe(true))
+  expect(result.current.loading).toBe(false)
+  act(()=>result.current.setSlot(0,'first'))
+  list.mockRejectedValueOnce(new Error('断网'))
+  await act(async()=>result.current.refresh())
+  expect(result.current.error).toContain('断网')
+  expect(result.current.loaded).toBe(true)
+  expect(result.current.loading).toBe(false)
+  expect(result.current.ids).toEqual(['first'])
+  list.mockResolvedValueOnce([fan('w','first'),fan('w','second')])
+  await act(async()=>result.current.refresh())
+  expect(result.current.error).toBe('')
+  expect(result.current.rows).toHaveLength(2)
+  expect(result.current.ids).toEqual(['first'])
+})
+
+it('does not clear the latest loading state when an older request settles',async()=>{
+  const pending:Array<(rows:SimulatedFan[])=>void>=[]
+  vi.spyOn(simulatedFanApi,'list').mockImplementation(()=>new Promise(resolve=>pending.push(resolve)))
+  const {result}=renderHook(()=>useSimulatedFans('w',''))
+  let latest!:Promise<void>
+  act(()=>{latest=result.current.refresh()})
+  await act(async()=>pending[0]([]))
+  expect(result.current.loading).toBe(true)
+  expect(result.current.loaded).toBe(false)
+  await act(async()=>{pending[1]([]);await latest})
+  expect(result.current.loading).toBe(false)
+  expect(result.current.loaded).toBe(true)
+})

@@ -10,11 +10,26 @@
 .simulation-account-preview { border: 1px solid var(--accent-border); border-radius: 12px; padding: 16px; background: var(--accent-surface); }
 .simulation-account-preview h3 { font-size: 17px; margin: 0 0 6px; }
 .simulation-account-preview p { margin: 6px 0; font-size: 14px; line-height: 1.6; }
+.simulation-account-range { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
+.simulation-account-range > div { flex: 1 1 180px; min-width: 0; }
 .simulation-role-editor { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
 .simulation-role-editor summary { cursor: pointer; font-size: 14px; font-weight: 600; }
 .simulation-role-editor fieldset { margin: 0; padding: 0; border: 0; }
 .simulation-role-editor label { display: block; margin: 12px 0; font-size: 13px; }
 .simulation-role-editor textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; min-height: 58px; resize: vertical; font: inherit; line-height: 1.5; }
+.simulation-reader-list .simulated-fan-slot { border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 10px 12px; }
+.simulation-reader-list .simulation-role-editor { margin-top: 8px; padding-top: 8px; }
+.simulation-reader-list .simulation-role-editor summary { font-size: 12px; font-weight: 400; color: var(--sub); }
+.simulation-reader-list .simulated-fan-slot-controls { flex-wrap: wrap; gap: 8px; }
+.simulation-reader-list .simulated-fan-slot-controls select { flex: 1 1 150px; }
+.simulation-recommendation-details { margin-top: 12px; font-size: 13px; }
+.simulation-recommendation-details summary { cursor: pointer; color: var(--sub); }
+.simulation-readers-error, .simulation-readers-empty { font-size: 14px; }
+.simulation-start { margin-top: 12px; }
+.simulation-note-target { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
+.simulation-note-target > div { flex: 1 1 180px; min-width: 0; }
+.simulation-note-target h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.simulation-note-target p { margin: 6px 0; font-size: 13px; }
 @media (max-width: 650px) {
   .simulation-hub-heading h1 { font-size: 24px; }
   .simulation-category-tabs { gap: 6px; }

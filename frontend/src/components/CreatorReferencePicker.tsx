@@ -3,6 +3,7 @@ import {analysisRunApi, audienceAnalysisApi} from '../api'
 import {creatorReferenceKey, type CreatorContextReference, type CreatorContextSelection} from '../contentCollaboration'
 import {loadCreatorReference, referenceDate, referenceKindNames, type CreatorReferencePreview} from '../creatorReferences'
 import {CreatorDialog} from './CreatorDialog'
+import {InfoHint} from './InfoHint'
 import './CreatorReferencePicker.css'
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -72,11 +73,11 @@ export function CreatorReferencePicker({workspaceId, selection, onChange, disabl
   }
   const alreadySelected = !!preview && selection.references.some(reference => creatorReferenceKey(reference) === creatorReferenceKey(preview.reference))
   return <div className="creator-references">
-    <div className="creator-references-heading"><span>本次参考{selection.references.length ? ` · ${selection.references.length}` : ''}</span><button type="button" className="text-button" disabled={disabled || selection.references.length >= 8} onClick={() => {setViewing(null); setOpen(true)}}>＋ 添加参考</button></div>
-    {selection.references.length ? <ul className="creator-reference-chips">{selection.references.map((reference, index) => {
+    <div className="creator-references-heading"><span>本次参考 · {selection.references.length || '仅当前稿件'}<InfoHint label="创作参考说明">不添加参考时，只读取当前稿件与这段对话。可添加最多 8 份账号或受众分析；更换参考后，下一条消息开启新的对话段。</InfoHint></span><button type="button" className="text-button" disabled={disabled || selection.references.length >= 8} onClick={() => {setViewing(null); setOpen(true)}}>＋ 添加参考</button></div>
+    {selection.references.length > 0 && <ul className="creator-reference-chips">{selection.references.map((reference, index) => {
       const key = creatorReferenceKey(reference), label = cache[`${workspaceId}:${key}`]?.label || `${referenceKindNames[reference.kind]} ${index + 1}`
       return <li key={key}><button type="button" className="text-button" onClick={() => {setViewing(reference); setOpen(true)}}>{label}</button><button type="button" className="icon-button" disabled={disabled} aria-label={`移除${label}`} onClick={() => onChange({...selection, references: selection.references.filter(item => creatorReferenceKey(item) !== key)})}>×</button></li>
-    })}</ul> : <p>只参考当前稿件与这段对话。</p>}
+    })}</ul>}
     {open && <CreatorDialog title={viewing ? '参考材料' : '添加参考'} onClose={close} className="creator-reference-dialog">
       {!viewing && <div className="creator-reference-selectors"><label>资料类型<select value={kind} onChange={event => setKind(event.target.value as CreatorContextReference['kind'])}><option value="account_analysis">账号分析</option><option value="audience_analysis">受众分析</option></select></label>
         <label>分析记录<select disabled={loading} value={selectedId} onChange={event => setSelectedId(event.target.value)}><option value="">{loading ? '正在读取…' : '选择一份分析'}</option>{choices.map(choice => <option key={choice.reference.id} value={choice.reference.id}>{choice.label}{selection.references.some(reference => creatorReferenceKey(reference) === creatorReferenceKey(choice.reference)) ? ' · 已添加' : ''}</option>)}</select></label>

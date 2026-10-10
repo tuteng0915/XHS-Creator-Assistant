@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { readerSelectionApi } from '../api'
 import type { ReaderSelection } from '../readerSelection'
-import type { PanelTask } from '../types'
+import type { AccountNoteSelection, PanelTask } from '../types'
 
 type Receipt = {requestKey: string; desiredCount: number; id?: string}
 type View = {key: string; revision: string; record: ReaderSelection | null; busy: boolean; error: string}
@@ -19,8 +19,9 @@ function read(key: string): Receipt | null {
   } catch { return null }
 }
 
-export function useReaderSelection(workspaceId: string, topicId: string, revision: string, panelTask?: PanelTask, note?: {sourceMaterialId:string;noteId:string}, accountProfileId?: string) {
-  const targetKey = accountProfileId ? `account:${accountProfileId}` : note ? `note:${note.sourceMaterialId}:${note.noteId}` : topicId
+export function useReaderSelection(workspaceId: string, topicId: string, revision: string, panelTask?: PanelTask, note?: {sourceMaterialId:string;noteId:string}, accountProfileId?: string, accountNoteSelection?: AccountNoteSelection) {
+  const targetKey = accountNoteSelection ? `account-notes:${JSON.stringify([accountNoteSelection.sourceMaterialId, [...accountNoteSelection.selectedNoteIds].sort()])}`
+    : accountProfileId ? `account:${accountProfileId}` : note ? `note:${note.sourceMaterialId}:${note.noteId}` : topicId
   const key = readerSelectionStorageKey(workspaceId, targetKey, panelTask)
   const epoch = useRef(0)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -92,7 +93,7 @@ export function useReaderSelection(workspaceId: string, topicId: string, revisio
       window.localStorage.setItem(key, JSON.stringify(receipt))
       const record = await readerSelectionApi.create(workspaceId, {
         requestKey: receipt.requestKey, desiredCount: receipt.desiredCount,
-        ...(accountProfileId ? {accountProfileId} : note || {topicId}),
+        ...(accountNoteSelection ? {accountNoteSelection} : accountProfileId ? {accountProfileId} : note || {topicId}),
         ...(panelTask ? {panelTask} : {}),
       })
       if (record.workspaceId !== workspaceId) throw new Error('推荐不属于当前账号')

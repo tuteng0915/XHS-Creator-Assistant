@@ -150,7 +150,7 @@ describe('public creator journey', () => {
     await screen.findByText('甲的笔记')
     fireEvent.click(screen.getByRole('button', {name:/账号诊断/}))
     fireEvent.click(screen.getByRole('button', {name:'调整范围'}))
-    fireEvent.click(screen.getByRole('button', {name:'清空'}))
+    fireEvent.click(screen.getByRole('button', {name:'取消选择'}))
     fireEvent.click(screen.getByRole('checkbox', {name:'选择笔记：甲的第二条笔记'}))
     fireEvent.click(screen.getByRole('button', {name:'完成'}))
     expect(screen.getByText('手动选择 · 1 条笔记')).toBeInTheDocument()

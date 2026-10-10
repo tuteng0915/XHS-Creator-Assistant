@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, inputAssetApi, mediaAssetApi, readerSelectionApi, simulationRunApi, xhsCaptureApi } from './api'
+import { ApiError, audienceAnalysisApi, inputAssetApi, mediaAssetApi, readerSelectionApi, simulationRunApi, xhsCaptureApi } from './api'
 import type { MediaAsset, TextInputAsset } from './types'
 
 const imageAsset: MediaAsset = {
@@ -45,6 +45,23 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+it('uses a new audience scope discriminator so old servers cannot silently ignore selected IDs', async () => {
+  const fetch = vi.spyOn(globalThis,'fetch').mockImplementation(() => jsonResponse({id:'run'}))
+  await audienceAnalysisApi.create('w','p','most_liked_10',['n2'])
+  expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual({sourceMaterialId:'p',scope:'selected_notes',selectionScope:'most_liked_10',selectedNoteIds:['n2']})
+})
+
+it('explains an old server scope rejection but preserves unrelated validation errors', async () => {
+  const fetch = vi.spyOn(globalThis,'fetch')
+    .mockImplementationOnce(() => jsonResponse({detail:[null,{type:'literal_error',loc:['body','scope'],input:'selected_notes',msg:'Input should be recent_10 or all'}]},422))
+    .mockImplementationOnce(() => jsonResponse({detail:'所选笔记无效或已变更，请重新选择当前账号的笔记。'},422))
+    .mockImplementationOnce(() => jsonResponse({detail:[{type:'too_short',loc:['body','selectedNoteIds'],msg:'需要至少一篇笔记'}]},422))
+  await expect(audienceAnalysisApi.create('w','p','all',['n'])).rejects.toThrow('请更新并重启后端')
+  await expect(audienceAnalysisApi.create('w','p','all',['n'])).rejects.toThrow('所选笔记无效或已变更')
+  await expect(audienceAnalysisApi.create('w','p','all',[])).rejects.toThrow('需要至少一篇笔记')
+  expect(fetch).toHaveBeenCalledTimes(3)
+})
+
 it('uses scoped relative recommendation URLs and preserves adoption metadata on simulation creation', async()=>{
   const fetch=vi.spyOn(globalThis,'fetch').mockImplementation(()=>jsonResponse({id:'r'}))
   await readerSelectionApi.create('w',{requestKey:'key',topicId:'t',desiredCount:4})
@@ -55,6 +72,30 @@ it('uses scoped relative recommendation URLs and preserves adoption metadata on 
   const payload={topicId:'t',simulatedFanIds:['d','a'],readerSelectionId:'r',readerSelectionInputHash:'a'.repeat(64),mode:'live' as const}
   await simulationRunApi.create('w',payload)
   expect(fetch).toHaveBeenLastCalledWith('/api/workspaces/w/simulation-runs',expect.objectContaining({method:'POST',body:JSON.stringify(payload)}))
+})
+
+it('sends the same explicit account notes to retrieval and simulation without a legacy whole-account target',async()=>{
+  const fetch=vi.spyOn(globalThis,'fetch').mockImplementation(()=>jsonResponse({id:'r'}))
+  const accountNoteSelection={sourceMaterialId:'p',selectedNoteIds:['n1','n3']}
+  await readerSelectionApi.create('w',{requestKey:'key',desiredCount:3,accountNoteSelection})
+  await simulationRunApi.create('w',{mode:'live',simulatedFanIds:['fan'],accountNoteSelection})
+  for(const [,init] of fetch.mock.calls){
+    const payload=JSON.parse(String(init?.body))
+    expect(payload.accountNoteSelection).toEqual(accountNoteSelection)
+    expect(payload).not.toHaveProperty('accountProfileId')
+  }
+})
+
+it('explains old account-scope servers without downgrading to a whole-account request',async()=>{
+  const fetch=vi.spyOn(globalThis,'fetch')
+    .mockImplementationOnce(()=>jsonResponse({detail:[null,{type:'extra_forbidden',loc:['body','accountNoteSelection'],msg:'Extra inputs are not permitted'}]},422))
+    .mockImplementationOnce(()=>jsonResponse({detail:'请选择一个账号、选题、草稿、历史笔记或手动标题'},422))
+    .mockImplementationOnce(()=>jsonResponse({detail:'所选笔记无效或已变更，请重新选择当前账号的笔记。'},422))
+  const accountNoteSelection={sourceMaterialId:'p',selectedNoteIds:['n']}
+  await expect(readerSelectionApi.create('w',{requestKey:'k',desiredCount:3,accountNoteSelection})).rejects.toThrow('请更新并重启后端')
+  await expect(simulationRunApi.create('w',{mode:'live',accountNoteSelection})).rejects.toThrow('请更新并重启后端')
+  await expect(simulationRunApi.create('w',{mode:'live',accountNoteSelection})).rejects.toThrow('所选笔记无效或已变更')
+  expect(fetch).toHaveBeenCalledTimes(3)
 })
 
 describe('mediaAssetApi', () => {

@@ -1,5 +1,5 @@
 import type { ReaderSelection, ReaderSelectionLink } from './readerSelection'
-import type { PanelComparison, PanelRetestPreview, PanelRetestRequest, PanelTask } from './types'
+import type { AccountNoteSelection, PanelComparison, PanelRetestPreview, PanelRetestRequest, PanelTask } from './types'
 import type { PanelEditOperation, PanelEditProposal } from './panelEdits'
 import type {
   Agent,
@@ -50,6 +50,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly validationIssues?: unknown[],
   ) {
     super(message)
   }
@@ -59,18 +60,38 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
   if (!response.ok) {
     let message = `Request failed (${response.status})`
+    let validationIssues: unknown[] | undefined
     try {
-      const body = (await response.json()) as { detail?: string }
-      if (body.detail) message = body.detail
+      const body = (await response.json()) as { detail?: unknown }
+      if (typeof body.detail === 'string' && body.detail) message = body.detail
+      if (Array.isArray(body.detail)) {
+        validationIssues = body.detail
+        message = body.detail.map(issue => typeof issue?.msg === 'string' ? issue.msg : '').filter(Boolean).join('；') || message
+      }
     } catch {
       // Keep the stable fallback message when an error is not JSON.
     }
-    throw new ApiError(message, response.status)
+    throw new ApiError(message, response.status, validationIssues)
   }
   return (await response.json()) as T
 }
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
+
+async function accountSelectionRequest<T>(url: string, init: RequestInit, selection?: AccountNoteSelection): Promise<T> {
+  try {return await request<T>(url, init)} catch (error) {
+    const unsupportedSelection = selection && error instanceof ApiError && error.status === 422 && (
+      error.message === '请选择一个账号、选题、草稿、历史笔记或手动标题'
+      || error.validationIssues?.some(issue => {
+        if (!issue || typeof issue !== 'object') return false
+        const detail = issue as {loc?: unknown[]; type?: string}
+        return detail.type === 'extra_forbidden' && Array.isArray(detail.loc) && detail.loc.at(-1) === 'accountNoteSelection'
+      })
+    )
+    if (unsupportedSelection) throw new ApiError('当前后端版本尚不支持账号模拟的笔记范围，请更新并重启后端后再试。', 422)
+    throw error
+  }
+}
 
 export const panelEditApi = {
   list: (workspaceId: string, runId: string) => request<PanelEditProposal[]>(
@@ -224,7 +245,25 @@ export const sourceMaterialApi = inputAssetApi
 export const audienceAnalysisApi = {
   get: (id: string) => request<import('./types').AudienceAnalysis>(`/api/audience-analyses/${encodeURIComponent(id)}`),
   list: (workspaceId: string) => request<import('./types').AudienceAnalysis[]>(`/api/workspaces/${workspaceId}/audience-analyses`),
-  create: (workspaceId: string, sourceMaterialId: string, scope: import('./creatorNotes').AnalysisScope) => request<import('./types').AudienceAnalysis>(`/api/workspaces/${workspaceId}/audience-analyses`, {method: 'POST', headers: jsonHeaders, body: JSON.stringify({sourceMaterialId, scope})}),
+  create: async (workspaceId: string, sourceMaterialId: string, scope: import('./creatorNotes').AnalysisScope, selectedNoteIds?: string[]) => {
+    try {
+      return await request<import('./types').AudienceAnalysis>(`/api/workspaces/${workspaceId}/audience-analyses`, {
+        method: 'POST', headers: jsonHeaders,
+        body: JSON.stringify(selectedNoteIds === undefined ? {sourceMaterialId, scope} : {sourceMaterialId, scope:'selected_notes', selectionScope:scope, selectedNoteIds}),
+      })
+    } catch (error) {
+      // An older backend ignores unknown ID fields. A new discriminator makes it
+      // reject rather than silently analyse a different set of notes.
+      const unsupportedScope = error instanceof ApiError && error.status === 422 && selectedNoteIds !== undefined
+        && error.validationIssues?.some(issue => {
+          if (!issue || typeof issue !== 'object') return false
+          const detail = issue as {loc?: unknown[]; type?: string; input?: unknown}
+          return Array.isArray(detail.loc) && detail.loc.at(-1) === 'scope' && detail.type === 'literal_error' && detail.input === 'selected_notes'
+        })
+      if (unsupportedScope) throw new ApiError('当前后端版本尚不支持精确选择笔记，请更新并重启后端后再分析。', 422)
+      throw error
+    }
+  },
 }
 
 export const simulatedFanApi = {
@@ -622,10 +661,10 @@ export const analysisRunApi = {
 }
 
 export const readerSelectionApi = {
-  create: (workspaceId: string, payload: {requestKey: string; topicId?: string; sourceMaterialId?: string; noteId?: string; accountProfileId?:string; desiredCount: number; panelTask?: PanelTask}) =>
-    request<ReaderSelection>(`/api/workspaces/${workspaceId}/reader-selections`, {
+  create: (workspaceId: string, payload: {requestKey: string; topicId?: string; sourceMaterialId?: string; noteId?: string; accountProfileId?:string; accountNoteSelection?: AccountNoteSelection; desiredCount: number; panelTask?: PanelTask}) =>
+    accountSelectionRequest<ReaderSelection>(`/api/workspaces/${workspaceId}/reader-selections`, {
       method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload),
-    }),
+    }, payload.accountNoteSelection),
   get: (workspaceId: string, id: string) =>
     request<ReaderSelection>(`/api/workspaces/${workspaceId}/reader-selections/${id}`),
 }
@@ -651,6 +690,7 @@ export const simulationRunApi = {
       audienceAnalysisId?: string
       simulatedFanIds?: string[]
       accountProfileId?: string
+      accountNoteSelection?: AccountNoteSelection
       personaOverrides?: SimulationPersonaOverrides
       panelTask?: PanelTask
       topicId?: string | null
@@ -661,11 +701,11 @@ export const simulationRunApi = {
       mode: 'demo' | 'live'
     },
   ) =>
-    request<SimulationRun>(`/api/workspaces/${workspaceId}/simulation-runs`, {
+    accountSelectionRequest<SimulationRun>(`/api/workspaces/${workspaceId}/simulation-runs`, {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify(payload),
-    }),
+    }, payload.accountNoteSelection),
 
   list: (workspaceId: string) =>
     request<SimulationRunSummary[]>(

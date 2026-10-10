@@ -709,9 +709,10 @@ class AnalysisRunStatus(StrEnum):
 class AnalysisRunCreate(APIModel):
     workflow_type: WorkflowType
     selected_note_ids: list[str] | None = Field(default=None, min_length=1, max_length=10000)
-    analysis_scope: Literal["recent_10", "last_7_days", "last_30_days", "last_90_days", "all"] = (
-        "all"
-    )
+    analysis_scope: Literal[
+        "recent_10", "most_liked_10", "most_engaged_10",
+        "last_7_days", "last_30_days", "last_90_days", "all",
+    ] = "all"
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=120)
     account_profile_input_asset_id: str | None = None
     account_profile_material_id: str | None = None
@@ -1034,7 +1035,31 @@ class SimulationPersonaOverride(APIModel):
         return self
 
 
+class AccountNoteSelection(APIModel):
+    """An explicit set of imported notes; distinct from the legacy account target."""
+
+    model_config = ConfigDict(extra="forbid")
+    source_material_id: str = Field(min_length=1, strict=True)
+    selected_note_ids: list[str] = Field(min_length=1)
+
+    @field_validator("source_material_id")
+    @classmethod
+    def nonblank_source(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("请选择笔记所属的账号资料")
+        return value
+
+    @field_validator("selected_note_ids")
+    @classmethod
+    def explicit_note_set(cls, value: list[str]) -> list[str]:
+        if any(not note_id.strip() for note_id in value) or len(set(value)) != len(value):
+            raise ValueError("请选择不重复的有效笔记")
+        # Membership, not click order, defines the target and recommendation identity.
+        return sorted(value)
+
+
 class SimulationRunCreate(APIModel):
+    account_note_selection: AccountNoteSelection | None = None
     account_profile_id: str | None = Field(default=None, min_length=1)
     source_material_id: str | None = None
     note_id: str | None = None

@@ -5,6 +5,7 @@ import {panelInterviewApi, type PanelInterview} from '../panelInterview'
 import {ReaderAvatar} from './ReaderAvatar'
 import {EditorFeedbackView} from './EditorFeedbackView'
 import {SimulationReviewSummary} from './SimulationReviewSummary'
+import {InfoHint} from './InfoHint'
 import './TrialRoom.css'
 import {simulationCategoryFor, visibleReply} from '../simulationChat'
 import type {ReaderFeedbackIntent} from '../contentCollaboration'
@@ -88,9 +89,8 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
   const oracleAnswers=Array.isArray(oracleInterview.answers)?oracleInterview.answers.map(obj)
     .filter(answer=>text(answer.quote).trim()&&people.some(person=>person.id===answer.personaId)):[]
   return <section className="trial-room" aria-label="读者试读群聊">
-    <header className="trial-room-head"><div><h3>{category==='account'?'账号读者群聊':category==='published_note'?'笔记复盘群聊':'试读讨论'}</h3><p>{run.targetTitle||text(topic.title)}</p></div><span>{people.length} 位读者</span></header>
-    {category==='account'&&<p className="trial-context">基于账号样本，讨论读者为何留下、接下来想看什么。{text(scope.omissionNotice)}</p>}
-    {category==='published_note'&&<p className="trial-context">讨论下一篇同类内容；已发布笔记不作修改。</p>}
+    <header className="trial-room-head"><div><div className="reader-card-heading"><h3>{category==='account'?'账号读者群聊':category==='published_note'?'笔记复盘群聊':'试读讨论'}</h3>{review&&<InfoHint label="讨论范围说明">{category==='account'?'基于账号样本，讨论读者为何留下、接下来想看什么。':'讨论下一篇同类内容；已发布笔记不作修改。'}</InfoHint>}</div><p>{run.targetTitle||text(topic.title)}</p></div><span>{people.length} 位读者</span></header>
+    {category==='account'&&text(scope.omissionNotice)&&<p className="trial-context">{text(scope.omissionNotice)}</p>}
     {category==='creation'&&!text(topic.body)&&!run.inputSnapshot.draft&&<p className="trial-context">本次只看标题，讨论阅读意愿与期待。</p>}
     <div className="trial-conversation" role="log" aria-label="试读发言" aria-live="polite">
       {!run.reactionResults.length&&!running&&<p className="muted">这次还没有读者发言。</p>}

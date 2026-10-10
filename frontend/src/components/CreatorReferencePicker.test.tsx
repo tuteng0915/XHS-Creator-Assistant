@@ -44,7 +44,11 @@ it('starts with no implicit references and lists only completed account analyses
   vi.mocked(analysisRunApi.list).mockResolvedValue([account(), account('running', {status: 'running'}),
     account('trend', {workflowType: 'trend_analysis'}), account('foreign', {workspaceId: 'workspace-2'})])
   const {onChange} = setup()
-  expect(screen.getByText('只参考当前稿件与这段对话。')).toBeInTheDocument()
+  expect(screen.getByText('本次参考 · 仅当前稿件')).toBeInTheDocument()
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  fireEvent.mouseEnter(screen.getByRole('button', {name: '创作参考说明'}))
+  expect(screen.getByRole('tooltip')).toHaveTextContent('不添加参考时，只读取当前稿件与这段对话。')
+  fireEvent.keyDown(document, {key: 'Escape'})
   expect(analysisRunApi.list).not.toHaveBeenCalled()
   await openPicker()
   const values = within(screen.getByRole('combobox', {name: '分析记录'})).getAllByRole('option').map(option => (option as HTMLOptionElement).value)

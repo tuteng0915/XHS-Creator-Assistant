@@ -3,34 +3,43 @@ import { panelEditApi, simulationRunApi, topicApi } from '../api'
 import type { PanelRetestRequest, SimulationRun, SimulationRunSummary, Topic } from '../types'
 import type { PanelEditProposal } from '../panelEdits'
 import { replaceSelectedText, selectionFromTextarea, type CollaborationCandidate, type CollaborationComposeIntent, type ReaderFeedbackIntent, type WritingSelection } from '../contentCollaboration'
+import { creatorDraftFrom, draftHasSameBase, draftMatchesSaved, readCreatorDraft, writeCreatorCache, type CreatorDraft } from '../creatorDraftCache'
 import { ContentCollaborationChat } from './ContentCollaborationChat'
 import { PanelEditWorkspace } from './PanelEditWorkspace'
 import { PendingSuggestions } from './PendingSuggestions'
 import { PanelRetestControl } from './PanelRetestControl'
+import { InfoHint } from './InfoHint'
 import './LocalRewrite.css'
 import './CreatorCanvasPage.css'
 
 const narrowCanvasQuery = '(max-width: 900px)'
 type CanvasPane = 'chat' | 'draft'
 
-export function CreatorCanvasPage({workspaceId, topic, topics, onSelect, onUpdated, onSimulate, onRetestCreated, simulationRuns = [], readerFeedback, onReaderFeedbackConsumed}: {
+export function CreatorCanvasPage({workspaceId, topic, topics, onSelect, onUpdated, onSimulate, onRetestCreated, simulationRuns = [], readerFeedback, onReaderFeedbackConsumed, onLeaveGuardChange}: {
   workspaceId: string; topic: Topic | null; topics: Topic[]; agentId?: string;
   onSelect: (topic: Topic) => void; onUpdated: (topic: Topic) => void;
   onSimulate?: (topic: Topic) => void;
   onRetestCreated?: (run: SimulationRun, navigate: boolean) => void;
   simulationRuns?: SimulationRunSummary[];
   readerFeedback?: ReaderFeedbackIntent | null; onReaderFeedbackConsumed?: () => void;
+  onLeaveGuardChange?: (message: string | null) => void;
 }) {
   return <section className="creator-canvas-page">
     <div className="creator-page-head"><h1>AI 创作助手</h1><select className="creator-topic-select" aria-label="创作选题" value={topic?.id || ''} onChange={e => {const selected = topics.find(t => t.id === e.target.value); if (selected) onSelect(selected)}}><option value="">选择选题</option>{topics.filter(t => t.status !== 'archived').map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></div>
-    {topic ? <Canvas key={`${workspaceId}:${topic.id}`} workspaceId={workspaceId} topic={topic} onUpdated={onUpdated} onSimulate={onSimulate} onRetestCreated={onRetestCreated} simulationRuns={simulationRuns} readerFeedback={readerFeedback} onReaderFeedbackConsumed={onReaderFeedbackConsumed} /> : <p>先从选题库选择一个题目。</p>}
+    {topic ? <Canvas key={`${workspaceId}:${topic.id}`} workspaceId={workspaceId} topic={topic} onUpdated={onUpdated} onSimulate={onSimulate} onRetestCreated={onRetestCreated} simulationRuns={simulationRuns} readerFeedback={readerFeedback} onReaderFeedbackConsumed={onReaderFeedbackConsumed} onLeaveGuardChange={onLeaveGuardChange} /> : <p>先从选题库选择一个题目。</p>}
   </section>
 }
 
-function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, simulationRuns, readerFeedback, onReaderFeedbackConsumed}: {workspaceId: string; topic: Topic; onUpdated: (t: Topic) => void; onSimulate?: (t: Topic) => void; onRetestCreated?: (run: SimulationRun, navigate: boolean) => void; simulationRuns: SimulationRunSummary[]; readerFeedback?: ReaderFeedbackIntent | null; onReaderFeedbackConsumed?: () => void}) {
+function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, simulationRuns, readerFeedback, onReaderFeedbackConsumed, onLeaveGuardChange}: {workspaceId: string; topic: Topic; onUpdated: (t: Topic) => void; onSimulate?: (t: Topic) => void; onRetestCreated?: (run: SimulationRun, navigate: boolean) => void; simulationRuns: SimulationRunSummary[]; readerFeedback?: ReaderFeedbackIntent | null; onReaderFeedbackConsumed?: () => void; onLeaveGuardChange?: (message: string | null) => void}) {
+  const [initialCache] = useState(() => readCreatorDraft(workspaceId, topic.id))
+  const recoverable = initialCache.value && !draftMatchesSaved(initialCache.value, topic) ? initialCache.value : null
+  const [draftConflict, setDraftConflict] = useState<CreatorDraft | null>(() => recoverable && !draftHasSameBase(recoverable, topic) ? recoverable : null)
+  const [cacheUnavailable, setCacheUnavailable] = useState(initialCache.unavailable)
+  const [messageCacheUnavailable, setMessageCacheUnavailable] = useState(false)
+  const [restoredDraft, setRestoredDraft] = useState(!!recoverable && !draftConflict)
   const [saved, setSaved] = useState(topic)
-  const [title, setTitle] = useState(topic.title)
-  const [body, setBody] = useState(topic.body || '')
+  const [title, setTitle] = useState(() => !draftConflict && recoverable ? recoverable.title : topic.title)
+  const [body, setBody] = useState(() => !draftConflict && recoverable ? recoverable.body : topic.body || '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [collaborating, setCollaborating] = useState(false)
@@ -62,6 +71,7 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
   const collaborationLock = useRef(false)
   const editRevision = useRef(0)
   const active = useRef(true)
+  const seenTopic = useRef(topic)
   useEffect(() => {active.current = true; return () => {active.current = false}}, [])
   useEffect(() => {
     const media = window.matchMedia?.(narrowCanvasQuery)
@@ -95,8 +105,32 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
   const dirtyRef = useRef(dirty)
   const onUpdatedRef = useRef(onUpdated)
   useEffect(() => {dirtyRef.current = dirty; onUpdatedRef.current = onUpdated}, [dirty, onUpdated])
+  useEffect(() => {
+    if (seenTopic.current.updatedAt === topic.updatedAt && seenTopic.current.title === topic.title && seenTopic.current.body === topic.body) return
+    seenTopic.current = topic
+    if (saved.updatedAt === topic.updatedAt && saved.title === topic.title && saved.body === topic.body) return
+    const local = draftConflict || (dirty ? creatorDraftFrom(saved, title, body) : null)
+    editRevision.current++
+    setSaved(topic); setTitle(topic.title); setBody(topic.body || ''); setSelection(null); setPreview(null)
+    setDraftConflict(local && !draftMatchesSaved(local, topic) ? local : null)
+  }, [topic, saved, dirty, title, body, draftConflict])
+  useEffect(() => {
+    const value = draftConflict || (dirty ? creatorDraftFrom(saved, title, body) : null)
+    setCacheUnavailable(!writeCreatorCache('draft', workspaceId, topic.id, value))
+  }, [workspaceId, topic.id, saved, title, body, dirty, draftConflict])
+  useEffect(() => {
+    if (!dirty && !draftConflict) return
+    const guard = (event: BeforeUnloadEvent) => {event.preventDefault(); event.returnValue = ''}
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [dirty, draftConflict])
+  const leaveWarning = (cacheUnavailable && (dirty || !!draftConflict)) || messageCacheUnavailable
+    ? '当前浏览器无法暂存这些修改，离开后未保存内容会丢失。确定离开吗？' : null
+  useEffect(() => {onLeaveGuardChange?.(leaveWarning)}, [leaveWarning, onLeaveGuardChange])
+  useEffect(() => () => onLeaveGuardChange?.(null), [onLeaveGuardChange])
+  const onMessageStorageIssue = useCallback((unavailable: boolean) => setMessageCacheUnavailable(unavailable), [])
   const onActivityChange = useCallback((busy: boolean) => {collaborationLock.current = busy; setCollaborating(busy)}, [])
-  const retestBlocked = dirty ? '画布有未保存修改，请先保存，再邀请原班读者试读。' : retesting || applying || saving || collaborating || preparing ? '请等待当前操作完成。' : ''
+  const retestBlocked = draftConflict ? '请先处理待恢复的本地草稿。' : dirty ? '画布有未保存修改，请先保存，再邀请原班读者试读。' : retesting || applying || saving || collaborating || preparing ? '请等待当前操作完成。' : ''
   const focusedSelection = selection?.body === body ? selection.value : undefined
   function showPane(next: CanvasPane, focusTab = false) {
     const current = pane === 'chat' ? chatPaneRef.current : draftPaneRef.current
@@ -114,6 +148,7 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
   }
 
   async function save() {
+    if (draftConflict) throw new Error('请先选择恢复本地草稿或使用已保存稿。')
     if (applyLock.current || retestLock.current) throw new Error('当前操作正在提交，请稍候再保存。')
     const savingRevision = editRevision.current
     setSaving(true)
@@ -181,7 +216,7 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
     closePreview()
   }
   async function applyPanelEdit(proposal: PanelEditProposal, operation: 'apply' | 'undo' = 'apply') {
-    if (!active.current || retestLock.current || applyLock.current || dirtyRef.current || collaborationLock.current || prepareLock.current || saving) throw new Error('请先完成当前编辑或等待正在执行的操作。')
+    if (!active.current || draftConflict || retestLock.current || applyLock.current || dirtyRef.current || collaborationLock.current || prepareLock.current || saving) throw new Error('请先完成当前编辑或等待正在执行的操作。')
     if (proposal.workspaceId !== workspaceId || proposal.topicId !== topic.id) throw new Error('提案不属于当前稿件。')
     applyLock.current = true; setApplying(true); setError('')
     const revision = editRevision.current
@@ -202,7 +237,7 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
     } finally {applyLock.current = false; if (active.current) setApplying(false)}
   }
   async function createRetest(parentId: string, payload: PanelRetestRequest) {
-    if (!active.current || retestLock.current || applyLock.current || dirtyRef.current || collaborationLock.current || prepareLock.current || saving) throw new Error('请先保存稿件并等待当前操作完成。')
+    if (!active.current || draftConflict || retestLock.current || applyLock.current || dirtyRef.current || collaborationLock.current || prepareLock.current || saving) throw new Error('请先保存稿件并等待当前操作完成。')
     if (Date.parse(payload.expectedUpdatedAt) !== Date.parse(saved.updatedAt)) throw new Error('确认中的稿件版本已变化，请重新核对。')
     retestLock.current = true; setRetesting(true); setError('')
     const revision = editRevision.current
@@ -219,6 +254,12 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
   }
   return <>
     {error && <p role="alert">{error}</p>}
+    {draftConflict && <section className="canvas-draft-recovery" aria-label="待恢复的本地草稿">
+      <p>已保存稿有更新，本页还留着一份未保存草稿。</p>
+      <details><summary>对照两份内容</summary><div className="canvas-draft-comparison"><section><h3>本地未保存</h3><strong>{draftConflict.title}</strong><p>{draftConflict.body || '正文为空'}</p></section><section><h3>当前已保存</h3><strong>{saved.title}</strong><p>{saved.body || '正文为空'}</p></section></div></details>
+      <div className="canvas-draft-recovery-actions"><button type="button" onClick={() => {editRevision.current++; setTitle(draftConflict.title); setBody(draftConflict.body); setDraftConflict(null); setRestoredDraft(true)}}>恢复本地草稿</button><button type="button" onClick={() => {setDraftConflict(null); setRestoredDraft(false)}}>使用已保存稿</button></div>
+    </section>}
+    {leaveWarning && <p className="canvas-draft-storage-warning" role="alert">本页无法暂存，离开前请保存稿件，并复制未发送的消息。</p>}
     {narrow && <div className="canvas-pane-tabs" role="tablist" aria-label="创作工作区"
       onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -236,8 +277,8 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
       <blockquote>{feedback.quote}</blockquote>
       <button type="button" disabled={collaborating || saving || applying || retesting} onClick={() => requestRewrite(focusedSelection ? '请结合引用的读者意见，只改写我选中的这一段，保留其余内容。' : '请结合引用的读者意见，先讨论这篇稿件哪些地方值得调整，别直接重写整篇。')}>和助手讨论</button>
     </section>}
-        <ContentCollaborationChat workspaceId={workspaceId} topic={saved} blocked={retesting || applying || preparing || saving || !title.trim()}
-          beforeSend={prepareCollaboration} onActivityChange={onActivityChange} onPreview={previewCandidate} composeIntent={composeIntent} />
+        <ContentCollaborationChat workspaceId={workspaceId} topic={saved} blocked={!!draftConflict || retesting || applying || preparing || saving || !title.trim()}
+          beforeSend={prepareCollaboration} onActivityChange={onActivityChange} onPreview={previewCandidate} composeIntent={composeIntent} onDraftStorageIssue={onMessageStorageIssue} />
       </div>
       <div className="canvas-divider" role="separator" aria-label="调整对话和稿件宽度" aria-valuenow={split} aria-valuetext={`对话 ${split}% · 稿件 ${100 - split}%`} aria-valuemin={30} aria-valuemax={70} aria-orientation="vertical" tabIndex={0} hidden={narrow}
         onKeyDown={event => {
@@ -250,7 +291,7 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
         onPointerUp={event => {if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)}}
         onPointerCancel={event => {if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)}} />
       <section ref={draftPaneRef} id="canvas-draft-pane" className="canvas-editor" role={narrow ? 'tabpanel' : undefined} aria-labelledby={narrow ? 'canvas-draft-tab' : undefined} hidden={narrow && pane !== 'draft'}>
-        <div className="canvas-editor-heading"><h2>稿件</h2><span>{Array.from(body).length} 字</span></div>
+        <div className="canvas-editor-heading"><h2>稿件<InfoHint label="稿件编辑说明">选中文字可局部改写；点击改写方式会把要求填入对话，确认发送后才生成建议。预览并采用后，仍需保存稿件。</InfoHint></h2><span>{Array.from(body).length} 字</span></div>
     {preview && <section ref={previewRef} tabIndex={-1} className="canvas-candidate-preview" aria-label="写作建议预览"><h2>{preview.candidate.title}</h2><p className="canvas-preview-note">确认后仍需保存。</p>
       {typeof preview.candidate.writingFocus?.readerMessage?.content === 'string' && <details><summary>这条建议参考的读者意见</summary>
         <p>{preview.candidate.writingFocus.readerMessage.senderName}：{preview.candidate.writingFocus.readerMessage.content}</p>
@@ -267,8 +308,8 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
       <div className="canvas-candidate-preview-actions"><button className="primary" disabled={!previewText.trim() || applying || retesting || saving || collaborating} onClick={putCandidateInEditor}>{preview.candidate.writingFocus?.selection ? '只替换这一段' : '确认放入画布'}</button><button onClick={closePreview}>关闭预览</button></div>
     </section>}
         <PendingSuggestions value={topic.generatedSnapshot.pendingSuggestions} />
-        <input aria-label="创作标题" value={title} disabled={preparing} placeholder="给这篇内容一个标题" onChange={e => {editRevision.current++; dirtyRef.current = true; setTitle(e.target.value)}} />
-        <textarea ref={editorRef} aria-label="创作正文" value={body} disabled={preparing} placeholder="写下想法，或和助手一起起草。" onChange={e => {editRevision.current++; dirtyRef.current = true; setBody(e.target.value); setSelection(null)}}
+        <input aria-label="创作标题" value={title} disabled={preparing || !!draftConflict} placeholder="给这篇内容一个标题" onChange={e => {editRevision.current++; dirtyRef.current = true; setTitle(e.target.value)}} />
+        <textarea ref={editorRef} aria-label="创作正文" value={body} disabled={preparing || !!draftConflict} placeholder="写下想法，或和助手一起起草。" onChange={e => {editRevision.current++; dirtyRef.current = true; setBody(e.target.value); setSelection(null)}}
           onSelect={event => {const node = event.currentTarget, value = selectionFromTextarea(body, node.selectionStart, node.selectionEnd); setSelection(value ? {value, body} : null)}} />
         {focusedSelection ? <section className="canvas-selection-tools" aria-label="选段改写">
           <div className="canvas-focus-heading"><strong>已选 {Array.from(focusedSelection.text).length} 字</strong><button type="button" className="text-button" onClick={() => setSelection(null)}>取消选段</button></div>
@@ -278,10 +319,10 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
             ['更简洁', '请只改写我选中的这一段，删去重复和绕弯，让表达更简洁，保留原有信息。'],
             ['把观点讲清楚', '请只改写我选中的这一段，把观点与逻辑讲清楚；缺少事实请先问我，不补造例子或数据。'],
           ].map(([label, request]) => <button key={label} type="button" disabled={collaborating || saving || applying || retesting} onClick={() => requestRewrite(request)}>{label}</button>)}</div>
-          <small>填入要求后，确认发送。</small>
-        </section> : <p className="canvas-selection-hint">选中文字，局部改写。</p>}
-        <div className="save-row"><button className="primary" disabled={retesting || applying || !dirty || saving || preparing || !title.trim()} onClick={() => {setError(''); void save().catch(e => setError(String(e)))}}>保存</button><small>{saving ? '保存中…' : dirty ? '有未保存修改' : '已保存'}</small>
-          {onSimulate && <button disabled={retesting || applying || preparing || saving || collaborating || !title.trim()} onClick={() => void prepareSimulation()}>{preparing ? '正在保存…' : '选择模拟读者'}</button>}
+        </section> : null}
+        {restoredDraft && dirty && <p className="canvas-draft-restored">已恢复本页未保存草稿。</p>}
+        <div className="save-row"><button className="primary" disabled={!!draftConflict || retesting || applying || !dirty || saving || preparing || !title.trim()} onClick={() => {setError(''); void save().catch(e => setError(String(e)))}}>保存</button><small>{saving ? '保存中…' : dirty ? '有未保存修改' : '已保存'}</small>
+          {onSimulate && <button disabled={!!draftConflict || retesting || applying || preparing || saving || collaborating || !title.trim()} onClick={() => void prepareSimulation()}>{preparing ? '正在保存…' : '选择模拟读者'}</button>}
         </div>
       </section>
     </div>
@@ -291,6 +332,6 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
     <PanelEditWorkspace workspaceId={workspaceId} topic={saved} runs={simulationRuns} onApply={applyPanelEdit}
       onUndo={proposal => applyPanelEdit(proposal, 'undo')}
       onRetest={createRetest} onRetestCreated={onRetestCreated}
-      blocked={dirty ? '画布有未保存修改，请先保存；若稿件有变化，需要重新试读。' : retesting || applying || saving || collaborating || preparing ? '请等待当前操作完成。' : ''}/>
+      blocked={draftConflict ? '请先处理待恢复的本地草稿。' : dirty ? '画布有未保存修改，请先保存；若稿件有变化，需要重新试读。' : retesting || applying || saving || collaborating || preparing ? '请等待当前操作完成。' : ''}/>
   </>
 }
