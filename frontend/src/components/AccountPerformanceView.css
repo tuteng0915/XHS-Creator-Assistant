@@ -68,7 +68,7 @@
 }
 
 .account-performance-view .account-performance-title:enabled:hover {
-  color: var(--blue);
+  color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 3px;
 }

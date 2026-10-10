@@ -91,6 +91,51 @@ describe('WorkspaceShell', () => {
     expect(props.onSetActivePage).toHaveBeenCalledWith('account-diagnosis')
   })
 
+  it('groups the journey with creation after readers and keeps icons decorative', () => {
+    renderShell({ activePage: 'simulations' })
+    const navigation = screen.getByRole('navigation', { name: '创作者功能导航' })
+
+    expect(within(navigation).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      '账号概览', '我的笔记', '账号诊断', '分析历史',
+      '受众分析', '模拟粉丝', '受众模拟', '选题库', 'AI 创作助手',
+    ])
+    expect(within(navigation).getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual([
+      '账号', '读者', '创作',
+    ])
+    expect(within(navigation).getByRole('button', { name: '受众模拟' })).toHaveAttribute('aria-current', 'page')
+    expect(within(navigation).getByRole('button', { name: '选题库' })).not.toHaveAttribute('aria-current')
+    expect(navigation.querySelectorAll('svg[aria-hidden="true"][focusable="false"]')).toHaveLength(9)
+  })
+
+  it('preserves workspace switching protection while busy', () => {
+    renderShell({ busy: true })
+
+    expect(screen.getByLabelText('当前账号档案')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '＋ 添加账号' })).toBeDisabled()
+  })
+
+  it('leaves developer navigation outside the public shell styling', () => {
+    const { container } = render(<WorkspaceShell
+      workspace={workspace}
+      workspaces={[workspace]}
+      selectedWorkspaceId={workspace.id}
+      activePage="account-diagnosis"
+      inputAssetPanel="xhs_creator_profiles"
+      showHelp={false}
+      helpContent={{ title: '帮助', description: '', bullets: [] }}
+      internalMode
+      onOpenInputAsset={vi.fn()}
+      onSetActivePage={vi.fn()}
+      onSelectWorkspace={vi.fn()}
+      onCreateCreatorProfile={vi.fn()}
+      onToggleHelp={vi.fn()}
+    >页面内容</WorkspaceShell>)
+
+    expect(container.querySelector('.creator-focused-shell')).not.toBeInTheDocument()
+    expect(container.querySelector('.creator-navigation')).not.toBeInTheDocument()
+    expect(screen.getByText('热点分析')).toBeInTheDocument()
+  })
+
   it('toggles and displays help content when requested', () => {
     const props = renderShell({ showHelp: true })
 

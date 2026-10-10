@@ -1,65 +1,74 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="300" viewBox="0 0 1280 300" fill="none" role="img" aria-labelledby="cover-title cover-desc">
-  <title id="cover-title">SqsAgent — 从认识账号，到听见读者。</title>
-  <desc id="cover-desc">浅蓝绿色背景上的 SqsAgent 标题，以及相互连接的账号、创作、读者三张概念卡片，表达分析、创作与倾听的协作过程。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" fill="none" role="img" aria-labelledby="cover-title cover-desc">
+  <title id="cover-title">SqsAgent — 认识账号，听见读者，打磨下一篇</title>
+  <desc id="cover-desc">柔和红色与中性灰封面。左侧为产品名称与“从认识账号，到听见读者”标语，右侧用账号卡、读者头像和创作卡呈现创作者工作区的概念流程。这是品牌插图，不是产品界面截图。</desc>
   <defs>
-    <linearGradient id="background" x1="24" y1="20" x2="1256" y2="292" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#F7F9FC"/>
-      <stop offset="0.52" stop-color="#F1F7FD"/>
-      <stop offset="1" stop-color="#ECF8F4"/>
+    <linearGradient id="paper" x1="44" y1="18" x2="1220" y2="352" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FCFAFA"/>
+      <stop offset="0.55" stop-color="#FFF1F3"/>
+      <stop offset="1" stop-color="#F9E8EC"/>
     </linearGradient>
-    <linearGradient id="center-card" x1="923" y1="70" x2="1061" y2="226" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFFFF"/>
-      <stop offset="1" stop-color="#F5F9FF"/>
+    <linearGradient id="accent" x1="62" y1="59" x2="93" y2="86" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C62F46"/>
+      <stop offset="1" stop-color="#AC253B"/>
     </linearGradient>
-    <filter id="card-shadow" x="-35%" y="-30%" width="170%" height="175%" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#244D78" flood-opacity="0.08"/>
+    <filter id="lift" x="-15%" y="-20%" width="130%" height="155%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#51353B" flood-opacity="0.06"/>
     </filter>
+    <clipPath id="frame"><rect x="1" y="1" width="1278" height="358" rx="28"/></clipPath>
   </defs>
-
-  <rect x="8.5" y="8.5" width="1263" height="283" rx="28" fill="url(#background)" stroke="#E4EBF1"/>
-  <path d="M780 291C833 252 818 181 884 133C952 84 1003 118 1062 78C1101 51 1104 27 1130 9H1244C1259 9 1271 21 1271 36V264C1271 279 1259 291 1244 291H780Z" fill="#E1F1F1" fill-opacity="0.52"/>
-  <circle cx="1170" cy="62" r="17" fill="#E2EEF9"/>
-  <circle cx="767" cy="211" r="6" fill="#B8DBE1"/>
-  <circle cx="1186" cy="233" r="5" fill="#AFCDEB"/>
-
+  <g clip-path="url(#frame)">
+    <rect x="1" y="1" width="1278" height="358" rx="28" fill="url(#paper)"/>
+    <path d="M662 358L975 0H1280V360L662 358Z" fill="#FFFFFF" fill-opacity="0.30"/>
+    <path d="M732 360L1046 0" stroke="#FFFFFF" stroke-width="2" stroke-opacity="0.70"/>
+    <circle cx="1231" cy="326" r="163" fill="#F3D9DF" fill-opacity="0.44"/>
+    <circle cx="1258" cy="355" r="124" stroke="#E8C9D1" stroke-opacity="0.75"/>
+  </g>
+  <rect x="1" y="1" width="1278" height="358" rx="28" stroke="#E8DFE1"/>
   <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif">
-    <rect x="64" y="54" width="30" height="5" rx="2.5" fill="#397ED9"/>
-    <text x="62" y="125" font-size="62" font-weight="700" letter-spacing="-2" fill="#1E3F6D">SqsAgent</text>
-    <text x="66" y="172" font-size="25" font-weight="400" letter-spacing="1" fill="#536B83">从认识账号，到听见读者。</text>
-    <rect x="65" y="209" width="275" height="32" rx="16" fill="#FFFFFF" fill-opacity="0.8" stroke="#DDE8F2"/>
-    <text x="85" y="229" font-size="10" font-weight="600" letter-spacing="1.9" fill="#527293">ANALYZE / CREATE / LISTEN</text>
+    <rect x="62" y="56" width="34" height="34" rx="11" fill="url(#accent)"/>
+    <path d="M72 66H84M72 73H84M72 80H79" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="109" y="78" font-size="12" font-weight="600" letter-spacing="2.3" fill="#757174">CREATOR WORKSPACE</text>
+    <text x="59" y="160" font-size="67" font-weight="700" letter-spacing="-2.5" fill="#352F32">SqsAgent</text>
+    <text x="62" y="218" font-size="29" font-weight="500" letter-spacing="0.4" fill="#575155">从认识账号，到听见读者。</text>
+    <text x="64" y="254" font-size="16" fill="#797276">把你的积累、想法与读者反馈，放在一起。</text>
+    <path d="M64 296H88" stroke="#C62F46" stroke-width="3" stroke-linecap="round"/>
+    <text x="101" y="301" font-size="12" letter-spacing="1.1" fill="#797276">ANALYZE · LISTEN · CREATE</text>
   </g>
-
-  <path d="M778 163C843 93 918 253 995 161C1060 84 1111 110 1199 148" stroke="#9BBFE1" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 8"/>
-  <circle cx="780" cy="161" r="4" fill="#FFFFFF" stroke="#8FB6DB" stroke-width="2"/>
-  <circle cx="1199" cy="148" r="4" fill="#FFFFFF" stroke="#8FB6DB" stroke-width="2"/>
-
-  <g transform="rotate(-9 875 156)">
-    <rect x="813" y="87" width="124" height="138" rx="20" fill="#FFFFFF" fill-opacity="0.94" stroke="#D7E4F0" filter="url(#card-shadow)"/>
-    <rect x="846" y="109" width="58" height="58" rx="20" fill="#EBF3FD"/>
-    <circle cx="875" cy="129" r="8" stroke="#568BC4" stroke-width="2.5"/>
-    <path d="M860 154C861 145 867 140 875 140C883 140 889 145 890 154" stroke="#568BC4" stroke-width="2.5" stroke-linecap="round"/>
-    <text x="875" y="198" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="500" fill="#61788F">账号</text>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif">
+    <rect x="745" y="49" width="453" height="260" rx="22" fill="#FFFFFF" fill-opacity="0.76" stroke="#E8DFE1" filter="url(#lift)"/>
+    <circle cx="767" cy="70" r="3" fill="#DDA3AE"/>
+    <circle cx="779" cy="70" r="3" fill="#E7C2CA"/>
+    <circle cx="791" cy="70" r="3" fill="#EDDEE1"/>
+    <text x="1180" y="74" text-anchor="end" font-size="10" letter-spacing="1" fill="#817C7F">你的创作工作区</text>
+    <path d="M745 88H1198" stroke="#EFEAEC"/>
+    <rect x="766" y="107" width="163" height="75" rx="13" fill="#FFF7F8" stroke="#F3D7DD"/>
+    <rect x="780" y="123" width="29" height="29" rx="9" fill="#FBE1E7"/>
+    <path d="M788 143V134M794 143V129M800 143V137" stroke="#C62F46" stroke-width="2" stroke-linecap="round"/>
+    <text x="819" y="136" font-size="13" font-weight="600" fill="#575155">认识账号</text>
+    <text x="819" y="155" font-size="10" fill="#817C7F">特点与值得保留的表达</text>
+    <path d="M941 145H955M950 140L955 145L950 150" stroke="#CFC4C7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="967" y="107" width="209" height="75" rx="13" fill="#F3F9F6" stroke="#DAEAE1"/>
+    <text x="981" y="130" font-size="13" font-weight="600" fill="#497368">听见不同读者</text>
+    <g transform="translate(984 140)">
+      <circle cx="11" cy="11" r="11" fill="#FBE1E7"/>
+      <circle cx="11" cy="8" r="3" fill="#BC7081"/>
+      <path d="M5 17C5 11 17 11 17 17" fill="#BC7081"/>
+      <circle cx="40" cy="11" r="11" fill="#DDEEE5"/>
+      <circle cx="40" cy="8" r="3" fill="#79A18C"/>
+      <path d="M34 17C34 11 46 11 46 17" fill="#79A18C"/>
+      <circle cx="69" cy="11" r="11" fill="#EEE8F5"/>
+      <circle cx="69" cy="8" r="3" fill="#A090B8"/>
+      <path d="M63 17C63 11 75 11 75 17" fill="#A090B8"/>
+      <path d="M95 7H151M95 14H132" stroke="#BCD4C8" stroke-width="3" stroke-linecap="round"/>
+    </g>
+    <path d="M1071 188V196M1067 192L1071 196L1075 192" stroke="#CFC4C7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="766" y="204" width="410" height="82" rx="13" fill="#FFFFFF" stroke="#E8DFE1"/>
+    <rect x="780" y="219" width="29" height="29" rx="9" fill="#FFF1F3"/>
+    <path d="M789 239L790 233L799 224L804 229L795 238L789 239ZM797 226L802 231" stroke="#C62F46" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="819" y="232" font-size="13" font-weight="600" fill="#575155">打磨下一篇</text>
+    <text x="819" y="251" font-size="10" fill="#817C7F">保留你的判断，让建议成为选择。</text>
+    <path d="M819 266H1020M1031 266H1058" stroke="#ECE7E9" stroke-width="3" stroke-linecap="round"/>
+    <rect x="1081" y="223" width="79" height="27" rx="8" fill="#FFF1F3"/>
+    <text x="1120" y="241" text-anchor="middle" font-size="10" font-weight="500" fill="#9E243B">由你来决定</text>
   </g>
-
-  <g transform="rotate(10 1100 164)">
-    <rect x="1037" y="94" width="126" height="140" rx="20" fill="#FFFFFF" fill-opacity="0.94" stroke="#D7E9E6" filter="url(#card-shadow)"/>
-    <rect x="1070" y="117" width="60" height="58" rx="20" fill="#EAF6F1"/>
-    <path d="M1087 131H1113C1116 131 1118 133 1118 136V151C1118 154 1116 156 1113 156H1098L1087 163V156C1084 156 1082 154 1082 151V136C1082 133 1084 131 1087 131Z" stroke="#61998C" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="1092" cy="143" r="1.7" fill="#61998C"/>
-    <circle cx="1100" cy="143" r="1.7" fill="#61998C"/>
-    <circle cx="1108" cy="143" r="1.7" fill="#61998C"/>
-    <text x="1100" y="205" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="15" font-weight="500" fill="#617F79">读者</text>
-  </g>
-
-  <g transform="rotate(2 992 148)">
-    <rect x="923" y="70" width="138" height="156" rx="22" fill="url(#center-card)" stroke="#C8DDF2" filter="url(#card-shadow)"/>
-    <rect x="959" y="95" width="66" height="64" rx="22" fill="#E7F0FE"/>
-    <path d="M978 137L997 118L1005 126L986 145L975 148L978 137Z" stroke="#397ED9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M994 121L1002 129M1005 105V111M1002 108H1008" stroke="#397ED9" stroke-width="2.5" stroke-linecap="round"/>
-    <text x="992" y="194" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600" fill="#3F6D9E">创作</text>
-  </g>
-
-  <path d="M1142 48V60M1136 54H1148" stroke="#9FC5D6" stroke-width="2" stroke-linecap="round"/>
-  <path d="M858 249V257M854 253H862" stroke="#A8C4E0" stroke-width="2" stroke-linecap="round"/>
 </svg>

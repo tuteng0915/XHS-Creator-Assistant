@@ -3,10 +3,10 @@
 .canvas-focus-heading h2, .canvas-feedback-retest h2 { font-size: var(--text-body); font-weight: 600; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
 .canvas-focus-heading strong { font-size: var(--text-sm); font-weight: 600; }
 .canvas-reader-feedback p, .canvas-feedback-retest p { font-size: var(--text-sm); line-height: 1.6; color: var(--sub); margin: 8px 0; }
-.canvas-reader-feedback blockquote, .canvas-selection-tools blockquote, .canvas-focus-original { margin: 10px 0; padding: 8px 12px; border-left: 2px solid var(--line); background: #f8fafc; color: var(--ink); font-size: var(--text-body); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
+.canvas-reader-feedback blockquote, .canvas-selection-tools blockquote, .canvas-focus-original { margin: 10px 0; padding: 8px 12px; border-left: 2px solid var(--line); background: var(--surface-muted); color: var(--ink); font-size: var(--text-body); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
 .canvas-reader-feedback .canvas-focus-question { font-size: var(--text-xs); color: var(--sub); }
 .canvas-selection-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .canvas-selection-tools small, .canvas-selection-hint { display: block; color: var(--sub); font-size: var(--text-xs); line-height: 1.6; margin: 8px 0 0; }
 .canvas-selection-tools summary { font-size: var(--text-xs); color: var(--sub); cursor: pointer; margin-top: 6px; }
-.canvas-candidate-preview:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.canvas-candidate-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 700px) { .canvas-reader-feedback, .canvas-selection-tools, .canvas-feedback-retest { padding: 12px; } }

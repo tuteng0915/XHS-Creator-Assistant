@@ -217,11 +217,15 @@ class RealContentCollaborationProvider:
             raise ValidationError("协作角色返回格式不符合本轮交接契约") from error
 
         turn = output.turn
+        single_writer = context.get("assistantMode") == "single_writer"
+        if single_writer and (role != "writing" or turn.next_recipient != "creator"):
+            raise ValidationError("创作助手应直接回复作者，不转交其他角色")
         self._validate_turn(
             role=role,
             turn=turn,
             sources=sources,
             upstream_candidates=upstream_candidates,
+            single_writer=single_writer,
         )
         candidates = [item.model_dump(by_alias=True) for item in turn.candidate_suggestions]
         return SpecialistTurn(
@@ -232,9 +236,10 @@ class RealContentCollaborationProvider:
             # provenance available without granting a model a write path.
             model_metadata={
                 **response.model_metadata,
-                "contract": "content-collaboration-turn/v2",
-            "candidateSuggestions": candidates,
-            "usedCandidateIds": list(turn.used_candidate_ids),
+                "contract": ("creator-writing-turn/v1" if single_writer
+                             else "content-collaboration-turn/v2"),
+                "candidateSuggestions": candidates,
+                "usedCandidateIds": list(turn.used_candidate_ids),
             },
         )
 
@@ -256,7 +261,10 @@ class RealContentCollaborationProvider:
 
         target = context.get("target")
         if isinstance(target, dict):
-            add("target:topic", "冻结选题", target, limit=_MAX_TARGET_SOURCE_CHARS)
+            target_limit = (len(_canonical(target))
+                            if context.get("assistantMode") == "single_writer"
+                            else _MAX_TARGET_SOURCE_CHARS)
+            add("target:topic", "冻结选题", target, limit=target_limit)
 
         focus = context.get("writingFocus")
         if isinstance(focus, dict):
@@ -271,8 +279,21 @@ class RealContentCollaborationProvider:
                      if key in reader}, limit=8_000)
 
         session_context = context.get("sessionContext")
+        if context.get("assistantMode") == "single_writer" and isinstance(session_context, dict):
+            snapshot = session_context.get("creatorContextSnapshot", {})
+            for reference in snapshot.get("references", []):
+                add(
+                    f"reference:{reference['kind']}:{reference['id']}",
+                    ("作者选择的账号分析" if reference["kind"] == "account_analysis"
+                     else "作者选择的受众分析"),
+                    {"scope": reference.get("scope", {}), "result": reference["content"],
+                     "sourceOrigin": reference.get("sourceOrigin", "unknown")},
+                    limit=100_000,
+                )
         workspace_context = (
-            session_context.get("workspaceContext") if isinstance(session_context, dict) else None
+            session_context.get("workspaceContext")
+            if isinstance(session_context, dict) and context.get("assistantMode") != "single_writer"
+            else None
         )
         if isinstance(workspace_context, dict):
             for item in workspace_context.get("items", []):
@@ -298,7 +319,8 @@ class RealContentCollaborationProvider:
                     f"message:{message_id}",
                     f"协作消息：{item.get('sender', 'unknown')} → {item.get('to', 'unknown')}",
                     content,
-                    limit=_MAX_TRANSCRIPT_MESSAGE_CHARS,
+                    limit=(8_000 if context.get("assistantMode") == "single_writer"
+                           else _MAX_TRANSCRIPT_MESSAGE_CHARS),
                 )
         return sources
 
@@ -318,6 +340,11 @@ class RealContentCollaborationProvider:
         concrete structure or revision.  This is deterministic retrieval over
         the already-frozen pack, never a fresh database read.
         """
+        if context.get("assistantMode") == "single_writer":
+            return {
+                key: source for key, source in sources.items()
+                if key == "target:topic" or key.startswith(("writing:", "reference:", "message:"))
+            }
         requested_ids = ["target:topic"]
         requested_ids.extend(["writing:selected_text", "writing:reader_opinion"])
         requested_ids.extend(f"workspace:{key}" for key in _ROLE_SOURCE_KEYS[role])
@@ -413,6 +440,30 @@ class RealContentCollaborationProvider:
                     "保留作者口吻和已确认事实；材料不足以支持新增经历、数据或结论时，"
                     "提出一个具体问题，不能把补造内容写入 copy_option。",
                 ],
+            }
+        if context.get("assistantMode") == "single_writer":
+            packet["schemaVersion"] = "creator-writing-packet/v1"
+            packet["assistantMode"] = "single_writer"
+            packet["roleTask"] = {
+                "objective": "直接帮助作者讨论角度、起草或精修眼前稿件，保留其具体经历与表达特点。",
+                "candidatePlan": (
+                    "作者要正文就给可用正文；只聊角度则先讨论；局部精修只返回替换片段。"
+                ),
+                "qualityBar": [
+                    "用具体的场景、动作和判断推进，不空泛套模板或重复作者的问题。",
+                    "默认给一个最值得采用的方案和简短理由；只有确有选择价值才给备选。",
+                    "只使用当前稿件、这个上下文段内的对话，以及作者显式选择的参考。",
+                    "参考分析是建议和观察，不是新稿必须照搬的选题，更不是作者新经历。",
+                ],
+                **({"writingFocusRules": packet["roleTask"]["writingFocusRules"]}
+                   if isinstance(focus, dict) else {}),
+            }
+            packet.pop("upstreamHandoff", None)
+            packet["evidence"]["sourceGroups"] = {
+                "manuscript": [key for key in sources if key == "target:topic"],
+                "selectedReferences": [key for key in sources if key.startswith("reference:")],
+                "currentConversation": [key for key in sources if key.startswith("message:")],
+                "writingFocus": [key for key in sources if key.startswith("writing:")],
             }
         return packet
 
@@ -516,6 +567,7 @@ class RealContentCollaborationProvider:
         turn: _WireTurn,
         sources: dict[str, dict[str, str]],
         upstream_candidates: list[dict[str, Any]],
+        single_writer: bool = False,
     ) -> None:
         if not turn.summary.strip():
             raise ValidationError("协作交接摘要不能为空")
@@ -537,7 +589,7 @@ class RealContentCollaborationProvider:
                 raise ValidationError("候选标题和内容不能为空")
             if candidate.kind not in _ALLOWED_SUGGESTION_KINDS[role]:
                 raise ValidationError(f"{role} 不能生成 {candidate.kind} 类型的候选")
-            if candidate.confidence == "inference" and not any(
+            if not single_writer and candidate.confidence == "inference" and not any(
                 marker in candidate.body for marker in ("推断", "待验证")
             ):
                 raise ValidationError("推断候选必须明确标记为推断或待验证")

@@ -2,13 +2,13 @@
 :root {
   --button-radius: 8px;
   --button-height: 36px;
-  --button-border: #cbd5e1;
+  --button-border: #cbbdc2;
   --button-background: #fff;
-  --button-foreground: #334155;
-  --button-hover-background: #f1f5f9;
-  --button-hover-border: #94a3b8;
-  --button-active-background: #e2e8f0;
-  --button-focus: #2563eb;
+  --button-foreground: #423b3f;
+  --button-hover-background: #f5f2f3;
+  --button-hover-border: #a8979e;
+  --button-active-background: #e9e4e6;
+  --button-focus: var(--accent);
 }
 
 button {
@@ -42,12 +42,12 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 
 /* Legacy class names deliberately map to the same primary treatment. */
 button:is(.primary, .save-button, .small-primary, .btn-fill) {
-  --button-background: var(--blue);
+  --button-background: var(--accent);
   --button-foreground: #fff;
-  --button-border: var(--blue);
-  --button-hover-background: #1d4ed8;
-  --button-hover-border: #1d4ed8;
-  --button-active-background: #1e40af;
+  --button-border: var(--accent);
+  --button-hover-background: var(--accent-hover);
+  --button-hover-border: var(--accent-hover);
+  --button-active-background: var(--accent-active);
 }
 button.danger-button {
   --button-foreground: #b91c1c;
@@ -59,10 +59,10 @@ button.danger-button {
 button.text-button {
   --button-background: transparent;
   --button-border: transparent;
-  --button-foreground: var(--blue);
-  --button-hover-background: var(--blue-soft);
+  --button-foreground: var(--accent);
+  --button-hover-background: var(--accent-soft);
   --button-hover-border: transparent;
-  --button-active-background: #dbeafe;
+  --button-active-background: var(--accent-soft-hover);
   min-height: 28px;
   padding: 3px 4px;
   border-radius: 5px;
@@ -82,9 +82,9 @@ button.icon-button {
 /* Selected filters are secondary controls, not additional primary actions. */
 .filter-row button.active, .help-button.active,
 .simulation-target-kind button[aria-pressed=true] {
-  color: #1d4ed8;
-  background: var(--blue-soft);
-  border-color: #93b4ed;
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+  border-color: var(--accent-border-strong);
 }
 
 /* Card and navigation geometry belongs to their component styles. */
@@ -92,6 +92,6 @@ button:is(.creator-note-card, .run-row, .topic-row, .capability-ref-chip, .panel
   font-weight: 400;
   white-space: normal;
 }
-nav button:where(:enabled:hover) { color: var(--blue); background: var(--blue-soft); }
+nav button:where(:enabled:hover) { color: var(--accent); background: var(--accent-soft); }
 
 @media (prefers-reduced-motion: reduce) { button { transition: none; } }

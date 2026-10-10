@@ -44,7 +44,7 @@ function setup(withFeedback=false) {
 
 async function openHub() {
   await screen.findByText('我的历史笔记')
-  fireEvent.click(screen.getByRole('button',{name:/👥 受众模拟/}))
+  fireEvent.click(screen.getByRole('button',{name:'受众模拟'}))
   await waitFor(()=>expect(screen.getAllByRole('option',{name:'认真读者'})).toHaveLength(3))
 }
 

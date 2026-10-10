@@ -10,19 +10,19 @@
 .trial-message-meta {display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px;font-size:var(--text-sm);line-height:1.5}
 .trial-message-meta b {font-size:var(--text-sm);font-weight:600;color:var(--ink)}
 .trial-message-meta span {font-size:var(--text-xs)!important;color:var(--sub);font-weight:400}
-.trial-bubble {margin:0!important;padding:12px 16px;border-radius:3px 14px 14px;background:#f6f7f9;white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--text-body)!important;line-height:1.75}
+.trial-bubble {margin:0!important;padding:12px 16px;border-radius:3px 14px 14px;background:var(--surface-muted);white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--text-body)!important;line-height:1.75}
 .trial-author {flex-direction:row-reverse}
-.trial-author .trial-bubble {background:#eef0f3;border-radius:14px 3px 14px 14px}
+.trial-author .trial-bubble {background:var(--accent-soft);border-radius:14px 3px 14px 14px}
 .trial-author .trial-message-meta {justify-content:flex-end}
 .trial-silent-note {margin:4px 0;color:var(--sub);font-size:var(--text-xs)}
 .trial-reading-notes {margin-top:6px;color:var(--sub);font-size:var(--text-sm)}
 .trial-reading-notes summary {font-size:var(--text-xs)!important;cursor:pointer;color:var(--sub)}
 .trial-reading-notes p {font-size:var(--text-sm);line-height:1.6}
 .trial-divider {display:flex;justify-content:center;padding:8px 0 22px;font-size:var(--text-xs);color:var(--sub)}
-.trial-progress {display:flex;align-items:center;gap:12px;margin:0 24px 20px;padding:14px;background:#f6f7f9;border:1px solid var(--line);border-radius:12px;font-size:var(--text-sm)}
+.trial-progress {display:flex;align-items:center;gap:12px;margin:0 24px 20px;padding:14px;background:var(--surface-muted);border:1px solid var(--line);border-radius:12px;font-size:var(--text-sm)}
 .trial-progress b {font-size:var(--text-sm);font-weight:600}
 .trial-progress small {display:block;color:var(--sub);margin-top:4px;font-size:var(--text-xs)}
-.trial-working-dot {width:8px;height:8px;border-radius:50%;background:var(--sub);box-shadow:0 0 0 4px #eceef1;flex:none}
+.trial-working-dot {width:8px;height:8px;border-radius:50%;background:var(--sub);box-shadow:0 0 0 4px var(--line);flex:none}
 .trial-interview {border-top:1px solid var(--line);background:#fff}
 .trial-interview .trial-progress {margin:0 0 20px}
 .trial-composer-target {display:flex;align-items:center;gap:12px;font-size:var(--text-sm);margin:0 0 12px}
@@ -36,15 +36,15 @@
 .simulation-history-target {max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trial-errors {margin:16px 24px;font-size:var(--text-sm)}
 .reader-card-heading {display:flex;gap:10px;align-items:center}
-.simulation-flow-steps {display:flex;gap:8px;list-style:none;padding:0;margin:0 0 20px;color:#73839a;font-size:13px;flex-wrap:wrap}
-.simulation-flow-steps li {padding:5px 10px;border-radius:20px;background:#eef3f8}
+.simulation-flow-steps {display:flex;gap:8px;list-style:none;padding:0;margin:0 0 20px;color:var(--sub);font-size:13px;flex-wrap:wrap}
+.simulation-flow-steps li {padding:5px 10px;border-radius:20px;background:var(--surface-muted)}
 .simulation-final-readers {padding:16px;border:1px solid #bfdccf;background:#f1f9f5;border-radius:12px;margin:16px 0}
 .simulation-final-readers h3 {font-size:16px;margin:0 0 8px}
 .simulation-final-readers ul {display:flex;gap:12px;flex-wrap:wrap;list-style:none;padding:0}
 .simulation-final-readers li {display:flex;gap:8px;align-items:center;font-size:14px}
 .simulation-target-kind {display:flex;gap:8px;margin-bottom:12px}
 .trial-setup-disclosure {margin-bottom:20px}
-.trial-setup-disclosure>summary {font-size:15px;cursor:pointer;color:#305579;padding:12px 4px;font-weight:600}
+.trial-setup-disclosure>summary {font-size:15px;cursor:pointer;color:var(--accent-ink);padding:12px 4px;font-weight:600}
 .workspace-page.creator-simulation-history {grid-template-columns:minmax(0,1fr);max-width:1100px}
 .creator-simulation-history>.history-list {display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px}
 .creator-simulation-history>.history-list .panel-title {margin:0 12px 0 0;font-size:14px}

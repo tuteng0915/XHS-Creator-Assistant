@@ -24,7 +24,7 @@
 .editor-feedback .feedback-card-actions { display: flex; flex-wrap: wrap; margin-top: 14px; }
 .editor-feedback details { margin-top: 12px; }
 .editor-feedback summary { width: fit-content; max-width: 100%; cursor: pointer; color: var(--sub); font-size: var(--text-sm); }
-.editor-feedback summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; border-radius: 2px; }
+.editor-feedback summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
 .editor-feedback .feedback-evidence[open] { border-top: 1px solid var(--line); padding-top: 12px; }
 .editor-feedback .feedback-source { border-bottom: 1px solid var(--line); padding: 12px 0; }
 .editor-feedback .feedback-source blockquote,

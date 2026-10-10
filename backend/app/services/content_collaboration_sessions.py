@@ -34,6 +34,7 @@ from app.services.content_collaboration import (
     SpecialistTurn,
 )
 from app.services.context_access import ContextAccessService
+from app.services.creator_context import canonical_selection, resolve_creator_context
 from app.services.writing_focus import resolve_writing_focus
 
 DEFAULT_MAX_TURNS = 3
@@ -88,6 +89,11 @@ class DeterministicContentCollaborationProvider:
         topic = context.get("target", {})
         topic_title = topic.get("title") if isinstance(topic, dict) else None
         label = f"《{topic_title}》" if isinstance(topic_title, str) and topic_title else "当前选题"
+        if context.get("assistantMode") == "single_writer":
+            return SpecialistTurn(
+                content=f"可以先围绕{label}确定一个具体场景，再把判断过程写清楚。你最想保留哪一句？",
+                to="creator", model_metadata=self._metadata(),
+            )
         if role == "research":
             return SpecialistTurn(
                 content=(
@@ -176,6 +182,10 @@ class ContentCollaborationSessionService:
             if request_key is not None
             else None
         )
+        if request_key is not None and payload.assistant_mode == "single_writer":
+            create_fingerprint = _fingerprint({
+                "title": title, "contextTarget": target_data, "assistantMode": "single_writer",
+            })
         now = utc_now()
         with self.database.transaction() as connection:
             workspace = self.workspace_repository.get(connection, workspace_id)
@@ -186,6 +196,7 @@ class ContentCollaborationSessionService:
                 connection,
                 workspace=workspace,
                 topic=topic,
+                assistant_mode=payload.assistant_mode,
             )
             row = self.repository.create_session(
                 connection,
@@ -204,6 +215,8 @@ class ContentCollaborationSessionService:
         with self.database.read() as connection:
             self.workspace_repository.get(connection, workspace_id)
             rows = self.repository.list_sessions(connection, workspace_id=workspace_id)
+            for row in rows:
+                row["creator_context_state"] = self._current_creator_context(connection, row)
         return [self._to_summary(row) for row in rows]
 
     def get(
@@ -219,6 +232,7 @@ class ContentCollaborationSessionService:
             runs = self.repository.list_runs(
                 connection, workspace_id=workspace_id, session_id=session_id
             )
+            row["creator_context_state"] = self._current_creator_context(connection, row)
         return self._to_response(row, messages=messages, runs=runs)
 
     def update(
@@ -270,6 +284,10 @@ class ContentCollaborationSessionService:
         recipient = payload.recipient.value
         mode = payload.mode
         request_identity = {"content": content, "recipient": recipient, "mode": mode}
+        selection = (canonical_selection(payload.creator_context_selection)
+                     if payload.creator_context_selection is not None else None)
+        if selection is not None:
+            request_identity["creatorContextSelection"] = selection
         if payload.writing_focus is not None:
             request_identity["writingFocus"] = payload.writing_focus.model_dump(
                 by_alias=True, mode="json", exclude_none=True
@@ -293,6 +311,23 @@ class ContentCollaborationSessionService:
                 return self.get(workspace_id, session_id)
             if session["status"] != "active":
                 raise ConflictError("已归档的协作会话不能继续发送消息")
+            assistant_mode = self._assistant_mode(session)
+            context_revision = 0
+            context_snapshot = None
+            if assistant_mode == "single_writer":
+                if recipient != "writing":
+                    raise ValidationError("创作助手只接收写作请求")
+                if selection is None:
+                    raise ValidationError("请明确本轮参考材料；不使用参考时传入空列表")
+                prior = self._current_creator_context(connection, session)
+                context_revision = prior["contextRevision"]
+                if not context_revision or prior["creatorContextSelection"] != selection:
+                    context_revision += 1
+                context_snapshot = resolve_creator_context(
+                    connection, workspace_id=workspace_id, selection=selection,
+                )
+            elif selection is not None:
+                raise ValidationError("请新建创作助手会话后使用参考材料")
             # Each creator turn starts from the latest saved draft. The
             # original session snapshot and prior run snapshots stay immutable;
             # all specialists within this run share this new frozen version.
@@ -301,8 +336,14 @@ class ContentCollaborationSessionService:
             if topic["workspace_id"] != workspace_id:
                 raise NotFoundError("协作上下文 Topic 不存在")
             session_context = self._build_session_context(
-                connection, workspace=workspace, topic=topic
+                connection, workspace=workspace, topic=topic, assistant_mode=assistant_mode,
             )
+            if assistant_mode == "single_writer":
+                session_context.update({
+                    "creatorContextSelection": selection,
+                    "creatorContextSnapshot": context_snapshot,
+                    "contextRevision": context_revision,
+                })
             focus = None
             if payload.writing_focus is not None:
                 focus = resolve_writing_focus(
@@ -326,6 +367,15 @@ class ContentCollaborationSessionService:
             if focus is not None:
                 creator_context["writingFocus"] = focus
             creator_metadata = {"origin": "creator", "executionMode": mode}
+            if assistant_mode == "single_writer":
+                context_fields = {
+                    "assistantMode": assistant_mode, "contextRevision": context_revision,
+                    "creatorContextSelection": selection,
+                }
+                creator_context.update({
+                    **context_fields, "creatorContextSnapshot": context_snapshot,
+                })
+                creator_metadata.update(context_fields)
             if focus is not None:
                 creator_metadata["writingFocus"] = focus
             message = self.repository.append_message(
@@ -346,13 +396,13 @@ class ContentCollaborationSessionService:
                 "schemaVersion": "content-collaboration-run-input/v1",
                 "sessionContext": session_context,
                 "triggerMessage": self._message_for_graph(message),
-                "maxTurns": self.max_turns,
+                "maxTurns": 1 if assistant_mode == "single_writer" else self.max_turns,
                 "mode": mode,
             }
             graph_state = {
                 "schemaVersion": "content-collaboration-graph/v1",
                 "pendingMessageId": message["id"],
-                "remainingTurns": self.max_turns,
+                "remainingTurns": 1 if assistant_mode == "single_writer" else self.max_turns,
                 "status": "queued",
             }
             run = self.repository.create_run(
@@ -490,8 +540,6 @@ class ContentCollaborationSessionService:
                 pending = CollaborationMessage.model_validate(
                     self._message_for_graph(pending_row)
                 )
-                transcript = self._graph_transcript(messages)
-                handoff_candidates = self._handoff_candidates(messages)
                 input_snapshot = _decoded_object(run["input_snapshot_json"], field="协作执行输入")
                 mode = input_snapshot.get("mode", "demo")
                 if mode not in {"demo", "live"}:
@@ -520,6 +568,14 @@ class ContentCollaborationSessionService:
                         code="missing_frozen_context",
                     )
                     return
+                if session_context.get("assistantMode") == "single_writer":
+                    current_revision = session_context.get("contextRevision")
+                    messages = [item for item in messages if _decoded_object(
+                        item["model_metadata_json"], field="消息上下文版本"
+                    ).get("contextRevision") == current_revision]
+                transcript = self._graph_transcript(messages)
+                handoff_candidates = ({} if session_context.get("assistantMode") == "single_writer"
+                                      else self._handoff_candidates(messages))
                 remaining = graph_state.get("remainingTurns")
                 if not isinstance(remaining, int):
                     await self._finish_failed(
@@ -623,6 +679,10 @@ class ContentCollaborationSessionService:
                 )
                 if isinstance(session_context.get("writingFocus"), dict):
                     message_metadata["writingFocus"] = session_context["writingFocus"]
+                if session_context.get("assistantMode") == "single_writer":
+                    message_metadata.update({key: session_context[key] for key in (
+                        "assistantMode", "contextRevision", "creatorContextSelection",
+                    )})
                 persisted = self.repository.append_message(
                     connection,
                     workspace_id=workspace_id,
@@ -791,11 +851,24 @@ class ContentCollaborationSessionService:
                 "transcript": bounded,
                 "transcriptTruncated": len(transcript) > len(bounded),
             }
+            if session_context.get("assistantMode") == "single_writer":
+                context["assistantMode"] = "single_writer"
             if isinstance(session_context.get("writingFocus"), dict):
                 context["writingFocus"] = session_context["writingFocus"]
             used_contexts[message.id] = context
             return context
 
+        if session_context.get("assistantMode") == "single_writer":
+            # Keep the durable graph boundary, but never let a model/demo route
+            # a public writer request to another specialist or a second call.
+            delegate = provider
+
+            class SingleWriterProvider:
+                async def run(self, *, role, message, context):
+                    turn = await delegate.run(role="writing", message=message, context=context)
+                    return turn.model_copy(update={"to": "creator"})
+
+            provider = SingleWriterProvider()
         return ContentCollaborationGraph(provider, context_for)
 
     def _provider_for_mode(self, mode: str) -> SpecialistProvider | None:
@@ -811,6 +884,7 @@ class ContentCollaborationSessionService:
         *,
         workspace: dict[str, Any],
         topic: dict[str, Any],
+        assistant_mode: str = "legacy_team",
     ) -> dict[str, Any]:
         target = {
             "assetType": "topic",
@@ -823,6 +897,19 @@ class ContentCollaborationSessionService:
             "status": topic["status"],
             "updatedAt": topic["updated_at"],
         }
+        if assistant_mode == "single_writer":
+            # The saved manuscript is always in scope; topic-generation hints,
+            # implicit positioning and unrelated workspace assets are not.
+            return {
+                "schemaVersion": "creator-writing-session/v1", "assistantMode": "single_writer",
+                "target": {key: target[key] for key in (
+                    "assetType", "assetId", "title", "body", "updatedAt",
+                )},
+                "creatorContextSelection": {
+                    "schemaVersion": "creator-context-selection/v1", "references": [],
+                },
+                "contextRevision": 0,
+            }
         pack = self.context_access_service.build_workspace_pack(
             connection,
             workspace=workspace,
@@ -990,6 +1077,10 @@ class ContentCollaborationSessionService:
         compact_transcript = compact_transcript[-MAX_CONTEXT_TRANSCRIPT_MESSAGES:]
         return {
             "schemaVersion": "content-collaboration-turn/v1",
+            **({key: session_context[key] for key in (
+                "assistantMode", "contextRevision", "creatorContextSelection",
+                "creatorContextSnapshot",
+            )} if session_context.get("assistantMode") == "single_writer" else {}),
             "sessionContextRef": {
                 "sessionId": session_id,
                 "contentHash": _fingerprint(session_context),
@@ -1027,6 +1118,10 @@ class ContentCollaborationSessionService:
             "id": row["id"],
             "workspace_id": row["workspace_id"],
             "title": row["title"],
+            "assistant_mode": ContentCollaborationSessionService._assistant_mode(row),
+            "creator_context_selection": row.get("creator_context_state", {}).get(
+                "creatorContextSelection"),
+            "context_revision": row.get("creator_context_state", {}).get("contextRevision", 0),
             "context_target": {
                 "asset_type": row["context_target_type"],
                 "asset_id": row["context_target_id"],
@@ -1040,6 +1135,29 @@ class ContentCollaborationSessionService:
             "updated_at": row["updated_at"],
             "last_message_at": row["last_message_at"],
             "completed_at": row["completed_at"],
+        }
+
+    @staticmethod
+    def _assistant_mode(row: dict[str, Any]) -> str:
+        initial = _decoded_object(row["initial_context_snapshot_json"], field="会话上下文")
+        return "single_writer" if initial.get("assistantMode") == "single_writer" else "legacy_team"
+
+    @staticmethod
+    def _current_creator_context(connection, session: dict[str, Any]) -> dict[str, Any]:
+        if ContentCollaborationSessionService._assistant_mode(session) != "single_writer":
+            return {"creatorContextSelection": None, "contextRevision": 0}
+        latest = connection.execute(
+            "SELECT context_snapshot_json FROM content_collaboration_messages "
+            "WHERE session_id=? AND sender_role='creator' ORDER BY sequence_no DESC LIMIT 1",
+            (session["id"],),
+        ).fetchone()
+        value = (_decoded_object(latest["context_snapshot_json"], field="消息参考材料")
+                 if latest is not None else {})
+        return {
+            "creatorContextSelection": value.get("creatorContextSelection", {
+                "schemaVersion": "creator-context-selection/v1", "references": [],
+            }),
+            "contextRevision": value.get("contextRevision", 0),
         }
 
     @staticmethod

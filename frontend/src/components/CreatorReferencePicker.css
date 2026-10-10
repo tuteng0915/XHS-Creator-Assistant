@@ -1,0 +1,21 @@
+.creator-references { margin-top: 12px; }
+.creator-references-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--sub); font-size: var(--text-xs); }
+.creator-references > p { margin: 6px 0 0; color: var(--sub); font-size: var(--text-xs); }
+.creator-reference-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
+.creator-reference-chips > li { display: flex; align-items: center; min-width: 0; max-width: 100%; border: 1px solid var(--line); background: var(--surface-muted); border-radius: 8px; }
+.creator-reference-chips .text-button { white-space: normal; overflow-wrap: anywhere; text-align: left; min-height: 30px; padding: 4px 8px; font-size: var(--text-xs); color: var(--ink); }
+.creator-reference-chips .icon-button { width: 28px; height: 28px; min-height: 28px; flex-shrink: 0; color: var(--sub); }
+.creator-reference-selectors { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; }
+.creator-reference-selectors label { display: grid; gap: 6px; font-size: var(--text-sm); color: var(--sub); min-width: 0; }
+.creator-reference-selectors select { width: 100%; min-width: 0; }
+.creator-reference-preview { margin: 18px 0; padding: 16px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.creator-reference-preview > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.creator-reference-preview strong { font-size: var(--text-body); font-weight: 600; }
+.creator-reference-preview small { font-size: var(--text-xs); color: var(--sub); }
+.creator-reference-preview p, .creator-reference-preview li { font-size: var(--text-body); line-height: 1.7; }
+.creator-reference-preview ul { padding-left: 20px; margin-bottom: 0; }
+.creator-reference-preview li + li { margin-top: 6px; }
+.creator-reference-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.creator-reference-empty, .creator-reference-error { font-size: var(--text-sm); line-height: 1.7; }
+.creator-reference-error { color: var(--accent-ink); }
+@media (max-width: 480px) { .creator-reference-selectors { grid-template-columns: minmax(0, 1fr); } }

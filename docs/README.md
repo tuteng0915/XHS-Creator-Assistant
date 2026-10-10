@@ -20,6 +20,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [产品需求](product-requirements.md) | 当前功能与交互决定，优先看文首最新更新 |
+| [笔记选择与单助手创作改造](creator-workspace-refinement-plan.md) | 10 月 10 日试用反馈：数据时间、统一筛选、评论更新、用户自选上下文与报告改版；待实施 |
 | [状态与待办](status-and-todo.md) | 每轮完成项、测试、已知限制和下一步交接 |
 | [创作者聚焦版执行手册](creator-focused-v2-execution-manual.md) | 公开产品的改造范围、流程与阶段验收 |
 | [产品设计基线](product-design.md) | 资产、能力、工作流及保留的内部工作台设计 |
@@ -30,13 +31,13 @@
 | 文档 | 内容 |
 | --- | --- |
 | [账号诊断](account-diagnosis-design.md) | 账号认识、关键词、优势与内容表现复盘 |
-| [人机共创](creator-writing-collaboration-design.md) | 研究／写作／审稿协作、局部改写与人工采用 |
+| [人机共创](creator-writing-collaboration-design.md) | 单助手与显式参考集的新方向，以及历史协作、局部改写与人工采用 |
 | [模拟读者](simulated-fan-model-design.md) | 人物候选、手动收录、画像编辑和冻结快照 |
 | [受众 Panel 四阶段计划](audience-panel-four-stage-plan.md) | 建立画像、检索组队、试读与回应、反馈改稿 |
 | [模拟方法](audience-simulation-methods.md) | 人物发现、行为案例和状态化互动的方法借鉴 |
 | [模拟研究](audience-simulation-research.md) | 文献来源、上下文审计与研究性方案 |
 
-早期文档保留过 Top 3、自动收录、单助手等方案，不能据此覆盖最新决定：模拟默认三个空槽且可增加，候选由作者手动收录，创作已接入多角色协作。账号／已发布笔记／创作共用一级受众模拟入口，结论用途各不相同。
+早期文档保留过 Top 3、自动收录和多角色创作等方案，不能据此覆盖最新决定：模拟默认三个空槽且可增加，候选由作者手动收录；当前创作仍是多角色实现，但 10 月 10 日已决定改为单助手与作者自选参考集，尚待实施。账号／已发布笔记／创作共用一级受众模拟入口，结论用途各不相同。
 
 ## 工程与质量验证
 

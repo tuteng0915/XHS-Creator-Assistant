@@ -27,7 +27,7 @@
 .audience-analysis-notes { margin: 20px 0 0; color: var(--sub); font-size: var(--text-sm); line-height: 1.65; overflow-wrap: anywhere; }
 .audience-analysis-notes > summary { width: fit-content; max-width: 100%; cursor: pointer; }
 .audience-analysis-notes p { margin: 10px 0 0; white-space: pre-wrap; }
-.audience-progress { padding: 16px; border: 1px solid var(--line); background: #f8f9fb; border-radius: 12px; font-size: var(--text-body); line-height: 1.65; }
+.audience-progress { padding: 16px; border: 1px solid var(--line); background: var(--surface-muted); border-radius: 12px; font-size: var(--text-body); line-height: 1.65; }
 .audience-progress strong { font-weight: 600; }
 .audience-progress p { margin-bottom: 0; color: var(--sub); font-size: var(--text-sm); }
 @media (max-width: 900px) {

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import {memoryStorage} from './test/storage'
@@ -58,7 +58,7 @@ describe('public creator journey', () => {
   it('sends guided questions and discussion settings from the public setup to simulation creation', async()=>{
     const fetch=setup(false,false,true)
     await screen.findByText('甲的笔记')
-    fireEvent.click(screen.getByRole('button',{name:/👥 受众模拟/}))
+    fireEvent.click(within(screen.getByRole('navigation', {name: '创作者功能导航'})).getByRole('button',{name:'受众模拟'}))
     fireEvent.click(screen.getByRole('tab',{name:/创作级/}))
     await waitFor(()=>expect(screen.getAllByRole('option',{name:'读者a'})).toHaveLength(3))
     expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('')
@@ -87,14 +87,14 @@ describe('public creator journey', () => {
     const fetch=setup(false,false,true)
     const simulations=()=>fetch.mock.calls.filter(([url,init])=>String(url).endsWith('/simulation-runs')&&init?.method==='POST')
     await screen.findByText('甲的笔记')
-    fireEvent.click(screen.getByRole('button',{name:/👥 受众模拟/}))
+    fireEvent.click(within(screen.getByRole('navigation', {name: '创作者功能导航'})).getByRole('button',{name:'受众模拟'}))
     fireEvent.click(screen.getByRole('tab',{name:/创作级/}))
     await waitFor(()=>expect(screen.getAllByRole('option',{name:'读者d'})).toHaveLength(3))
     expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('')
     fireEvent.change(screen.getByLabelText('第 1 位模拟粉丝'),{target:{value:'d'}})
     fireEvent.click(screen.getByRole('button',{name:/选题库/}))
     fireEvent.click(await screen.findByRole('button',{name:/第一个测试选题/}))
-    fireEvent.click(screen.getByRole('button',{name:'受众模拟'}))
+    fireEvent.click(within(screen.getByRole('main')).getByRole('button',{name:'受众模拟'}))
     await screen.findByRole('region',{name:'模拟准备'})
     expect(screen.getByLabelText('模拟选题')).toHaveValue('topic-0')
     expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('d')
@@ -102,7 +102,7 @@ describe('public creator journey', () => {
     expect(fetch.mock.calls.filter(([url])=>String(url).includes('/reader-selections'))).toHaveLength(0)
     fireEvent.click(screen.getByRole('button',{name:/选题库/}))
     fireEvent.click(await screen.findByRole('button',{name:/第二个测试选题/}))
-    fireEvent.click(screen.getByRole('button',{name:'受众模拟'}))
+    fireEvent.click(within(screen.getByRole('main')).getByRole('button',{name:'受众模拟'}))
     expect(screen.getByLabelText('模拟选题')).toHaveValue('topic-1')
     expect(screen.getByLabelText('第 1 位模拟粉丝')).toHaveValue('d')
     expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
@@ -127,7 +127,7 @@ describe('public creator journey', () => {
     expect(fetch.mock.calls.filter(([,init])=>init?.method==='PATCH')).toHaveLength(1)
     fireEvent.change(screen.getByLabelText('当前账号档案'),{target:{value:'account-1'}})
     await screen.findByText('乙的笔记')
-    fireEvent.click(screen.getByRole('button',{name:/👥 受众模拟/}))
+    fireEvent.click(within(screen.getByRole('navigation', {name: '创作者功能导航'})).getByRole('button',{name:'受众模拟'}))
     fireEvent.click(screen.getByRole('tab',{name:/创作级/}))
     expect(screen.getByLabelText('模拟选题')).toHaveValue('')
     expect(screen.queryByText('刚刚润色的完整正文')).not.toBeInTheDocument()
@@ -169,7 +169,7 @@ describe('public creator journey', () => {
   it('updates the history list status when reopening a simulation completed after refresh', async () => {
     setup(true)
     await screen.findByText('甲的笔记')
-    fireEvent.click(screen.getByRole('button', {name: /👥 受众模拟/}))
+    fireEvent.click(within(screen.getByRole('navigation', {name: '创作者功能导航'})).getByRole('button', {name: '受众模拟'}))
     fireEvent.click(screen.getByRole('tab', {name: /创作级/}))
     fireEvent.click(screen.getByRole('button', {name: /受众模拟 正在试读/}))
     await screen.findByRole('button', {name: /受众模拟 已完成/})

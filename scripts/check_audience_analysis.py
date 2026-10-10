@@ -19,17 +19,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "backend"), str(ROOT / "scripts")]
 
-from app.config import Settings  # noqa: E402
-from app.models import ModelOperation  # noqa: E402
-from app.services.audience_analyses import validate_audience_output  # noqa: E402
-from app.services.audience_evidence import audience_context  # noqa: E402
-from app.services.creator_analysis_scope import scope_creator_profile  # noqa: E402
-from app.services.model_calls import ModelCallService  # noqa: E402
-from app.services.xhs_imports import XhsOfflineImportService  # noqa: E402
 from xhs_mediacrawler_fixture import (  # noqa: E402
     build_xhs_creator_profile_payload,
     load_mediacrawler_export,
 )
+
+from app.config import Settings  # noqa: E402
+from app.models import ModelOperation  # noqa: E402
+from app.services.audience_analyses import validate_audience_output  # noqa: E402
+from app.services.audience_evidence import audience_context, audience_model_context  # noqa: E402
+from app.services.creator_analysis_scope import scope_creator_profile  # noqa: E402
+from app.services.model_calls import ModelCallService  # noqa: E402
+from app.services.xhs_imports import XhsOfflineImportService  # noqa: E402
 
 
 def prepare_context(source: Path) -> dict:
@@ -80,6 +81,8 @@ def review_summary(report: dict) -> dict:
 
 
 async def run_check(service, context: dict) -> dict:
+    # Archived reports remain readable, but live replays use today's role exclusion.
+    model_context = audience_model_context(context)
     report = {
         "status": "failed",
         "requestAttempts": 1,
@@ -90,7 +93,7 @@ async def run_check(service, context: dict) -> dict:
     phase = "model_call"
     try:
         response = await service.call_operation(
-            ModelOperation.AUDIENCE_ANALYSIS, context
+            ModelOperation.AUDIENCE_ANALYSIS, model_context
         )
         report.update(output=response.output, modelMetadata=response.model_metadata)
         phase = "validation"

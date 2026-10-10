@@ -8,7 +8,7 @@ import { CreatorCanvasPage } from './CreatorCanvasPage'
 
 afterEach(() => {cleanup();vi.restoreAllMocks()})
 const topic: Topic = {id:'t',workspaceId:'w',title:'原题',body:'原文',angle:'',associatedPainPoint:'',whyItFits:'',generatedSnapshot:{},sourceAnalysisRunId:null,sourceWorkflow:'manual',status:'candidate',createdAt:'v1',updatedAt:'v1'}
-const session: CollaborationSession = {id:'s',workspaceId:'w',title:'协作',status:'active',executionStatus:'waiting_creator',contextTarget:{assetType:'topic',assetId:'t'},failureCode:'',failureDetail:'',createdAt:'',updatedAt:'',messages:[],runs:[]}
+const session: CollaborationSession = {id:'s',workspaceId:'w',title:'协作',assistantMode:'single_writer',status:'active',executionStatus:'waiting_creator',contextTarget:{assetType:'topic',assetId:'t'},failureCode:'',failureDetail:'',createdAt:'',updatedAt:'',messages:[],runs:[]}
 function deferred<T>() {let resolve!:(value:T)=>void, reject!:(error:Error)=>void; const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no}); return {promise,resolve,reject}}
 function setup() {
   vi.spyOn(agentConversationApi,'list').mockResolvedValue([])

@@ -1,5 +1,15 @@
 # Agent Runtime and Context Architecture
 
+## 2026-10-10 product revision (single-writer core implemented)
+
+New public writing sessions explicitly use `assistantMode=single_writer`, replacing the three-specialist experience described below. One request has one writing turn addressed directly to the creator, using the existing session/message/run persistence, Qwen adapter, worker recovery and confirmation boundaries. No new runtime or database migration was added. Account analysis and reader panels keep their flows; both legacy conversation types remain readable and do not receive new single-writer messages. The API default remains `legacy_team` for older callers; the public UI always requests the new mode explicitly.
+
+`creator_context.py` resolves the explicit `creator-context-selection/v1` references: completed account diagnosis (`profile` / `pain_points`) and audience-analysis results in the same workspace. It never calls `build_workspace_pack`, recurses through source material, or fills an empty selection with defaults. At most eight records and 48,000 serialized characters are accepted; oversized inputs fail before a model call. Each frozen reference includes content, allowlisted scope, source-version hash, timestamps and source origin (including authored showcases). The fixed target contains only asset identity, title, body and version, excluding hidden topic/context hints.
+
+Reference sets are canonicalized for equality and idempotency. A changed set increments `contextRevision`; only that revision's latest 12 messages enter the provider, without old summaries or upstream team candidates. A→empty→A creates a third segment rather than resurrecting the first. Request messages freeze the selection, resolved snapshots and current manuscript; later UI changes cannot alter a running request. Reopening restores the latest sent selection. The single-writer prompt has its own `creator-writing-turn/v1` task and explicit object-shaped citation contract; strict validators still reject invalid citations and routing. A syntactically valid rewrite is not a semantic guarantee of fact preservation.
+
+The implementation reuses the existing graph with a one-turn budget and the `writing` node; it does not restore the old broad-context conversation path or add hidden specialist calls. See the [implementation plan](creator-workspace-refinement-plan.md) for UI behavior, tests and remaining work. The sections below document older/shared runtime behavior, not an instruction to retain three-agent routing for new public writing.
+
 ## Decision
 
 This product is a creator workspace with several specialized AI steps, not a general-purpose agent platform. Keep the current FastAPI, React, SQLite, explicit product flows, and user-confirmed editing model.

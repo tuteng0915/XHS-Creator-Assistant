@@ -18,6 +18,9 @@ export interface CollaborationSummary {
   contextTarget: {assetType: 'topic'; assetId: string}
   executionStatus: CollaborationStatus; failureCode: string; failureDetail: string
   createdAt: string; updatedAt: string
+  assistantMode?: 'single_writer' | 'legacy_team'
+  creatorContextSelection?: CreatorContextSelection
+  contextRevision?: number
 }
 export interface CollaborationSession extends CollaborationSummary {
   messages: CollaborationMessage[]; runs: CollaborationRun[]
@@ -46,6 +49,15 @@ export interface FrozenWritingFocus {
   readerMessage?: {personaId: string; senderName: string; content: string; authorQuestion?: string; sourceTarget?: unknown}
 }
 export interface CollaborationComposeIntent {id: string; text: string; recipient: SpecialistRole}
+
+export interface CreatorContextReference {kind: 'account_analysis' | 'audience_analysis'; id: string}
+export interface CreatorContextSelection {
+  schemaVersion: 'creator-context-selection/v1'
+  references: CreatorContextReference[]
+}
+export const emptyCreatorContext = (): CreatorContextSelection => ({schemaVersion: 'creator-context-selection/v1', references: []})
+export const creatorReferenceKey = (reference: CreatorContextReference): string => `${reference.kind}:${reference.id}`
+export const creatorContextSignature = (selection: CreatorContextSelection): string => selection.references.map(creatorReferenceKey).sort().join('|')
 
 export function selectionFromTextarea(body: string, start: number, end: number): WritingSelection | null {
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > body.length) return null
@@ -90,8 +102,8 @@ const json = (body: unknown): RequestInit => ({method: 'POST', headers: {'Conten
 export const contentCollaborationApi = {
   list: (workspaceId: string) => request<CollaborationSummary[]>(base(workspaceId)),
   get: (workspaceId: string, id: string) => request<CollaborationSession>(`${base(workspaceId)}/${encodeURIComponent(id)}`),
-  create: (workspaceId: string, topicId: string, title: string, requestKey: string) => request<CollaborationSession>(base(workspaceId), json({title: title.slice(0, 160), contextTarget: {assetType: 'topic', assetId: topicId}, requestKey})),
-  send: (workspaceId: string, id: string, content: string, recipient: SpecialistRole, requestKey: string, writingFocus?: WritingFocusRequest) => request<CollaborationSession>(`${base(workspaceId)}/${encodeURIComponent(id)}/messages`, json({content, recipient, requestKey, mode: 'live', ...(writingFocus ? {writingFocus} : {})})),
+  create: (workspaceId: string, topicId: string, title: string, requestKey: string) => request<CollaborationSession>(base(workspaceId), json({title: title.slice(0, 160), contextTarget: {assetType: 'topic', assetId: topicId}, requestKey, assistantMode: 'single_writer'})),
+  send: (workspaceId: string, id: string, content: string, recipient: SpecialistRole, requestKey: string, writingFocus?: WritingFocusRequest, creatorContextSelection?: CreatorContextSelection) => request<CollaborationSession>(`${base(workspaceId)}/${encodeURIComponent(id)}/messages`, json({content, recipient, requestKey, mode: 'live', ...(writingFocus ? {writingFocus} : {}), ...(creatorContextSelection ? {creatorContextSelection} : {})})),
 }
 
 export function collaborationCandidates(message: CollaborationMessage): CollaborationCandidate[] {

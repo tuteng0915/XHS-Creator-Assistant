@@ -7,6 +7,8 @@ import {
 } from '../inputAssets'
 import type { WorkflowAssetSummary, Workspace } from '../types'
 import type { WorkflowTab } from '../workflows'
+import { CreatorNavIcon, type CreatorNavIconName } from './CreatorNavIcon'
+import './CreatorShell.css'
 
 export type ActivePage =
   | 'creator-start'
@@ -54,6 +56,36 @@ type WorkspaceShellProps = {
   onSetWorkflowTab?: (tab: WorkflowTab) => void
   onToggleHelp: () => void
 }
+
+const CREATOR_NAVIGATION: Array<{
+  label: string
+  items: Array<{ page: ActivePage; label: string; icon: CreatorNavIconName; child?: boolean }>
+}> = [
+  {
+    label: '账号',
+    items: [
+      { page: 'creator-overview', label: '账号概览', icon: 'overview' },
+      { page: 'source-materials', label: '我的笔记', icon: 'notes', child: true },
+      { page: 'account-diagnosis', label: '账号诊断', icon: 'analysis' },
+      { page: 'history', label: '分析历史', icon: 'history', child: true },
+    ],
+  },
+  {
+    label: '读者',
+    items: [
+      { page: 'audience-analysis', label: '受众分析', icon: 'audience' },
+      { page: 'simulated-fans', label: '模拟粉丝', icon: 'readers', child: true },
+      { page: 'simulations', label: '受众模拟', icon: 'conversation' },
+    ],
+  },
+  {
+    label: '创作',
+    items: [
+      { page: 'topics', label: '选题库', icon: 'topics' },
+      { page: 'drafts', label: 'AI 创作助手', icon: 'writing', child: true },
+    ],
+  },
+]
 
 export function WorkspaceShell({
   workspace,
@@ -122,47 +154,26 @@ export function WorkspaceShell({
           </button>
         </section>
 
-        <nav aria-label="创作者功能导航">
-          <button className={activePage === 'creator-overview' ? 'active' : ''} onClick={() => onSetActivePage('creator-overview')}><span>◉</span> 账号概览</button>
-          <button
-            className={`creator-nav-child ${activePage === 'source-materials' ? 'active' : ''}`}
-            onClick={() => onOpenInputAsset('xhs_creator_profiles')}
-          >
-            <span>📕</span> 我的笔记
-          </button>
-
-          <button
-            className={activePage === 'account-diagnosis' ? 'active' : ''}
-            onClick={() => onSetActivePage('account-diagnosis')}
-          >
-            <span>📊</span> 账号诊断
-          </button>
-          <button
-            className={`creator-nav-child ${activePage === 'history' ? 'active' : ''}`}
-            onClick={() => onSetActivePage('history')}
-          >
-            <span>◷</span> 分析历史
-          </button>
-          <button
-            className={activePage === 'topics' ? 'active' : ''}
-            onClick={() => onSetActivePage('topics')}
-          >
-            <span>◇</span> 选题库
-          </button>
-          <button
-            className={`creator-nav-child ${activePage === 'drafts' ? 'active' : ''}`}
-            onClick={() => onSetActivePage('drafts')}
-          >
-            <span>✦</span> AI 创作助手
-          </button>
-          <button className={activePage === 'audience-analysis' ? 'active' : ''} onClick={() => onSetActivePage('audience-analysis')}><span>◎</span> 受众分析</button>
-          <button className={`creator-nav-child ${activePage === 'simulated-fans' ? 'active' : ''}`} onClick={() => onSetActivePage('simulated-fans')}><span>♧</span> 模拟粉丝</button>
-          <button
-            className={activePage === 'simulations' ? 'active' : ''}
-            onClick={() => onSetActivePage('simulations')}
-          >
-            <span>👥</span> 受众模拟
-          </button>
+        <nav className="creator-navigation" aria-label="创作者功能导航">
+          {CREATOR_NAVIGATION.map((group) => (
+            <div className="creator-nav-group" role="group" aria-label={group.label} key={group.label}>
+              <span className="creator-nav-group-label" aria-hidden="true">{group.label}</span>
+              {group.items.map((item) => (
+                <button
+                  key={item.page}
+                  type="button"
+                  className={`${item.child ? 'creator-nav-child ' : ''}${activePage === item.page ? 'active' : ''}`}
+                  aria-current={activePage === item.page ? 'page' : undefined}
+                  onClick={() => item.page === 'source-materials'
+                    ? onOpenInputAsset('xhs_creator_profiles')
+                    : onSetActivePage(item.page)}
+                >
+                  <CreatorNavIcon name={item.icon} />
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
         </nav>
 
       </aside>
@@ -189,7 +200,7 @@ export function WorkspaceShell({
             <div>
               <span>使用路径</span>
               <p>
-                导入账号后，依次完成账号诊断、保存选题、AI 创作和受众模拟。
+                导入账号后，了解账号与读者，进行受众模拟，再整理选题、继续创作。
                 所有结果都会保存在当前账号档案中。
               </p>
             </div>

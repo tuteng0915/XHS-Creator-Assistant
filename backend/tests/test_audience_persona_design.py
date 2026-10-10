@@ -11,7 +11,7 @@ from test_workspace_api import create_workspace, send
 from app.main import create_app
 from app.models import ModelCallResponse, ModelOperation, SimulationRunCreate
 from app.services.audience_analyses import validate_audience_output
-from app.services.audience_evidence import audience_context
+from app.services.audience_evidence import audience_context, audience_model_context
 from app.services.model_calls import ModelCallService
 from app.services.simulated_fans import FanDefinition
 from app.workflows.audience_simulation import PersonaDefinition, RealAudienceSimulationModelProvider
@@ -53,7 +53,7 @@ def test_prompt_separates_broad_interests_from_concrete_needs_and_behaviors(sett
     service = ModelCallService(settings)
     context = {"notes": [{"noteId": "n", "title": "当前笔记"}]}
     system, user = service._build_prompt(ModelOperation.AUDIENCE_ANALYSIS, context)
-    assert json.loads(user) == context
+    assert json.loads(user) == audience_model_context(context)
     assert '"interests":[]' in system
     assert "多个角色可以共享完全相同的 interests" in system
     assert "不能只换名称和语气" in system

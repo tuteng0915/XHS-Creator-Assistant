@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { collaborationCandidates, contentCollaborationApi, replaceSelectedText, selectionFromTextarea, type CollaborationMessage, type FrozenWritingFocus } from './contentCollaboration'
+import { collaborationCandidates, contentCollaborationApi, creatorContextSignature, emptyCreatorContext, replaceSelectedText, selectionFromTextarea, type CollaborationMessage, type FrozenWritingFocus } from './contentCollaboration'
 
 afterEach(() => vi.restoreAllMocks())
 const body = '开头🙂重复。\n中间。\n重复。结尾'
@@ -39,4 +39,18 @@ it('leaves ordinary message payloads unchanged and sends references with explici
   const writingFocus = {expectedUpdatedAt:'v1',selection:selected,readerReference:{simulationId:'run',stage:'interview' as const,messageId:'m',interviewId:'i'}}
   await contentCollaborationApi.send('w','s','改写','writing','key-2',writingFocus)
   expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body)).writingFocus).toEqual(writingFocus)
+})
+
+it('creates explicit single-writer sessions and sends an empty reference set without defaulting to all history', async () => {
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ok:true,json:async()=>({})} as Response)
+  await contentCollaborationApi.create('w', 't', '当前稿件', 'create-key')
+  expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({assistantMode:'single_writer', contextTarget:{assetType:'topic',assetId:'t'}})
+  await contentCollaborationApi.send('w','s','聊聊','writing','key',undefined,emptyCreatorContext())
+  expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({content:'聊聊',recipient:'writing',requestKey:'key',mode:'live',creatorContextSelection:emptyCreatorContext()})
+})
+
+it('keeps reference-set identity independent from chip order', () => {
+  const references = [{kind:'account_analysis' as const,id:'a'}, {kind:'audience_analysis' as const,id:'b'}]
+  expect(creatorContextSignature({...emptyCreatorContext(),references})).toBe(creatorContextSignature({...emptyCreatorContext(),references:[...references].reverse()}))
+  expect(creatorContextSignature({...emptyCreatorContext(),references})).not.toBe(creatorContextSignature(emptyCreatorContext()))
 })

@@ -29,6 +29,7 @@ from app.repositories.workspaces import WorkspaceRepository
 from app.services.common import as_iso, utc_now
 from app.services.context_access import ContextAccessService
 from app.services.creator_analysis_scope import note_published_at, scope_creator_profile
+from app.services.xhs_comment_roles import reader_comments_text
 
 STAGE_KEYS = {
     WorkflowType.ACCOUNT_DIAGNOSIS.value: {
@@ -1340,38 +1341,7 @@ class AnalysisRunService:
         return "\n".join(lines).rstrip() + "\n"
 
     def _derive_xhs_comments_text(self, profile: dict) -> str:
-        lines = ["# 小红书一级评论样本（由 xhs_creator_profile 派生）", ""]
-        for note in profile.get("notes", []):
-            if not isinstance(note, dict):
-                continue
-            comments = note.get("comments") if isinstance(note.get("comments"), list) else []
-            lines.extend(
-                [
-                    f"## {note.get('title') or '未命名笔记'}",
-                    "",
-                    f"- note_id：{note.get('noteId') or '未知'}",
-                    f"- 抓取评论数：{len(comments)}",
-                    "",
-                ]
-            )
-            if not comments:
-                lines.extend(["（本次未抓取到一级评论。）", ""])
-                continue
-            for index, comment in enumerate(comments, start=1):
-                if not isinstance(comment, dict):
-                    continue
-                lines.extend(
-                    [
-                        f"{index}. {comment.get('content') or '（图片评论或空文本评论）'}",
-                        (
-                            f"   - comment_id：{comment.get('commentId') or '未知'}；"
-                            f"赞：{comment.get('likeCount', '未知')}；"
-                            f"二级评论数：{comment.get('subCommentCount', '未知')}"
-                        ),
-                    ]
-                )
-            lines.append("")
-        return "\n".join(lines).rstrip() + "\n"
+        return reader_comments_text(profile)
 
     @staticmethod
     def _metric(note: dict, key: str) -> int:

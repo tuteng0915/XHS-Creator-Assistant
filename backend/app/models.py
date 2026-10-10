@@ -418,6 +418,7 @@ class ContentCollaborationContextTarget(APIModel):
 
 
 class ContentCollaborationSessionCreate(APIModel):
+    assistant_mode: Literal["single_writer", "legacy_team"] = "legacy_team"
     title: str | None = Field(default=None, min_length=1, max_length=160)
     context_target: ContentCollaborationContextTarget
     request_key: str | None = Field(default=None, min_length=1, max_length=120)
@@ -487,6 +488,27 @@ class ContentWritingFocus(APIModel):
         return self
 
 
+class CreatorContextReference(APIModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["account_analysis", "audience_analysis"]
+    id: str = Field(min_length=1, max_length=120)
+
+    @field_validator("id")
+    @classmethod
+    def nonblank_id(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("参考记录标识不能为空")
+        return value.strip()
+
+
+class CreatorContextSelection(APIModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["creator-context-selection/v1"] = "creator-context-selection/v1"
+    references: list[CreatorContextReference] = Field(default_factory=list, max_length=8)
+
+
 class ContentCollaborationMessageCreate(APIModel):
     content: str = Field(min_length=1, max_length=8_000)
     recipient: Literal[
@@ -499,6 +521,7 @@ class ContentCollaborationMessageCreate(APIModel):
     # default Qwen path unless a caller explicitly asks for the local demo.
     mode: Literal["demo", "live"] = "live"
     writing_focus: ContentWritingFocus | None = None
+    creator_context_selection: CreatorContextSelection | None = None
 
     @field_validator("content", "request_key")
     @classmethod
@@ -546,6 +569,9 @@ class ContentCollaborationSessionSummary(APIModel):
     workspace_id: str
     title: str
     context_target: ContentCollaborationContextTarget
+    assistant_mode: Literal["single_writer", "legacy_team"] = "legacy_team"
+    creator_context_selection: CreatorContextSelection | None = None
+    context_revision: int = 0
     status: ContentCollaborationSessionStatus
     execution_status: ContentCollaborationExecutionStatus
     revision: int

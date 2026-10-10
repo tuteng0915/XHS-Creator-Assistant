@@ -7,7 +7,8 @@ import {CreatorCanvasPage} from './CreatorCanvasPage'
 
 const body = '开头🙂重复。\n中间。\n重复。结尾'
 const topic: Topic = {id:'t',workspaceId:'w',title:'原题',body,angle:'',associatedPainPoint:'',whyItFits:'',generatedSnapshot:{},sourceAnalysisRunId:null,sourceWorkflow:'manual',status:'candidate',createdAt:'v1',updatedAt:'v1'}
-const session: CollaborationSession = {id:'s',workspaceId:'w',title:'协作',status:'active',executionStatus:'waiting_creator',contextTarget:{assetType:'topic',assetId:'t'},failureCode:'',failureDetail:'',createdAt:'',updatedAt:'',messages:[],runs:[]}
+const session: CollaborationSession = {id:'s',workspaceId:'w',title:'协作',assistantMode:'single_writer',status:'active',executionStatus:'waiting_creator',contextTarget:{assetType:'topic',assetId:'t'},failureCode:'',failureDetail:'',createdAt:'',updatedAt:'',messages:[],runs:[]}
+const emptyReferences = {schemaVersion:'creator-context-selection/v1',references:[]}
 const feedback: ReaderFeedbackIntent = {id:'intent',workspaceId:'w',topicId:'t',simulationId:'run',stage:'interview',messageId:'reply',interviewId:'i',senderName:'重细节的读者',quote:'我想看到这一步为什么这样做。',authorQuestion:'哪一处还不清楚？'}
 const selection = selectionFromTextarea(body, body.lastIndexOf('重复。'), body.lastIndexOf('重复。') + 3)!
 const focus: FrozenWritingFocus = {baseTopicId:'t',baseTitle:topic.title,baseBody:body,baseUpdatedAt:'v1',selection,
@@ -19,7 +20,7 @@ beforeEach(() => {
   vi.spyOn(agentConversationApi,'list').mockResolvedValue([])
   vi.spyOn(contentCollaborationApi,'list').mockResolvedValue([])
 })
-afterEach(() => {cleanup();vi.restoreAllMocks()})
+afterEach(() => {cleanup();vi.restoreAllMocks();vi.unstubAllGlobals()})
 function chooseLastParagraph() {
   const editor = screen.getByLabelText('创作正文') as HTMLTextAreaElement
   editor.focus(); editor.setSelectionRange(body.lastIndexOf('重复。'), body.lastIndexOf('重复。') + 3)
@@ -49,9 +50,9 @@ it('imports feedback without changing the editor, overwriting typed instructions
   expect(screen.getByLabelText('创作正文')).toHaveValue(body)
   expect(screen.getByLabelText('给创作助手的消息')).toHaveValue('我自己的要求')
   expect(consumed).toHaveBeenCalledTimes(1)
-  fireEvent.click(screen.getByRole('button',{name:'交给写作伙伴讨论'}))
+  fireEvent.click(screen.getByRole('button',{name:'和助手讨论'}))
   expect((screen.getByLabelText('给创作助手的消息') as HTMLTextAreaElement).value).toContain('我自己的要求\n\n请结合引用的读者意见')
-  expect(screen.getByLabelText('先交给哪位伙伴')).toHaveValue('writing')
+  expect(screen.queryByLabelText('先交给哪位伙伴')).not.toBeInTheDocument()
   expect(screen.getByLabelText('给创作助手的消息')).toHaveFocus()
   expect(send).not.toHaveBeenCalled()
 })
@@ -73,14 +74,14 @@ it('sends the exact Unicode selection and reference IDs only after explicit send
   fireEvent.click(screen.getByRole('button',{name:'发送'}))
   await waitFor(() => expect(send).toHaveBeenCalledWith('w','s',expect.stringContaining('更简洁'),'writing',expect.any(String),{
     expectedUpdatedAt:'v1',selection,readerReference:{simulationId:'run',stage:'interview',messageId:'reply',interviewId:'i'},
-  }))
+  },emptyReferences))
 })
 
 it('lets a feedback-only request discuss changes without inventing a selected range', async () => {
   vi.spyOn(contentCollaborationApi,'create').mockResolvedValue(session)
   const send = vi.spyOn(contentCollaborationApi,'send').mockResolvedValue(session)
   render(<CreatorCanvasPage {...props} readerFeedback={feedback} />)
-  fireEvent.click(screen.getByRole('button',{name:'交给写作伙伴讨论'}))
+  fireEvent.click(screen.getByRole('button',{name:'和助手讨论'}))
   await waitFor(() => expect(screen.getByRole('button',{name:'发送'})).toBeEnabled())
   fireEvent.click(screen.getByRole('button',{name:'发送'}))
   await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
@@ -96,7 +97,7 @@ it('does not keep sending the reference after the author removes it', async () =
   await waitFor(() => expect(screen.getByRole('button',{name:'发送'})).toBeEnabled())
   fireEvent.click(screen.getByRole('button',{name:'发送'}))
   await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
-  expect(send).toHaveBeenCalledWith('w','s','再聊一个方向','research',expect.any(String))
+  expect(send).toHaveBeenCalledWith('w','s','再聊一个方向','writing',expect.any(String),undefined,emptyReferences)
 })
 
 it('shows before/after, changes only the selected duplicate, and requires manual save', async () => {
@@ -154,4 +155,24 @@ it('ignores feedback from a different workspace or topic', async () => {
   await waitFor(() => expect(contentCollaborationApi.list).toHaveBeenCalled())
   expect(screen.queryByText(feedback.quote)).not.toBeInTheDocument()
   expect(consumed).not.toHaveBeenCalled()
+})
+
+it('moves between the real narrow-screen composer and preview without focusing a hidden pane', async () => {
+  vi.stubGlobal('matchMedia', vi.fn(() => ({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()})))
+  reopen()
+  render(<CreatorCanvasPage {...props} />)
+  await screen.findByRole('button',{name:'对比并修改这一段'})
+  fireEvent.click(screen.getByRole('tab',{name:'稿件'}))
+  chooseLastParagraph()
+  fireEvent.click(screen.getByRole('button',{name:'更简洁'}))
+  expect(screen.getByRole('tab',{name:'对话'})).toHaveAttribute('aria-selected','true')
+  expect(screen.getByLabelText('给创作助手的消息')).toBeVisible()
+  expect(screen.getByLabelText('给创作助手的消息')).toHaveFocus()
+  fireEvent.click(screen.getByRole('button',{name:'对比并修改这一段'}))
+  expect(screen.getByRole('tab',{name:'稿件'})).toHaveAttribute('aria-selected','true')
+  expect(screen.getByLabelText('写作建议预览')).toHaveFocus()
+  expect(screen.getByLabelText('给创作助手的消息')).not.toBeVisible()
+  fireEvent.click(screen.getByRole('button',{name:'关闭预览'}))
+  expect(screen.getByLabelText('创作正文')).toHaveFocus()
+  expect(screen.getByLabelText('创作正文')).toHaveValue(body)
 })

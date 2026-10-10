@@ -79,7 +79,7 @@ def test_matching_input_contains_only_scoped_citable_text_and_catalog():
         "noteId": "n1", "title": "申请步骤", "content": "先准备材料，再核对费用。",
         "comments": [{"commentId": "c1", "content": "费用包含签证费吗？",
                       "createTime": None, "sourceRole": "unknown"}],
-        "authorReplies": [],
+        "excludedAuthorCommentIds": [],
     }]
     assert prepared["sampling"]["sentNotes"] == 1
     assert prepared["sampling"]["sentComments"] == 1

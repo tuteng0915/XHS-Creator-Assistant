@@ -115,7 +115,7 @@ function setup(switchAccount: boolean) {
 it.each(['SSE', 'polling'] as const)('late %s completion updates A history without leaving B or erasing its interview question', async transport => {
   const control = setup(false)
   await screen.findByText('甲的笔记')
-  fireEvent.click(screen.getByRole('button', {name: /👥 受众模拟/}))
+  fireEvent.click(within(screen.getByRole('navigation', {name: '创作者功能导航'})).getByRole('button', {name: '受众模拟'}))
   fireEvent.click(screen.getByRole('tab', {name: /创作级/}))
   await waitFor(() => expect(screen.getAllByRole('option', {name: '模拟读者'})).toHaveLength(3))
   fireEvent.change(screen.getByLabelText('模拟选题'), {target: {value: 'topic-a'}})
@@ -145,7 +145,7 @@ it.each(['SSE', 'polling'] as const)('late %s completion updates A history witho
 it.each(['SSE', 'polling'] as const)('late %s completion from the previous account cannot replace the current interview', async transport => {
   const control = setup(true)
   await screen.findByText('甲的笔记')
-  fireEvent.click(screen.getByRole('button', {name: /👥 受众模拟/}))
+  fireEvent.click(within(screen.getByRole('navigation', {name: '创作者功能导航'})).getByRole('button', {name: '受众模拟'}))
   fireEvent.click(screen.getByRole('tab', {name: /创作级/}))
   await waitFor(() => expect(screen.getAllByRole('option', {name: '模拟读者'})).toHaveLength(3))
   fireEvent.change(screen.getByLabelText('模拟选题'), {target: {value: 'topic-a'}})
@@ -156,7 +156,7 @@ it.each(['SSE', 'polling'] as const)('late %s completion from the previous accou
   await waitFor(() => expect(control.delayedA.length).toBeGreaterThan(0))
   fireEvent.change(screen.getByLabelText('当前账号档案'), {target: {value: 'account-1'}})
   await screen.findByText('乙的笔记')
-  fireEvent.click(screen.getByRole('button', {name: /👥 受众模拟/}))
+  fireEvent.click(within(screen.getByRole('navigation', {name: '创作者功能导航'})).getByRole('button', {name: '受众模拟'}))
   fireEvent.click(screen.getByRole('tab', {name: /创作级/}))
   fireEvent.click(await screen.findByRole('button', {name: /受众模拟 已完成/}))
   const question = await screen.findByLabelText('作者追问')

@@ -8,6 +8,10 @@ import { PanelEditWorkspace } from './PanelEditWorkspace'
 import { PendingSuggestions } from './PendingSuggestions'
 import { PanelRetestControl } from './PanelRetestControl'
 import './LocalRewrite.css'
+import './CreatorCanvasPage.css'
+
+const narrowCanvasQuery = '(max-width: 900px)'
+type CanvasPane = 'chat' | 'draft'
 
 export function CreatorCanvasPage({workspaceId, topic, topics, onSelect, onUpdated, onSimulate, onRetestCreated, simulationRuns = [], readerFeedback, onReaderFeedbackConsumed}: {
   workspaceId: string; topic: Topic | null; topics: Topic[]; agentId?: string;
@@ -18,7 +22,7 @@ export function CreatorCanvasPage({workspaceId, topic, topics, onSelect, onUpdat
   readerFeedback?: ReaderFeedbackIntent | null; onReaderFeedbackConsumed?: () => void;
 }) {
   return <section className="creator-canvas-page">
-    <div className="creator-page-head"><h1>AI 创作助手</h1><select aria-label="创作选题" value={topic?.id || ''} onChange={e => {const selected = topics.find(t => t.id === e.target.value); if (selected) onSelect(selected)}}><option value="">选择选题</option>{topics.filter(t => t.status !== 'archived').map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></div>
+    <div className="creator-page-head"><h1>AI 创作助手</h1><select className="creator-topic-select" aria-label="创作选题" value={topic?.id || ''} onChange={e => {const selected = topics.find(t => t.id === e.target.value); if (selected) onSelect(selected)}}><option value="">选择选题</option>{topics.filter(t => t.status !== 'archived').map(t => <option key={t.id} value={t.id}>{t.title}</option>)}</select></div>
     {topic ? <Canvas key={`${workspaceId}:${topic.id}`} workspaceId={workspaceId} topic={topic} onUpdated={onUpdated} onSimulate={onSimulate} onRetestCreated={onRetestCreated} simulationRuns={simulationRuns} readerFeedback={readerFeedback} onReaderFeedbackConsumed={onReaderFeedbackConsumed} /> : <p>先从选题库选择一个题目。</p>}
   </section>
 }
@@ -30,7 +34,9 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [collaborating, setCollaborating] = useState(false)
-  const [split, setSplit] = useState(52)
+  const [split, setSplit] = useState(44)
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.(narrowCanvasQuery).matches ?? window.innerWidth <= 900)
+  const [pane, setPane] = useState<CanvasPane>('chat')
   const [preparing, setPreparing] = useState(false)
   const [applying, setApplying] = useState(false)
   const [retesting, setRetesting] = useState(false)
@@ -43,6 +49,12 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
   const [feedbackRunId, setFeedbackRunId] = useState('')
   const [composeIntent, setComposeIntent] = useState<CollaborationComposeIntent | null>(null)
   const previewRef = useRef<HTMLElement>(null)
+  const editorRef = useRef<HTMLTextAreaElement>(null)
+  const chatPaneRef = useRef<HTMLDivElement>(null)
+  const draftPaneRef = useRef<HTMLElement>(null)
+  const chatTabRef = useRef<HTMLButtonElement>(null)
+  const draftTabRef = useRef<HTMLButtonElement>(null)
+  const paneScroll = useRef(new Map<Element, number>())
   const consumedFeedbackId = useRef('')
   const retestLock = useRef(false)
   const applyLock = useRef(false)
@@ -51,6 +63,23 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
   const editRevision = useRef(0)
   const active = useRef(true)
   useEffect(() => {active.current = true; return () => {active.current = false}}, [])
+  useEffect(() => {
+    const media = window.matchMedia?.(narrowCanvasQuery)
+    if (!media) return
+    const resize = () => {
+      if (media.matches && draftPaneRef.current?.contains(document.activeElement)) setPane('draft')
+      setNarrow(media.matches)
+    }
+    media.addEventListener('change', resize)
+    return () => media.removeEventListener('change', resize)
+  }, [])
+  useEffect(() => {
+    const visible = pane === 'chat' ? chatPaneRef.current : draftPaneRef.current
+    if (!visible) return
+    for (const [element, scrollTop] of paneScroll.current) {
+      if (visible === element || visible.contains(element)) element.scrollTop = scrollTop
+    }
+  }, [pane, narrow])
   useEffect(() => {
     if (!preview) return
     previewRef.current?.focus({preventScroll: true})
@@ -69,7 +98,18 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
   const onActivityChange = useCallback((busy: boolean) => {collaborationLock.current = busy; setCollaborating(busy)}, [])
   const retestBlocked = dirty ? '画布有未保存修改，请先保存，再邀请原班读者试读。' : retesting || applying || saving || collaborating || preparing ? '请等待当前操作完成。' : ''
   const focusedSelection = selection?.body === body ? selection.value : undefined
+  function showPane(next: CanvasPane, focusTab = false) {
+    const current = pane === 'chat' ? chatPaneRef.current : draftPaneRef.current
+    if (current) {
+      for (const element of [current, ...current.querySelectorAll('*')]) {
+        if (element.scrollTop > 0 || paneScroll.current.has(element)) paneScroll.current.set(element, element.scrollTop)
+      }
+    }
+    setPane(next)
+    if (focusTab) (next === 'chat' ? chatTabRef : draftTabRef).current?.focus()
+  }
   function requestRewrite(text: string) {
+    showPane('chat')
     setComposeIntent({id: crypto.randomUUID(), recipient: 'writing', text})
   }
 
@@ -112,8 +152,13 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
       || candidate.writingFocus.baseTitle !== title || replaceSelectedText(body, candidate.writingFocus, candidate.body) === null)) {
       setError('这条局部建议依据的稿件已变化。当前文字已保留，请重新选择段落后生成建议。'); return
     }
+    showPane('draft')
     setPreview({candidate, body, revision: editRevision.current})
     setPreviewText(candidate.body); setPreviewMode('append'); setPreviewTarget('body'); setError('')
+  }
+  function closePreview() {
+    setPreview(null)
+    editorRef.current?.focus({preventScroll: true})
   }
   function putCandidateInEditor() {
     if (!preview || !previewText.trim()) return
@@ -123,7 +168,7 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
       if (updatedBody === null || preview.candidate.writingFocus.baseTopicId !== topic.id || preview.candidate.writingFocus.baseTitle !== title) {
         setError('原稿或选段已变化，这条建议未覆盖任何文字。请重新选择段落后发送。'); return
       }
-      editRevision.current++; dirtyRef.current = true; setBody(updatedBody); setSelection(null); setPreview(null)
+      editRevision.current++; dirtyRef.current = true; setBody(updatedBody); setSelection(null); closePreview()
       const reference = preview.candidate.writingFocus.readerReference
       if (reference) setFeedbackRunId(reference.simulationId)
       return
@@ -133,7 +178,7 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
     else setBody(previewMode === 'replace' ? previewText : [preview.body, previewText].filter(Boolean).join('\n\n'))
     if (preview.candidate.writingFocus?.readerReference) setFeedbackRunId(preview.candidate.writingFocus.readerReference.simulationId)
     setSelection(null)
-    setPreview(null)
+    closePreview()
   }
   async function applyPanelEdit(proposal: PanelEditProposal, operation: 'apply' | 'undo' = 'apply') {
     if (!active.current || retestLock.current || applyLock.current || dirtyRef.current || collaborationLock.current || prepareLock.current || saving) throw new Error('请先完成当前编辑或等待正在执行的操作。')
@@ -174,12 +219,38 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
   }
   return <>
     {error && <p role="alert">{error}</p>}
+    {narrow && <div className="canvas-pane-tabs" role="tablist" aria-label="创作工作区"
+      onKeyDown={event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        showPane(event.key === 'Home' ? 'chat' : event.key === 'End' ? 'draft' : pane === 'chat' ? 'draft' : 'chat', true)
+      }}>
+      <button ref={chatTabRef} id="canvas-chat-tab" role="tab" type="button" aria-selected={pane === 'chat'} aria-controls="canvas-chat-pane" tabIndex={pane === 'chat' ? 0 : -1} onClick={() => showPane('chat')}>对话</button>
+      <button ref={draftTabRef} id="canvas-draft-tab" role="tab" type="button" aria-selected={pane === 'draft'} aria-controls="canvas-draft-pane" tabIndex={pane === 'draft' ? 0 : -1} onClick={() => showPane('draft')}>稿件{dirty && <span className="canvas-unsaved-dot" aria-hidden="true" title="有未保存修改" />}</button>
+    </div>}
+    <div className="creator-canvas" style={{gridTemplateColumns:`minmax(0, ${split}fr) 12px minmax(0, ${100-split}fr)`}}>
+      <div ref={chatPaneRef} id="canvas-chat-pane" className="canvas-dialogue-pane" role={narrow ? 'tabpanel' : undefined} aria-labelledby={narrow ? 'canvas-chat-tab' : undefined} hidden={narrow && pane !== 'chat'}>
     {feedback && <section className="canvas-reader-feedback" aria-label="带来的读者意见">
       <div className="canvas-focus-heading"><h2>读者意见 · {feedback.senderName}</h2><button type="button" className="text-button" onClick={() => setFeedback(null)}>移除引用</button></div>
       {feedback.authorQuestion && <p className="canvas-focus-question">你当时问：{feedback.authorQuestion}</p>}
       <blockquote>{feedback.quote}</blockquote>
-      <button type="button" disabled={collaborating || saving || applying || retesting} onClick={() => requestRewrite(focusedSelection ? '请结合引用的读者意见，只改写我选中的这一段，保留其余内容。' : '请结合引用的读者意见，先讨论这篇稿件哪些地方值得调整，别直接重写整篇。')}>交给写作伙伴讨论</button>
+      <button type="button" disabled={collaborating || saving || applying || retesting} onClick={() => requestRewrite(focusedSelection ? '请结合引用的读者意见，只改写我选中的这一段，保留其余内容。' : '请结合引用的读者意见，先讨论这篇稿件哪些地方值得调整，别直接重写整篇。')}>和助手讨论</button>
     </section>}
+        <ContentCollaborationChat workspaceId={workspaceId} topic={saved} blocked={retesting || applying || preparing || saving || !title.trim()}
+          beforeSend={prepareCollaboration} onActivityChange={onActivityChange} onPreview={previewCandidate} composeIntent={composeIntent} />
+      </div>
+      <div className="canvas-divider" role="separator" aria-label="调整对话和稿件宽度" aria-valuenow={split} aria-valuetext={`对话 ${split}% · 稿件 ${100 - split}%`} aria-valuemin={30} aria-valuemax={70} aria-orientation="vertical" tabIndex={0} hidden={narrow}
+        onKeyDown={event => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+          event.preventDefault()
+          setSplit(value => event.key === 'Home' ? 30 : event.key === 'End' ? 70 : Math.max(30, Math.min(70, value + (event.key === 'ArrowLeft' ? -5 : 5))))
+        }}
+        onPointerDown={event => {event.preventDefault(); event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId)}}
+        onPointerMove={event => {if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const rect = event.currentTarget.parentElement!.getBoundingClientRect(); if (rect.width) setSplit(Math.round(Math.min(70, Math.max(30, (event.clientX - rect.left) / rect.width * 100))))}}
+        onPointerUp={event => {if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)}}
+        onPointerCancel={event => {if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)}} />
+      <section ref={draftPaneRef} id="canvas-draft-pane" className="canvas-editor" role={narrow ? 'tabpanel' : undefined} aria-labelledby={narrow ? 'canvas-draft-tab' : undefined} hidden={narrow && pane !== 'draft'}>
+        <div className="canvas-editor-heading"><h2>稿件</h2><span>{Array.from(body).length} 字</span></div>
     {preview && <section ref={previewRef} tabIndex={-1} className="canvas-candidate-preview" aria-label="写作建议预览"><h2>{preview.candidate.title}</h2><p className="canvas-preview-note">确认后仍需保存。</p>
       {typeof preview.candidate.writingFocus?.readerMessage?.content === 'string' && <details><summary>这条建议参考的读者意见</summary>
         <p>{preview.candidate.writingFocus.readerMessage.senderName}：{preview.candidate.writingFocus.readerMessage.content}</p>
@@ -193,13 +264,11 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
       {previewTarget === 'body' ? <label>放入方式<select aria-label="建议放入方式" value={previewMode} onChange={event => setPreviewMode(event.target.value as 'append' | 'replace')}><option value="append">追加在当前正文后</option><option value="replace">替换当前正文</option></select></label> : <p>当前标题：{title} → 确认后替换为下方文字。</p>}
       </>}
       <label>{preview.candidate.writingFocus?.selection ? '修改后' : '建议内容'}<textarea aria-label="编辑写作建议" value={previewText} onChange={event => setPreviewText(event.target.value)} /></label>
-      <div className="canvas-candidate-preview-actions"><button className="primary" disabled={!previewText.trim() || applying || retesting || saving || collaborating} onClick={putCandidateInEditor}>{preview.candidate.writingFocus?.selection ? '只替换这一段' : '确认放入画布'}</button><button onClick={() => setPreview(null)}>关闭预览</button></div>
+      <div className="canvas-candidate-preview-actions"><button className="primary" disabled={!previewText.trim() || applying || retesting || saving || collaborating} onClick={putCandidateInEditor}>{preview.candidate.writingFocus?.selection ? '只替换这一段' : '确认放入画布'}</button><button onClick={closePreview}>关闭预览</button></div>
     </section>}
-    <div className="creator-canvas" style={{gridTemplateColumns:`minmax(0, ${split}fr) 12px minmax(0, ${100-split}fr)`}}>
-      <section className="canvas-editor">
         <PendingSuggestions value={topic.generatedSnapshot.pendingSuggestions} />
-        <input aria-label="创作标题" value={title} disabled={preparing} onChange={e => {editRevision.current++; dirtyRef.current = true; setTitle(e.target.value)}} />
-        <textarea aria-label="创作正文" value={body} disabled={preparing} placeholder="写下你的想法，或请右侧伙伴一起起草。" onChange={e => {editRevision.current++; dirtyRef.current = true; setBody(e.target.value); setSelection(null)}}
+        <input aria-label="创作标题" value={title} disabled={preparing} placeholder="给这篇内容一个标题" onChange={e => {editRevision.current++; dirtyRef.current = true; setTitle(e.target.value)}} />
+        <textarea ref={editorRef} aria-label="创作正文" value={body} disabled={preparing} placeholder="写下想法，或和助手一起起草。" onChange={e => {editRevision.current++; dirtyRef.current = true; setBody(e.target.value); setSelection(null)}}
           onSelect={event => {const node = event.currentTarget, value = selectionFromTextarea(body, node.selectionStart, node.selectionEnd); setSelection(value ? {value, body} : null)}} />
         {focusedSelection ? <section className="canvas-selection-tools" aria-label="选段改写">
           <div className="canvas-focus-heading"><strong>已选 {Array.from(focusedSelection.text).length} 字</strong><button type="button" className="text-button" onClick={() => setSelection(null)}>取消选段</button></div>
@@ -215,13 +284,6 @@ function Canvas({workspaceId, topic, onUpdated, onSimulate, onRetestCreated, sim
           {onSimulate && <button disabled={retesting || applying || preparing || saving || collaborating || !title.trim()} onClick={() => void prepareSimulation()}>{preparing ? '正在保存…' : '选择模拟读者'}</button>}
         </div>
       </section>
-      <div className="canvas-divider" role="separator" aria-label="调整画布和对话宽度" aria-valuenow={split} aria-valuemin={30} aria-valuemax={70} aria-orientation="vertical" tabIndex={0}
-        onKeyDown={e => {if(e.key === 'ArrowLeft') setSplit(v => Math.max(30,v-5)); if(e.key === 'ArrowRight') setSplit(v => Math.min(70,v+5))}}
-        onPointerDown={e => e.currentTarget.setPointerCapture(e.pointerId)}
-        onPointerMove={e => {if (!e.currentTarget.hasPointerCapture(e.pointerId)) return; const rect=e.currentTarget.parentElement!.getBoundingClientRect(); setSplit(Math.min(70,Math.max(30,(e.clientX-rect.left)/rect.width*100)))}}
-        onPointerUp={e => e.currentTarget.releasePointerCapture(e.pointerId)} />
-      <ContentCollaborationChat workspaceId={workspaceId} topic={saved} blocked={retesting || applying || preparing || saving || !title.trim()}
-        beforeSend={prepareCollaboration} onActivityChange={onActivityChange} onPreview={previewCandidate} composeIntent={composeIntent} />
     </div>
     {feedbackRunId && onRetestCreated && <section className="canvas-feedback-retest" aria-label="意见修改后复测"><h2>原班读者复测</h2>
       <PanelRetestControl key={feedbackRunId} workspaceId={workspaceId} runId={feedbackRunId} topic={saved} blocked={retestBlocked} onCreate={createRetest} onCreated={onRetestCreated} />

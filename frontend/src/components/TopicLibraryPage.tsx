@@ -42,6 +42,10 @@ function topicSourceLabel(source: TopicSourceWorkflow | 'all'): string {
   return '手动'
 }
 
+function topicStatusLabel(status: Topic['status']): string {
+  return { candidate: '待创作', selected: '当前选题', archived: '已归档' }[status]
+}
+
 export function TopicLibraryPage({
   publicMode = false,
   busy = false,
@@ -82,9 +86,9 @@ export function TopicLibraryPage({
     </form>
   )
   return (
-    <div className="workspace-page topics-page">
+    <div className={`workspace-page topics-page${publicMode ? ' creator-topics-page' : ''}`}>
       <section className="history-list">
-        <div className="panel-title">◇ 选题库</div>
+        {publicMode ? <h1 className="creator-topics-title">选题库</h1> : <div className="panel-title">◇ 选题库</div>}
         {publicMode ? <>
           <button type="button" className="primary" onClick={() => setCreating(true)}>＋ 新建选题</button>
           {creating && <CreatorDialog title="新建选题" onClose={() => setCreating(false)}>{manualForm}</CreatorDialog>}
@@ -113,6 +117,7 @@ export function TopicLibraryPage({
               <button
                 key={item}
                 className={topicFilter === item ? 'active' : ''}
+                aria-pressed={topicFilter === item}
                 onClick={() => onTopicFilterChange(item)}
               >
                 {topicSourceLabel(item)}
@@ -124,10 +129,11 @@ export function TopicLibraryPage({
           <button
             key={topic.id}
             className={`topic-row ${selectedTopic?.id === topic.id ? 'active' : ''}`}
+            aria-pressed={selectedTopic?.id === topic.id}
             onClick={() => onSelectTopicRow(topic)}
           >
             <span>{topic.pinned ? '📌 ' : ''}{topic.title}</span>
-            <b>{topic.status}</b>
+            <b>{publicMode ? topicStatusLabel(topic.status) : topic.status}</b>
             <small>{publicMode ? topicSourceLabel(topic.sourceWorkflow) : topic.sourceWorkflow}</small>
           </button>
         ))}
@@ -139,7 +145,7 @@ export function TopicLibraryPage({
               <div>
                 <h2>{selectedTopic.title}</h2>
                 <p>
-                  {publicMode ? topicSourceLabel(selectedTopic.sourceWorkflow) : selectedTopic.sourceWorkflow} · {selectedTopic.status}
+                  {publicMode ? topicSourceLabel(selectedTopic.sourceWorkflow) : selectedTopic.sourceWorkflow} · {publicMode ? topicStatusLabel(selectedTopic.status) : selectedTopic.status}
                 </p>
               </div>
               <div className="detail-actions">

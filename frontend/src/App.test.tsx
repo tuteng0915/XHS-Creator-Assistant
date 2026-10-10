@@ -3647,7 +3647,7 @@ describe('workspace UI', () => {
       ? new Promise<Response>(done => { resolve = done }) : original(input, init))
     render(<App />)
     await screen.findByRole('button', { name: '开始导入' })
-    fireEvent.click(await screen.findByRole('button', { name: /👥 受众模拟/ }))
+    fireEvent.click(within(await screen.findByRole('navigation', {name: '创作者功能导航'})).getByRole('button', {name: '受众模拟'}))
     fireEvent.click(screen.getByRole('tab', {name:/创作级/}))
     const list = (await screen.findByText('历史记录')).closest('section') as HTMLElement
     fireEvent.click(within(list).getByRole('button', { name: /受众模拟/ }))
@@ -3656,7 +3656,7 @@ describe('workspace UI', () => {
     await waitFor(() => expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
     fireEvent.change(screen.getByLabelText('当前账号档案'), {target:{value:'workspace-2'}})
     await waitFor(() => expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: /👥 受众模拟/ }))
+    fireEvent.click(within(screen.getByRole('navigation', {name: '创作者功能导航'})).getByRole('button', {name: '受众模拟'}))
     const response = await original('/api/simulation-runs/simulation-2', {method:'GET'})
     await act(async () => resolve(response))
     expect(screen.queryByText('真实前提 + 分阶段路径')).not.toBeInTheDocument()
@@ -3699,7 +3699,7 @@ describe('workspace UI', () => {
     })
     render(<App />)
     if (publicMode) await screen.findByRole('button', {name:'开始导入'})
-    fireEvent.click(await screen.findByRole('button', {name:/👥 受众模拟/}))
+    fireEvent.click(within(await screen.findByRole('navigation', {name: publicMode ? '创作者功能导航' : '内容资产导航'})).getByRole('button', {name:/受众模拟/}))
     if (publicMode) fireEvent.click(screen.getByRole('tab', {name:/创作级/}))
     const list = (await screen.findByText(publicMode?'历史记录':'👥 受众模拟')).closest('section') as HTMLElement
     const open = within(list).getAllByRole('button', {name:/受众模拟/})[0]
@@ -3758,7 +3758,7 @@ describe('workspace UI', () => {
     fireEvent.click(screen.getByRole('button', {name:'保存复盘'}))
     fireEvent.change(screen.getByLabelText('当前账号档案'), {target:{value:'workspace-1'}})
     await waitFor(() => expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', {name:/👥 受众模拟/}))
+    fireEvent.click(within(screen.getByRole('navigation', {name: '创作者功能导航'})).getByRole('button', {name: '受众模拟'}))
     await act(async () => pending[0].resolve(await jsonResponse({...saved,userNotes:'其他账号的旧提交'})))
     expect(screen.queryByDisplayValue('其他账号的旧提交')).not.toBeInTheDocument()
     expect(screen.queryByText('本次读者')).not.toBeInTheDocument()

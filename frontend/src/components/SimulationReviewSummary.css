@@ -5,7 +5,7 @@
 .simulation-review-summary ul {margin:0;padding-left:20px;font-size:var(--text-body)}
 .simulation-review-summary li+li {margin-top:8px}
 .simulation-review-summary summary {cursor:pointer;color:var(--sub);font-size:var(--text-sm);line-height:1.6}
-.simulation-review-summary summary:focus-visible {outline:2px solid var(--blue);outline-offset:4px;border-radius:3px}
+.simulation-review-summary summary:focus-visible {outline:2px solid var(--accent);outline-offset:4px;border-radius:3px}
 .simulation-review-summary details[open]>summary {margin-bottom:10px}
 .simulation-review-directions {margin:18px 0}
 .simulation-review-observations {display:grid;gap:12px;margin:18px 0}

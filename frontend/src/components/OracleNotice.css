@@ -5,8 +5,8 @@
   width: fit-content;
   padding: 2px 7px;
   border-radius: 5px;
-  background: #eef4ff;
-  color: #496387;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
   font-size: var(--text-xs, 12px);
   font-weight: 500;
   line-height: 1.5;
@@ -16,7 +16,7 @@
 
 .oracle-record-notice {
   margin: 8px 0 14px;
-  color: var(--sub, #64748b);
+  color: var(--sub, #71696c);
   font-size: var(--text-sm, 13px);
   line-height: 1.65;
 }
@@ -30,7 +30,7 @@
 .oracle-history-settings > summary,
 .oracle-source-note > summary {
   cursor: pointer;
-  color: var(--sub, #64748b);
+  color: var(--sub, #71696c);
   line-height: 1.7;
 }
 
@@ -56,7 +56,7 @@
 .analysis-history-material-text,
 .oracle-source-note p {
   margin: 0;
-  color: var(--sub, #64748b);
+  color: var(--sub, #71696c);
   font-size: var(--text-sm, 13px);
   line-height: 1.75;
   white-space: pre-wrap;

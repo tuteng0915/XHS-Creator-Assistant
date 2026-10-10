@@ -140,8 +140,8 @@ def audience_context(snapshot: dict) -> dict:
     notes = snapshot["notes"]
     selected = []
     for i, note in enumerate(notes[:100]):
-        # Bound and assign IDs before partitioning so old snapshot references keep
-        # their positions and the author background cannot double the token budget.
+        # Assign IDs before filtering so saved references retain their positions.
+        # Authors do not consume the reader sample budget or enter the model input.
         comments = [
             {
                 "commentId": str(c.get("commentId") or f"snapshot-comment-{j}"),
@@ -149,14 +149,15 @@ def audience_context(snapshot: dict) -> dict:
                 "createTime": c.get("createTime"),
                 "sourceRole": comment_source_role(note, c),
             }
-            for j, c in enumerate(note.get("comments", [])[:50])
+            for j, c in enumerate(note.get("comments", []))
         ]
         selected.append({
             "noteId": str(note.get("noteId") or f"snapshot-note-{i}"),
             "title": str(note.get("title") or "")[:1000],
             "content": str(note.get("desc") or "")[:4000],
-            "comments": [c for c in comments if c["sourceRole"] != "author"],
-            "authorReplies": [c for c in comments if c["sourceRole"] == "author"],
+            "comments": [c for c in comments if c["sourceRole"] != "author"][:50],
+            "excludedAuthorCommentIds": [c["commentId"] for c in comments
+                                         if c["sourceRole"] == "author"],
         })
     return {
         # Do not leak an all-history summary into a scoped analysis.
@@ -167,17 +168,65 @@ def audience_context(snapshot: dict) -> dict:
             "availableNotes": len(notes),
             "sentNotes": len(selected),
             "availableComments": sum(len(n.get("comments", [])) for n in notes),
-            "sentComments": sum(len(n["comments"]) + len(n["authorReplies"]) for n in selected),
+            "sentComments": sum(len(n["comments"]) for n in selected),
             "sentCandidateComments": sum(len(n["comments"]) for n in selected),
-            "sentAuthorComments": sum(len(n["authorReplies"]) for n in selected),
+            "sentAuthorComments": 0,
+            "excludedAuthorComments": sum(len(n["excludedAuthorCommentIds"]) for n in selected),
             "sentUnknownRoleComments": sum(
                 c["sourceRole"] == "unknown" for n in selected for c in n["comments"]
             ),
             "commentRoleMethod": "mediacrawler_author_hash_v1",
-            "commentLayout": "reader_comments_author_background_v1",
+            "commentLayout": "reader_comments_only_v2",
             "maxCommentsPerNote": 50,
             "selection": "笔记范围内按已保存顺序截取；非随机抽样，不代表粉丝人数",
             "timeBasis": "笔记发布时间；评论为这些笔记下已采集的评论",
+        },
+    }
+
+
+def audience_model_context(context: dict) -> dict:
+    """Project legacy replay inputs too; never mutate their archived snapshots."""
+    notes = []
+    excluded_count = 0
+    for note in context.get("notes", [])[:100]:
+        excluded = list(note.get("excludedAuthorCommentIds", []))
+        authors = note.get("authorReplies", []) + [
+            c for c in note.get("comments", []) if c.get("sourceRole") == "author"
+        ]
+        excluded.extend(c.get("commentId") for c in authors)
+        excluded = list(dict.fromkeys(cid for cid in excluded if isinstance(cid, str) and cid))
+        excluded_ids = set(excluded)
+        comments = []
+        for comment in note.get("comments", []):
+            if (comment.get("sourceRole") != "author"
+                    and comment.get("commentId") not in excluded_ids):
+                role = comment.get("sourceRole")
+                comments.append({**comment, "sourceRole": (
+                    role if role in {"non_author", "unknown"} else "unknown"
+                )})
+        excluded_count += len(excluded) + sum(not c.get("commentId") for c in authors)
+        notes.append({
+            **{key: value for key, value in note.items()
+               if key not in {"authorReplies", "authorBackground", "excludedAuthorCommentIds"}},
+            "comments": comments[:50],
+        })
+    return {
+        **{key: value for key, value in context.items()
+           if key not in {"authorReplies", "authorBackground"}},
+        "notes": notes,
+        "sampling": {
+            **context.get("sampling", {}),
+            "sentNotes": len(notes),
+            "sentComments": sum(len(n["comments"]) for n in notes),
+            "sentCandidateComments": sum(len(n["comments"]) for n in notes),
+            "sentAuthorComments": 0,
+            "excludedAuthorComments": max(
+                excluded_count, context.get("sampling", {}).get("excludedAuthorComments", 0),
+            ),
+            "sentUnknownRoleComments": sum(c["sourceRole"] == "unknown"
+                                            for n in notes for c in n["comments"]),
+            "commentLayout": "reader_comments_only_v2",
+            "maxCommentsPerNote": 50,
         },
     }
 
@@ -190,6 +239,8 @@ def evidence_issues(refs: list[AudienceEvidence], context: dict) -> list[dict]:
     occurrences: dict[tuple, int] = {}
     author_comments: set[tuple] = set()
     for note in context["notes"]:
+        author_comments.update((note["noteId"], cid, "comment")
+                               for cid in note.get("excludedAuthorCommentIds", []))
         note_key = (note["noteId"], None, "note")
         occurrences[note_key] = occurrences.get(note_key, 0) + 1
         sources.setdefault((note["noteId"], None, "note"), []).extend(
@@ -210,7 +261,7 @@ def evidence_issues(refs: list[AudienceEvidence], context: dict) -> list[dict]:
             issues.append({
                 "referenceIndex": index,
                 "code": "author_comment_not_reader_evidence",
-                "message": "作者回复可作背景，不能作为读者需求证据",
+                "message": "作者评论已排除，不能作为读者需求证据",
                 "reference": ref.model_dump(mode="json", by_alias=True),
             })
             continue

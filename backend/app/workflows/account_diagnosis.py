@@ -29,6 +29,7 @@ from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
 from app.services.run_events import RunEvent, RunEventEmitter, RunEventType
+from app.services.xhs_comment_roles import reader_comments_text
 
 ACCOUNT_GRAPH_NODE_ORDER = [
     "profile_analysis",
@@ -482,7 +483,11 @@ class _AccountDiagnosisGraphExecution:
             await self.emit("stage.started", "pain_points", "running", {})
             try:
                 output = await provider.pain_points(
-                    comments=str(snapshot["comments"]["content"])
+                    # Rebuild from the frozen raw profile, including old pending runs
+                    # whose derived text still mixed author and reader comments.
+                    comments=(reader_comments_text(snapshot["xhsCreatorProfile"])
+                              if snapshot.get("xhsCreatorProfile")
+                              else str(snapshot["comments"]["content"]))
                 )
                 result = PainPointsStageResult.model_validate(output).model_dump(
                     mode="json"

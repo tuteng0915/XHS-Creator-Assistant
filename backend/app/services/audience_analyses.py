@@ -15,6 +15,7 @@ from app.services.audience_evidence import (
     AudienceEvidence,
     ObservedEpisode,
     audience_context,
+    audience_model_context,
     evidence_issues,
     observed_episodes,
     validate_evidence,
@@ -259,7 +260,7 @@ class AudienceAnalysisService:
             context = audience_context(run.input_snapshot)
             response = await self.model_call_service.call_operation(
                 ModelOperation.AUDIENCE_ANALYSIS,
-                context,
+                audience_model_context(context),
             )
             # Save the response before validation so rejected output remains debuggable.
             with self.database.transaction() as c:

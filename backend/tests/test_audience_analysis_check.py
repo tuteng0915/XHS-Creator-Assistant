@@ -57,12 +57,13 @@ def test_preview_uses_import_scope_and_role_logic_without_network(tmp_path):
     check = load_check()
     context = check.prepare_context(source)
     assert [n["noteId"] for n in context["notes"]] == [str(i) for i in range(11, 1, -1)]
-    assert context["sampling"]["sentAuthorComments"] == 1
+    assert context["sampling"]["sentAuthorComments"] == 0
+    assert context["sampling"]["excludedAuthorComments"] == 1
     assert context["sampling"]["sentCandidateComments"] == 1
-    assert context["sampling"]["sentComments"] == 2
+    assert context["sampling"]["sentComments"] == 1
     assert context["notes"][0]["comments"][0]["commentId"] == "reader"
-    assert context["notes"][0]["authorReplies"][0]["commentId"] == "author"
-    assert context["sampling"]["commentLayout"] == "reader_comments_author_background_v1"
+    assert context["notes"][0]["excludedAuthorCommentIds"] == ["author"]
+    assert context["sampling"]["commentLayout"] == "reader_comments_only_v2"
     assert "authorHash" not in json.dumps(context)
     result = subprocess.run(
         [sys.executable, check.__file__, str(source)], capture_output=True, text=True, check=True
@@ -80,7 +81,10 @@ def test_one_call_preserves_rejected_output_and_reader_result(tmp_path):
         async def call_operation(self, operation, received):
             self.calls += 1
             assert operation == ModelOperation.AUDIENCE_ANALYSIS
-            assert received is context
+            assert received["notes"][0]["comments"] == context["notes"][0]["comments"]
+            assert "authorReplies" not in received["notes"][0]
+            assert "excludedAuthorCommentIds" not in received["notes"][0]
+            assert "请发到我的邮箱" not in json.dumps(received, ensure_ascii=False)
             return ModelCallResponse(
                 output={
                     "summary": "模拟人物",
@@ -136,6 +140,29 @@ def test_failure_is_not_retried_or_dumped_with_sensitive_details():
     assert "secret-header-value" not in json.dumps(report)
     assert report["reviewSummary"]["acceptedGroups"] is None
     assert report["reviewSummary"]["rejectedGroups"] is None
+
+
+def test_replayed_check_does_not_send_legacy_author_background(tmp_path):
+    check = load_check()
+    context = check.prepare_context(raw_export(tmp_path))
+    context["notes"][0]["authorReplies"] = [{
+        "commentId": "author", "content": "请发到我的邮箱",
+    }]
+    original = json.dumps(context, ensure_ascii=False)
+    received = []
+
+    class Model:
+        async def call_operation(self, operation, model_context):
+            received.append(model_context)
+            raise RuntimeError("offline test")
+
+    report = asyncio.run(check.run_check(Model(), context))
+    assert len(received) == 1
+    assert "请发到我的邮箱" not in json.dumps(received[0], ensure_ascii=False)
+    assert "authorReplies" not in received[0]["notes"][0]
+    assert "excludedAuthorCommentIds" not in received[0]["notes"][0]
+    assert json.dumps(report["context"], ensure_ascii=False) == original
+    assert json.dumps(context, ensure_ascii=False) == original
 
 
 def test_validation_failure_keeps_model_output_for_review():

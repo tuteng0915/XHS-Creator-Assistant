@@ -35,6 +35,9 @@ describe('TopicLibraryPage', () => {
       onSaveTopicEdits={vi.fn()}
     />)
     expect(screen.getByRole('button', { name: 'AI 创作助手' })).toBeDisabled()
+    expect(screen.getByRole('heading', { name: '选题库', level: 1 })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /如何判断一个选题值得做 待创作/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '全部' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: '受众模拟' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '＋ 新建选题' })).toHaveClass('primary')
     expect(screen.getByRole('button', { name: 'AI 创作助手' })).toHaveClass('primary')
