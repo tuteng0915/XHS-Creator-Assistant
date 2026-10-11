@@ -13,6 +13,14 @@ import httpx
 from app.config import Settings
 from app.errors import ValidationError
 from app.models import ModelCallRequest, ModelCallResponse, ModelOperation
+from app.services.account_report_prompt import (
+    PROFILE_PROMPT_VERSION as PROFILE_PROMPT_VERSION,
+)
+from app.services.account_report_prompt import (
+    SOURCE_LED_PROFILE_PROMPT,
+    uses_structured_notes,
+)
+from app.services.account_report_sources import prepare_source_led_context
 from app.services.audience_evidence import audience_model_context
 from app.services.audience_examples import ANALYSIS_EXAMPLES, REACTION_EXAMPLES
 from app.services.editor_feedback import (
@@ -31,8 +39,6 @@ from app.services.simulation_review import (
     review_prompt,
     simulation_category,
 )
-
-PROFILE_PROMPT_VERSION = "account-report/2026-10-10-v2"
 
 PROMPT_PROFILE = """你是懂内容传播的创作者顾问，为作者写一份读完就知道自己好在哪里、下次怎么写的账号报告。语气真诚、积极、有鼓励感，像认真读过作品的编辑，不像打分评审。先认识账号，再谈可尝试的改进；每个判断都要落到具体文字，少用抽象赞美、身份标签和运营套话。
 
@@ -436,6 +442,7 @@ class ModelCallService:
             )
 
         system, user = review_prompt or self._build_prompt(operation, context)
+        model = self.qwen_model_for(operation)
         if self.before_request is not None:
             self.before_request()
         async with self._qwen_client(operation) as client:
@@ -446,10 +453,13 @@ class ModelCallService:
                     "authorization": f"Bearer {self.settings.qwen_api_key}",
                 },
                 json={
-                    "model": self.settings.qwen_model,
+                    "model": model,
                     "max_tokens": self._output_budget(operation, context),
                     "temperature": 0.3,
                     "response_format": {"type": "json_object"},
+                    **({"enable_thinking": False}
+                       if operation == ModelOperation.PROFILE and model.lower().startswith("qwen3.8")
+                       else {}),
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
@@ -477,12 +487,17 @@ class ModelCallService:
             model_metadata={
                 "provider": "qwen",
                 "systemPromptHash": hashlib.sha256(system.encode("utf-8")).hexdigest(),
-                "model": body.get("model", self.settings.qwen_model),
+                "model": body.get("model", model),
                 "modelSource": "response" if body.get("model") else "configured",
                 "usage": body.get("usage", {}),
                 "operation": operation.value,
             },
         )
+
+    def qwen_model_for(self, operation: ModelOperation) -> str:
+        if operation == ModelOperation.PROFILE:
+            return self.settings.qwen_profile_model.strip() or self.settings.qwen_model
+        return self.settings.qwen_model
 
     @staticmethod
     def _output_budget(operation: ModelOperation, context: dict) -> int:
@@ -550,10 +565,14 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
 更新会写入当前选题，不能修改其他资产。回复简洁说明实际改动。
 只输出 JSON：{"reply":"","update":null,"pendingSuggestions":[],"factCheck":{"safeToApply":false,"supportedClaims":[]}}；可安全更新时 update={"title":"","body":""} 且 safeToApply=true。""", json.dumps(context, ensure_ascii=False))
         if operation == ModelOperation.PROFILE:
+            structured = uses_structured_notes(context)
+            report_context = prepare_source_led_context(context) if structured else context
             return (
-                PROMPT_PROFILE,
+                SOURCE_LED_PROFILE_PROMPT if structured else PROMPT_PROFILE,
                 f"账号定位：\n{positioning}\n\n历史笔记：\n"
-                f"{context.get('historicalPosts', '')}",
+                f"{report_context.get('historicalPosts', '')}"
+                + ("\n\n请按固定六部分模板交付 source-led/v3 账号复盘，只写最终 JSON。"
+                   if structured else ""),
             )
         if operation == ModelOperation.PAIN_POINTS:
             source = context.get("sourceText", context.get("comments", ""))

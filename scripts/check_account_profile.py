@@ -32,9 +32,11 @@ from app.services.account_diagnosis_evidence import (  # noqa: E402
     profile_stage_input,
     verified_portrait,
 )
+from app.services.account_report_editorial import compile_editorial_profile  # noqa: E402
+from app.services.account_report_prompt import profile_prompt_version  # noqa: E402
 from app.services.analysis_runs import AnalysisRunService  # noqa: E402
 from app.services.creator_analysis_scope import ordered_notes, scope_creator_profile  # noqa: E402
-from app.services.model_calls import PROFILE_PROMPT_VERSION  # noqa: E402
+from app.services.model_calls import PROFILE_PROMPT_VERSION as PROFILE_PROMPT_VERSION  # noqa: E402
 from app.services.xhs_imports import XhsOfflineImportService  # noqa: E402
 from app.workflows.account_diagnosis import ProfileStageResult  # noqa: E402
 
@@ -120,6 +122,55 @@ def prepare_workspace_case(
         connection.close()
 
 
+def prepare_analysis_run_case(database: Path, run_id: str) -> dict:
+    """Use one historical input snapshot with today's profile prompt/input shape."""
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("分析记录标识不能为空")
+    connection = sqlite3.connect(database.resolve(strict=True).as_uri() + "?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        row = connection.execute(
+            "SELECT id,workspace_id,workflow_type,input_snapshot_json,created_at "
+            "FROM analysis_runs WHERE id=?", (run_id,),
+        ).fetchone()
+        if row is None or row["workflow_type"] != "account_diagnosis":
+            raise ValueError("账号分析记录不存在或类型不符")
+        snapshot = json.loads(row["input_snapshot_json"])
+        profile = snapshot.get("xhsCreatorProfile") if isinstance(snapshot, dict) else None
+        notes = profile.get("notes") if isinstance(profile, dict) else None
+        if (not isinstance(notes, list) or not notes
+                or any(not isinstance(note, dict) for note in notes)):
+            raise ValueError("历史输入没有可用的结构化笔记快照")
+        if not any(isinstance(note.get(key), str) and note[key].strip()
+                   for note in notes for key in ("title", "desc")):
+            raise ValueError("历史笔记快照没有已保存的标题或正文")
+        selected = [note.get("noteId") for note in notes]
+        if (any(not isinstance(item, str) or not item.strip() or item != item.strip()
+                for item in selected) or len(set(selected)) != len(selected)):
+            raise ValueError("历史笔记标识缺失或不唯一")
+        scope = snapshot.get("analysisRange")
+        if isinstance(scope, dict):
+            recorded_ids = scope.get("selectedNoteIds")
+            if recorded_ids is not None and (
+                not isinstance(recorded_ids, list)
+                or any(not isinstance(item, str) for item in recorded_ids)
+                or len(recorded_ids) != len(selected) or set(recorded_ids) != set(selected)
+            ):
+                raise ValueError("历史范围与冻结笔记不一致")
+            if ("selectedNoteCount" in scope and scope["selectedNoteCount"] != len(selected)):
+                raise ValueError("历史范围与冻结笔记数量不一致")
+        context, observations = profile_stage_input(snapshot, row["created_at"])
+        return {
+            "snapshot": snapshot, "context": context, "observations": observations,
+            "inputSource": {
+                "type": "analysis_run_snapshot", "runId": row["id"],
+                "workspaceId": row["workspace_id"], "selectedNoteIds": selected,
+            },
+        }
+    finally:
+        connection.close()
+
+
 def claim_counts(portrait) -> dict:
     portrait = portrait if isinstance(portrait, dict) else {}
     result = {key: int(isinstance(portrait.get(key), dict))
@@ -127,6 +178,9 @@ def claim_counts(portrait) -> dict:
     for key in ("keywords", "strengths", "recurringThemes", "readerValue", "expressionPatterns"):
         values = portrait.get(key)
         result[key] = len(values) if isinstance(values, list) else 0
+    if "nextSteps" in portrait:
+        result["nextSteps"] = (len(portrait["nextSteps"])
+                               if isinstance(portrait["nextSteps"], list) else 0)
     return result
 
 
@@ -150,16 +204,9 @@ def case_from_report(path: Path) -> dict:
 async def run_check(service, case: dict) -> dict:
     report = {"status": "failed", "requestAttempts": 1, **case,
               "semanticStatus": "not_reviewed", "manualChecks": [
-                  "关键词是否同时体现主题、价值和表达，而非仅复述标题？",
-                  "优势是否具体指出已经做对的事情，且引用真正支持它？",
-                  "鼓励是否自然、贴合本人，而非承诺流量或泛泛夸奖？",
-                  "改进建议与优势是否自洽，是否把相关性写成原因？",
-                  "是否分开理解赞、收藏、评论、分享，而非只按点赞判断所有表现？",
-                  "复盘经验是否指出来源写法、适用场景和一个可执行调整？",
-                  "风格描述是否可以模仿，而非空泛人格标签或固定爆款模板？",
-                  "示例是否被误写为账号事实，是否保留不同类型内容的表达差异？",
-                  "跨经历优势是在归纳共同写法，还是把不同场景合并成了一段经历？",
-                  "缺失指标是否省略或写未提供，是否把低互动内容贬为没有价值？",
+                  "解释力：是否认出跨篇的观察、判断或表达特点，而非仅列题材；允许例外和不同表现，不要求每篇同一结构？",
+                  "事实落点：代表作中的人物、经历、措辞和顺序是否准确；积极的编辑评价不能变成补造事实或已验证的传播效果？",
+                  "创作回报：是否指出值得延续的本领与可用的下一步，而非拔高使命、挑不存在的缺点或强套模板？",
               ]}
     phase = "model_call"
     started = time.monotonic()
@@ -167,7 +214,8 @@ async def run_check(service, case: dict) -> dict:
         response = await service.call_operation(ModelOperation.PROFILE, case["context"])
         report.update(output=response.output, modelMetadata=response.model_metadata)
         phase = "validation"
-        result = ProfileStageResult.model_validate(response.output).model_dump(mode="json")
+        prepared = compile_editorial_profile(response.output, case["snapshot"])
+        result = ProfileStageResult.model_validate(prepared).model_dump(mode="json")
         raw = result["profile"].get("accountPortrait")
         observations = case["observations"]
         kept = verified_portrait(raw, case["snapshot"], (observations or {}).get("chronology"))
@@ -183,6 +231,7 @@ async def run_check(service, case: dict) -> dict:
         report["error"] = {"phase": phase, "type": type(error).__name__}
     report["elapsedSeconds"] = round(time.monotonic() - started, 2)
     if isinstance(service, DiagnosticProfileCalls):
+        report["requestAttempts"] = service.request_attempts
         report["responseDiagnostic"] = service.diagnostic.copy()
         # Also cover a credential echoed inside otherwise valid structured output.
         report = service.redact(report)
@@ -194,11 +243,13 @@ def main() -> int:
     parser.add_argument("source", nargs="?", type=Path, help="已保存的 MediaCrawler 原始数据目录")
     parser.add_argument("--input-from", type=Path, help="复用已有画像检查报告的完整冻结输入")
     parser.add_argument("--workspace-id", help="只读检查当前账号档案已保存的笔记")
+    parser.add_argument("--analysis-run-id",
+                        help="只读历史账号分析的冻结笔记，用当前画像输入重新检查")
     parser.add_argument("--database", type=Path,
-                        help="与 --workspace-id 一起使用；默认读取配置路径")
+                        help="账号或历史分析模式使用；默认读取配置路径")
     parser.add_argument("--note-ids", help="与 --workspace-id 一起使用；逗号分隔的精确笔记 ID")
     parser.add_argument("--limit", type=int, help="账号模式下选择最近 N 篇，默认 5，范围 1～50")
-    parser.add_argument("--live", action="store_true", help="只调用一次 Qwen 账号画像")
+    parser.add_argument("--live", action="store_true", help="运行一次 Qwen 画像检查，不重试")
     parser.add_argument("--output", type=Path, help="新的报告目录，拒绝覆盖")
     parser.add_argument("--read-timeout-seconds", type=int, default=90,
                         help="仅本次检查的读取等待上限，1～300 秒；默认 90，不改变生产设置")
@@ -207,22 +258,30 @@ def main() -> int:
         parser.error("--read-timeout-seconds 必须为 1～300 的整数")
     if args.live and args.output is None:
         parser.error("--live 必须指定新的 --output 目录")
-    if sum(value is not None for value in (args.source, args.input_from, args.workspace_id)) != 1:
-        parser.error("提供原始数据目录、--input-from 或 --workspace-id，三选一")
+    if sum(value is not None for value in (
+        args.source, args.input_from, args.workspace_id, args.analysis_run_id,
+    )) != 1:
+        parser.error("提供原始数据目录、--input-from、--workspace-id 或 --analysis-run-id，四选一")
+    database_input = args.workspace_id is not None or args.analysis_run_id is not None
+    if not database_input and args.database is not None:
+        parser.error("--database 仅用于 --workspace-id 或 --analysis-run-id")
     if args.workspace_id is None and any(
-        value is not None for value in (args.database, args.note_ids, args.limit)
+        value is not None for value in (args.note_ids, args.limit)
     ):
-        parser.error("--database、--note-ids 和 --limit 仅用于 --workspace-id")
+        parser.error("--note-ids 和 --limit 仅用于 --workspace-id，不改变历史冻结范围")
     if args.limit is not None and not 1 <= args.limit <= 50:
         parser.error("--limit 必须为 1～50 的整数")
     if args.limit is not None and args.note_ids is not None:
         parser.error("--note-ids 已指定精确笔记，不与 --limit 同时使用")
-    if args.workspace_id is not None and args.live and not args.output.resolve().is_relative_to(
+    if database_input and args.live and not args.output.resolve().is_relative_to(
         (ROOT / "data/evals").resolve(),
     ):
         parser.error("账号笔记报告请保存到仓库 data/evals 下的新目录")
     try:
-        if args.workspace_id is not None:
+        if args.analysis_run_id is not None:
+            database = args.database or Settings.from_environment().database_path
+            case = prepare_analysis_run_case(database, args.analysis_run_id)
+        elif args.workspace_id is not None:
             database = args.database or Settings.from_environment().database_path
             ids = ([item.strip() for item in args.note_ids.split(",")]
                    if args.note_ids is not None else None)
@@ -239,7 +298,7 @@ def main() -> int:
             "mode": "preview", "requestAttempts": 0,
             "coverage": case["observations"].get("coverage"),
             "chronology": case["observations"].get("chronology"),
-            **({"selection": case["inputSource"]} if args.workspace_id is not None else {}),
+            **({"selection": case["inputSource"]} if database_input else {}),
         }, ensure_ascii=False))
         return 0
     settings = replace(Settings.from_environment(), model_provider="qwen")
@@ -249,8 +308,8 @@ def main() -> int:
     service = DiagnosticProfileCalls(settings, read_timeout_seconds=args.read_timeout_seconds)
     system, user = service._build_prompt(ModelOperation.PROFILE, case["context"])
     report = asyncio.run(run_check(service, case))
-    report.update(provider="qwen", configuredModel=settings.qwen_model,
-                  promptVersion=PROFILE_PROMPT_VERSION,
+    report.update(provider="qwen", configuredModel=service.qwen_model_for(ModelOperation.PROFILE),
+                  promptVersion=profile_prompt_version(case["context"]),
                   promptHash=hashlib.sha256(system.encode()).hexdigest(),
                   inputHash=hashlib.sha256(user.encode()).hexdigest())
     if args.input_from:
@@ -260,7 +319,8 @@ def main() -> int:
     destination = args.output / "report.json"
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"report": str(destination), "status": report["status"],
-                      "requestAttempts": 1, "semanticStatus": "not_reviewed"}, ensure_ascii=False))
+                      "requestAttempts": report["requestAttempts"],
+                      "semanticStatus": "not_reviewed"}, ensure_ascii=False))
     return 0 if report["status"] == "completed" else 1
 
 

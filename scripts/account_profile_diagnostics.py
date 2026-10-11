@@ -5,9 +5,11 @@ Raw model text is private source-derived content and belongs in ignored reports.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
+from copy import deepcopy
 
 import httpx
 
@@ -23,6 +25,12 @@ TRACE_OPERATIONS = {
               "receive_response_headers", "receive_response_body"},
 }
 MAX_TRACE_EVENTS = 128
+USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens")
+
+
+def safe_usage(value):
+    return {key: value[key] for key in USAGE_KEYS
+            if isinstance(value, dict) and type(value.get(key)) is int and value[key] >= 0}
 
 
 class DiagnosticProfileCalls(ModelCallService):
@@ -33,6 +41,9 @@ class DiagnosticProfileCalls(ModelCallService):
         self.transport = transport
         self.read_timeout_seconds = read_timeout_seconds
         self.diagnostic: dict = {}
+        self.request_attempts = 0
+        self.request_diagnostics: list[dict] = []
+        self._request_recorded = False
         self._started: float | None = None
         self._secrets = [value for value in (settings.qwen_api_key, settings.anthropic_api_key)
                          if value]
@@ -50,6 +61,9 @@ class DiagnosticProfileCalls(ModelCallService):
 
     async def call_operation(self, operation, context):
         self.diagnostic = {"phase": "configuration"}
+        self.request_attempts = 0
+        self.request_diagnostics = []
+        self._request_recorded = False
         if operation != ModelOperation.PROFILE or self.settings.model_provider != "qwen":
             raise ValueError("Profile diagnostics only support the Qwen profile operation")
         self._started = time.monotonic()
@@ -57,13 +71,59 @@ class DiagnosticProfileCalls(ModelCallService):
             response = await super().call_operation(operation, context)
         except Exception as error:
             self.diagnostic["failureType"] = type(error).__name__
+            if self.diagnostic.get("phase") == "parsed":
+                self.diagnostic["phase"] = "stage_validation"
             raise
         finally:
             self._mark("finishedMs")
-        return response.model_copy(update={"model_metadata": {
-            "provider": "qwen", "model": self.diagnostic.get("model", self.settings.qwen_model),
-            "usage": self.diagnostic.get("usage", {}), "operation": operation.value,
-        }})
+            # Preserve the old top-level fields and retain request-level traces
+            # even when the operation fails after receiving a response.
+            self.diagnostic.update(
+                requestAttempts=self.request_attempts,
+                requests=deepcopy(self.request_diagnostics),
+                totalUsage=self._total_usage(),
+            )
+        return response.model_copy(update={"model_metadata": self._safe_metadata(
+            response.model_metadata, operation,
+        )})
+
+    async def _call_qwen(self, operation, context, *, review_prompt=None):
+        self.diagnostic = {"phase": "configuration"}
+        self._request_recorded = False
+        self._started = time.monotonic()
+        try:
+            response = await super()._call_qwen(operation, context, review_prompt=review_prompt)
+            self.diagnostic["phase"] = "parsed"
+            self._mark("parsedMs")
+            return response
+        except Exception as error:
+            self.diagnostic["failureType"] = type(error).__name__
+            raise
+        finally:
+            self._mark("finishedMs")
+            if self._request_recorded:
+                self.request_diagnostics.append(deepcopy(self.diagnostic))
+
+    def _total_usage(self):
+        samples = [safe_usage(item.get("usage")) for item in self.request_diagnostics]
+        return {key: sum(item.get(key, 0) for item in samples) for key in USAGE_KEYS
+                if any(key in item for item in samples)}
+
+    def _safe_metadata(self, metadata, operation):
+        metadata = metadata if isinstance(metadata, dict) else {}
+        safe = {key: self.redact(metadata[key]) for key in (
+            "provider", "model", "modelSource", "systemPromptHash", "promptVersion",
+        ) if isinstance(metadata.get(key), str)}
+        safe.update(provider="qwen", operation=operation.value,
+                    requestCount=self.request_attempts,
+                    usage=safe_usage(metadata.get("usage")) or self._total_usage())
+        return safe
+
+    def _count_request(self):
+        if not self._request_recorded:
+            self.request_attempts += 1
+            self._request_recorded = True
+            self.diagnostic["requestNumber"] = self.request_attempts
 
     def _qwen_client(self, operation):
         self.diagnostic.update(
@@ -84,9 +144,17 @@ class DiagnosticProfileCalls(ModelCallService):
             )
 
     async def _record_request(self, request: httpx.Request):
+        self._count_request()
         self._mark("requestPreparedMs")
         request.extensions["trace"] = self._record_network_event
         payload = json.loads(request.content)
+        self.diagnostic["requestedMaxTokens"] = payload.get("max_tokens")
+        system = next((item.get("content", "") for item in payload.get("messages", [])
+                       if item.get("role") == "system"), "")
+        user = next((item.get("content", "") for item in payload.get("messages", [])
+                     if item.get("role") == "user"), "")
+        self.diagnostic["systemPromptHash"] = hashlib.sha256(system.encode()).hexdigest()
+        self.diagnostic["inputHash"] = hashlib.sha256(user.encode()).hexdigest()
         text = "".join(message.get("content", "") for message in payload.get("messages", [])
                        if isinstance(message.get("content"), str))
         self.diagnostic["sizes"] = {
@@ -114,6 +182,8 @@ class DiagnosticProfileCalls(ModelCallService):
         )})
 
     async def _record_response(self, response: httpx.Response):
+        # Also support injected test clients which retain only the response hook.
+        self._count_request()
         self._mark("responseHeadersMs")
         self.diagnostic.update(httpStatus=response.status_code, phase="http_status")
         self.diagnostic["waitingFor"] = "response_body"
@@ -137,16 +207,15 @@ class DiagnosticProfileCalls(ModelCallService):
             self.diagnostic["model"] = self.redact(model)[:200]
         usage = body.get("usage")
         if isinstance(usage, dict):
-            self.diagnostic["usage"] = {
-                key: usage[key] for key in ("prompt_tokens", "completion_tokens", "total_tokens")
-                if type(usage.get(key)) is int and usage[key] >= 0
-            }
+            self.diagnostic["usage"] = safe_usage(usage)
         choices = body.get("choices")
         first = choices[0] if isinstance(choices, list) and choices else None
         reason = first.get("finish_reason") if isinstance(first, dict) else None
         if isinstance(reason, str):
             self.diagnostic["finishReason"] = self.redact(reason)[:64]
             self.diagnostic["providerReportedLengthLimit"] = reason == "length"
+            if reason == "length":
+                self.diagnostic["phase"] = "output_length"
 
     def _extract_openai_compatible_text(self, body):
         self.diagnostic["phase"] = "content_extraction"
@@ -168,3 +237,8 @@ class DiagnosticProfileCalls(ModelCallService):
         self.diagnostic["phase"] = "parsed"
         self._mark("parsedMs")
         return value
+
+    def _parse_json(self, text):
+        # Keep JSON parsing visible even when the caller uses a custom prompt.
+        self.diagnostic["phase"] = "model_json"
+        return super()._parse_json(text)

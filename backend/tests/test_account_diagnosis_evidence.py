@@ -265,6 +265,81 @@ def test_portrait_keeps_grounded_keywords_strengths_and_encouragement():
     )
 
 
+def test_portrait_accepts_selected_note_sources_without_inventing_quotes():
+    snapshot = selected_snapshot()
+    portrait = {
+        "summary": {
+            "statement": "以具体准备过程为主",
+            "evidence": [
+                {"noteId": "n1", "scope": "note"},
+                {"noteId": "n1", "scope": "note"},
+                {"noteId": "missing", "scope": "note"},
+                {"noteId": "n2", "quote": "中文正文乙"},
+            ],
+            "counterexamples": [{"noteId": "n1", "scope": "note"}],
+        },
+        "keywords": [{
+            "statement": "准备过程", "evidence": [{"noteId": "n2", "scope": "note"}],
+        }],
+    }
+    before = deepcopy((portrait, snapshot))
+    result = verified_portrait(portrait, snapshot)
+    assert result["summary"]["evidence"] == [
+        {"noteId": "n1", "scope": "note"},
+        {"noteId": "n2", "quote": "中文正文乙"},
+    ]
+    assert result["summary"]["counterexamples"] == []
+    assert result["keywords"][0]["evidence"] == [{"noteId": "n2", "scope": "note"}]
+    assert "nextSteps" not in result
+    assert (portrait, snapshot) == before
+
+
+@pytest.mark.parametrize("ref", [
+    {"noteId": "n1", "scope": "note", "quote": ""},
+    {"noteId": "n1", "scope": "note", "quote": "   "},
+    {"noteId": "n1", "scope": "note", "quote": None},
+    {"noteId": "n1", "scope": "note", "quote": "中文正文乙"},
+    {"noteId": "unknown", "scope": "note"},
+    {"noteId": ["n1"], "scope": "note"},
+    {"noteId": "n1"},
+    {"noteId": "n1", "scope": "anything"},
+])
+def test_note_scope_does_not_bypass_source_or_quote_validation(ref):
+    assert verified_portrait({"summary": {
+        "statement": "不可保留", "evidence": [ref],
+    }}, selected_snapshot()) is None
+
+
+def test_note_scope_with_literal_quote_keeps_legacy_quote_verification():
+    result = verified_portrait({"summary": {
+        "statement": "保留原话",
+        "evidence": [{"noteId": "n1", "scope": "note", "quote": "中文正文甲"}],
+    }}, selected_snapshot())
+    assert result["summary"]["evidence"] == [{"noteId": "n1", "quote": "中文正文甲"}]
+
+
+def test_note_sources_require_unique_snapshot_identity():
+    snapshot = selected_snapshot()
+    snapshot["xhsCreatorProfile"]["notes"].append({"noteId": "n1", "desc": "另一个来源"})
+    assert verified_portrait({"summary": {
+        "statement": "身份歧义", "evidence": [{"noteId": "n1", "scope": "note"}],
+    }}, snapshot) is None
+
+
+def test_portrait_preserves_at_most_two_valid_next_steps_when_provided():
+    portrait = {"nextSteps": [
+        {"statement": "没有来源", "evidence": [{"noteId": "missing", "scope": "note"}]},
+        *[{
+            "statement": f"下一篇建议 {index}",
+            "evidence": [{"noteId": "n1", "scope": "note"}],
+        } for index in range(3)],
+    ]}
+    result = verified_portrait(portrait, selected_snapshot())
+    assert [item["statement"] for item in result["nextSteps"]] == ["下一篇建议 0", "下一篇建议 1"]
+    assert result["nextSteps"][0]["evidence"] == [{"noteId": "n1", "scope": "note"}]
+    assert verified_portrait({"nextSteps": []}, selected_snapshot()) is None
+
+
 def test_chronology_and_counterexamples_require_selected_original_evidence():
     notes = [
         {

@@ -59,6 +59,52 @@ it('switches keyword evidence below the tags and preserves missing historical qu
   expect(screen.queryByRole('region')).not.toBeInTheDocument()
 })
 
+it('opens note-level keyword sources without inventing a quote', () => {
+  const {container} = render(<AccountPortraitView portrait={{keywords:[{
+    statement:'过程分享', evidence:[{noteId:'n1',scope:'note'}],
+  }]}} observations={observations} notes={[note]} mediaAssets={[]} />)
+  fireEvent.click(screen.getByRole('button',{name:'过程分享：查看 1 条笔记依据'}))
+  expect(screen.getByRole('region',{name:'过程分享的依据'})).toBeInTheDocument()
+  expect(screen.getByRole('button',{name:/准备过程 赞/})).toBeInTheDocument()
+  expect(container.querySelector('.account-portrait-quotes')).toBeNull()
+  expect(screen.queryByText('“”')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:/准备过程 赞/}))
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  expect(screen.getByText(note.desc)).toBeInTheDocument()
+})
+
+it('renders only nonempty original quotes among note-level sources and exceptions', () => {
+  const {container} = render(<AccountPortraitView portrait={{summary:{
+    statement:'笔记来源和摘句一起保留',
+    evidence:[{noteId:'n1',scope:'note'},{noteId:'n1',quote:'先列成本'},{noteId:'n1',quote:''}],
+    counterexamples:[{noteId:'n2',scope:'note'},{noteId:'n2',quote:'   '}],
+  }}} observations={observations} notes={[note,{...note,noteId:'n2',title:'另一次准备'}]} mediaAssets={[]} />)
+  fireEvent.click(screen.getByRole('button',{name:'查看依据 · 1 条笔记'}))
+  expect(screen.getByText('“先列成本”')).toBeInTheDocument()
+  expect(container.querySelectorAll('.account-portrait-quotes span')).toHaveLength(1)
+  expect(screen.queryByText('“”')).not.toBeInTheDocument()
+  expect(screen.getAllByRole('button',{name:/准备过程 赞/})).toHaveLength(1)
+  expect(screen.getByRole('button',{name:/另一次准备 赞/})).toBeInTheDocument()
+})
+
+it('places note-linked next steps after performance and preserves legacy next steps', () => {
+  const nextStep = {statement:'下一篇继续把选择过程写清楚',evidence:[{noteId:'n1',scope:'note' as const}]}
+  const {rerender} = render(<AccountPortraitView portrait={{nextSteps:[nextStep]}} observations={observations} notes={[note]} mediaAssets={[]} />)
+  expect(screen.queryByText(/本次暂无可展示/)).not.toBeInTheDocument()
+  const step = screen.getByText(nextStep.statement)
+  expect(step.closest('details')).toBeNull()
+  expect(screen.getByText('笔记表现').compareDocumentPosition(step) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(step.compareDocumentPosition(screen.getByText('分析范围')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  fireEvent.click(screen.getByRole('button',{name:'查看依据 · 1 条笔记'}))
+  expect(screen.getByRole('button',{name:/准备过程 赞/})).toBeInTheDocument()
+  rerender(<AccountPortraitView portrait={{nextSteps:[nextStep]}} observations={observations} notes={[note]} mediaAssets={[]} nextSteps={<p>旧报告的下一篇建议</p>} />)
+  expect(screen.getByText(nextStep.statement)).toBeInTheDocument()
+  expect(screen.getByText('旧报告的下一篇建议')).toBeInTheDocument()
+  rerender(<AccountPortraitView observations={observations} notes={[note]} mediaAssets={[]} nextSteps={<p>旧报告的下一篇建议</p>} />)
+  expect(screen.getByText('旧报告的下一篇建议')).toBeInTheDocument()
+  expect(screen.queryByText(/本次暂无可展示/)).not.toBeInTheDocument()
+})
+
 it('recognizes a valid recent change without an intro, but keeps the chronology requirement', () => {
   const {container,rerender} = render(<AccountPortraitView portrait={{recentChange:summary}} observations={{...observations,chronology:{status:'comparable'}}} notes={[note]} mediaAssets={[]} />)
   expect(screen.getByText('内容方向的新变化')).toBeInTheDocument()

@@ -13,7 +13,14 @@ from test_audience_analysis_check import raw_export
 
 from app.db.database import SQLiteDatabase
 from app.models import ModelCallResponse, ModelOperation
+from app.repositories.analysis_runs import AnalysisRunRepository
 from app.services.account_diagnosis_evidence import build_account_observations, profile_stage_input
+from app.services.account_report_prompt import (
+    LEGACY_PROFILE_PROMPT_VERSION,
+    PROFILE_PROMPT_VERSION,
+    SOURCE_LED_PROFILE_PROMPT,
+)
+from app.services.model_calls import PROMPT_PROFILE
 
 
 def load_check():
@@ -22,6 +29,12 @@ def load_check():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def legacy_transport_case(check, source):
+    case = check.prepare_case(source)
+    case["context"] = {"positioning": "旧纯文本定位", "historicalPosts": "旧纯文本笔记输入"}
+    return case
 
 
 def test_default_preview_is_free(tmp_path, monkeypatch, capsys):
@@ -200,7 +213,7 @@ def test_diagnostics_use_production_request_and_safe_stage_information(
     tmp_path, settings, kind, phase, status,
 ):
     check = load_check()
-    case = check.prepare_case(raw_export(tmp_path))
+    case = legacy_transport_case(check, raw_export(tmp_path))
     calls = []
     text = json.dumps({"profile": {"pillars": ["中文", "test-private-key"]}})
 
@@ -237,7 +250,7 @@ def test_diagnostics_use_production_request_and_safe_stage_information(
         return httpx.Response(200, json=body)
 
     service = check.DiagnosticProfileCalls(
-        replace(settings, model_provider="qwen", qwen_model="qwen-plus",
+        replace(settings, model_provider="qwen", qwen_model="qwen-plus", qwen_profile_model="",
                 qwen_api_key="test-private-key", qwen_base_url="https://example.invalid/v1"),
         transport=httpx.MockTransport(respond),
     )
@@ -287,7 +300,8 @@ def test_long_request_diagnostics_distinguish_headers_body_and_parse(tmp_path, s
         replace(settings, model_provider="qwen", qwen_api_key="secret-key"),
         transport=httpx.MockTransport(respond),
     )
-    report = asyncio.run(check.run_check(service, check.prepare_case(raw_export(tmp_path))))
+    case = legacy_transport_case(check, raw_export(tmp_path))
+    report = asyncio.run(check.run_check(service, case))
     diagnostic = report["responseDiagnostic"]
     assert len(calls) == 1
     assert diagnostic["sizes"]["requestBodyBytes"] == len(calls[0].content)
@@ -496,17 +510,20 @@ def test_diagnostics_redact_before_clipping_and_reject_non_qwen(settings):
         asyncio.run(service.call_operation(ModelOperation.PROFILE, {}))
 
 
-@pytest.mark.parametrize("replay", [False, True])
+@pytest.mark.parametrize("replay", [False, True, "legacy_text"])
 def test_diagnostic_cli_prints_only_summary(tmp_path, monkeypatch, settings, capsys, replay):
     check = load_check()
     source = raw_export(tmp_path)
     output = tmp_path / "report"
     private_text = '{"profile": {"pillars": ["private-api-key", "私有正文"]}}'
     cls = check.DiagnosticProfileCalls
+    requests = []
     configured = replace(settings, qwen_api_key="private-api-key", model_provider="qwen")
     monkeypatch.setattr(check.Settings, "from_environment", lambda: configured)
     inputs = [str(source)]
     case = check.prepare_case(source)
+    if replay == "legacy_text":
+        case["context"] = {"positioning": "旧纯文本定位", "historicalPosts": "旧纯文本笔记输入"}
     if replay:
         previous = tmp_path / "previous.json"
         previous.write_text(json.dumps(case, ensure_ascii=False), encoding="utf-8")
@@ -519,11 +536,19 @@ def test_diagnostic_cli_prints_only_summary(tmp_path, monkeypatch, settings, cap
     def client(self, operation):
         assert operation == ModelOperation.PROFILE
         assert self.read_timeout_seconds == 180
-        return httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda _: httpx.Response(200, json={
+        def respond(request):
+            requests.append(request)
+            payload = json.loads(request.content)
+            assert payload["messages"][0]["content"] == (
+                PROMPT_PROFILE if replay == "legacy_text" else SOURCE_LED_PROFILE_PROMPT
+            )
+            return httpx.Response(200, json={
                 "model": "qwen-plus", "choices": [{"finish_reason": "stop",
                                                     "message": {"content": private_text}}],
-            })), event_hooks={"response": [self._record_response]},
+            })
+        return httpx.AsyncClient(
+            transport=httpx.MockTransport(respond),
+            event_hooks={"response": [self._record_response]},
         )
     monkeypatch.setattr(cls, "_qwen_client", client)
     assert check.main() == 0
@@ -531,16 +556,24 @@ def test_diagnostic_cli_prints_only_summary(tmp_path, monkeypatch, settings, cap
     assert "private-api-key" not in stdout
     assert "私有正文" not in stdout
     assert "rawText" not in stdout
+    expected_attempts = 1
+    assert len(requests) == json.loads(stdout)["requestAttempts"] == expected_attempts
     saved = (output / "report.json").read_text(encoding="utf-8")
     assert "私有正文" in saved
     assert "private-api-key" not in saved
-    assert json.loads(saved)["responseDiagnostic"]["phase"] == "parsed"
+    parsed = json.loads(saved)
+    assert parsed["responseDiagnostic"]["phase"] == "parsed"
+    assert parsed["requestAttempts"] == expected_attempts
+    assert parsed["promptVersion"] == (
+        LEGACY_PROFILE_PROMPT_VERSION if replay == "legacy_text" else PROFILE_PROMPT_VERSION
+    )
+    assert parsed["promptVersion"] == check.profile_prompt_version(case["context"])
     if replay:
         report = json.loads(saved)
         assert report["inputSource"]["type"] == "previous_profile_report"
         assert report["context"] == case["context"]
         assert report["snapshot"] == case["snapshot"]
-        assert report["requestAttempts"] == 1
+        assert report["requestAttempts"] == expected_attempts
 
 
 def saved_workspace_database(tmp_path, *, notes=None):
@@ -720,8 +753,11 @@ def test_workspace_cli_rejects_ambiguous_or_unsafe_options_before_reading(
     assert error.value.code == 2
 
 
+@pytest.mark.parametrize("profile_model,expected_model", [
+    (None, "qwen3.8-max"), ("", "qwen-plus"), ("qwen3.8-max", "qwen3.8-max"),
+])
 def test_workspace_live_uses_one_qwen_request_and_preserves_database(
-    tmp_path, monkeypatch, settings, capsys,
+    tmp_path, monkeypatch, settings, capsys, profile_model, expected_model,
 ):
     check = load_check()
     database, _ = saved_workspace_database(tmp_path)
@@ -729,6 +765,8 @@ def test_workspace_live_uses_one_qwen_request_and_preserves_database(
     output = tmp_path / "data/evals/workspace-check"
     requests = []
     configured = replace(settings, qwen_api_key="private-key", model_provider="qwen")
+    if profile_model is not None:
+        configured = replace(configured, qwen_profile_model=profile_model)
     monkeypatch.setattr(check.Settings, "from_environment", lambda: configured)
     monkeypatch.setattr(sys, "argv", [
         check.__file__, "--workspace-id", "current", "--database", str(database),
@@ -738,6 +776,12 @@ def test_workspace_live_uses_one_qwen_request_and_preserves_database(
     def client(self, operation):
         def respond(request):
             requests.append(request)
+            payload = json.loads(request.content)
+            assert payload["model"] == expected_model
+            if expected_model.startswith("qwen3.8"):
+                assert payload["enable_thinking"] is False
+            else:
+                assert "enable_thinking" not in payload
             return httpx.Response(200, json={"model": "qwen-plus", "choices": [{
                 "finish_reason": "stop", "message": {"content": '{"profile":{}}'},
             }]})
@@ -755,10 +799,268 @@ def test_workspace_live_uses_one_qwen_request_and_preserves_database(
     report = json.loads((output / "report.json").read_text(encoding="utf-8"))
     assert report["inputSource"]["selectedNoteIds"] == ["saved-0", "saved-6"]
     assert report["requestAttempts"] == 1
-    assert report["configuredModel"] == "qwen-plus"
-    assert report["promptVersion"] == check.PROFILE_PROMPT_VERSION
+    assert report["configuredModel"] == expected_model
+    assert report["promptVersion"] == check.profile_prompt_version(report["context"])
     assert len(report["promptHash"]) == len(report["inputHash"]) == 64
     assert report["responseDiagnostic"]["phase"] == "parsed"
     encoded = json.dumps(report["context"], ensure_ascii=False)
     assert "私有正文0" in encoded and "私有正文6" in encoded and "私有正文1" not in encoded
     assert "private-key" not in json.dumps(report)
+
+
+def saved_analysis_history(database, *, snapshot=None, workflow="account_diagnosis"):
+    if snapshot is None:
+        snapshot = {
+            "accountPositioning": "旧定位不代替当前结构化输入",
+            "historicalPosts": {"content": "旧版派生短文本不能代替完整正文"},
+            "xhsCreatorProfile": {"creator": {"displayName": "历史账号"}, "notes": [
+                {"noteId": "frozen-b", "title": "冻结标题乙", "desc": "完整正文乙" * 1_000,
+                 "publishedAt": "2026-09-01T00:00:00Z", "metrics": {"liked": 5}},
+                {"noteId": "frozen-a", "title": "冻结标题甲", "desc": "冻结正文甲",
+                 "publishedAt": "2026-09-20T00:00:00Z", "metrics": {"liked": 2}},
+            ]},
+            "analysisRange": {"selectedNoteIds": ["frozen-b", "frozen-a"],
+                              "selectedNoteCount": 2, "availableNoteCount": 7},
+        }
+    with sqlite3.connect(database) as connection:
+        connection.row_factory = sqlite3.Row
+        run = AnalysisRunRepository().create(
+            connection, workspace_id="current", workflow_type=workflow,
+            input_snapshot_json=json.dumps(snapshot, ensure_ascii=False),
+            idempotency_key=None, now="2026-09-21T00:00:00Z",
+        )
+        connection.execute(
+            "UPDATE analysis_runs SET status='completed',stage_results_json=? WHERE id=?",
+            (json.dumps({"profile": {"mustNotRead": "既往结论不能成为新输入"}}), run["id"]),
+        )
+    return run["id"], snapshot
+
+
+def test_analysis_run_uses_exact_frozen_notes_full_text_order_and_current_input_builder(
+    tmp_path, monkeypatch,
+):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    run_id, original = saved_analysis_history(database)
+    before = database.read_bytes()
+    observed = []
+    original_connect = sqlite3.connect
+
+    def readonly_connect(database_uri, **kwargs):
+        assert database_uri.endswith("?mode=ro") and kwargs == {"uri": True}
+        connection = original_connect(database_uri, **kwargs)
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            connection.execute("UPDATE analysis_runs SET status='failed'")
+        connection.rollback()
+        connection.set_trace_callback(observed.append)
+        return connection
+
+    monkeypatch.setattr(check.sqlite3, "connect", readonly_connect)
+    case = check.prepare_analysis_run_case(database, run_id)
+    assert case["snapshot"] == original
+    assert case["context"] == profile_stage_input(original, "2026-09-21T00:00:00Z")[0]
+    packet = json.loads(case["context"]["historicalPosts"])
+    assert [note["noteId"] for note in packet["notes"]] == ["frozen-b", "frozen-a"]
+    assert packet["notes"][0]["body"] == "完整正文乙" * 1_000
+    assert case["observations"]["coverage"]["snapshotAt"] == "2026-09-21T00:00:00Z"
+    assert case["inputSource"] == {
+        "type": "analysis_run_snapshot", "runId": run_id, "workspaceId": "current",
+        "selectedNoteIds": ["frozen-b", "frozen-a"],
+    }
+    assert all(sql.startswith("SELECT") for sql in observed)
+    assert all("source_materials" not in sql and "stage_results_json" not in sql
+               for sql in observed)
+    assert "私有正文" not in json.dumps(case, ensure_ascii=False)
+    assert "既往结论不能成为新输入" not in json.dumps(case, ensure_ascii=False)
+    assert database.read_bytes() == before
+
+
+@pytest.mark.parametrize("snapshot", [
+    {}, [], {"historicalPosts": {"content": "只有文本的旧快照"}},
+    {"xhsCreatorProfile": {"notes": []}}, {"xhsCreatorProfile": {"notes": ["坏笔记"]}},
+    {"xhsCreatorProfile": {"notes": [{"noteId": "n"}]}},
+    {"xhsCreatorProfile": {"notes": [{"desc": "没有身份"}]}},
+    {"xhsCreatorProfile": {"notes": [{"noteId": "n", "desc": "正文"}, {"noteId": "n"}]}},
+    {"xhsCreatorProfile": {"notes": [{"noteId": "n", "desc": "正文"}]},
+     "analysisRange": {"selectedNoteIds": ["not-n"]}},
+    {"xhsCreatorProfile": {"notes": [{"noteId": "n", "desc": "正文"}]},
+     "analysisRange": {"selectedNoteCount": 2}},
+])
+def test_analysis_run_rejects_empty_unstructured_or_inconsistent_frozen_inputs(tmp_path, snapshot):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    run_id, _ = saved_analysis_history(database, snapshot=snapshot)
+    with pytest.raises(ValueError):
+        check.prepare_analysis_run_case(database, run_id)
+
+
+@pytest.mark.parametrize("problem", ["missing", "wrong_workflow", "blank"])
+def test_analysis_run_requires_exact_account_diagnosis_record(tmp_path, problem):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    run_id, _ = saved_analysis_history(database, workflow="trend_analysis")
+    requested = "missing" if problem == "missing" else " " if problem == "blank" else run_id
+    with pytest.raises(ValueError):
+        check.prepare_analysis_run_case(database, requested)
+
+
+@pytest.mark.parametrize("explicit_database", [False, True])
+def test_analysis_run_preview_is_free_safe_and_does_not_create_output(
+    tmp_path, monkeypatch, settings, capsys, explicit_database,
+):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    run_id, _ = saved_analysis_history(database)
+    output = tmp_path / "unused-history-output"
+    argv = [check.__file__, "--analysis-run-id", run_id, "--output", str(output)]
+    if explicit_database:
+        argv.extend(["--database", str(database)])
+        monkeypatch.setattr(check.Settings, "from_environment", lambda: pytest.fail("explicit DB"))
+    else:
+        monkeypatch.setattr(check.Settings, "from_environment", lambda: replace(
+            settings, database_path=database, qwen_api_key="must-not-print-key",
+        ))
+    monkeypatch.setattr(check, "DiagnosticProfileCalls", lambda *a, **kw: pytest.fail("no model"))
+    monkeypatch.setattr(sys, "argv", argv)
+    assert check.main() == 0
+    stdout = capsys.readouterr().out
+    assert all(value not in stdout for value in ("完整正文", "冻结标题", "must-not-print-key"))
+    assert json.loads(stdout)["requestAttempts"] == 0
+    assert json.loads(stdout)["selection"]["runId"] == run_id
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("arguments", [
+    ["source", "--analysis-run-id", "run"],
+    ["--input-from", "previous.json", "--analysis-run-id", "run"],
+    ["--workspace-id", "current", "--analysis-run-id", "run"],
+    ["--analysis-run-id", "run", "--note-ids", "n1"],
+    ["--analysis-run-id", "run", "--limit", "1"],
+    ["--analysis-run-id", "run", "--live", "--output", "/tmp/not-ignored-history"],
+])
+def test_analysis_run_options_cannot_mix_or_change_frozen_scope(monkeypatch, arguments):
+    check = load_check()
+    monkeypatch.setattr(check.Settings, "from_environment", lambda: pytest.fail("no config"))
+    monkeypatch.setattr(check, "prepare_analysis_run_case", lambda *a, **kw: pytest.fail("no read"))
+    monkeypatch.setattr(sys, "argv", [check.__file__, *arguments])
+    with pytest.raises(SystemExit) as error:
+        check.main()
+    assert error.value.code == 2
+
+
+def test_analysis_run_live_calls_current_qwen_once_and_keeps_history_unchanged(
+    tmp_path, monkeypatch, settings,
+):
+    check = load_check()
+    database, _ = saved_workspace_database(tmp_path)
+    run_id, original = saved_analysis_history(database)
+    monkeypatch.setattr(check, "ROOT", tmp_path)
+    monkeypatch.setattr(check.Settings, "from_environment", lambda: replace(
+        settings, database_path=database, qwen_api_key="private-key",
+    ))
+    output = tmp_path / "data/evals/history-check"
+    monkeypatch.setattr(sys, "argv", [check.__file__, "--analysis-run-id", run_id,
+                                     "--live", "--output", str(output)])
+    requests = []
+
+    def client(self, operation):
+        def respond(request):
+            requests.append(request)
+            return httpx.Response(200, json={"model": "qwen-plus", "choices": [{
+                "finish_reason": "stop", "message": {"content": '{"profile":{}}'},
+            }]})
+        return httpx.AsyncClient(transport=httpx.MockTransport(respond), event_hooks={
+            "request": [self._record_request], "response": [self._record_response],
+        })
+
+    monkeypatch.setattr(check.DiagnosticProfileCalls, "_qwen_client", client)
+    before = database.read_bytes()
+    assert check.main() == 0
+    assert len(requests) == 1 and database.read_bytes() == before
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["snapshot"] == original
+    assert report["inputSource"]["runId"] == run_id
+    assert report["inputSource"]["workspaceId"] == "current"
+    assert report["requestAttempts"] == 1
+    assert report["promptVersion"] == check.profile_prompt_version(report["context"])
+
+
+def source_led_model_output():
+    """Shared synthetic response for check-script/production entry-point parity."""
+    return {"profile": {
+        "reportFormat": "source-led/v1",
+        "titleReadings": [{
+            "noteId": "11", "move": "两段分别指认标题内容", "parts": [
+                {"text": "真实", "role": "前段"}, {"text": "标题", "role": "后段"},
+            ],
+        }],
+        "nextMoves": [{
+            "sourceNoteId": "11", "sourceQuote": "先准备材料",
+            "basis": "先写准备动作", "action": "下次写操作分享时，按实际先后排列动作",
+        }],
+        "pillars": ["操作分享"],
+    }}
+
+
+def expected_source_led_display():
+    return (
+        [{"formula": "两段分别指认标题内容：真实（前段）→标题（后段）", "examples": ["真实标题"]}],
+        ["参考《真实标题》：先写准备动作。下一篇可尝试：下次写操作分享时，按实际先后排列动作。"],
+    )
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_check_compiles_new_editorial_output_but_preserves_raw_and_legacy_fields(tmp_path, legacy):
+    check = load_check()
+    case = check.prepare_case(raw_export(tmp_path))
+    formulas, takeaways = expected_source_led_display()
+    output = ({"profile": {"titleFormulas": formulas, "contrast": {"takeaways": takeaways}}}
+              if legacy else source_led_model_output())
+    before = deepcopy(output)
+
+    class Model:
+        calls = 0
+
+        async def call_operation(self, operation, context):
+            self.calls += 1
+            assert operation == ModelOperation.PROFILE and context == case["context"]
+            return ModelCallResponse(output=output, model_metadata={"model": "fake"})
+
+    model = Model()
+    report = asyncio.run(check.run_check(model, case))
+    assert model.calls == 1 and report["status"] == "completed"
+    assert report["output"] == output == before
+    profile = report["result"]["profile"]
+    assert profile["titleFormulas"] == formulas
+    assert profile["contrast"]["takeaways"] == takeaways
+    assert not {"reportFormat", "titleReadings", "nextMoves"} & profile.keys()
+
+
+@pytest.mark.parametrize("problem", ["title_fragment", "wrong_source", "body_quote"])
+def test_check_invalid_editorial_sources_fail_validation_without_completed_result(
+    tmp_path, problem,
+):
+    check = load_check()
+    case = check.prepare_case(raw_export(tmp_path))
+    output = source_led_model_output()
+    if problem == "title_fragment":
+        output["profile"]["titleReadings"][0]["parts"][0]["text"] = "不在标题里的新增成分"
+    elif problem == "wrong_source":
+        output["profile"]["titleReadings"][0]["noteId"] = "outside-selection"
+    else:
+        output["profile"]["nextMoves"][0]["sourceQuote"] = "不在正文里的新增引用"
+    before = deepcopy(output)
+
+    class Model:
+        calls = 0
+
+        async def call_operation(self, *args):
+            self.calls += 1
+            return ModelCallResponse(output=output, model_metadata={"model": "fake"})
+
+    model = Model()
+    report = asyncio.run(check.run_check(model, case))
+    assert model.calls == 1
+    assert report["status"] == "failed" and report["error"]["phase"] == "validation"
+    assert "result" not in report and "portraitVerification" not in report
+    assert report["output"] == output == before

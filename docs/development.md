@@ -74,6 +74,7 @@ npm run dev -- --host 127.0.0.1
 export MODEL_PROVIDER=qwen
 export QWEN_API_KEY=替换为自己的密钥
 export QWEN_MODEL=qwen-plus
+export QWEN_PROFILE_MODEL=qwen3.8-max
 # 可选；以下是默认地址
 export QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
@@ -91,6 +92,8 @@ export QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 | `QWEN_DASHSCOPE_BASE_URL` | `DASHSCOPE_API_BASE_URL` |
 
 `MODEL_PROVIDER=dashscope` 也进入 Qwen 文本调用路径；通常保持默认 `qwen` 即可。
+
+`QWEN_PROFILE_MODEL` 默认 `qwen3.8-max`，只影响账号报告的 PROFILE 操作，其他文本操作仍用 `QWEN_MODEL`。设为空字符串可显式继承总模型。PROFILE 使用 Qwen3.8 系列时发送 `enable_thinking=false`，与本轮非思考验证一致（[官方参数说明](https://help.aliyun.com/en/model-studio/qwen-api-via-openai-chat-completions)）；不额外增加模型调用或自动降级。端点不支持所选模型时会明确报错，应检查配置，而不是悄悄换模型。Anthropic 兼容路径不受这一变量影响。
 
 ### 账号画像读取超时
 
@@ -254,7 +257,7 @@ backend/.venv/bin/python scripts/check_audience_reactions.py \
 
 ## 画像输入复现
 
-`scripts/check_account_profile.py` 可从已保存的 MediaCrawler 数据或已有画像检查报告复现画像输入，不抓取、不创建数据库、不生成选题，也不重试。以下从仓库根目录执行，用已有报告免费预览：
+`scripts/check_account_profile.py` 可从已保存的 MediaCrawler 数据、已有检查报告、当前工作区或历史分析快照复现画像输入，不抓取、不创建数据库、不生成选题，也不重试。以下从仓库根目录执行，用已有报告免费预览：
 
 ```bash
 backend/.venv/bin/python scripts/check_account_profile.py \
@@ -270,7 +273,9 @@ backend/.venv/bin/python scripts/check_account_profile.py \
   --output data/evals/profile-recheck-01
 ```
 
-也可用一个位置参数提供已保存的 MediaCrawler 原始数据目录，替代 `--input-from`，两者只能选一。报告包含来源文本，应留在私有本地目录；结构、引用身份和字面引用验证也不能替代语义质量人工验收。
+也可用一个位置参数提供已保存的 MediaCrawler 原始数据目录。当前档案用 `--workspace-id WORKSPACE_ID --database data/app.sqlite3 --limit 5`；也可用 `--note-ids ID1,ID2` 指定所选篇目。要与旧好报告公平比较，使用 `--analysis-run-id RUN_ID --database data/app.sqlite3` 读取当时冻结的完整笔记；这一路不接受 limit/note-ids，不偷换成当前材料。四种来源模式只能选一，不加 `--live` 均为零模型调用。
+
+报告分别保存配置模型、响应模型、提示版本/哈希、实际请求数、原始输出和编译结果；失败不重试。`--input-from` 会按当前输入契约重建请求，来源快照仍保持不变。报告包含私有原文，应留在被忽略的 `data/evals`；结构、引用身份和字面引用验证不能替代语义人工验收。
 
 ## 同源部署边界
 

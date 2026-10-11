@@ -46,6 +46,23 @@ def test_model_provider_allows_an_explicit_compatible_override(monkeypatch) -> N
     assert Settings.from_environment().model_provider == "anthropic"
 
 
+@pytest.mark.parametrize("override,expected", [(None, "qwen3.8-max"), ("", ""),
+                                               ("qwen3.8-max", "qwen3.8-max")])
+def test_profile_model_is_optional_and_does_not_replace_general_model(
+    monkeypatch, override, expected,
+):
+    monkeypatch.setattr("app.config.load_env_file_defaults", lambda _: None)
+    monkeypatch.setenv("QWEN_MODEL", "qwen-plus")
+    monkeypatch.delenv("QWEN_PROFILE_MODEL", raising=False)
+    if override is not None:
+        monkeypatch.setenv("QWEN_PROFILE_MODEL", override)
+    configured = Settings.from_environment()
+    assert configured.qwen_profile_model == expected
+    assert configured.qwen_model == "qwen-plus"
+    defaults = Settings(database_path=Path(":memory:"), upload_directory=Path("."))
+    assert defaults.qwen_profile_model == "qwen3.8-max"
+
+
 @pytest.mark.parametrize("value,expected", [(None, 180), ("90", 90), ("300", 300)])
 def test_profile_timeout_from_environment(monkeypatch, value, expected):
     monkeypatch.setattr("app.config.load_env_file_defaults", lambda _: None)

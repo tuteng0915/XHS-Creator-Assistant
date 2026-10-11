@@ -52,6 +52,7 @@ class Settings:
     anthropic_messages_url: str = ""
     qwen_api_key: str = ""
     qwen_model: str = "qwen-plus"
+    qwen_profile_model: str = "qwen3.8-max"
     qwen_profile_read_timeout_seconds: int = 180
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     qwen_dashscope_base_url: str = "https://dashscope.aliyuncs.com/api/v1"
@@ -104,6 +105,7 @@ class Settings:
             anthropic_messages_url=os.getenv("ANTHROPIC_MESSAGES_URL", ""),
             qwen_api_key=os.getenv("QWEN_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
             qwen_model=os.getenv("QWEN_MODEL", "qwen-plus"),
+            qwen_profile_model=os.getenv("QWEN_PROFILE_MODEL", "qwen3.8-max"),
             qwen_profile_read_timeout_seconds=int(
                 os.getenv("QWEN_PROFILE_READ_TIMEOUT_SECONDS", "180")
             ),

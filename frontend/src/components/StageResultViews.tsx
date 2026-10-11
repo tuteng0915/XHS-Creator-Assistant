@@ -168,11 +168,17 @@ function profileDetails(data: Record<string, unknown>, alreadyDisplayed = new Se
     return [group]
   })
   const hooks = uniqueProfileTexts(data.hookStyles, seen)
-  const structure = (data.viralStructure || {}) as {name?: unknown; steps?: unknown}
+  const structure = (data.viralStructure || {}) as {name?: unknown; steps?: unknown; kind?: unknown; scope?: unknown; scopeLabel?: unknown; overview?: unknown}
   const structureName = profileText(structure.name)
+  const structureOverview = profileText(structure.overview)
+  const structureKind = structure.kind === 'narrative' ? '行文推进' : structure.kind === 'comparison' ? '并列比较' : structure.kind === 'repeated_blocks' ? '重复模块' : ''
+  const structureScope = structure.scope === 'section' ? profileText(structure.scopeLabel).trim() : ''
+  const structureContext = [structureKind, structureScope ? `局部：${structureScope}` : ''].filter(Boolean).join(' · ')
+  const orderedStructure = structure.kind !== 'comparison' && structure.kind !== 'repeated_blocks'
   // Sequence is part of the finding: the same action may recur later in a note.
   const steps = (Array.isArray(structure.steps) ? structure.steps : []).map(profileText).filter(value => value.trim())
-  const hasExpression = voice.length > 0 || formulas.length > 0 || hooks.length > 0 || !!structureName || steps.length > 0
+  const hasStructure = !!structureName || !!structureOverview || steps.length > 0
+  const hasExpression = voice.length > 0 || formulas.length > 0 || hooks.length > 0 || hasStructure
   const contrast = data.contrast as {takeaways?: unknown} | undefined
   // An action can build on a finding but should not repeat it verbatim.
   const takeaways = uniqueProfileTexts(contrast?.takeaways, seen)
@@ -184,9 +190,12 @@ function profileDetails(data: Record<string, unknown>, alreadyDisplayed = new Se
         {item.formula && <p>{displayText(item.formula)}</p>}
         {item.examples.map(example => <p className="account-report-example" key={example}>例：{displayText(example)}</p>)}
       </div>)}</div></div>}
-      {hooks.length > 0 && <div className="account-report-subsection"><h5>开头习惯</h5><ul>{hooks.map(hook => <li key={hook}>{displayText(hook)}</li>)}</ul></div>}
-      {(!!structureName || steps.length > 0) && <div className="account-report-subsection"><h5>表达结构{structureName ? ` · ${displayText(structureName)}` : ''}</h5>
-        {steps.length > 0 && <ol>{steps.map((step, index) => <li key={index}>{displayText(step)}</li>)}</ol>}
+      {hooks.length > 0 && <div className="account-report-subsection"><h5>开头写法</h5><ul>{hooks.map(hook => <li key={hook}>{displayText(hook)}</li>)}</ul></div>}
+      {hasStructure && <div className="account-report-subsection"><h5>表达结构{structureName ? ` · ${displayText(structureName)}` : ''}</h5>
+        {(structureContext || structureOverview) && <p>{structureContext && displayText(structureContext)}{structureContext && structureOverview ? '。' : ''}{displayText(structureOverview)}</p>}
+        {steps.length > 0 && (orderedStructure
+          ? <ol>{steps.map((step, index) => <li key={index}>{displayText(step)}</li>)}</ol>
+          : <ul>{steps.map((step, index) => <li key={index}>{displayText(step)}</li>)}</ul>)}
       </div>}
     </div> : null,
     nextSteps: takeaways.length > 0 ? <section className="account-report-next-steps"><h4>接下来值得试什么</h4><ol>{takeaways.map(item => <li key={item}>{displayText(item)}</li>)}</ol></section> : null,

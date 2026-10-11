@@ -130,6 +130,7 @@ async def run_smoke(args: argparse.Namespace) -> int:
             anthropic_messages_url=base.anthropic_messages_url,
             qwen_api_key=base.qwen_api_key,
             qwen_model=base.qwen_model,
+            qwen_profile_model=base.qwen_profile_model,
             qwen_base_url=base.qwen_base_url,
             qwen_dashscope_base_url=base.qwen_dashscope_base_url,
             qwen_vision_model=base.qwen_vision_model,
@@ -271,4 +272,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

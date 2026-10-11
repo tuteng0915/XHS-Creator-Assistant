@@ -40,6 +40,14 @@ def topic_profile_context(
     context["writingSuggestions"] = [
         item for item in takeaways if isinstance(item, str) and item.strip()
     ] if isinstance(takeaways, list) else []
+    portrait = profile.get("accountPortrait")
+    next_steps = portrait.get("nextSteps") if isinstance(portrait, dict) else None
+    if not context["writingSuggestions"] and isinstance(next_steps, list):
+        context["writingSuggestions"] = [
+            item["statement"] for item in next_steps
+            if isinstance(item, dict) and isinstance(item.get("statement"), str)
+            and item["statement"].strip()
+        ]
     context["performanceObservations"] = observations
     context["interpretationGuide"] = (
         "performanceObservations 是本次所选笔记抓取时的累计互动；null 表示未获取，不是零。"
@@ -214,7 +222,7 @@ def verified_portrait(
     snapshot: dict[str, Any],
     chronology: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Keep only claims whose quotes occur in selected, correctly identified notes."""
+    """Check source identities and literal quotes, not a claim's interpretation."""
     if not portrait or not isinstance(portrait, dict):
         return None
     source = snapshot.get("xhsCreatorProfile")
@@ -244,6 +252,13 @@ def verified_portrait(
             note_id = ref.get("noteId")
             quote = ref.get("quote")
             note = notes.get(note_id) if isinstance(note_id, str) else None
+            if note is not None and ref.get("scope") == "note" and "quote" not in ref:
+                if (note_id, None) not in seen:
+                    verified.append({"noteId": note_id, "scope": "note"})
+                    seen.add((note_id, None))
+                    if len(verified) >= limit:
+                        break
+                continue
             if (
                 note is not None
                 and isinstance(quote, str)
@@ -312,6 +327,13 @@ def verified_portrait(
                 if len({ref["noteId"] for ref in claim["evidence"]}) >= 2
             ]
         sections[key] = claims[:limit]
+    if "nextSteps" in portrait:
+        values = portrait["nextSteps"]
+        sections["nextSteps"] = (
+            [claim for value in values[:12] if (claim := verified_claim(value))][:2]
+            if isinstance(values, list)
+            else []
+        )
     recent_change = verified_claim(portrait.get("recentChange"))
     if recent_change:
         earlier_ids = set((chronology or {}).get("earlier", {}).get("noteIds", []))

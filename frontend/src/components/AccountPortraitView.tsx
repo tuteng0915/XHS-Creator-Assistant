@@ -6,7 +6,7 @@ import { CreatorNoteBrowser } from './CreatorNoteBrowser'
 import { AccountPerformanceView, type MetricSummary, type PerformanceNote } from './AccountPerformanceView'
 import './AccountReport.css'
 
-type Evidence = { noteId: string; quote: string }
+type Evidence = { noteId: string; quote?: string; scope?: 'note' }
 type Claim = { statement: string; evidence: Evidence[]; counterexamples?: Evidence[] }
 type Portrait = {
   summary?: Claim | null
@@ -16,6 +16,7 @@ type Portrait = {
   recurringThemes?: Claim[]
   readerValue?: Claim[]
   expressionPatterns?: Claim[]
+  nextSteps?: Claim[]
   recentChange?: Claim | null
 }
 type Observations = {
@@ -45,9 +46,9 @@ function claimHasEvidence(value: Claim | null | undefined): value is Claim {
 }
 
 function appendEvidence(existing: Evidence[], incoming: Evidence[]): Evidence[] {
-  const seen = new Set(existing.map(ref => JSON.stringify([ref.noteId, ref.quote])))
+  const seen = new Set(existing.map(ref => JSON.stringify([ref.noteId, ref.quote, ref.scope])))
   return [...existing, ...incoming.filter(ref => {
-    const key = JSON.stringify([ref.noteId, ref.quote])
+    const key = JSON.stringify([ref.noteId, ref.quote, ref.scope])
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -90,12 +91,20 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
   const values = claimsOnce(portrait?.readerValue || [])
   const changes = claimsOnce(observations.chronology?.status === 'comparable' ? [portrait?.recentChange] : [])
   const expressions = claimsOnce(portrait?.expressionPatterns || [])
+  const suggestedSteps = claimsOnce(portrait?.nextSteps || [])
   const keywords = claimsOnce(portrait?.keywords || [], new Map())
   const openKeyword = keywords.find((_, index) => openClaim === `keyword-${index}`)
   const hasIntro = !!summary || keywords.length > 0
   const hasContent = themes.length > 0 || values.length > 0 || changes.length > 0 || !!contentDetails
   const hasExpression = expressions.length > 0 || !!expressionDetails
   const hasPortrait = hasIntro || strengths.length > 0 || hasContent || hasExpression
+
+  function renderQuotes(evidence: Evidence[]) {
+    const quoted = evidence.filter(ref => typeof ref.quote === 'string' && ref.quote.trim())
+    return quoted.length > 0 ? <div className="account-portrait-quotes">
+      {quoted.map((ref, index) => <span key={`${ref.noteId}-${index}`}>“{ref.quote}”</span>)}
+    </div> : null
+  }
 
   function renderEvidence(claim: Claim) {
     const evidenceIds = [...new Set(claim.evidence.map(ref => ref.noteId))]
@@ -105,14 +114,12 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
     const missingCount = evidenceIds.length - linkedNotes.length
     const missingExceptions = exceptionIds.length - exceptionNotes.length
     return <div className="account-portrait-evidence">
-        <div className="account-portrait-quotes">
-          {claim.evidence.map((ref, index) => <span key={`${ref.noteId}-${index}`}>“{ref.quote}”</span>)}
-        </div>
+        {renderQuotes(claim.evidence)}
         {missingCount > 0 && <p className="muted">{missingCount} 条依据笔记未保留在本次分析快照中，仅显示历史引用。</p>}
         <CreatorNoteBrowser notes={linkedNotes} mediaAssets={mediaAssets} />
         {exceptionIds.length > 0 && <div className="account-portrait-exceptions">
           <b>可能的例外</b>
-          <div className="account-portrait-quotes">{(claim.counterexamples || []).map((ref, index) => <span key={`${ref.noteId}-${index}`}>“{ref.quote}”</span>)}</div>
+          {renderQuotes(claim.counterexamples || [])}
           {missingExceptions > 0 && <p className="muted">{missingExceptions} 条例外笔记未保留在本次分析快照中，仅显示历史引用。</p>}
           <CreatorNoteBrowser notes={exceptionNotes} mediaAssets={mediaAssets} />
         </div>}
@@ -171,8 +178,12 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
       <div className="account-portrait-claims">{expressions.map((claim, index) => renderClaim(claim, `expression-${index}`))}</div>
       {expressionDetails}
     </section>}
-    {!hasPortrait && !nextSteps && <p className="muted">本次暂无可展示的账号画像，已保留的内容归纳与笔记数据不受影响。</p>}
+    {!hasPortrait && !nextSteps && suggestedSteps.length === 0 && <p className="muted">本次暂无可展示的账号画像，已保留的内容归纳与笔记数据不受影响。</p>}
     <AccountPerformanceView observations={observations.notes} summaries={observations.metricSummaries} notes={notes} mediaAssets={mediaAssets} />
+    {suggestedSteps.length > 0 && <section className="account-report-next-steps">
+      <h4>接下来值得试什么</h4>
+      <div className="account-portrait-claims">{suggestedSteps.map((claim, index) => renderClaim(claim, `next-step-${index}`))}</div>
+    </section>}
     {nextSteps}
     <details className="account-portrait-source">
       <summary>分析范围 <span>· {coverage.selectedCount} 条笔记</span></summary>

@@ -68,6 +68,35 @@ def test_legacy_and_missing_profile_remain_compatible():
     assert topic_profile_context(None, selected_snapshot(), AT) is None
 
 
+@pytest.mark.parametrize("takeaways, expected", [
+    ([], ["延续具体场景，再补上选择理由。"]),
+    ([None, " "], ["延续具体场景，再补上选择理由。"]),
+    (["旧版已确认建议"], ["旧版已确认建议"]),
+])
+def test_lean_next_steps_supply_topic_suggestions_without_overwriting_legacy(
+    takeaways, expected,
+):
+    profile = {
+        "accountPortrait": {
+            "expressionPatterns": [{"statement": "从具体处境讲起", "evidence": []}],
+            "nextSteps": [
+                {"statement": "延续具体场景，再补上选择理由。", "evidence": []},
+                None, {"statement": " "}, {"statement": 42},
+            ],
+        },
+        "contrast": {"takeaways": takeaways},
+    }
+    original = deepcopy(profile)
+    result = topic_profile_context(profile, selected_snapshot(), AT)
+    assert result["writingSuggestions"] == expected
+    assert "viralStructure" not in result
+    assert "voiceFingerprint" not in result
+    result["accountPortrait"]["nextSteps"][0]["statement"] = "下游编辑"
+    assert profile == original
+    # Text-only historical reports keep their old, unprojected payload.
+    assert topic_profile_context(profile, {}, AT) == original
+
+
 @pytest.mark.parametrize("resume", [False, True])
 def test_graph_uses_frozen_context_on_fresh_and_resumed_runs(app, resume):
     workspace = create_workspace(app)

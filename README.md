@@ -88,9 +88,10 @@ npm --prefix frontend ci
 MODEL_PROVIDER=qwen
 QWEN_API_KEY=你的密钥
 QWEN_MODEL=qwen-plus
+QWEN_PROFILE_MODEL=qwen3.8-max
 ```
 
-默认使用 Qwen / DashScope；密钥由后端读取，不放进前端。`.env.local` 已被 Git 忽略。自定义端点、超时及兼容配置见[模型配置](docs/development.md#模型配置)。
+默认使用 Qwen / DashScope，账号报告单独使用 Qwen3.8-Max，其余功能沿用 QWEN_MODEL。密钥由后端读取，不放进前端；`.env.local` 已被 Git 忽略。自定义端点、超时及兼容配置见[模型配置](docs/development.md#模型配置)。
 
 ### 3. 启动应用
 

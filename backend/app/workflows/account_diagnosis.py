@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import contextvars
 from collections.abc import AsyncIterator
-from typing import Any, Protocol, TypedDict
+from typing import Any, Literal, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_serializer, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from app.db.database import SQLiteDatabase
@@ -26,6 +26,7 @@ from app.services.account_diagnosis_evidence import (
     verified_portrait,
 )
 from app.services.account_profile_shape import normalize_profile_stage_result
+from app.services.account_report_editorial import compile_editorial_profile
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
@@ -65,6 +66,18 @@ class TitleFormula(BaseModel):
 class ViralStructure(BaseModel):
     name: str = ""
     steps: list[str] = Field(default_factory=list)
+    kind: Literal["narrative", "comparison", "repeated_blocks"] | None = None
+    scope: Literal["whole_note", "section"] | None = None
+    scopeLabel: str | None = None
+    overview: str | None = None
+
+    @model_serializer(mode="wrap")
+    def preserve_legacy_shape(self, handler):
+        values = handler(self)
+        for field in ("kind", "scope", "scopeLabel", "overview"):
+            if field not in self.model_fields_set:
+                values.pop(field, None)
+        return values
 
 
 class ProfileData(BaseModel):
@@ -461,7 +474,8 @@ class _AccountDiagnosisGraphExecution:
                     positioning=context["positioning"],
                     historical_posts=context["historicalPosts"],
                 )
-                result = ProfileStageResult.model_validate(output).model_dump(
+                prepared = compile_editorial_profile(output, snapshot)
+                result = ProfileStageResult.model_validate(prepared).model_dump(
                     mode="json"
                 )
                 result["profile"]["accountPortrait"] = verified_portrait(

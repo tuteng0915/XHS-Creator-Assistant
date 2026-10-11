@@ -84,12 +84,14 @@ it('omits empty legacy disclosures and headings while preserving genuine legacy 
   rerender(<ProfileView data={{pillars:['生活记录']}} />)
   expect(screen.getByRole('heading',{name:'内容方向与读者价值'})).toBeInTheDocument()
   expect(screen.queryByRole('heading',{name:'标题写法'})).not.toBeInTheDocument()
-  expect(screen.queryByRole('heading',{name:'开头习惯'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading',{name:'开头写法'})).not.toBeInTheDocument()
   expect(screen.queryByRole('heading',{name:/表达结构/})).not.toBeInTheDocument()
   rerender(<ProfileView data={{titleFormulas:[{formula:'先说场景',examples:['下班以后']}],hookStyles:['用具体动作开头'],viralStructure:{name:'日常叙事',steps:['场景','感受']}}} />)
   expect(screen.getByText('先说场景')).toBeInTheDocument()
   expect(screen.getByText('例：下班以后')).toBeInTheDocument()
   expect(screen.getByText('用具体动作开头')).toBeInTheDocument()
+  expect(screen.getByRole('heading',{name:'开头写法'})).toBeInTheDocument()
+  expect(screen.queryByRole('heading',{name:'开头习惯'})).not.toBeInTheDocument()
   expect(screen.getByRole('heading',{name:'表达结构 · 日常叙事'})).toBeInTheDocument()
   expect(screen.getByText('感受')).toBeInTheDocument()
   rerender(<ProfileView data={{viralStructure:{steps:[]}}} />)
@@ -136,6 +138,45 @@ it('preserves repeated steps in their saved order and does not merge different E
   expect(screen.getByText('值得继续。')).toBeInTheDocument()
   const ordered = screen.getByRole('heading',{name:'表达结构'}).parentElement!.querySelectorAll('li')
   expect([...ordered].map(item => item.textContent)).toEqual(['回到现场','补充解释','回到现场'])
+  expect(ordered[0].parentElement?.tagName).toBe('OL')
+})
+
+it.each([
+  ['narrative', '行文推进', 'OL'],
+  ['comparison', '并列比较', 'UL'],
+  ['repeated_blocks', '重复模块', 'UL'],
+])('renders %s without giving parallel units a chronological list', (kind, label, tagName) => {
+  const report = {viralStructure:{name:'准备出发的三种选择',kind,scope:'section',scopeLabel:'比较交通方案',
+    overview:'这一段分别交代各方案的用时与取舍。',steps:['步行：交代沿路体验。','乘车：说明时间成本。','骑行：补充天气限制。']}}
+  const original = JSON.stringify(report)
+  render(<ProfileView data={report} observations={observations} />)
+  const section = screen.getByRole('heading',{name:'表达结构 · 准备出发的三种选择'}).parentElement!
+  expect(section).toHaveTextContent(`${label} · 局部：比较交通方案。这一段分别交代各方案的用时与取舍。`)
+  const items = section.querySelectorAll('li')
+  expect(items[0].parentElement?.tagName).toBe(tagName)
+  expect([...items].map(item => item.textContent)).toEqual(report.viralStructure.steps)
+  expect(section.querySelector('details')).toBeNull()
+  expect(section).not.toHaveTextContent(kind)
+  expect(JSON.stringify(report)).toBe(original)
+})
+
+it.each([
+  {scope:'whole_note',scopeLabel:'不应作为局部显示'},
+  {scope:'section',scopeLabel:'   '},
+  {},
+])('omits absent or inapplicable structure scope without hiding the overview', scope => {
+  const overview = '分别写清各项目的定位，再说明该项目的取舍。'.repeat(12)
+  render(<ProfileView data={{viralStructure:{kind:'repeated_blocks',...scope,overview,steps:['项目一','项目二']}}} />)
+  expect(screen.getByText(`重复模块。${overview}`)).toBeInTheDocument()
+  expect(screen.queryByText(/不应作为局部显示|重复模块 ·|undefined|null/)).not.toBeInTheDocument()
+})
+
+it('preserves full legacy structure prose without adding inferred structure labels', () => {
+  const step = '回到文首提出的问题，但这一次说清楚自己的选择。'.repeat(15)
+  const {container} = render(<ProfileView data={{viralStructure:{name:'旧版正文拆解',steps:[step,'补充原来的结尾',step]}}} />)
+  expect(screen.getAllByText(step)).toHaveLength(2)
+  expect([...container.querySelectorAll('ol li')].map(item => item.textContent)).toEqual([step,'补充原来的结尾',step])
+  expect(screen.queryByText(/行文推进|并列比较|重复模块/)).not.toBeInTheDocument()
 })
 
 it('retains unique title examples when formulas repeat findings or earlier formula groups', () => {

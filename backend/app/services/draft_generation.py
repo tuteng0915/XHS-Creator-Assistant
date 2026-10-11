@@ -308,6 +308,27 @@ class DraftGenerationService:
                 "voiceFingerprint": profile.get("voiceFingerprint", []),
                 "viralStructure": profile.get("viralStructure", {}),
             }
+            portrait = profile.get("accountPortrait")
+            if isinstance(portrait, dict):
+                expressions = portrait.get("expressionPatterns")
+                if not analysis_context["voiceFingerprint"] and isinstance(expressions, list):
+                    analysis_context["expressionPatterns"] = [
+                        item["statement"] for item in expressions
+                        if isinstance(item, dict) and isinstance(item.get("statement"), str)
+                        and item["statement"].strip()
+                    ]
+                next_steps = portrait.get("nextSteps")
+                if isinstance(next_steps, list):
+                    contrast = profile.get("contrast")
+                    takeaways = contrast.get("takeaways") if isinstance(contrast, dict) else None
+                    suggestions = [
+                        item for item in takeaways if isinstance(item, str) and item.strip()
+                    ] if isinstance(takeaways, list) else []
+                    analysis_context["writingSuggestions"] = suggestions or [
+                        item["statement"] for item in next_steps
+                        if isinstance(item, dict) and isinstance(item.get("statement"), str)
+                        and item["statement"].strip()
+                    ]
         elif source_run and source_run["workflow_type"] == "trend_analysis":
             trend = stage_results.get("trend_analysis", {}).get("trendAnalysis", {})
             analysis_context = {
@@ -343,14 +364,19 @@ class DraftGenerationService:
             else {}
         )
         background = ""
-        if analysis_context.get("viralStructure"):
-            background = json.dumps(
-                {
-                    "voiceFingerprint": analysis_context.get("voiceFingerprint", []),
-                    "viralStructure": analysis_context.get("viralStructure", {}),
-                },
-                ensure_ascii=False,
-            )
+        account_background = {}
+        if analysis_context.get("voiceFingerprint"):
+            account_background["voiceFingerprint"] = analysis_context["voiceFingerprint"]
+        structure = analysis_context.get("viralStructure")
+        # ProfileStageResult supplies {"name": "", "steps": []} even when the
+        # report never proposed a structure. Do not send that default as context.
+        if isinstance(structure, dict) and any(structure.values()):
+            account_background["viralStructure"] = structure
+        for key in ("expressionPatterns", "writingSuggestions"):
+            if analysis_context.get(key):
+                account_background[key] = analysis_context[key]
+        if account_background:
+            background = json.dumps(account_background, ensure_ascii=False)
         elif analysis_context.get("viralPatterns"):
             background = "；".join(analysis_context.get("viralPatterns", []))
         if brief_content:
