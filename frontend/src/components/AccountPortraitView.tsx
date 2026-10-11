@@ -7,7 +7,18 @@ import { AccountPerformanceView, type MetricSummary, type PerformanceNote } from
 import './AccountReport.css'
 
 type Evidence = { noteId: string; quote?: string; scope?: 'note' }
-type Claim = { statement: string; evidence: Evidence[]; counterexamples?: Evidence[] }
+type ExampleFragment = {
+  source: 'title' | 'body'; quote: string; start: number; end: number; excerptId?: string
+}
+type LegacyBoundExample = {
+  noteId: string; title: string; source: 'title' | 'body'; quote: string
+  interpretation: string; start: number; end: number
+}
+type GroupedBoundExample = {
+  noteId: string; title: string; interpretation: string; fragments: ExampleFragment[]
+}
+type BoundExample = LegacyBoundExample | GroupedBoundExample
+type Claim = { statement: string; evidence: Evidence[]; counterexamples?: Evidence[]; examples?: BoundExample[] }
 type Portrait = {
   summary?: Claim | null
   keywords?: Claim[]
@@ -55,6 +66,34 @@ function appendEvidence(existing: Evidence[], incoming: Evidence[]): Evidence[] 
   })]
 }
 
+function exampleFragments(example: BoundExample): ExampleFragment[] {
+  return 'fragments' in example
+    ? (Array.isArray(example.fragments) ? example.fragments : [])
+    : [example]
+}
+
+function appendExamples(existing: BoundExample[], incoming?: BoundExample[]): BoundExample[] {
+  const signature = (item: BoundExample) => JSON.stringify([
+    item.noteId, item.title, item.interpretation,
+    exampleFragments(item).map(fragment => [
+      fragment.excerptId, fragment.source, fragment.quote, fragment.start, fragment.end,
+    ]),
+  ])
+  const seen = new Set(existing.map(signature))
+  const valid = (Array.isArray(incoming) ? incoming : []).filter(item => item
+    && typeof item.noteId === 'string' && typeof item.title === 'string'
+    && typeof item.interpretation === 'string' && item.interpretation.trim()
+    && exampleFragments(item).length > 0
+    && exampleFragments(item).every(fragment => fragment
+      && typeof fragment.quote === 'string' && fragment.quote.trim()))
+  return [...existing, ...valid.filter(item => {
+    const key = signature(item)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })]
+}
+
 export function AccountPortraitView({ portrait, observations, notes, mediaAssets, contentDetails, expressionDetails, nextSteps }: {
   portrait?: Portrait | null
   observations: Observations
@@ -78,9 +117,10 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
       if (existing) {
         existing.evidence = appendEvidence(existing.evidence, claim.evidence)
         existing.counterexamples = appendEvidence(existing.counterexamples || [], claim.counterexamples || [])
+        existing.examples = appendExamples(existing.examples || [], claim.examples)
         return []
       }
-      const copy = {...claim, evidence: appendEvidence([], claim.evidence), counterexamples: appendEvidence([], claim.counterexamples || [])}
+      const copy = {...claim, evidence: appendEvidence([], claim.evidence), counterexamples: appendEvidence([], claim.counterexamples || []), examples: appendExamples([], claim.examples)}
       registry.set(key, copy)
       return [copy]
     })
@@ -106,7 +146,7 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
     </div> : null
   }
 
-  function renderEvidence(claim: Claim) {
+  function renderEvidence(claim: Claim, shownExamples: BoundExample[] = []) {
     const evidenceIds = [...new Set(claim.evidence.map(ref => ref.noteId))]
     const exceptionIds = [...new Set((claim.counterexamples || []).map(ref => ref.noteId))]
     const linkedNotes = evidenceIds.map(id => selectable.get(id)).filter((note): note is CreatorNote => Boolean(note))
@@ -114,7 +154,9 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
     const missingCount = evidenceIds.length - linkedNotes.length
     const missingExceptions = exceptionIds.length - exceptionNotes.length
     return <div className="account-portrait-evidence">
-        {renderQuotes(claim.evidence)}
+        {renderQuotes(claim.evidence.filter(ref => !shownExamples.some(example =>
+          example.noteId === ref.noteId && exampleFragments(example).some(fragment =>
+            fragment.quote === ref.quote))))}
         {missingCount > 0 && <p className="muted">{missingCount} 条依据笔记未保留在本次分析快照中，仅显示历史引用。</p>}
         <CreatorNoteBrowser notes={linkedNotes} mediaAssets={mediaAssets} />
         {exceptionIds.length > 0 && <div className="account-portrait-exceptions">
@@ -128,11 +170,18 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
 
   function renderClaim(claim: Claim, key: string) {
     const evidenceCount = new Set(claim.evidence.map(ref => ref.noteId)).size
+    const examples = claim.examples || []
     return <div className="account-portrait-claim" key={key}>
       <p>{claim.statement}</p>
+      {examples.map((example, index) => <div className="account-report-bound-example" key={`${example.noteId}-${index}`}>
+        <p className="account-report-example-title">《{example.title}》</p>
+        {exampleFragments(example).map((fragment, fragmentIndex) =>
+          <p className="account-report-example-quote" key={fragmentIndex}>“{fragment.quote}”</p>)}
+        <p>{example.interpretation}</p>
+      </div>)}
       <button type="button" className="text-button" onClick={() => setOpenClaim(openClaim === key ? null : key)}
         aria-expanded={openClaim === key}>查看依据 · {evidenceCount} 条笔记</button>
-      {openClaim === key && renderEvidence(claim)}
+      {openClaim === key && renderEvidence(claim, examples)}
     </div>
   }
 

@@ -14,6 +14,99 @@ const observations:Observations = {
 }
 const summary = {statement:'把过程讲得具体',evidence:[{noteId:'n1',quote:'先列成本'},{noteId:'n1',quote:'再分步骤'}]}
 
+it('renders noncontiguous grouped fragments separately under one title and interpretation', () => {
+  const source = {...note, desc:'先列成本。中间另谈一件事。再分步骤。'}
+  const example = {noteId:'n1',title:source.title,fragments:[
+    {excerptId:'b1',source:'body' as const,quote:'先列成本。',start:0,end:5},
+    {excerptId:'b3',source:'body' as const,quote:'再分步骤。',start:13,end:18},
+  ],interpretation:'两个相隔的动作呼应，让准备过程有顺序。'}
+  const portrait = {strengths:[{statement:summary.statement,
+    evidence:[{noteId:'n1',scope:'note' as const}],examples:[example]}]}
+  const before = JSON.stringify(portrait)
+  const {container} = render(<AccountPortraitView portrait={portrait} observations={observations} notes={[source]} mediaAssets={[]} />)
+  expect(container.querySelectorAll('.account-report-bound-example')).toHaveLength(1)
+  expect(container.querySelectorAll('.account-report-example-title')).toHaveLength(1)
+  expect(Array.from(container.querySelectorAll('.account-report-example-quote')).map(el => el.textContent))
+    .toEqual(['“先列成本。”','“再分步骤。”'])
+  expect(screen.getAllByText(example.interpretation)).toHaveLength(1)
+  expect(screen.queryByText(/先列成本.*[……].*再分步骤/)).not.toBeInTheDocument()
+  expect(screen.queryByText('b1')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'查看依据 · 1 条笔记'}))
+  expect(screen.getAllByText('“先列成本。”')).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button',{name:/准备过程 赞/}))
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  expect(screen.getByText(source.desc)).toBeInTheDocument()
+  expect(JSON.stringify(portrait)).toBe(before)
+})
+
+it('keeps equal grouped quote text at different positions and legacy examples visible', () => {
+  const legacy = {noteId:'n1',title:note.title,source:'body' as const,quote:'先列成本',
+    interpretation:'旧版解释保持原样。',start:0,end:4}
+  const grouped = {noteId:'n1',title:note.title,fragments:[
+    {excerptId:'b1',source:'body' as const,quote:'重复的一句。',start:0,end:6},
+    {excerptId:'b3',source:'body' as const,quote:'重复的一句。',start:12,end:18},
+  ],interpretation:'同一句在不同位置重现。'}
+  const portrait = {strengths:[{...summary,examples:[legacy,grouped]}],
+    expressionPatterns:[{...summary,examples:[grouped]}]}
+  const before = JSON.stringify(portrait)
+  const {container} = render(<AccountPortraitView portrait={portrait} observations={observations} notes={[note]} mediaAssets={[]} />)
+  expect(container.querySelectorAll('.account-report-bound-example')).toHaveLength(2)
+  expect(screen.getAllByText('“重复的一句。”')).toHaveLength(2)
+  expect(screen.getAllByText(grouped.interpretation)).toHaveLength(1)
+  expect(screen.getByText(legacy.interpretation)).toBeInTheDocument()
+  expect(screen.getByText('“先列成本”')).toBeInTheDocument()
+  expect(JSON.stringify(portrait)).toBe(before)
+})
+
+it('keeps six fragments separate and allows the same source to support different interpretations', () => {
+  const fragments = Array.from({length:6}, (_,index) => ({excerptId:`b${index+1}`,
+    source:'body' as const,quote:`问题${index+1}？`,start:index*4,end:(index+1)*4}))
+  const group = {noteId:'n1',title:note.title,fragments,interpretation:'用连续设问列出需要判断的条件。'}
+  const another = {...group,fragments:[fragments[0]],interpretation:'第一个问题也划定了讨论范围。'}
+  const portrait = {strengths:[{statement:summary.statement,
+    evidence:[{noteId:'n1',scope:'note' as const}],examples:[group,another]}]}
+  const {container} = render(<AccountPortraitView portrait={portrait} observations={observations} notes={[note]} mediaAssets={[]} />)
+  expect(container.querySelectorAll('.account-report-bound-example')).toHaveLength(2)
+  expect(container.querySelectorAll('.account-report-example-quote')).toHaveLength(7)
+  expect(screen.getAllByText('“问题1？”')).toHaveLength(2)
+  expect(screen.getByText(group.interpretation)).toBeInTheDocument()
+  expect(screen.getByText(another.interpretation)).toBeInTheDocument()
+})
+
+it('shows immutable source examples beside the judgment and keeps source browsing without duplicate quotes', () => {
+  const example = {noteId:'n1',title:note.title,source:'body' as const,quote:'先列成本',
+    interpretation:'先交代具体成本，让选择有可比较的依据。',start:0,end:4}
+  const portrait = {strengths:[{...summary, examples:[example]}]}
+  const before = JSON.stringify(portrait)
+  const {container} = render(<AccountPortraitView portrait={portrait} observations={observations} notes={[note]} mediaAssets={[]} />)
+  expect(screen.getByText(`《${note.title}》`)).toBeInTheDocument()
+  expect(screen.getByText('“先列成本”')).toBeInTheDocument()
+  expect(screen.getByText(example.interpretation).closest('details')).toBeNull()
+  expect(container.querySelectorAll('.account-report-bound-example')).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button',{name:'查看依据 · 1 条笔记'}))
+  expect(screen.getAllByText('“先列成本”')).toHaveLength(1)
+  expect(screen.getByText('“再分步骤”')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:/准备过程 赞/}))
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  expect(screen.getByText(note.desc)).toBeInTheDocument()
+  expect(JSON.stringify(portrait)).toBe(before)
+})
+
+it('merges identical claims without losing distinct bound examples or changing long original text', () => {
+  const example = {noteId:'n1',title:note.title,source:'body' as const,quote:'先列成本',
+    interpretation:'先说明成本。'.repeat(40),start:0,end:4}
+  const another = {...example,quote:'再分步骤',interpretation:'再呈现动作顺序。',start:5,end:9}
+  const portrait = {strengths:[{...summary,examples:[example]}],
+    expressionPatterns:[{...summary,examples:[example,another]}]}
+  const before = JSON.stringify(portrait)
+  const {container} = render(<AccountPortraitView portrait={portrait} observations={observations} notes={[note]} mediaAssets={[]} />)
+  expect(container.querySelectorAll('.account-report-bound-example')).toHaveLength(2)
+  expect(screen.getByText(example.interpretation)).toBeInTheDocument()
+  expect(screen.getByText(another.interpretation)).toBeInTheDocument()
+  expect(screen.getAllByText(summary.statement)).toHaveLength(1)
+  expect(JSON.stringify(portrait)).toBe(before)
+})
+
 it('shows valid keywords and strengths without requiring a summary or missing sections', () => {
   render(<AccountPortraitView portrait={{summary:null,keywords:[{...summary,statement:'过程分享'}],strengths:[summary],recurringThemes:[],readerValue:[]}} observations={observations} notes={[note]} mediaAssets={[]} />)
   expect(screen.getByText('过程分享')).toBeInTheDocument()

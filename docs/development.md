@@ -95,6 +95,21 @@ export QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 `QWEN_PROFILE_MODEL` 默认 `qwen3.8-max`，只影响账号报告的 PROFILE 操作，其他文本操作仍用 `QWEN_MODEL`。设为空字符串可显式继承总模型。PROFILE 使用 Qwen3.8 系列时发送 `enable_thinking=false`，与本轮非思考验证一致（[官方参数说明](https://help.aliyun.com/en/model-studio/qwen-api-via-openai-chat-completions)）；不额外增加模型调用或自动降级。端点不支持所选模型时会明确报错，应检查配置，而不是悄悄换模型。Anthropic 兼容路径不受这一变量影响。
 
+### 三阶段账号报告候选
+
+`ACCOUNT_REPORT_MODE` 默认为 `source_led`。在隔离测试服务中显式设为 `staged`，结构化所选笔记会走“整体阅读 → 最多三篇并行精读 → 汇总”，至多五次 Qwen 请求，仍使用 `QWEN_PROFILE_MODEL`。普通旧文本输入保持原路径；该候选仅支持 Qwen/dashscope，无自动回退。此设置不会迁移旧报告；不要为试验自动重启用户正在使用或已关闭的服务。
+
+前端以阶段摘要显示进度，最终报告保留代码绑定的原标题与原句。v3.1 精读以本篇片段 ID 选择原文，一组最多 6 个片段并分别保存位置，不把不连续原句拼接；允许同一原文支撑不同判断。失败停止本次 PROFILE、不自动重试，恢复粒度仍是整个 PROFILE，不能接着某篇精读续跑。分析 SSE 重连发送最新快照，序号接在客户端游标之后，不是历史事件的逐条重放。质量状态与已知限制见 [状态记录](status-and-todo.md)。
+
+复现使用已有检查报告的冻结样本，不读取当前业务库、不抓取：
+
+```bash
+backend/.venv/bin/python scripts/check_staged_account_report.py \
+  --input-from /path/to/previous/report.json --read-note-ids n1,n3
+```
+
+默认只预览范围，零模型请求、零文件写入。明确加 `--live --output data/evals/staged-check/new-case` 才执行；输出目录必须不存在。`--read-note-ids` 可固定 1～3 篇代表作做对照，省略时由整体阅读选择。报告保留每步输入、原响应、耗时、用量和错误，成败都保存；诊断含私人笔记，放在被忽略的私有目录，不提交。被取消请求可能已在服务端执行，没有返回用量时不可按零费用计算。
+
 ### 账号画像读取超时
 
 Qwen 账号画像的单次网络读取超时默认是 180 秒，可在本地 env 文件调整：

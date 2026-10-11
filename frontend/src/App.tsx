@@ -159,6 +159,7 @@ import {
 } from './workflows'
 import {
   activePageForWorkflowTab,
+  applyAnalysisStageEvent,
   applySimulationStageEvent,
   defaultWorkflowOutputKinds,
   emptyWorkflowStageViews,
@@ -1572,16 +1573,6 @@ function WorkspaceApp() {
     }))
   }
 
-  function setAnalysisStageStatus(
-    targetTab: WorkflowTab,
-    key: string,
-    patch: Partial<StageView>,
-  ) {
-    setAnalysisStageViews(targetTab, (current) =>
-      current.map((stage) => (stage.key === key ? { ...stage, ...patch } : stage)),
-    )
-  }
-
   function setWorkflowOutputKind(targetTab: WorkflowTab, kind: WorkflowOutputKind) {
     setWorkflowOutputKindByWorkflow((current) => ({
       ...current,
@@ -1682,26 +1673,10 @@ function WorkspaceApp() {
       }
       const handleMessage = (message: MessageEvent<string>) => {
         const activity = JSON.parse(message.data) as ActivityEvent
+        if (activity.runId !== run.id) return
         const eventType = activity.data.eventType
-        if (eventType === 'stage.started' && activity.stageKey) {
-          setAnalysisStageStatus(targetTab, activity.stageKey, { status: 'running' })
-          return
-        }
-        if (eventType === 'stage.succeeded' && activity.stageKey) {
-          const result = { ...activity.data }
-          delete result.eventType
-          setAnalysisStageStatus(targetTab, activity.stageKey, {
-            status: 'completed',
-            result,
-            error: undefined,
-          })
-          return
-        }
-        if (eventType === 'stage.failed' && activity.stageKey) {
-          setAnalysisStageStatus(targetTab, activity.stageKey, {
-            status: 'failed',
-            error: String(activity.data.error || '阶段执行失败'),
-          })
+        if (['stage.started', 'stage.progress', 'stage.succeeded', 'stage.failed'].includes(String(eventType))) {
+          setAnalysisStageViews(targetTab, current => applyAnalysisStageEvent(current, activity, run.id))
           return
         }
         if (
@@ -1716,6 +1691,7 @@ function WorkspaceApp() {
         'run.created',
         'run.started',
         'stage.started',
+        'stage.progress',
         'stage.succeeded',
         'stage.failed',
         'run.partial',

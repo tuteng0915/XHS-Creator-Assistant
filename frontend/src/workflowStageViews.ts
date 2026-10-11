@@ -6,6 +6,7 @@ import type {
 import type { ActivityEvent, AnalysisRun, SimulationRun } from './types'
 import { withSimulationPersonaLabels } from './simulationPersonaLabels'
 import { isOracleShowcase, ORACLE_SHOWCASE_ORIGIN } from './recordOrigin'
+import { parseWorkflowProgress } from './workflowProgress'
 import {
   ACCOUNT_STAGES,
   TREND_STAGES,
@@ -53,6 +54,32 @@ export function stageSeed(tab: WorkflowTab): StageView[] {
 
 export function simulationStageSeed(): StageView[] {
   return SIMULATION_STAGES.map((stage) => ({ ...stage, status: 'waiting' }))
+}
+
+export function applyAnalysisStageEvent(
+  stages: StageView[], activity: ActivityEvent, runId: string,
+): StageView[] {
+  if (activity.runId !== runId || !activity.stageKey) return stages
+  const kind = activity.data.eventType
+  if (!['stage.started', 'stage.progress', 'stage.succeeded', 'stage.failed'].includes(String(kind))) return stages
+  return stages.map(stage => {
+    if (stage.key !== activity.stageKey) return stage
+    // Replayed progress must not reopen a stage whose result is already final.
+    if (kind === 'stage.started' || kind === 'stage.progress') {
+      if (stage.status === 'completed' || stage.status === 'failed') return stage
+      if (kind === 'stage.started') return {...stage, status: 'running'}
+      const progress = parseWorkflowProgress(activity.data)
+      if (!progress || JSON.stringify(progress) === JSON.stringify(stage.progress)) return stage
+      return {...stage, status: 'running', progress}
+    }
+    if (kind === 'stage.succeeded') {
+      const result = {...activity.data}
+      delete result.eventType
+      return {...stage, status: 'completed', result, error: undefined, progress: undefined}
+    }
+    return {...stage, status: 'failed', progress: undefined,
+      error: String(activity.data.error || '阶段执行失败')}
+  })
 }
 
 // Observation only: preserve successful results when a parallel role fails.
@@ -108,6 +135,9 @@ export function stageSeedFromRun(run: AnalysisRun): StageView[] {
           : 'waiting',
     result: run.stageResults[stage.key],
     error: run.stageErrors[stage.key],
+    progress: run.status === 'running' && !run.stageResults[stage.key] && !run.stageErrors[stage.key]
+      ? parseWorkflowProgress((run.modelMetadata[stage.key] as Record<string, unknown> | undefined)?.progress)
+      : undefined,
   }))
 }
 

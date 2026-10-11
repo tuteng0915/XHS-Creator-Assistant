@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Literal, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -273,6 +273,35 @@ class RealAccountDiagnosisModelProvider:
         )
         return response.output
 
+    async def profile_with_updates(
+        self,
+        *,
+        positioning: str,
+        historical_posts: str,
+        on_update: Callable[[dict[str, Any]], Awaitable[None]],
+    ):
+        # Keep the normal profile call and older provider implementations intact.
+        from app.services.account_report_pipeline import (
+            StagedReportResult,
+            run_staged_account_report,
+        )
+        from app.services.account_report_prompt import uses_structured_notes
+
+        context = {"positioning": positioning, "historicalPosts": historical_posts}
+        if (self.model_call_service.settings.account_report_mode == "staged"
+                and uses_structured_notes(context)):
+            return await run_staged_account_report(
+                context,
+                self.model_call_service.call_account_report_step,
+                on_update=on_update,
+            )
+        return StagedReportResult(
+            output=await self.profile(
+                positioning=positioning, historical_posts=historical_posts,
+            ),
+            model_metadata={},
+        )
+
     async def pain_points(self, *, comments: str) -> dict[str, Any]:
         response = await self.model_call_service.call_operation(
             ModelOperation.PAIN_POINTS,
@@ -470,10 +499,43 @@ class _AccountDiagnosisGraphExecution:
                 run = self.service.analysis_service.get(self.run_id)
                 context, observations = profile_stage_input(snapshot, run.created_at.isoformat())
                 chronology = (observations or {}).get("chronology", {})
-                output = await provider.profile(
-                    positioning=context["positioning"],
-                    historical_posts=context["historicalPosts"],
-                )
+                metadata = {"engine": "langgraph"}
+                latest_preview = ""
+
+                async def on_update(progress: dict[str, Any]) -> None:
+                    nonlocal latest_preview
+                    # Keep the last finished reading visible during the next call.
+                    if isinstance(progress.get("preview"), str) and progress["preview"]:
+                        latest_preview = progress["preview"]
+                    progress = {**progress, "preview": latest_preview}
+                    self.service.analysis_service.update_stage(
+                        self.run_id,
+                        "profile",
+                        AnalysisStageUpdate(
+                            status=AnalysisRunStatus.RUNNING,
+                            model_metadata={
+                                **metadata, "accountReportMode": "staged",
+                                "progress": dict(progress),
+                            },
+                        ),
+                    )
+                    await self.emit("stage.progress", "profile", "running", progress)
+
+                with_updates = getattr(provider, "profile_with_updates", None)
+                if callable(with_updates):
+                    response = await with_updates(
+                        positioning=context["positioning"],
+                        historical_posts=context["historicalPosts"],
+                        on_update=on_update,
+                    )
+                    output = response.output
+                    metadata.update(response.model_metadata)
+                    metadata.pop("progress", None)
+                else:
+                    output = await provider.profile(
+                        positioning=context["positioning"],
+                        historical_posts=context["historicalPosts"],
+                    )
                 prepared = compile_editorial_profile(output, snapshot)
                 result = ProfileStageResult.model_validate(prepared).model_dump(
                     mode="json"
@@ -489,7 +551,7 @@ class _AccountDiagnosisGraphExecution:
                     AnalysisStageUpdate(
                         status=AnalysisRunStatus.COMPLETED,
                         result=result,
-                        model_metadata={"engine": "langgraph"},
+                        model_metadata=metadata,
                     ),
                 )
                 updated["profile"] = result["profile"]
@@ -614,10 +676,17 @@ class _AccountDiagnosisGraphExecution:
     ) -> None:
         message = self.error_message(error)
         state.setdefault("stage_errors", {})[stage_key] = message
+        run = self.service.analysis_service.get(self.run_id)
+        saved_metadata = run.model_metadata.get(stage_key)
+        metadata = dict(saved_metadata) if isinstance(saved_metadata, dict) else {}
+        metadata.pop("progress", None)
         self.service.analysis_service.update_stage(
             self.run_id,
             stage_key,
-            AnalysisStageUpdate(status=AnalysisRunStatus.FAILED, error=message),
+            AnalysisStageUpdate(
+                status=AnalysisRunStatus.FAILED, error=message,
+                model_metadata=metadata,
+            ),
         )
         await self.emit("stage.failed", stage_key, "failed", {"error": message})
 

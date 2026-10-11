@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -894,8 +894,13 @@ def create_api_router(
 
         async def event_stream():
             emitted_stages: set[tuple[str, str]] = set()
+            emitted_progress: dict[str, dict[str, Any]] = {}
             emitted_terminal = False
-            sequence = 0
+            # This endpoint streams snapshots, not a persisted event log. On
+            # reconnect replay the current snapshot above the client's cursor;
+            # rebuilding old progress counts could otherwise hide the terminal state.
+            sequence = max(0, min_sequence)
+            initial_snapshot = True
             while True:
                 run = analysis_service.get(run_id)
                 stage_order = (
@@ -905,7 +910,8 @@ def create_api_router(
                     if run.workflow_type.value == "video_creator_quality"
                     else TREND_STAGE_ORDER
                 )
-                if sequence == 0:
+                if initial_snapshot:
+                    initial_snapshot = False
                     sequence += 1
                     event = _sse_event(
                         run_id=run.id,
@@ -935,6 +941,27 @@ def create_api_router(
                             sequence=sequence,
                             event_type="stage.started",
                             data={},
+                        )
+                        if sequence > min_sequence:
+                            yield event
+                    stage_metadata = run.model_metadata.get(stage_key)
+                    progress = (stage_metadata.get("progress")
+                                if isinstance(stage_metadata, dict) else None)
+                    if (run.status.value == "running"
+                            and stage_key not in run.stage_results
+                            and stage_key not in run.stage_errors
+                            and isinstance(progress, dict)
+                            and progress != emitted_progress.get(stage_key)):
+                        emitted_progress[stage_key] = dict(progress)
+                        sequence += 1
+                        event = _sse_event(
+                            run_id=run.id,
+                            run_type=run.workflow_type.value,
+                            stage_key=stage_key,
+                            status="running",
+                            sequence=sequence,
+                            event_type="stage.progress",
+                            data=progress,
                         )
                         if sequence > min_sequence:
                             yield event

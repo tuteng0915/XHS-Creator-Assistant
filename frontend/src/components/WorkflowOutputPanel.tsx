@@ -7,6 +7,7 @@ import { stageDisplayStatus } from '../simulationStageStatus'
 import type { FeedbackRun } from '../editorFeedback'
 import { isOracleShowcase } from '../recordOrigin'
 import { OracleBadge, OracleNotice } from './OracleNotice'
+import { workflowProgressLabel, type WorkflowProgress } from '../workflowProgress'
 
 export type StageView = {
   key: string
@@ -15,6 +16,7 @@ export type StageView = {
   title: string
   status: 'waiting' | 'running' | 'completed' | 'failed'
   result?: unknown
+  progress?: WorkflowProgress
   error?: string
   personaLabels?: ReadonlyMap<string, string>
   personaIds?: string[]
@@ -79,7 +81,13 @@ export function WorkflowOutputPanel({
             {stage.status === 'running' && (
               <div className="stage-loading">
                 <span className="spinner" />
-                分析中…
+                {stage.progress ? workflowProgressLabel(stage.progress) : '分析中…'}
+              </div>
+            )}
+            {stage.status === 'running' && stage.progress?.preview && (
+              <div className="stage-progress-preview" role="status">
+                <small>阶段阅读摘要，完整报告仍在生成</small>
+                <p style={{whiteSpace: 'pre-line'}}>{stage.progress.preview}</p>
               </div>
             )}
             {isSimulation ? <SimulationStageNotice stage={stage} /> : stage.error && <div className="err">{stage.error}</div>}

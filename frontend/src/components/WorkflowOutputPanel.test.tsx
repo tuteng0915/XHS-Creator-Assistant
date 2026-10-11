@@ -40,6 +40,19 @@ describe('WorkflowOutputPanel', () => {
     expect(screen.getByText('受众模拟待运行')).toBeInTheDocument()
   })
 
+  it('shows a clearly unfinished reading preview with progress', () => {
+    renderPanel([{
+      key: 'profile', n: '①', title: '账号画像', status: 'running',
+      progress: {phase: 'reading', status: 'running', completed: 2, total: 3,
+        preview: '《第一篇》：用动作交代过程。\n《第二篇》：并列两种选择。'},
+    }])
+    expect(screen.getByText('逐篇细读 · 2/3')).toBeInTheDocument()
+    expect(screen.getByText('阶段阅读摘要，完整报告仍在生成')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('《第一篇》')
+    expect(screen.getByRole('status')).toHaveTextContent('《第二篇》')
+    expect(screen.queryByText('已完成')).not.toBeInTheDocument()
+  })
+
   it('renders stage status, errors, loading state, and delegated results', () => {
     const { renderStageResult } = renderPanel([
       {

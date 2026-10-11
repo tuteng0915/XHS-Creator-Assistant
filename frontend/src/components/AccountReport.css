@@ -88,6 +88,22 @@
   border-left: 2px solid var(--accent-border);
 }
 
+.account-report .account-report-bound-example {
+  min-width: 0;
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--accent-border);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.account-report .account-report-example-title {
+  color: var(--sub);
+  font-size: 12px;
+}
+
+.account-report .account-report-example-quote { color: var(--ink); }
+
 .account-report .account-report-next-steps li::marker { color: var(--accent-ink); }
 .account-report .account-portrait-source { font-size: 12px; }
 .account-report .account-portrait-source > summary,

@@ -22,6 +22,7 @@ RunEventType = Literal[
     "run.partial",
     "run.failed",
     "stage.started",
+    "stage.progress",
     "stage.succeeded",
     "stage.failed",
 ]
@@ -34,6 +35,7 @@ RUN_EVENT_TYPES: frozenset[str] = frozenset(
         "run.partial",
         "run.failed",
         "stage.started",
+        "stage.progress",
         "stage.succeeded",
         "stage.failed",
     }

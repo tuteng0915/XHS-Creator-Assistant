@@ -131,6 +131,42 @@ def test_editorial_task_invites_generalization_without_requiring_identical_artic
         assert name not in LEAN_PROFILE_PROMPT
 
 
+def test_sections_separate_account_synthesis_examples_and_future_actions():
+    tasks = dict(
+        line.removeprefix("- ").split("：", 1)
+        for line in LEAN_PROFILE_PROMPT.splitlines()
+        if line.startswith("- ")
+    )
+    assert set(tasks) == {"summary", "keywords", "directions", "strengths", "writing", "nextSteps"}
+    assert "不展开例子" in tasks["summary"]
+    assert "不排列作品或复述人物与事件" in tasks["directions"]
+    assert "预告介绍打算展开的问题，不当成已给出的答案" in tasks["directions"]
+    assert "每个例子的具体表现各归其文" in tasks["strengths"]
+    assert "不重讲内容方向与优势" in tasks["writing"]
+    assert "下一篇可以【方向】；试着【编辑动作】，让读者【阅读价值】" in tasks["nextSteps"]
+    assert "text不复述旧经历" in tasks["nextSteps"]
+    assert "noteIds仍指向启发建议的作品" in tasks["nextSteps"]
+    assert "同一作品可以支撑不同判断" in LEAN_PROFILE_PROMPT
+
+
+def test_future_action_keeps_source_links_without_requiring_past_story_recap(snapshot, output):
+    action = "下一篇比较两种保留标准怎样改变选择，让读者找到适合自己的取舍。"
+    output["profile"]["nextSteps"] = [{"text": action, "noteIds": ["n1", "n2"]}]
+    portrait = compile_editorial_profile(output, snapshot)["profile"]["accountPortrait"]
+    assert portrait["nextSteps"] == [{
+        "statement": action,
+        "evidence": [{"noteId": "stable-a", "scope": "note"},
+                     {"noteId": "stable-b", "scope": "note"}],
+    }]
+
+
+def test_report_can_omit_next_steps_without_inventing_an_omission(snapshot, output):
+    output["profile"]["nextSteps"] = []
+    result = compile_editorial_profile(output, snapshot)
+    assert result["profile"]["accountPortrait"]["nextSteps"] == []
+    assert result["profile"]["accountPortrait"]["strengths"]
+
+
 def test_compiler_preserves_account_level_interpretation_with_distinct_note_references(
     snapshot, output,
 ):

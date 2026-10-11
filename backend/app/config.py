@@ -46,6 +46,7 @@ class Settings:
     # opt-ins through MODEL_PROVIDER rather than becoming an accidental
     # fallback when a local env file is absent.
     model_provider: str = "qwen"
+    account_report_mode: str = "source_led"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
@@ -65,6 +66,8 @@ class Settings:
     video_preview_frame_count: int = 8
 
     def __post_init__(self) -> None:
+        if self.account_report_mode not in ("source_led", "staged"):
+            raise ValueError("ACCOUNT_REPORT_MODE must be 'source_led' or 'staged'")
         value = self.qwen_profile_read_timeout_seconds
         if type(value) is not int or not 1 <= value <= 300:
             raise ValueError("QWEN_PROFILE_READ_TIMEOUT_SECONDS must be an integer from 1 to 300")
@@ -97,6 +100,7 @@ class Settings:
                 )
             ),
             model_provider=os.getenv("MODEL_PROVIDER", "qwen"),
+            account_report_mode=os.getenv("ACCOUNT_REPORT_MODE", "source_led"),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
             anthropic_base_url=os.getenv(

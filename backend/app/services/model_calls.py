@@ -319,6 +319,8 @@ MAX_TOKENS = {
     ModelOperation.INCENTIVE_FIT_ANALYSIS: 1800,
 }
 
+_ACCOUNT_REPORT_STAGE_BUDGETS = {"overview": 1600, "read": 1600, "synthesis": 2000}
+
 
 class ModelCallService:
     def __init__(self, settings: Settings, *, before_request: Callable[[], None] | None = None) -> None:
@@ -327,6 +329,30 @@ class ModelCallService:
 
     async def call(self, payload: ModelCallRequest) -> ModelCallResponse:
         return await self.call_operation(payload.operation, payload.context)
+
+    async def call_account_report_step(
+        self, stage: str, system: str, user: str
+    ) -> ModelCallResponse:
+        """Make one independent staged-report request without review or retry."""
+        if not isinstance(stage, str) or stage not in _ACCOUNT_REPORT_STAGE_BUDGETS:
+            raise ValidationError("Unsupported account report stage. Use overview, read, or synthesis.")
+        if self.settings.model_provider.strip().lower() not in {"qwen", "dashscope"}:
+            raise ValidationError("Staged account reports require MODEL_PROVIDER=qwen or dashscope.")
+        response = await self._call_qwen(
+            ModelOperation.PROFILE,
+            {"_accountReportStage": stage},
+            # Explicit prompts use the existing JSON-only path, not PROFILE's
+            # full report schema. Each stage validates its own output contract.
+            review_prompt=(system, user),
+        )
+        return ModelCallResponse(
+            output=response.output,
+            model_metadata={
+                **response.model_metadata,
+                "stage": stage,
+                "profileModel": self.qwen_model_for(ModelOperation.PROFILE),
+            },
+        )
 
     async def call_operation(
         self, operation: ModelOperation, context: dict[str, Any]
@@ -471,6 +497,8 @@ class ModelCallService:
 
         body = response.json()
         if review_prompt and body["choices"][0].get("finish_reason") == "length":
+            if operation == ModelOperation.PROFILE and context.get("_accountReportStage"):
+                raise ValidationError("账号报告分步输出达到长度上限，未取得完整结果。")
             raise ValidationError("独立核对输出不完整，未放行原结果。")
         text = self._extract_openai_compatible_text(body)
         if operation == ModelOperation.PROFILE and body["choices"][0].get("finish_reason") == "length":
@@ -501,6 +529,10 @@ class ModelCallService:
 
     @staticmethod
     def _output_budget(operation: ModelOperation, context: dict) -> int:
+        stage = context.get("_accountReportStage")
+        if (operation == ModelOperation.PROFILE and isinstance(stage, str)
+                and stage in _ACCOUNT_REPORT_STAGE_BUDGETS):
+            return _ACCOUNT_REPORT_STAGE_BUDGETS[stage]
         if (operation == ModelOperation.SIMULATION_SYNTHESIS
                 and simulation_category(context.get("topic")) != "creation"):
             return 2400

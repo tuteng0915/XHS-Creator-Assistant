@@ -9,6 +9,7 @@ from datetime import UTC
 from statistics import median
 from typing import Any
 
+from app.services.account_report_passages import reading_fragments
 from app.services.creator_analysis_scope import note_published_at
 
 METRIC_KEYS = ("liked", "collected", "comments", "shares")
@@ -287,11 +288,85 @@ def verified_portrait(
             for item in verified_refs(value.get("counterexamples"), limit=2)
             if item["noteId"] not in supporting_ids
         ]
-        return {
+        result = {
             "statement": statement.strip(),
             "evidence": evidence,
             "counterexamples": counterexamples,
         }
+        if "examples" in value:
+            examples = value["examples"]
+            if not isinstance(examples, list) or not 1 <= len(examples) <= 3:
+                return None
+            bound = []
+            for example in examples:
+                if not isinstance(example, dict):
+                    return None
+                note_id, quote = example.get("noteId"), example.get("quote")
+                note = notes.get(note_id) if isinstance(note_id, str) else None
+                if "fragments" in example:
+                    # New grouped passages carry reversible catalog positions. Equal
+                    # text at different original positions is not an ambiguous source.
+                    if (set(example) != {"noteId", "title", "fragments", "interpretation"}
+                            or note is None
+                            or example.get("title") != (note.get("title") or "")
+                            or not isinstance(example.get("interpretation"), str)
+                            or not 0 < len(example["interpretation"].strip()) <= 200
+                            or {"noteId": note_id, "scope": "note"} not in evidence):
+                        return None
+                    title, body = note.get("title") or "", note.get("desc") or ""
+                    if not isinstance(title, str) or not isinstance(body, str):
+                        return None
+                    fragments = example["fragments"]
+                    if not isinstance(fragments, list) or not 1 <= len(fragments) <= 6:
+                        return None
+                    catalog = reading_fragments(title, body)
+                    order = {key: index for index, key in enumerate(catalog)}
+                    last_position = -1
+                    originals = []
+                    for fragment in fragments:
+                        if not isinstance(fragment, dict):
+                            return None
+                        excerpt_id = fragment.get("excerptId")
+                        if not isinstance(excerpt_id, str) or excerpt_id not in catalog:
+                            return None
+                        original = catalog[excerpt_id]
+                        if (type(fragment.get("start")) is not int
+                                or type(fragment.get("end")) is not int
+                                or fragment != original or not original["quote"].strip()
+                                or order[excerpt_id] <= last_position):
+                            return None
+                        originals.append(dict(original))
+                        last_position = order[excerpt_id]
+                    bound.append({
+                        "noteId": note_id, "title": title, "fragments": originals,
+                        "interpretation": example["interpretation"],
+                    })
+                    continue
+                source = example.get("source")
+                source_key = (
+                    {"title": "title", "body": "desc"}.get(source)
+                    if isinstance(source, str) else None
+                )
+                if note is None or source_key is None:
+                    return None
+                text = note.get(source_key) or ""
+                start, end = example.get("start"), example.get("end")
+                interpretation = example.get("interpretation")
+                if (not isinstance(text, str) or not isinstance(quote, str)
+                        or not 0 < len(quote.strip()) <= 160
+                        or type(start) is not int or type(end) is not int
+                        or not 0 <= start < end <= len(text) or text[start:end] != quote
+                        or text.find(quote) != start or text.find(quote, start + 1) >= 0
+                        or example.get("title") != (note.get("title") or "")
+                        or not isinstance(interpretation, str)
+                        or not 0 < len(interpretation.strip()) <= 200
+                        or {"noteId": note_id, "quote": quote} not in evidence):
+                    return None
+                bound.append({"noteId": note_id, "title": note.get("title") or "",
+                              "source": example["source"], "quote": quote,
+                              "interpretation": interpretation, "start": start, "end": end})
+            result["examples"] = bound
+        return result
 
     summary = verified_claim(portrait.get("summary"))
     keywords = []
