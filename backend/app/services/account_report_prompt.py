@@ -3,8 +3,33 @@
 
 import json
 
+from app.services.account_report_sources import prepare_source_led_context
+
 PROFILE_PROMPT_VERSION = "account-report/2026-10-11-editorial-template-v5.3.1"
 LEGACY_PROFILE_PROMPT_VERSION = "account-report/2026-10-10-v2"
+READING_OBSERVATIONS_MARKER = "\n\n可选精读观察：\n"
+
+
+def build_source_led_profile_prompt(
+    context: dict, *, reading_observations: list | None = None,
+) -> tuple[str, str]:
+    """One delivery task for the baseline and its optional reading enhancement."""
+    report_context = prepare_source_led_context(context)
+    user = (
+        f"账号定位：\n{context.get('positioning', '')}\n\n历史笔记：\n"
+        f"{report_context.get('historicalPosts', '')}"
+        "\n\n请按固定六部分模板交付 source-led/v3 账号复盘，只写最终 JSON。"
+    )
+    if reading_observations:
+        user += (
+            "\n以下是可选精读素材，主要供标题、表达和下一步建议参考。"
+            "账号印象、关键词、内容方向与优势仍按上面的默认任务，从全部所选作品中认识题材、具体做法与阅读价值；不要把账号印象写成修辞清单，未精读的作品同样可以成为代表作。"
+            "正文组织直接回看代表作全文，按原文推进关系划分，不沿用精读的结构标签。"
+            "精读中的手法名称和解释都是待参考的意见，回到对应原句再决定是否采用；保留有用的具体发现，被纠正的预设不转成要求作者补写的建议。"
+            + READING_OBSERVATIONS_MARKER
+            + json.dumps(reading_observations, ensure_ascii=False)
+        )
+    return SOURCE_LED_PROFILE_PROMPT, user
 
 
 def uses_structured_notes(context: dict) -> bool:

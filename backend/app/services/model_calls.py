@@ -13,14 +13,14 @@ import httpx
 from app.config import Settings
 from app.errors import ValidationError
 from app.models import ModelCallRequest, ModelCallResponse, ModelOperation
+from app.services.account_report_contract import AccountReportOutputError
 from app.services.account_report_prompt import (
     PROFILE_PROMPT_VERSION as PROFILE_PROMPT_VERSION,
 )
 from app.services.account_report_prompt import (
-    SOURCE_LED_PROFILE_PROMPT,
+    build_source_led_profile_prompt,
     uses_structured_notes,
 )
-from app.services.account_report_sources import prepare_source_led_context
 from app.services.audience_evidence import audience_model_context
 from app.services.audience_examples import ANALYSIS_EXAMPLES, REACTION_EXAMPLES
 from app.services.editor_feedback import (
@@ -319,7 +319,29 @@ MAX_TOKENS = {
     ModelOperation.INCENTIVE_FIT_ANALYSIS: 1800,
 }
 
-_ACCOUNT_REPORT_STAGE_BUDGETS = {"overview": 1600, "read": 1600, "synthesis": 2000}
+_ACCOUNT_REPORT_STAGE_BUDGETS = {"overview": 1600, "read": 1600, "synthesis": 6000}
+
+TOKEN_USAGE_KEYS = (
+    "prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens",
+    "reasoning_tokens",
+)
+
+
+def safe_token_usage(value: Any) -> dict[str, int]:
+    """Retain numeric counters only, never provider text or reasoning content."""
+    if not isinstance(value, dict):
+        return {}
+    usage = {key: value[key] for key in TOKEN_USAGE_KEYS
+             if type(value.get(key)) is int and value[key] >= 0}
+    # Qwen's OpenAI-compatible API nests reasoning tokens in completion details.
+    # Flatten it for request totals; it is a subset of completion_tokens, not an
+    # additional billable count to add to total_tokens.
+    for key in ("completion_tokens_details", "output_tokens_details"):
+        details = value.get(key)
+        count = details.get("reasoning_tokens") if isinstance(details, dict) else None
+        if "reasoning_tokens" not in usage and type(count) is int and count >= 0:
+            usage["reasoning_tokens"] = count
+    return usage
 
 
 class ModelCallService:
@@ -341,8 +363,8 @@ class ModelCallService:
         response = await self._call_qwen(
             ModelOperation.PROFILE,
             {"_accountReportStage": stage},
-            # Explicit prompts use the existing JSON-only path, not PROFILE's
-            # full report schema. Each stage validates its own output contract.
+            # Explicit prompts and each stage's own schema bypass PROFILE's
+            # legacy envelope parser. The pipeline also validates locally.
             review_prompt=(system, user),
         )
         return ModelCallResponse(
@@ -469,6 +491,24 @@ class ModelCallService:
 
         system, user = review_prompt or self._build_prompt(operation, context)
         model = self.qwen_model_for(operation)
+        thinking_parameters = self.qwen_thinking_parameters(operation)
+        stage = context.get("_accountReportStage") if operation == ModelOperation.PROFILE else None
+        staged = isinstance(stage, str) and stage in _ACCOUNT_REPORT_STAGE_BUDGETS
+        # Use the same transport as the working single-call report. Optional
+        # sections are normalized by the product, not required by the provider.
+        response_format = {"type": "json_object"}
+        metadata = {
+            "provider": "qwen",
+            "systemPromptHash": hashlib.sha256(system.encode("utf-8")).hexdigest(),
+            "model": model, "modelSource": "configured", "usage": {},
+            "operation": operation.value,
+            **({"enableThinking": thinking_parameters.get("enable_thinking"),
+                "thinkingBudget": thinking_parameters.get("thinking_budget"),
+                "responseFormat": response_format["type"],
+                "responseSchema": None}
+               if operation == ModelOperation.PROFILE else {}),
+            **({"stage": stage, "profileModel": model} if staged else {}),
+        }
         if self.before_request is not None:
             self.before_request()
         async with self._qwen_client(operation) as client:
@@ -480,12 +520,13 @@ class ModelCallService:
                 },
                 json={
                     "model": model,
+                    # In DashScope's OpenAI-compatible API, max_tokens limits
+                    # final-answer tokens; thinking_budget is separate. Do not
+                    # subtract the thinking allowance from the report budget.
                     "max_tokens": self._output_budget(operation, context),
                     "temperature": 0.3,
-                    "response_format": {"type": "json_object"},
-                    **({"enable_thinking": False}
-                       if operation == ModelOperation.PROFILE and model.lower().startswith("qwen3.8")
-                       else {}),
+                    "response_format": response_format,
+                    **thinking_parameters,
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
@@ -495,10 +536,24 @@ class ModelCallService:
         if response.status_code >= 400:
             raise ValidationError(f"Model call failed ({response.status_code})")
 
-        body = response.json()
+        try:
+            body = response.json()
+        except ValueError:
+            if staged:
+                raise AccountReportOutputError("invalid_response", metadata=metadata) from None
+            raise
+        if staged and not isinstance(body, dict):
+            raise AccountReportOutputError("invalid_response", metadata=metadata)
+        metadata.update({
+            "model": body.get("model", model),
+            "modelSource": "response" if body.get("model") else "configured",
+            "usage": (safe_token_usage(body.get("usage"))
+                      if operation == ModelOperation.PROFILE else body.get("usage", {})),
+        })
+        if staged:
+            output = self._parse_account_report_response(body, metadata)
+            return ModelCallResponse(output=output, model_metadata=metadata)
         if review_prompt and body["choices"][0].get("finish_reason") == "length":
-            if operation == ModelOperation.PROFILE and context.get("_accountReportStage"):
-                raise ValidationError("账号报告分步输出达到长度上限，未取得完整结果。")
             raise ValidationError("独立核对输出不完整，未放行原结果。")
         text = self._extract_openai_compatible_text(body)
         if operation == ModelOperation.PROFILE and body["choices"][0].get("finish_reason") == "length":
@@ -512,20 +567,46 @@ class ModelCallService:
             raise ValidationError("协作角色输出达到长度上限，未取得完整结果。")
         return ModelCallResponse(
             output=self._parse_json(text) if review_prompt else self._parse_model_output(operation, text),
-            model_metadata={
-                "provider": "qwen",
-                "systemPromptHash": hashlib.sha256(system.encode("utf-8")).hexdigest(),
-                "model": body.get("model", model),
-                "modelSource": "response" if body.get("model") else "configured",
-                "usage": body.get("usage", {}),
-                "operation": operation.value,
-            },
+            model_metadata=metadata,
         )
+
+    def _parse_account_report_response(self, body: dict, metadata: dict) -> dict:
+        """Classify only generated-output failures, never HTTP/config failures."""
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise AccountReportOutputError("invalid_response", metadata=metadata)
+        if choices[0].get("finish_reason") == "length":
+            raise AccountReportOutputError("output_truncated", metadata=metadata)
+        try:
+            text = self._extract_openai_compatible_text(body)
+        except (ValidationError, TypeError):
+            raise AccountReportOutputError("invalid_response", metadata=metadata) from None
+        if not text.strip():
+            raise AccountReportOutputError("empty_output", metadata=metadata)
+        try:
+            output = self._parse_json(text)
+        except ValidationError:
+            raise AccountReportOutputError("invalid_json", metadata=metadata) from None
+        if not output:
+            raise AccountReportOutputError("empty_output", metadata=metadata)
+        return output
 
     def qwen_model_for(self, operation: ModelOperation) -> str:
         if operation == ModelOperation.PROFILE:
             return self.settings.qwen_profile_model.strip() or self.settings.qwen_model
         return self.settings.qwen_model
+
+    def qwen_thinking_parameters(self, operation: ModelOperation) -> dict[str, Any]:
+        if operation != ModelOperation.PROFILE:
+            return {}
+        if self.settings.qwen_profile_enable_thinking:
+            return {"enable_thinking": True,
+                    "thinking_budget": self.settings.qwen_profile_thinking_budget}
+        # Preserve the existing request for every other operation/model when
+        # this account-only experiment has not been explicitly enabled.
+        if self.qwen_model_for(operation).lower().startswith("qwen3.8"):
+            return {"enable_thinking": False}
+        return {}
 
     @staticmethod
     def _output_budget(operation: ModelOperation, context: dict) -> int:
@@ -597,14 +678,12 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
 更新会写入当前选题，不能修改其他资产。回复简洁说明实际改动。
 只输出 JSON：{"reply":"","update":null,"pendingSuggestions":[],"factCheck":{"safeToApply":false,"supportedClaims":[]}}；可安全更新时 update={"title":"","body":""} 且 safeToApply=true。""", json.dumps(context, ensure_ascii=False))
         if operation == ModelOperation.PROFILE:
-            structured = uses_structured_notes(context)
-            report_context = prepare_source_led_context(context) if structured else context
+            if uses_structured_notes(context):
+                return build_source_led_profile_prompt(context)
             return (
-                SOURCE_LED_PROFILE_PROMPT if structured else PROMPT_PROFILE,
+                PROMPT_PROFILE,
                 f"账号定位：\n{positioning}\n\n历史笔记：\n"
-                f"{report_context.get('historicalPosts', '')}"
-                + ("\n\n请按固定六部分模板交付 source-led/v3 账号复盘，只写最终 JSON。"
-                   if structured else ""),
+                f"{context.get('historicalPosts', '')}",
             )
         if operation == ModelOperation.PAIN_POINTS:
             source = context.get("sourceText", context.get("comments", ""))

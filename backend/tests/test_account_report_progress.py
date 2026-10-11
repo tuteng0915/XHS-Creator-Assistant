@@ -127,9 +127,17 @@ def test_progress_reconnect_replays_final_snapshot_above_old_cursor(app, cursor_
     assert all(event["data"]["eventType"] != "stage.progress" for event in events)
 
 
-@pytest.mark.parametrize("mode,structured", [("source_led", True), ("staged", False)])
-def test_real_provider_preserves_default_and_legacy_text_paths(mode, structured):
-    model = SimpleNamespace(settings=SimpleNamespace(account_report_mode=mode))
+@pytest.mark.parametrize("mode,structured,model_provider", [
+    ("source_led", True, "qwen"),
+    ("staged", False, "qwen"),
+    ("staged", True, "anthropic"),
+])
+def test_real_provider_preserves_single_call_rollback_legacy_text_and_other_providers(
+    mode, structured, model_provider,
+):
+    model = SimpleNamespace(settings=SimpleNamespace(
+        account_report_mode=mode, model_provider=model_provider,
+    ))
     provider = RealAccountDiagnosisModelProvider(model)
     provider.profile = AsyncMock(return_value={"profile": {"pillars": ["旧路径"]}})
     callback = AsyncMock()
@@ -143,7 +151,10 @@ def test_real_provider_preserves_default_and_legacy_text_paths(mode, structured)
     callback.assert_not_called()
 
 
-def test_real_provider_selects_staged_pipeline_only_when_opted_in(app, monkeypatch):
+@pytest.mark.parametrize("model_provider", ["qwen", "dashscope"])
+def test_real_provider_selects_staged_pipeline_by_default_for_qwen(
+    app, settings, monkeypatch, model_provider,
+):
     from app.services import account_report_pipeline
 
     run = create_source_led_account_run(app)
@@ -152,8 +163,10 @@ def test_real_provider_selects_staged_pipeline_only_when_opted_in(app, monkeypat
         model_metadata={"accountReportMode": "staged", "calls": []},
     ))
     monkeypatch.setattr(account_report_pipeline, "run_staged_account_report", pipeline)
+    assert settings.account_report_mode == "staged"
     model = SimpleNamespace(
-        settings=SimpleNamespace(account_report_mode="staged"),
+        settings=SimpleNamespace(account_report_mode=settings.account_report_mode,
+                                 model_provider=model_provider),
         call_account_report_step=AsyncMock(),
         call_operation=AsyncMock(),
     )

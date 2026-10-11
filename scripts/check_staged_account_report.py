@@ -2,7 +2,8 @@
 
 The default preview makes no model calls and writes no files. Live diagnostics
 contain private source text; save them only to an appropriate private eval folder.
-No database access, source refresh, retries, or provider fallback is performed.
+No database access, source refresh, or provider fallback is performed. Output
+recovery uses the same bounded stage-local policy as the product.
 """
 from __future__ import annotations
 
@@ -20,14 +21,20 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "backend"), str(ROOT / "scripts")]
 
 from account_profile_diagnostics import DiagnosticProfileCalls, safe_usage  # noqa: E402
-from check_account_profile import case_from_report  # noqa: E402
+from check_account_profile import case_from_report, claim_counts  # noqa: E402
 
 from app.config import Settings  # noqa: E402
+from app.services.account_diagnosis_evidence import verified_portrait  # noqa: E402
+from app.services.account_report_contract import AccountReportOutputError  # noqa: E402
+from app.services.account_report_delivery import compile_usable_account_report  # noqa: E402
 from app.services.account_report_pipeline import (  # noqa: E402
+    MAX_EXTRA_REQUESTS,
     PIPELINE_VERSION,
     _material,
     run_staged_account_report,
 )
+from app.services.account_report_prompt import READING_OBSERVATIONS_MARKER  # noqa: E402
+from app.workflows.account_diagnosis import ProfileStageResult  # noqa: E402
 
 
 def preview_scope(case: dict, read_note_ids: list[str] | None = None) -> dict:
@@ -39,6 +46,9 @@ def preview_scope(case: dict, read_note_ids: list[str] | None = None) -> dict:
         or len(set(read_note_ids)) != len(read_note_ids)
     ):
         raise ValueError("--read-note-ids 必须是冻结输入中1～3个不同的 n 编号")
+    normal_requests = 2 + (
+        len(read_note_ids) if read_note_ids is not None else min(3, len(notes))
+    )
     return {
         "inputNoteCount": len(notes),
         "inputBodyCharacters": sum(len(item["body"]) for item in notes),
@@ -46,9 +56,9 @@ def preview_scope(case: dict, read_note_ids: list[str] | None = None) -> dict:
         "readNoteIds": list(read_note_ids) if read_note_ids is not None else None,
         "readNoteCount": len(read_note_ids) if read_note_ids is not None else None,
         "maxReadNoteCount": len(read_note_ids) if read_note_ids is not None else min(3, len(notes)),
-        "maxModelRequests": 2 + (
-            len(read_note_ids) if read_note_ids is not None else min(3, len(notes))
-        ),
+        "normalModelRequests": normal_requests,
+        "maxRecoveryRequests": MAX_EXTRA_REQUESTS,
+        "maxModelRequests": normal_requests + MAX_EXTRA_REQUESTS,
     }
 
 
@@ -58,11 +68,52 @@ def _input_scope(stage: str, payload: dict) -> dict:
         return {"kind": "single_note", "noteCount": 1, "title": note["title"],
                 "bodyCharacters": sum(len(item["text"]) for item in note["bodyExcerpts"])}
     return {
-        "kind": "all_source_notes" if stage == "overview" else "conclusions_only",
+        "kind": "all_source_notes" if stage == "overview" else "all_source_notes_and_readings",
         "noteCount": len(payload["notes"]),
         "noteIds": [item["noteId"] for item in payload["notes"]],
-        **({"readingCount": len(payload["readings"])} if stage == "synthesis" else {}),
+        **({"readingCount": len(payload["readings"]), "bodyCharacters": sum(
+            len(fragment["text"]) for note in payload["notes"]
+            for fragment in note["bodyExcerpts"]
+        )} if stage == "synthesis" else {}),
     }
+
+
+def stage_input(stage: str, user: str) -> dict:
+    """Capture the default report prompt without changing the actual request."""
+    if stage != "synthesis":
+        return json.loads(user)
+    _, marker, tail = user.partition("\n\n历史笔记：\n")
+    if not marker:
+        # Read older JSON-shaped diagnostic inputs without rewriting them.
+        return json.loads(user)
+    packet, _ = json.JSONDecoder().raw_decode(tail)
+    _, observations_marker, observations = user.partition(READING_OBSERVATIONS_MARKER)
+    return {**packet, "readings": json.loads(observations) if observations_marker else []}
+
+
+def validate_product_result(
+    output: dict, snapshot: dict, observations: dict | None,
+) -> tuple[dict, dict]:
+    """Apply the product's final checks offline without changing compiled output."""
+    prepared = compile_usable_account_report(output, snapshot)
+    validated = ProfileStageResult.model_validate(prepared).model_dump(mode="json")
+    raw = validated["profile"].get("accountPortrait")
+    kept = verified_portrait(raw, snapshot, (observations or {}).get("chronology"))
+    validated["profile"]["accountPortrait"] = kept
+    if observations is not None:
+        validated["observations"] = deepcopy(observations)
+    raw_counts, kept_counts = claim_counts(raw), claim_counts(kept)
+    verification = {
+        "rawClaimCounts": raw_counts,
+        "keptClaimCounts": kept_counts,
+        "droppedClaimCounts": {
+            key: count - kept_counts.get(key, 0) for key, count in raw_counts.items()
+            if count > kept_counts.get(key, 0)
+        },
+        "hasVerifiedPortrait": kept is not None,
+        "scope": "source_identity_and_literal_quotes_not_semantic_entailment",
+    }
+    return validated, verification
 
 
 async def run_check(service_factory, case: dict, *, read_note_ids=None, on_progress=None) -> dict:
@@ -78,16 +129,19 @@ async def run_check(service_factory, case: dict, *, read_note_ids=None, on_progr
 
     async def progress(update):
         event = {key: update[key] for key in ("phase", "status", "completed", "total")}
+        if isinstance(update.get("recovery"), dict):
+            event["recovery"] = deepcopy(update["recovery"])
         event["elapsedSeconds"] = round(time.monotonic() - started, 3)
         report["progress"].append(event)
         if on_progress is not None:
             on_progress(deepcopy(event))
 
     async def call_step(stage, system, user):
-        payload = json.loads(user)
+        payload = stage_input(stage, user)
         capture = {
             "sequence": len(report["stages"]) + 1, "stage": stage, "status": "failed",
             "input": payload, "inputScope": _input_scope(stage, payload),
+            "userPrompt": user,
             "systemPromptHash": hashlib.sha256(system.encode("utf-8")).hexdigest(),
             "inputHash": hashlib.sha256(user.encode("utf-8")).hexdigest(),
         }
@@ -122,19 +176,29 @@ async def run_check(service_factory, case: dict, *, read_note_ids=None, on_progr
                 capture.clear()
                 capture.update(redacted)
 
+    validation_phase = None
     try:
         report["scope"] = preview_scope(frozen, read_note_ids)
         result = await run_staged_account_report(
             frozen["context"], call_step, on_update=progress,
             representative_note_ids=deepcopy(read_note_ids),
         )
-        report.update(status="completed", result={
+        report["result"] = {
             "output": result.output, "modelMetadata": result.model_metadata,
-        })
+        }
+        validation_phase = "product_validation"
+        validated, verification = validate_product_result(
+            result.output, frozen["snapshot"], frozen.get("observations"),
+        )
+        report.update(status="completed", validatedResult=validated,
+                      portraitVerification=verification)
     except Exception as error:
-        report["error"] = {"type": type(error).__name__, "phase": (
+        report["error"] = {"type": type(error).__name__, "phase": validation_phase or (
             report["progress"][-1]["phase"] if report["progress"] else "input_validation"
         )}
+        if isinstance(error, AccountReportOutputError):
+            report["error"]["code"] = error.code
+            report["recoveryMetadata"] = deepcopy(getattr(error, "pipeline_metadata", {}))
     report["requestAttempts"] = sum(item["requestAttempts"] for item in report["stages"])
     total_usage = {}
     for capture in report["stages"]:
@@ -159,11 +223,17 @@ def main() -> int:
     parser.add_argument("--output", type=Path, help="新的诊断报告目录，拒绝覆盖")
     parser.add_argument("--read-timeout-seconds", type=int,
                         help="仅本次每个请求的读取等待上限，1～300秒；默认使用画像配置")
+    parser.add_argument("--thinking", choices=("on", "off"),
+                        help="仅本次账号模型是否思考；不修改正式配置")
+    parser.add_argument("--thinking-budget", type=int,
+                        help="仅本次思考预算，1～8192；不是最终答案长度")
     args = parser.parse_args()
     if args.live and args.output is None:
         parser.error("--live 必须指定新的 --output 目录")
     if args.read_timeout_seconds is not None and not 1 <= args.read_timeout_seconds <= 300:
         parser.error("--read-timeout-seconds 必须为1～300的整数")
+    if args.thinking_budget is not None and not 1 <= args.thinking_budget <= 8192:
+        parser.error("--thinking-budget 必须为1～8192的整数")
     if args.output is not None and args.output.exists():
         parser.error("--output 已存在，拒绝覆盖")
     try:
@@ -173,11 +243,18 @@ def main() -> int:
                if args.read_note_ids is not None else None)
         scope = preview_scope(case, ids)
         settings = replace(Settings.from_environment(), model_provider="qwen")
+        if args.thinking is not None:
+            settings = replace(settings, qwen_profile_enable_thinking=args.thinking == "on")
+        if args.thinking_budget is not None:
+            settings = replace(settings, qwen_profile_thinking_budget=args.thinking_budget)
         model = settings.qwen_profile_model.strip() or settings.qwen_model
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.error(f"输入预检失败：{type(error).__name__}")
     if not args.live:
         print(json.dumps({"mode": "preview", "provider": "qwen", "configuredModel": model,
+                          "enableThinking": settings.qwen_profile_enable_thinking,
+                          "thinkingBudget": (settings.qwen_profile_thinking_budget
+                                             if settings.qwen_profile_enable_thinking else None),
                           "requestAttempts": 0, "scope": scope}, ensure_ascii=False))
         return 0
     if not settings.qwen_api_key:
@@ -198,7 +275,10 @@ def main() -> int:
                                   on_progress=lambda event: print(json.dumps({
                                       "event": "progress", **event,
                                   }, ensure_ascii=False), flush=True)))
-    report.update(provider="qwen", configuredModel=model, inputSource={
+    report.update(provider="qwen", configuredModel=model,
+                  enableThinking=settings.qwen_profile_enable_thinking,
+                  thinkingBudget=(settings.qwen_profile_thinking_budget
+                                  if settings.qwen_profile_enable_thinking else None), inputSource={
         "type": "previous_profile_report",
         "sha256": source_hash,
     })

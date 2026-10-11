@@ -8,6 +8,23 @@ ENV_LINE_RE = re.compile(
 )
 
 
+def environment_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized not in {"true", "false"}:
+        raise ValueError(f"{name} must be true or false")
+    return normalized == "true"
+
+
+def environment_integer(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer") from error
+
+
 def load_env_file_defaults(path: Path) -> None:
     """Load simple KEY=value lines without overriding explicit environment.
 
@@ -46,7 +63,9 @@ class Settings:
     # opt-ins through MODEL_PROVIDER rather than becoming an accidental
     # fallback when a local env file is absent.
     model_provider: str = "qwen"
-    account_report_mode: str = "source_led"
+    # Structured Qwen reports add isolated reading assistance by default;
+    # source_led remains the explicit single-call rollback option.
+    account_report_mode: str = "staged"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
@@ -55,6 +74,8 @@ class Settings:
     qwen_model: str = "qwen-plus"
     qwen_profile_model: str = "qwen3.8-max"
     qwen_profile_read_timeout_seconds: int = 180
+    qwen_profile_enable_thinking: bool = False
+    qwen_profile_thinking_budget: int = 4096
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     qwen_dashscope_base_url: str = "https://dashscope.aliyuncs.com/api/v1"
     qwen_vision_model: str = "qwen-vl-plus"
@@ -71,6 +92,11 @@ class Settings:
         value = self.qwen_profile_read_timeout_seconds
         if type(value) is not int or not 1 <= value <= 300:
             raise ValueError("QWEN_PROFILE_READ_TIMEOUT_SECONDS must be an integer from 1 to 300")
+        if type(self.qwen_profile_enable_thinking) is not bool:
+            raise ValueError("QWEN_PROFILE_ENABLE_THINKING must be true or false")
+        value = self.qwen_profile_thinking_budget
+        if type(value) is not int or not 1 <= value <= 8192:
+            raise ValueError("QWEN_PROFILE_THINKING_BUDGET must be an integer from 1 to 8192")
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -100,7 +126,7 @@ class Settings:
                 )
             ),
             model_provider=os.getenv("MODEL_PROVIDER", "qwen"),
-            account_report_mode=os.getenv("ACCOUNT_REPORT_MODE", "source_led"),
+            account_report_mode=os.getenv("ACCOUNT_REPORT_MODE", "staged"),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
             anthropic_base_url=os.getenv(
@@ -113,6 +139,8 @@ class Settings:
             qwen_profile_read_timeout_seconds=int(
                 os.getenv("QWEN_PROFILE_READ_TIMEOUT_SECONDS", "180")
             ),
+            qwen_profile_enable_thinking=environment_bool("QWEN_PROFILE_ENABLE_THINKING", False),
+            qwen_profile_thinking_budget=environment_integer("QWEN_PROFILE_THINKING_BUDGET", 4096),
             qwen_base_url=os.getenv(
                 "QWEN_BASE_URL",
                 os.getenv(

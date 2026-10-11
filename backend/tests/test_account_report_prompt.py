@@ -9,9 +9,37 @@ from app.services.account_report_prompt import (
     LEGACY_PROFILE_PROMPT_VERSION,
     PROFILE_PROMPT_VERSION,
     SOURCE_LED_PROFILE_PROMPT,
+    build_source_led_profile_prompt,
     profile_prompt_version,
 )
 from app.services.model_calls import PROMPT_PROFILE, ModelCallService
+
+
+def test_optional_readings_do_not_replace_the_whole_account_or_structure_task():
+    context = {"historicalPosts": json.dumps({
+        "schemaVersion": "account-reading-input/v2", "notes": [
+            {"noteId": "saved-a", "title": "一篇具体作品", "body": "先观察。再作判断。"},
+            {"noteId": "saved-b", "title": "另一种内容价值", "body": "提供可用的方法。"},
+        ],
+    }, ensure_ascii=False)}
+    system, default_user = build_source_led_profile_prompt(context)
+    enhanced_system, enhanced_user = build_source_led_profile_prompt(context, reading_observations=[
+        {"noteId": "n1", "assessment": "值得参考的观察", "correction": "", "examples": []},
+    ])
+    assert enhanced_system == system == SOURCE_LED_PROFILE_PROMPT
+    assert enhanced_user.startswith(default_user)
+    assert "从全部所选作品中认识题材、具体做法与阅读价值" in enhanced_user
+    assert "未精读的作品同样可以成为代表作" in enhanced_user
+    assert "正文组织直接回看代表作全文" in enhanced_user
+    assert "回到对应原句再决定是否采用" in enhanced_user
+    assert "提供可用的方法。" in enhanced_user
+    assert "值得参考的观察" in enhanced_user
+    assert "QSheep" not in enhanced_user and "放弃保研" not in enhanced_user
+    # None of this changes the single-call rollback's prompt or source input.
+    assert "以下是可选精读素材" not in default_user
+    assert build_source_led_profile_prompt(context, reading_observations=[]) == (
+        system, default_user,
+    )
 
 
 def test_structured_profile_uses_source_led_task_without_modifying_input(settings):

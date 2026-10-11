@@ -24,22 +24,30 @@ def response_body(output, *, usage=None, finish="stop"):
     }
 
 
-def test_profile_check_tracks_actual_request_and_preserves_frozen_input(tmp_path, settings):
+@pytest.mark.parametrize("thinking", [False, True])
+def test_profile_check_tracks_actual_request_and_preserves_frozen_input(
+    tmp_path, settings, thinking,
+):
     check = load_check()
     case = check.prepare_case(raw_export(tmp_path))
     original = deepcopy(case)
     requests = []
     output = {"profile": {"pillars": ["private-api-key", "具体做法"]}}
     usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
-             "private": "private-api-key"}
+             "private": "private-api-key",
+             "completion_tokens_details": {"reasoning_tokens": 3 if thinking else 0,
+                                           "reasoning_content": "private-reasoning-text"}}
 
     def respond(request):
         requests.append(json.loads(request.content))
         assert len(requests) == 1  # No hidden editorial call or retry.
-        return httpx.Response(200, json=response_body(output, usage=usage))
+        body = response_body(output, usage=usage)
+        body["choices"][0]["message"]["reasoning_content"] = "private-reasoning-text"
+        return httpx.Response(200, json=body)
 
     service = check.DiagnosticProfileCalls(
-        replace(settings, model_provider="qwen", qwen_api_key="private-api-key"),
+        replace(settings, model_provider="qwen", qwen_api_key="private-api-key",
+                qwen_profile_enable_thinking=thinking),
         transport=httpx.MockTransport(respond),
     )
     report = asyncio.run(check.run_check(service, case))
@@ -59,16 +67,31 @@ def test_profile_check_tracks_actual_request_and_preserves_frozen_input(tmp_path
     assert len(request_diagnostic["systemPromptHash"]) == len(request_diagnostic["inputHash"]) == 64
     assert requests[0]["messages"][0]["content"] == SOURCE_LED_PROFILE_PROMPT
     assert "先准备材料" in requests[0]["messages"][1]["content"]
-    totals = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    totals = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+              "reasoning_tokens": 3 if thinking else 0}
     assert diagnostic["totalUsage"] == request_diagnostic["usage"] == totals
     metadata = report["modelMetadata"]
     assert metadata["requestCount"] == 1
     assert metadata["usage"] == totals
+    for record in (metadata, diagnostic, request_diagnostic):
+        assert record["enableThinking"] is thinking
+        assert record["thinkingBudget"] == (4096 if thinking else None)
+    assert requests[0]["max_tokens"] == request_diagnostic["requestedMaxTokens"] == 6000
+    assert request_diagnostic["responseFormat"] == "json_object"
+    assert request_diagnostic.get("responseSchema") is None
+    assert request_diagnostic.get("schemaHash") is None
+    assert requests[0]["enable_thinking"] is thinking
+    if thinking:
+        assert requests[0]["thinking_budget"] == 4096
+    else:
+        assert "thinking_budget" not in requests[0]
     assert metadata["systemPromptHash"] == hashlib.sha256(
         SOURCE_LED_PROFILE_PROMPT.encode(),
     ).hexdigest()
     assert metadata["model"] == "qwen-returned-model" and metadata["modelSource"] == "response"
     assert "private-api-key" not in json.dumps(report)
+    assert "private-reasoning-text" not in json.dumps(report)
+    assert "reasoning_content" not in json.dumps(report)
     assert "[REDACTED]" in request_diagnostic["rawText"]
     assert "private" not in json.dumps(metadata)
 
@@ -81,8 +104,9 @@ def test_profile_check_tracks_actual_request_and_preserves_frozen_input(tmp_path
     ("length", 1, "output_length"),
     ("schema", 1, "output_schema"),
 ])
+@pytest.mark.parametrize("thinking", [False, True])
 def test_failed_check_reports_actual_attempts_without_retry_or_partial_success(
-    tmp_path, settings, failure, attempts, phase,
+    tmp_path, settings, failure, attempts, phase, thinking,
 ):
     check = load_check()
     case = check.prepare_case(raw_export(tmp_path))
@@ -98,13 +122,16 @@ def test_failed_check_reports_actual_attempts_without_retry_or_partial_success(
             raise httpx.ReadTimeout("private-error-key", request=request)
         output = ("not valid json" if failure == "json" else
                   {"invalid": "result"} if failure == "schema" else {"profile": {}})
-        return httpx.Response(200, json=response_body(
+        body = response_body(
             output, finish="length" if failure == "length" else "stop",
-        ))
+        )
+        body["choices"][0]["message"]["reasoning_content"] = "never-retain-reasoning"
+        return httpx.Response(200, json=body)
 
     service = check.DiagnosticProfileCalls(
         replace(settings, model_provider="qwen",
-                qwen_api_key="" if failure == "configuration" else "private-error-key"),
+                qwen_api_key="" if failure == "configuration" else "private-error-key",
+                qwen_profile_enable_thinking=thinking),
         transport=httpx.MockTransport(respond),
     )
     report = asyncio.run(check.run_check(service, case))
@@ -117,6 +144,9 @@ def test_failed_check_reports_actual_attempts_without_retry_or_partial_success(
     assert diagnostic["phase"] == phase
     assert diagnostic["requestAttempts"] == len(diagnostic["requests"]) == attempts
     assert "private-error-key" not in json.dumps(report)
+    assert "never-retain-reasoning" not in json.dumps(report)
+    assert diagnostic["enableThinking"] is thinking
+    assert diagnostic["thinkingBudget"] == (4096 if thinking else None)
 
 
 def test_diagnostics_reset_between_operations_and_keep_safe_metadata_only(tmp_path, settings):
@@ -126,7 +156,9 @@ def test_diagnostics_reset_between_operations_and_keep_safe_metadata_only(tmp_pa
 
     def respond(request):
         requests.append(request)
-        return httpx.Response(200, json=response_body({"profile": {}}))
+        return httpx.Response(200, json=response_body({
+            "profile": {"hookStyles": ["从具体动作切入，再展开说明。"]},
+        }))
 
     service = check.DiagnosticProfileCalls(
         replace(settings, model_provider="qwen", qwen_api_key="private-key"),
@@ -146,6 +178,40 @@ def test_diagnostics_reset_between_operations_and_keep_safe_metadata_only(tmp_pa
     assert metadata["usage"] == {"prompt_tokens": 8}
     assert "should-not-copy" not in json.dumps(metadata)
     assert "private-key" not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize("usage,expected", [
+    ({"completion_tokens_details": {"reasoning_tokens": 12, "private": "never-retain"}},
+     {"reasoning_tokens": 12}),
+    ({"output_tokens_details": {"reasoning_tokens": 8}}, {"reasoning_tokens": 8}),
+    ({"reasoning_tokens": 5, "completion_tokens_details": {"reasoning_tokens": 5}},
+     {"reasoning_tokens": 5}),
+    ({"completion_tokens_details": {"reasoning_tokens": True}}, {}),
+    ({"completion_tokens_details": {"reasoning_tokens": -1}}, {}),
+    ({"completion_tokens_details": {"reasoning_tokens": 1.5}}, {}),
+    ({"completion_tokens_details": {"reasoning_tokens": "12"}}, {}),
+    ({"completion_tokens_details": "never-retain"}, {}),
+    (None, {}),
+])
+def test_diagnostics_retain_only_safe_reasoning_token_counts(settings, usage, expected):
+    check = load_check()
+    service = check.DiagnosticProfileCalls(settings)
+    metadata = service._safe_metadata({"usage": usage}, ModelOperation.PROFILE)
+    assert metadata["usage"] == expected
+
+
+def test_diagnostics_sum_reasoning_as_a_subset_without_inflating_total_usage(settings):
+    check = load_check()
+    service = check.DiagnosticProfileCalls(settings)
+    service.request_diagnostics = [
+        {"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+                   "reasoning_tokens": 3}},
+        {"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+                   "completion_tokens_details": {"reasoning_tokens": 4}}},
+    ]
+    assert service._total_usage() == {
+        "prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30, "reasoning_tokens": 7,
+    }
 
 
 @pytest.mark.parametrize("invalid_source", [False, True])

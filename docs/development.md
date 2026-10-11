@@ -93,13 +93,15 @@ export QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 `MODEL_PROVIDER=dashscope` 也进入 Qwen 文本调用路径；通常保持默认 `qwen` 即可。
 
-`QWEN_PROFILE_MODEL` 默认 `qwen3.8-max`，只影响账号报告的 PROFILE 操作，其他文本操作仍用 `QWEN_MODEL`。设为空字符串可显式继承总模型。PROFILE 使用 Qwen3.8 系列时发送 `enable_thinking=false`，与本轮非思考验证一致（[官方参数说明](https://help.aliyun.com/en/model-studio/qwen-api-via-openai-chat-completions)）；不额外增加模型调用或自动降级。端点不支持所选模型时会明确报错，应检查配置，而不是悄悄换模型。Anthropic 兼容路径不受这一变量影响。
+`QWEN_PROFILE_MODEL` 默认 `qwen3.8-max`，只影响账号报告的 PROFILE 操作，其他文本操作仍用 `QWEN_MODEL`。设为空字符串可显式继承总模型。`QWEN_PROFILE_ENABLE_THINKING` 可设 `true`/`false`，默认false保留既有Qwen3.8非思考请求；显式开启后传 `enable_thinking=true` 和 `QWEN_PROFILE_THINKING_BUDGET`（默认4096，本应用接受1～8192）。思考预算独立于最终答案 `max_tokens`，不从报告的答案预算中扣除。只影响Qwen的PROFILE请求，不改变其他功能或Anthropic路径；不增加模型调用、自动重试或降级。[官方思考说明](https://help.aliyun.com/zh/model-studio/deep-thinking)、[JSON模式](https://help.aliyun.com/zh/model-studio/qwen-structured-output)。诊断仅保留思考开关、预算和数值reasoning_tokens，不保存reasoning_content；reasoning_tokens是completion_tokens子集，不重复加到总用量。
 
-### 三阶段账号报告候选
+### 默认账号报告与单次回退
 
-`ACCOUNT_REPORT_MODE` 默认为 `source_led`。在隔离测试服务中显式设为 `staged`，结构化所选笔记会走“整体阅读 → 最多三篇并行精读 → 汇总”，至多五次 Qwen 请求，仍使用 `QWEN_PROFILE_MODEL`。普通旧文本输入保持原路径；该候选仅支持 Qwen/dashscope，无自动回退。此设置不会迁移旧报告；不要为试验自动重启用户正在使用或已关闭的服务。
+`ACCOUNT_REPORT_MODE` 默认为 `staged`。结构化所选笔记会走“整体阅读 → 可选最多三篇并行精读 → 默认模板报告”，正常二至五次 Qwen 请求，仍使用 `QWEN_PROFILE_MODEL`。显式设为 `source_led` 可回到单次生成。普通旧文本输入保持原路径；多阶段只用于 Qwen/dashscope，不切其他服务商。此设置不会迁移旧报告；上线／重启仍需用户授权，不因定时触发自动启动服务。
 
-前端以阶段摘要显示进度，最终报告保留代码绑定的原标题与原句。v3.1 精读以本篇片段 ID 选择原文，一组最多 6 个片段并分别保存位置，不把不连续原句拼接；允许同一原文支撑不同判断。失败停止本次 PROFILE、不自动重试，恢复粒度仍是整个 PROFILE，不能接着某篇精读续跑。分析 SSE 重连发送最新快照，序号接在客户端游标之后，不是历史事件的逐条重放。质量状态与已知限制见 [状态记录](status-and-todo.md)。
+前端以阶段摘要显示进度。v5.1-balanced-default 最终与单次链使用同一个提示构建器，保留全部所选原标题与完整正文片段，只额外附加有效精读观察、修正和例子；概览初判、假设和提问不进入最终上下文。账号印象／方向／优势继续面向全部作品，结构回看全文，精读主要供标题／表达／建议参考。没有有效观察时最终请求逐字等于单次链。未精读篇也保留全文，旧报告及分组例子仍可读。分析 SSE 重连发送最新快照，序号接在客户端游标之后，不是历史事件的逐条重放。质量状态与已知限制见 [状态记录](status-and-todo.md)。
+
+请求统一为 `json_object`，不再发送 v4.1 的严格 JSON Schema 或使用模型白名单。`account_report_contract.py` 只做辅助输出类型解析，不要求概览摘要、方向、问题或修正／例子必须齐全，也无最低字数限制。概览／精读输出错误只跳过该项／步骤，保留有效兄弟结果，不额外重试；有效选篇缺问题时用中性问题。最终通过 `compile_usable_account_report` 逐项调用既有原文编译／核验逻辑，缺栏目正常省略、坏栏目局部删去，摘要可缺，但全空或只有关键词不算交付。两种模式共用此适配器，旧历史不改。只有多阶段流程最终无可用报告才补一次，因此最多六次请求；认证、HTTP、网络与未知执行错误不重试。安全记录删项、跳过步骤、尝试次数和用量；未知用量不记成零费用。显式单次模式不增加调用；没有精读级持久断点续跑。
 
 复现使用已有检查报告的冻结样本，不读取当前业务库、不抓取：
 
@@ -108,7 +110,7 @@ backend/.venv/bin/python scripts/check_staged_account_report.py \
   --input-from /path/to/previous/report.json --read-note-ids n1,n3
 ```
 
-默认只预览范围，零模型请求、零文件写入。明确加 `--live --output data/evals/staged-check/new-case` 才执行；输出目录必须不存在。`--read-note-ids` 可固定 1～3 篇代表作做对照，省略时由整体阅读选择。报告保留每步输入、原响应、耗时、用量和错误，成败都保存；诊断含私人笔记，放在被忽略的私有目录，不提交。被取消请求可能已在服务端执行，没有返回用量时不可按零费用计算。
+默认只预览范围，零模型请求、零文件写入；同时列出正常请求数和包含恢复的上限。明确加 `--live --output data/evals/staged-check/new-case` 才执行；输出目录必须不存在。`--read-note-ids` 可固定 1～3 篇代表作做对照，省略时由整体阅读选择。`--thinking on|off --thinking-budget 4096` 仅覆盖本次检查，不更改正式配置；当前使用 off。报告保留每步完整 userPrompt、解析输入、原响应、耗时、用量和错误，成败都保存；还记录 responseFormat、提示哈希、尝试／恢复／跳过／删项统计。`stages[].output` 是原始结果，`result.output` 是局部保留后的编译结果，`validatedResult` 是产品最终结果；`portraitVerification` 比较编译后与最终核验，不能用它替代原始删项诊断。来源校验仍不等于语义正确。诊断含私人笔记，放在被忽略的私有目录，不提交。被取消请求可能已在服务端执行，没有返回用量时不可按零费用计算。
 
 ### 账号画像读取超时
 

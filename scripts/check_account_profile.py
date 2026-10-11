@@ -32,7 +32,7 @@ from app.services.account_diagnosis_evidence import (  # noqa: E402
     profile_stage_input,
     verified_portrait,
 )
-from app.services.account_report_editorial import compile_editorial_profile  # noqa: E402
+from app.services.account_report_delivery import compile_usable_account_report  # noqa: E402
 from app.services.account_report_prompt import profile_prompt_version  # noqa: E402
 from app.services.analysis_runs import AnalysisRunService  # noqa: E402
 from app.services.creator_analysis_scope import ordered_notes, scope_creator_profile  # noqa: E402
@@ -214,7 +214,11 @@ async def run_check(service, case: dict) -> dict:
         response = await service.call_operation(ModelOperation.PROFILE, case["context"])
         report.update(output=response.output, modelMetadata=response.model_metadata)
         phase = "validation"
-        prepared = compile_editorial_profile(response.output, case["snapshot"])
+        omissions: list[str] = []
+        prepared = compile_usable_account_report(
+            response.output, case["snapshot"], omissions=omissions,
+        )
+        report["omittedReportItems"] = omissions
         result = ProfileStageResult.model_validate(prepared).model_dump(mode="json")
         raw = result["profile"].get("accountPortrait")
         observations = case["observations"]

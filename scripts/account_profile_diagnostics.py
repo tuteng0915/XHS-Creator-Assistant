@@ -14,7 +14,12 @@ from copy import deepcopy
 import httpx
 
 from app.models import ModelOperation
-from app.services.model_calls import MAX_TOKENS, ModelCallService
+from app.services.model_calls import (
+    MAX_TOKENS,
+    TOKEN_USAGE_KEYS,
+    ModelCallService,
+    safe_token_usage,
+)
 
 TRACE_OPERATIONS = {
     "connection": {"connect_tcp", "start_tls"},
@@ -25,12 +30,11 @@ TRACE_OPERATIONS = {
               "receive_response_headers", "receive_response_body"},
 }
 MAX_TRACE_EVENTS = 128
-USAGE_KEYS = ("prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens")
+USAGE_KEYS = TOKEN_USAGE_KEYS
 
 
 def safe_usage(value):
-    return {key: value[key] for key in USAGE_KEYS
-            if isinstance(value, dict) and type(value.get(key)) is int and value[key] >= 0}
+    return safe_token_usage(value)
 
 
 class DiagnosticProfileCalls(ModelCallService):
@@ -88,7 +92,10 @@ class DiagnosticProfileCalls(ModelCallService):
         )})
 
     async def _call_qwen(self, operation, context, *, review_prompt=None):
-        self.diagnostic = {"phase": "configuration"}
+        thinking = self.qwen_thinking_parameters(operation)
+        self.diagnostic = {"phase": "configuration",
+                           "enableThinking": thinking.get("enable_thinking"),
+                           "thinkingBudget": thinking.get("thinking_budget")}
         self._request_recorded = False
         self._started = time.monotonic()
         try:
@@ -117,6 +124,11 @@ class DiagnosticProfileCalls(ModelCallService):
         safe.update(provider="qwen", operation=operation.value,
                     requestCount=self.request_attempts,
                     usage=safe_usage(metadata.get("usage")) or self._total_usage())
+        enabled = metadata.get("enableThinking")
+        budget = metadata.get("thinkingBudget")
+        safe["enableThinking"] = enabled if type(enabled) is bool else None
+        safe["thinkingBudget"] = (budget if enabled is True and type(budget) is int
+                                  and 1 <= budget <= 8192 else None)
         return safe
 
     def _count_request(self):
@@ -149,6 +161,16 @@ class DiagnosticProfileCalls(ModelCallService):
         request.extensions["trace"] = self._record_network_event
         payload = json.loads(request.content)
         self.diagnostic["requestedMaxTokens"] = payload.get("max_tokens")
+        self.diagnostic["enableThinking"] = payload.get("enable_thinking")
+        self.diagnostic["thinkingBudget"] = payload.get("thinking_budget")
+        response_format = payload.get("response_format", {})
+        self.diagnostic["responseFormat"] = response_format.get("type")
+        schema = response_format.get("json_schema")
+        if isinstance(schema, dict):
+            self.diagnostic["responseSchema"] = schema.get("name")
+            self.diagnostic["schemaHash"] = hashlib.sha256(
+                json.dumps(schema.get("schema"), sort_keys=True).encode(),
+            ).hexdigest()
         system = next((item.get("content", "") for item in payload.get("messages", [])
                        if item.get("role") == "system"), "")
         user = next((item.get("content", "") for item in payload.get("messages", [])

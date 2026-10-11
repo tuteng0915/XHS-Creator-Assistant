@@ -1,19 +1,34 @@
+"""Deterministic tests: staged generation uses the shared source-led report contract."""
+
 import asyncio
 import json
 from copy import deepcopy
 
+import httpx
 import pytest
-from pydantic import ValidationError as PydanticValidationError
 
 from app.models import ModelCallResponse
 from app.services.account_diagnosis_evidence import verified_portrait
+from app.services.account_report_contract import AccountReportOutputError
+from app.services.account_report_delivery import compile_usable_account_report
+from app.services.account_report_editorial import compile_editorial_profile
 from app.services.account_report_passages import reading_fragments
 from app.services.account_report_pipeline import (
+    DEFAULT_READING_QUESTION,
+    FORMAT_RECOVERY_PROMPT,
+    MAX_EXTRA_REQUESTS,
+    OVERVIEW_PROMPT,
     PIPELINE_VERSION,
+    READ_PROMPT,
+    SYNTHESIS_PROMPT,
     TEXT_SCOPE,
     run_staged_account_report,
 )
-from app.services.account_report_sources import build_report_sources
+from app.services.account_report_prompt import (
+    SOURCE_LED_PROFILE_PROMPT,
+    build_source_led_profile_prompt,
+)
+from app.services.account_report_sources import prepare_source_led_context
 from app.workflows.account_diagnosis import ProfileStageResult
 
 
@@ -22,8 +37,8 @@ def source_notes():
         {"noteId": "stable-a", "title": "甲篇：先确认条件",
          "body": "甲篇开头。先核对费用。甲篇结尾。",
          "metrics": {"liked": 123456}, "comments": [{"content": "不应进入精读"}]},
-        {"noteId": "stable-b", "title": "乙篇：承认尚未展开",
-         "body": "乙篇开头。这里只是一个预告。乙篇结尾。",
+        {"noteId": "stable-b", "title": "乙篇：从问题出发",
+         "body": "乙篇开头。换个角度看这个问题。乙篇结尾。",
          "metrics": {"liked": 987654}},
         {"noteId": "stable-c", "title": "丙篇：另一种题材",
          "body": "丙篇独有的正文不应进入其他精读。"},
@@ -42,46 +57,95 @@ def context_for(notes=None):
     }
 
 
+def claim(text, ids=("n1",)):
+    return {"text": text, "noteIds": list(ids)}
+
+
 def overview_for(ids=("n1", "n2")):
     return {
-        "summary": claim("初步猜想：每篇都给出了完整行动路径。"),
+        "summary": claim("初步猜想：这些篇目关注如何判断具体条件。"),
         "directions": [claim("在具体问题里确认条件")],
-        "hypotheses": ["先确认约束再给出行动路径"],
-        "readings": [{"noteId": note_id, "question": f"这篇是否真的给出了完整路径？{note_id}"}
+        "hypotheses": ["不同篇目怎样组织判断的依据？"],
+        "readings": [{"noteId": note_id, "question": f"这篇具体怎样组织判断？{note_id}"}
                      for note_id in ids],
     }
+
+
+def fragmentary_overview(shape):
+    output = overview_for()
+    if shape == "summary-fragment":
+        output["summary"]["text"] = "围绕"
+    else:
+        assert shape == "planning-fragments"
+        output["directions"][0]["text"] = "以"
+        output["readings"][0]["question"] = "这篇用"
+    return output
 
 
 def reading_for(note_id):
     if note_id == "n1":
         return {
-            "assessment": "甲篇通过核对条件提供行动参照。", "correction": "",
+            "assessment": "标题用“先”明确准备顺序；开头后写核对费用，再以结尾收束。",
+            "correction": "",
             "examples": [{"excerptIds": ["b2"],
                           "interpretation": "以明确动作说明准备工作。"}],
         }
     return {
-        "assessment": "乙篇只提出后续要谈的问题，正文尚未展开。",
-        "correction": "这篇是预告，不能据此认定已经给出完整行动路径。",
+        "assessment": "标题把注意力放在问题上，正文从开头转向另一种观察角度再收束。",
+        "correction": "本篇强调换角度看问题，不能直接归为核对条件的行动路径。",
         "examples": [{"excerptIds": ["b2"],
-                      "interpretation": "明确标注预告边界，避免把设问当成结论。"}],
+                      "interpretation": "用“换个角度”明确提示看问题的方向发生变化。"}],
     }
 
 
-def claim(text, ids=("n1",)):
-    return {"text": text, "noteIds": list(ids)}
+def source_claim(text, ids=("n1",), excerpt_id="t"):
+    return {"statement": text, "evidence": [
+        {"noteId": note_id, "excerptId": excerpt_id} for note_id in ids
+    ]}
 
 
-def synthesis_for(*, examples=True):
-    return {
-        "summary": claim("关注具体问题的判断过程；既有行动经验，也有待展开的设问。", ("n1", "n2")),
-        "keywords": [claim("具体判断")],
-        "directions": [claim("从条件和问题切入经验分享。", ("n1", "n2"))],
-        "strengths": [{"text": "把判断落到能观察的细节。", "exampleIds": ["e1"]}]
-        if examples else [],
-        "writing": [{"text": "交代文字的用途和边界。", "exampleIds": ["e2"]}]
-        if examples else [],
-        "nextSteps": [claim("下一篇可展开一个具体问题，先列条件，再让读者比较选项。")],
-    }
+def synthesis_for(*, notes=None, examples=True):
+    notes = source_notes() if notes is None else notes
+    ids = tuple(f"n{index}" for index in range(1, min(2, len(notes)) + 1))
+    title = notes[0]["title"]
+    return {"profile": {
+        "reportFormat": "source-led/v3",
+        "accountPortrait": {
+            "summary": source_claim("你主要写具体问题的判断过程。不同篇目有各自的展开方式。", ids),
+            "keywords": [source_claim("具体判断")],
+            "recurringThemes": [source_claim("经验判断：不同条件怎样影响选择", ids)]
+            if len(ids) > 1 else [],
+            "strengths": [source_claim(f"在《{title}》里，你把判断落到明确动作。", ("n1",), "b2")]
+            if examples else [],
+        },
+        "titleReadings": [{"noteId": "n1", "parts": [{"text": title, "role": "点明关注点"}]}],
+        "expressionReadings": [{
+            "examples": [{"noteId": "n1", "fromExcerptId": "b2", "toExcerptId": "b2"}],
+            "kind": "wording", "technique": "用具体动作说明判断过程。",
+            "application": "适合需要交代准备条件的经验分享。",
+        }] if examples else [],
+        "structureReading": {
+            "noteId": "n1", "units": [
+                {"excerptIds": ["b1"], "label": "引入", "reading": "先交代观察起点"},
+                {"excerptIds": ["b2", "b3"], "label": "展开与收束", "reading": "呈现动作后收束"},
+            ], "kind": "narrative", "scope": "whole_note", "scopeLabel": "",
+            "overview": "从开头引入观察，再展开具体动作并收束。",
+        } if examples else None,
+        "nextMoves": [{
+            "sourceNoteId": "n1", "sourceExcerptId": "b2", "basis": "把判断落在具体动作上。",
+            "action": "下次写经验判断时，可以并列比较两种条件，让读者看清选择依据。",
+        }] if examples else [],
+    }}
+
+
+def decode_payload(stage, user):
+    if stage != "synthesis":
+        return json.loads(user)
+    source = user.split("历史笔记：\n", 1)[1].split("\n\n请按固定六部分模板", 1)[0]
+    payload = json.loads(source)
+    marker = "\n\n可选精读观察：\n"
+    payload["readings"] = json.loads(user.split(marker, 1)[1]) if marker in user else []
+    return payload
 
 
 class FakeCalls:
@@ -92,11 +156,11 @@ class FakeCalls:
         self.readings = {note_id: reading_for(note_id) for note_id in ids}
         if readings is not None:
             self.readings.update(readings)
-        self.synthesis = synthesis_for() if synthesis is None else synthesis
+        self.synthesis = synthesis_for(notes=self.notes) if synthesis is None else synthesis
         self.calls = []
 
     async def __call__(self, stage, system, user):
-        payload = json.loads(user)
+        payload = decode_payload(stage, user)
         self.calls.append((stage, system, payload))
         if stage == "overview":
             output = self.overview
@@ -110,6 +174,40 @@ class FakeCalls:
         return ModelCallResponse(output=deepcopy(output), model_metadata={"model": "fake"})
 
 
+class ScriptedCalls(FakeCalls):
+    """One outcome per actual call, with per-stage/note deterministic failures."""
+
+    def __init__(self, failures, **kwargs):
+        super().__init__(**kwargs)
+        self.failures = {key: list(values) for key, values in failures.items()}
+        self.raw_calls = []
+        self.counts = {}
+
+    async def __call__(self, stage, system, user):
+        self.raw_calls.append((stage, system, user))
+        response = await super().__call__(stage, system, user)
+        note_id = ""
+        if stage == "read":
+            title = json.loads(user)["note"]["title"]
+            note_id = next(f"n{index}" for index, note in enumerate(self.notes, 1)
+                           if note["title"] == title)
+        key = stage, note_id
+        self.counts[key] = self.counts.get(key, 0) + 1
+        response.model_metadata = {
+            "model": "fake", "requestId": f"call-{len(self.raw_calls)}",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 2,
+                      "total_tokens": 3, "reasoning_tokens": 1},
+        }
+        remaining = self.failures.get(key, [])
+        if remaining:
+            outcome = remaining.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            response.output = deepcopy(outcome)
+            response.model_metadata["privateResponse"] = "private-invalid-response"
+        return response
+
+
 def snapshot_for(notes):
     return {"xhsCreatorProfile": {"notes": [
         {"noteId": note["noteId"], "title": note["title"], "desc": note["body"]}
@@ -117,42 +215,33 @@ def snapshot_for(notes):
     ]}}
 
 
-def test_all_stage_prompts_share_the_saved_text_and_missing_material_scope():
-    model = FakeCalls()
-    asyncio.run(run_staged_account_report(context_for(), model))
-    assert all(system.startswith(TEXT_SCOPE) for _, system, _ in model.calls)
-    for limitation in ("已保存的标题和文字正文", "未读取图片内文字或视频", "不保证材料包含全文",
-                       "未提供论证不等于原作没有论证", "不能据此断言是预告"):
-        assert limitation in TEXT_SCOPE
-
-
 @pytest.mark.parametrize("body", [
     "", "   \r\n\t", "  首句。\r\n下一句！\nemoji🙂保留。尾部  ",
     "长" * 321, "重复。中间。重复。", "English one. English two?\n尾句",
 ])
-def test_reading_fragment_catalog_is_reversible_positioned_and_preserves_full_title(body):
-    title = "完整标题" * 50
-    fragments = reading_fragments(title, body)
-    assert fragments["t"] == {"excerptId": "t", "source": "title", "quote": title,
-                               "start": 0, "end": len(title)}
-    body_fragments = [fragment for fragment in fragments.values() if fragment["source"] == "body"]
-    assert "".join(fragment["quote"] for fragment in body_fragments) == body
-    offset = 0
-    for index, fragment in enumerate(body_fragments, 1):
-        assert fragment["excerptId"] == f"b{index}"
-        assert fragment["start"] == offset
-        assert fragment["end"] == offset + len(fragment["quote"])
-        assert body[fragment["start"]:fragment["end"]] == fragment["quote"]
-        assert len(fragment["quote"]) <= 160
-        offset = fragment["end"]
-    assert offset == len(body)
+def test_every_selected_body_is_reversible_in_synthesis_including_an_unread_note(body):
+    notes = source_notes()
+    notes[2].update(title="完整标题" * 50, body=body, type="normal")
+    model = FakeCalls(notes=notes)
+    asyncio.run(run_staged_account_report(context_for(notes), model))
+    payload = model.calls[-1][2]
+    expected = json.loads(prepare_source_led_context(context_for(notes))["historicalPosts"])
+    assert payload["notes"] == expected["notes"]
+    assert payload["readingScope"] == expected["readingScope"]
+    assert payload["readingScope"]["selectedNoteCount"] == 3
+    assert [item["noteId"] for item in payload["readings"]] == ["n1", "n2"]
+    for original, projected in zip(notes, payload["notes"], strict=True):
+        assert projected["title"] == original["title"]
+        assert "".join(item["text"] for item in projected["bodyExcerpts"]) == original["body"]
+        assert not {"body", "quote", "stableId", "metrics", "comments"} & projected.keys()
+        assert all(set(item) == {"excerptId", "text"} for item in projected["bodyExcerpts"])
+    assert payload["notes"][2]["type"] == "normal"
 
 
-def test_only_selected_readings_build_local_catalogs_after_overview(monkeypatch):
+def test_only_selected_readings_bind_positioned_catalogs_after_overview(monkeypatch):
     from app.services import account_report_pipeline
 
-    model = FakeCalls()
-    events = []
+    model, events = FakeCalls(), []
     selected_titles = [note["title"] for note in source_notes()[:2]]
 
     def fragments(title, body):
@@ -163,8 +252,6 @@ def test_only_selected_readings_build_local_catalogs_after_overview(monkeypatch)
 
     async def call(stage, system, user):
         events.append(stage)
-        if stage == "overview":
-            assert events == ["overview"]
         return await model(stage, system, user)
 
     monkeypatch.setattr(account_report_pipeline, "reading_fragments", fragments)
@@ -172,157 +259,9 @@ def test_only_selected_readings_build_local_catalogs_after_overview(monkeypatch)
     assert {event[1] for event in events if isinstance(event, tuple)} == set(selected_titles)
 
 
-def test_overview_parallel_isolated_readings_synthesis_and_program_bound_examples():
-    async def scenario():
-        notes = source_notes()
-        notes[0]["body"] += "保留完整原文" * 1500
-        context = context_for(notes)
-        before = deepcopy(context)
-        model = FakeCalls(notes=notes, ids=("n2", "n1"))
-        calls, entered, finished, updates = [], set(), [], []
-        both_started, first_reported = asyncio.Event(), asyncio.Event()
-
-        async def progress(update):
-            updates.append(deepcopy(update))
-            if update["phase"] == "reading" and update["completed"] == 1:
-                first_reported.set()
-
-        async def call(stage, system, user):
-            payload = json.loads(user)
-            calls.append((stage, payload))
-            assert "json" in system.lower()
-            if stage == "read":
-                title = payload["note"]["title"]
-                entered.add(title)
-                if len(entered) == 2:
-                    both_started.set()
-                await both_started.wait()
-                if title == notes[1]["title"]:
-                    await first_reported.wait()
-                finished.append(title)
-            if stage == "synthesis":
-                assert finished == [notes[0]["title"], notes[1]["title"]]
-            return await model(stage, system, user)
-
-        result = await asyncio.wait_for(
-            run_staged_account_report(context, call, on_update=progress), timeout=2,
-        )
-        assert context == before
-        assert [stage for stage, _ in calls] == ["overview", "read", "read", "synthesis"]
-        overview_payload = calls[0][1]
-        assert overview_payload == {"account": context["positioning"], "notes": [
-            {"noteId": f"n{index}", "title": note["title"], "body": note["body"]}
-            for index, note in enumerate(notes, 1)
-        ]}
-        for _, payload in calls[1:3]:
-            source = next(note for note in notes if note["title"] == payload["note"]["title"])
-            assert set(payload) == {"question", "note"}
-            catalog = build_report_sources(snapshot_for([source]))[source["noteId"]]
-            assert payload["note"] == {
-                "title": source["title"], "bodyExcerpts": [
-                    {"excerptId": key, "text": text}
-                    for key, text in catalog.items() if key != "t"
-                ],
-            }
-            assert "".join(item["text"] for item in payload["note"]["bodyExcerpts"]) \
-                == source["body"]
-            assert "body" not in payload["note"]
-            serialized = json.dumps(payload, ensure_ascii=False)
-            assert model.overview["summary"]["text"] not in serialized
-            assert context["positioning"] not in serialized
-            for other in notes:
-                if other is not source:
-                    assert other["title"] not in serialized
-                    assert other["body"] not in serialized
-        synthesis_payload = calls[-1][1]
-        assert set(synthesis_payload) == {"initialView", "notes", "readings"}
-        assert "readings" not in synthesis_payload["initialView"]
-        assert synthesis_payload["initialView"] == {
-            key: model.overview[key] for key in ("summary", "directions", "hypotheses")
-        }
-        assert [item["noteId"] for item in synthesis_payload["readings"]] == ["n2", "n1"]
-        assert [item["question"] for item in synthesis_payload["readings"]] \
-            == [item["question"] for item in model.overview["readings"]]
-        assert [item["examples"] for item in synthesis_payload["readings"]] == [
-            [{"id": "e1", "observation": reading_for("n2")["examples"][0]["interpretation"]}],
-            [{"id": "e2", "observation": reading_for("n1")["examples"][0]["interpretation"]}],
-        ]
-        assert synthesis_payload["readings"][0]["correction"] == reading_for("n2")["correction"]
-        serialized = json.dumps(synthesis_payload, ensure_ascii=False)
-        for note in notes:
-            assert note["body"] not in serialized
-        for quote in ("先核对费用。", "这里只是一个预告。"):
-            assert quote not in serialized
-        for _, payload in calls:
-            serialized = json.dumps(payload, ensure_ascii=False)
-            for private in ("metrics", "comments", "123456", "987654", "stable-a",
-                            "packet-private", "context-private"):
-                assert private not in serialized
-
-        portrait = result.output["profile"]["accountPortrait"]
-        assert portrait["strengths"] == [{
-            "statement": "把判断落到能观察的细节。",
-            "evidence": [{"noteId": "stable-b", "scope": "note"}],
-            "examples": [{"noteId": "stable-b", "title": notes[1]["title"],
-                          "fragments": [{"excerptId": "b2", "source": "body",
-                                         "quote": "这里只是一个预告。", "start": 5, "end": 14}],
-                          "interpretation": "明确标注预告边界，避免把设问当成结论。"}],
-        }]
-        assert portrait["expressionPatterns"][0]["evidence"] == [
-            {"noteId": "stable-a", "scope": "note"},
-        ]
-        assert portrait["summary"]["statement"] == model.synthesis["summary"]["text"]
-        assert portrait["summary"]["evidence"] == [
-            {"noteId": "stable-a", "scope": "note"},
-            {"noteId": "stable-b", "scope": "note"},
-        ]
-        metadata = result.model_metadata
-        assert metadata["accountReportMode"] == "staged"
-        assert metadata["promptVersion"] == PIPELINE_VERSION
-        assert metadata["representativeNoteIds"] == ["stable-b", "stable-a"]
-        assert [item["noteId"] for item in metadata["calls"] if item["stage"] == "read"] \
-            == ["stable-b", "stable-a"]
-        assert [item["id"] for item in metadata["boundExamples"]] == ["e1", "e2"]
-        for bound in metadata["boundExamples"]:
-            note = next(note for note in notes if note["noteId"] == bound["stableId"])
-            assert bound["title"] == note["title"]
-            for fragment in bound["fragments"]:
-                assert note[fragment["source"]][fragment["start"]:fragment["end"]] \
-                    == fragment["quote"]
-        assert all("examples" not in item for item in metadata["readingAssessments"])
-        assert [(item["phase"], item["status"], item["completed"], item["total"])
-                for item in updates] == [
-            ("overview", "running", 0, 1), ("overview", "completed", 1, 1),
-            ("reading", "running", 0, 2), ("reading", "running", 1, 2),
-            ("reading", "completed", 2, 2), ("synthesis", "running", 0, 1),
-            ("synthesis", "completed", 1, 1),
-        ]
-        assert updates[1]["preview"] == model.overview["summary"]["text"]
-        assert updates[3]["preview"] \
-            == f"《{notes[0]['title']}》：{reading_for('n1')['assessment']}"
-        assert updates[4]["preview"].splitlines() == [
-            f"《{notes[1]['title']}》：{reading_for('n2')['assessment']}",
-            f"《{notes[0]['title']}》：{reading_for('n1')['assessment']}",
-        ]
-        parsed = ProfileStageResult.model_validate(result.output).profile.accountPortrait
-        assert parsed == portrait
-        verified = verified_portrait(parsed, snapshot_for(notes))
-        for key, value in portrait.items():
-            if isinstance(value, list):
-                assert [item["statement"] for item in verified[key]] \
-                    == [item["statement"] for item in value]
-        assert verified["summary"]["statement"] == portrait["summary"]["statement"]
-        for section in ("strengths", "expressionPatterns"):
-            assert verified[section][0]["examples"] == portrait[section][0]["examples"]
-
-    asyncio.run(scenario())
-
-
-def test_input_and_forced_selection_are_frozen_before_callbacks_can_change_them():
-    context = context_for()
-    original_notes = json.loads(context["historicalPosts"])["notes"]
-    forced = ["n1", "n2"]
-    model = FakeCalls()
+def test_input_selection_synthesis_sources_and_compiler_snapshot_are_frozen_before_callbacks():
+    context, forced, model = context_for(), ["n1", "n2"], FakeCalls()
+    original = deepcopy(context)
 
     async def progress(update):
         if update["phase"] == "overview" and update["status"] == "running":
@@ -333,11 +272,13 @@ def test_input_and_forced_selection_are_frozen_before_callbacks_can_change_them(
     result = asyncio.run(run_staged_account_report(
         context, model, on_update=progress, representative_note_ids=forced,
     ))
-    payload = model.calls[0][2]
-    assert payload["account"] == "作者提供的账号定位"
-    assert payload["representativeNoteIds"] == ["n1", "n2"]
-    assert [note["body"] for note in payload["notes"]] \
-        == [note["body"] for note in original_notes]
+    assert model.calls[0][2]["account"] == original["positioning"]
+    assert model.calls[0][2]["representativeNoteIds"] == ["n1", "n2"]
+    projected = json.loads(prepare_source_led_context(original)["historicalPosts"])
+    assert model.calls[-1][2]["notes"] == projected["notes"]
+    assert result.output == compile_usable_account_report(
+        model.synthesis, snapshot_for(source_notes()),
+    )
     assert result.model_metadata["representativeNoteIds"] == ["stable-a", "stable-b"]
 
 
@@ -376,13 +317,10 @@ def test_slow_progress_store_cannot_overwrite_newer_reading_counts_or_previews()
         ))
         try:
             await asyncio.wait_for(second_model_returned.wait(), timeout=2)
-            # The second model has returned while the first publication is blocked.
-            # Its progress must wait; model requests themselves must not wait.
-            before_release = deepcopy(published)
-            callbacks_before_release = list(callback_counts)
+            before_release, callbacks_before_release = deepcopy(published), list(callback_counts)
         finally:
             release_first_store.set()
-        result = await asyncio.wait_for(task, timeout=2)
+        await asyncio.wait_for(task, timeout=2)
         assert model_returns == ["n1", "n2"]
         assert [update["completed"] for update in before_release] == [0]
         assert callbacks_before_release == [0, 1]
@@ -392,90 +330,17 @@ def test_slow_progress_store_cannot_overwrite_newer_reading_counts_or_previews()
             f"《{source_notes()[0]['title']}》：{reading_for('n1')['assessment']}",
             f"《{source_notes()[1]['title']}》：{reading_for('n2')['assessment']}",
         ]
-        assert len(result.model_metadata["calls"]) == 4
 
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("ids", [("n1", "n1"), ("n1", "n404"), ("stable-a",), (),
-                                ("n1", "n2", "n3", "n4")])
-def test_invalid_overview_selection_stops_before_readings(ids):
-    model = FakeCalls(ids=ids)
-    with pytest.raises((ValueError, PydanticValidationError)):
-        asyncio.run(run_staged_account_report(context_for(), model))
-    assert [stage for stage, _, _ in model.calls] == ["overview"]
-
-
-@pytest.mark.parametrize("section", ["summary", "directions"])
-@pytest.mark.parametrize("note_ids", [["n404"], ["stable-a"], []])
-def test_overview_claims_require_known_local_source_ids_before_any_reading(section, note_ids):
-    overview = overview_for()
-    target = overview[section] if section == "summary" else overview[section][0]
-    target["noteIds"] = note_ids
-    model = FakeCalls(overview=overview)
-    with pytest.raises((ValueError, PydanticValidationError)):
-        asyncio.run(run_staged_account_report(context_for(), model))
-    assert [stage for stage, _, _ in model.calls] == ["overview"]
-
-
-@pytest.mark.parametrize("section", ["summary", "directions"])
-def test_overview_does_not_accept_unattributed_legacy_plain_text_claims(section):
-    overview = overview_for()
-    overview[section] = "没有来源的总结" if section == "summary" else ["没有来源的方向"]
-    model = FakeCalls(overview=overview)
-    with pytest.raises(PydanticValidationError):
-        asyncio.run(run_staged_account_report(context_for(), model))
-    assert [stage for stage, _, _ in model.calls] == ["overview"]
-
-
-def test_overview_claim_attribution_reaches_synthesis_without_losing_unread_note_refs():
-    overview = overview_for()
-    overview["summary"] = claim("乙篇提出后续问题，丙篇提供不同题材。", ("n2", "n3"))
-    overview["directions"] = [claim("后续问题的预告。", ("n2",)),
-                              claim("另一种题材的观察。", ("n3",))]
-    model = FakeCalls(overview=overview)
-    before = deepcopy(overview)
-    asyncio.run(run_staged_account_report(context_for(), model))
-    initial = model.calls[-1][2]["initialView"]
-    assert initial["summary"] == before["summary"]
-    assert initial["directions"] == before["directions"]
-    assert [item["noteIds"] for item in initial["directions"]] == [["n2"], ["n3"]]
-    assert model.overview == before
-
-
-def test_synthesis_receives_the_exact_question_a_reader_correction_answers():
-    overview = overview_for()
-    overview["hypotheses"] = ["先确认约束再给出行动路径", "每篇都用类比解释经验"]
-    overview["readings"][1]["question"] = "这篇是否真的用类比解释经验？"
-    reading = reading_for("n2")
-    reading["correction"] = "这个判断不成立。"
-    model = FakeCalls(overview=overview, readings={"n2": reading})
-    result = asyncio.run(run_staged_account_report(context_for(), model))
-    conclusion = model.calls[-1][2]["readings"][1]
-    assert conclusion["noteId"] == "n2"
-    assert conclusion["question"] == overview["readings"][1]["question"]
-    assert conclusion["correction"] == "这个判断不成立。"
-    assert result.model_metadata["readingAssessments"][1]["question"] \
-        == overview["readings"][1]["question"]
-
-
-@pytest.mark.parametrize("note_count", [2, 3])
-def test_unforced_multiple_note_input_requires_at_least_two_representatives(note_count):
-    notes = source_notes()[:note_count]
-    model = FakeCalls(notes=notes, ids=("n1",))
-    with pytest.raises(ValueError, match="代表作|至少|精读"):
-        asyncio.run(run_staged_account_report(context_for(notes), model))
-    assert [stage for stage, _, _ in model.calls] == ["overview"]
-
-
 def test_explicit_evaluation_can_still_read_one_representative_from_multiple_notes():
-    synthesis = synthesis_for()
-    synthesis["writing"] = []
-    model = FakeCalls(ids=("n1",), synthesis=synthesis)
+    model = FakeCalls(ids=("n1",))
     result = asyncio.run(run_staged_account_report(
         context_for(), model, representative_note_ids=["n1"],
     ))
     assert [stage for stage, _, _ in model.calls] == ["overview", "read", "synthesis"]
+    assert len(model.calls[-1][2]["notes"]) == 3
     assert result.model_metadata["representativeNoteIds"] == ["stable-a"]
 
 
@@ -484,194 +349,36 @@ def test_explicit_evaluation_can_still_read_one_representative_from_multiple_not
 def test_invalid_fixed_selection_fails_before_any_model_call(forced):
     model = FakeCalls()
     with pytest.raises(ValueError, match="固定精读范围"):
-        asyncio.run(run_staged_account_report(
-            context_for(), model, representative_note_ids=forced,
-        ))
+        asyncio.run(run_staged_account_report(context_for(), model, representative_note_ids=forced))
     assert model.calls == []
 
 
-def test_fixed_evaluation_rejects_swapped_representatives_but_accepts_reordering():
-    model = FakeCalls(ids=("n2", "n3"))
-    with pytest.raises(ValueError, match="不能用换作品代替验收"):
-        asyncio.run(run_staged_account_report(
-            context_for(), model, representative_note_ids=["n1", "n2"],
-        ))
-    assert len(model.calls) == 1
-    model = FakeCalls(ids=("n2", "n1"))
-    result = asyncio.run(run_staged_account_report(
-        context_for(), model, representative_note_ids=["n1", "n2"],
-    ))
-    assert result.model_metadata["representativeNoteIds"] == ["stable-b", "stable-a"]
-
-
-@pytest.mark.parametrize("excerpt_ids", [
-    ["b404"], ["n2:b2"], ["stable-b:b2"], [], ["b1", "b2", "b3", "t"],
-    ["b2", "b2"], ["b3", "b2"], ["b2", "t"], [1],
+@pytest.mark.parametrize("keys", [
+    (["b2"], ["b2"]), (["b1", "b2"], ["b2", "b3"]), (["b1", "b3"], ["b3"]),
 ])
-def test_invalid_excerpt_id_selections_are_rejected(excerpt_ids):
+def test_overlapping_and_noncontiguous_groups_are_auditable_without_duplicate_source_text(keys):
     reading = reading_for("n1")
-    reading["examples"][0]["excerptIds"] = excerpt_ids
+    reading["examples"] = [
+        {"excerptIds": ids, "interpretation": f"第{index}种具体观察。"}
+        for index, ids in enumerate(keys, 1)
+    ]
     model = FakeCalls(readings={"n1": reading})
-    with pytest.raises((ValueError, PydanticValidationError)):
-        asyncio.run(run_staged_account_report(context_for(), model))
-    assert "synthesis" not in [stage for stage, _, _ in model.calls]
-
-
-def test_an_excerpt_id_present_only_in_another_note_cannot_be_selected():
-    notes = source_notes()
-    notes[1]["body"] += "另一篇第四句。"
-    assert "b4" in build_report_sources(snapshot_for(notes))["stable-b"]
-    reading = reading_for("n1")
-    reading["examples"][0]["excerptIds"] = ["b4"]
-    model = FakeCalls(notes=notes, readings={"n1": reading})
-    with pytest.raises(ValueError):
-        asyncio.run(run_staged_account_report(context_for(notes), model))
-    assert "synthesis" not in [stage for stage, _, _ in model.calls]
-
-
-@pytest.mark.parametrize("excerpt_id", ["t", "b1"])
-def test_blank_only_title_or_body_excerpt_is_not_usable_evidence(excerpt_id):
-    notes = source_notes()
-    notes[0].update(title="   ", body="   \n实际正文。")
-    reading = reading_for("n1")
-    reading["examples"][0]["excerptIds"] = [excerpt_id]
-    model = FakeCalls(notes=notes, readings={"n1": reading})
-    with pytest.raises(ValueError):
-        asyncio.run(run_staged_account_report(context_for(notes), model))
-    assert "synthesis" not in [stage for stage, _, _ in model.calls]
-
-
-@pytest.mark.parametrize("mixed", [False, True])
-def test_new_reader_contract_rejects_legacy_or_mixed_free_quote_output(mixed):
-    reading = reading_for("n1")
-    old = {"source": "body", "quote": "先核对费用。", "interpretation": "以动作说明准备。"}
-    if mixed:
-        old["excerptIds"] = ["b2"]
-    reading["examples"] = [old]
-    model = FakeCalls(readings={"n1": reading})
-    with pytest.raises(PydanticValidationError):
-        asyncio.run(run_staged_account_report(context_for(), model))
-    assert "synthesis" not in [stage for stage, _, _ in model.calls]
-
-
-@pytest.mark.parametrize("different_interpretation", [False, True])
-def test_one_source_location_can_support_multiple_reading_groups(different_interpretation):
-    reading = reading_for("n1")
-    duplicate = deepcopy(reading["examples"][0])
-    if different_interpretation:
-        duplicate["interpretation"] = "同一句也能从表达节奏的角度解释。"
-    reading["examples"].append(duplicate)
-    synthesis = synthesis_for()
-    synthesis["strengths"][0]["exampleIds"] = ["e1", "e2"]
-    synthesis["writing"] = []
-    model = FakeCalls(readings={"n1": reading}, synthesis=synthesis)
     result = asyncio.run(run_staged_account_report(context_for(), model))
     bound = result.model_metadata["boundExamples"][:2]
     assert [example["id"] for example in bound] == ["e1", "e2"]
-    assert bound[0]["fragments"] == bound[1]["fragments"]
-    assert [example["interpretation"] for example in bound] \
-        == [example["interpretation"] for example in reading["examples"]]
-    portrait = result.output["profile"]["accountPortrait"]
-    verified = verified_portrait(portrait, snapshot_for(source_notes()))
-    assert len(verified["strengths"][0]["examples"]) == 2
-    assert verified["strengths"][0]["examples"] == portrait["strengths"][0]["examples"]
-
-
-def test_identical_text_at_distinct_title_and_body_locations_remains_separate_examples():
-    notes = source_notes()
-    notes[0]["title"] = "先核对费用。"
-    reading = reading_for("n1")
-    reading["examples"].append({"excerptIds": ["t"],
-                                "interpretation": "原标题直接点明准备动作。"})
-    model = FakeCalls(notes=notes, readings={"n1": reading})
-    result = asyncio.run(run_staged_account_report(context_for(notes), model))
-    examples = result.model_metadata["boundExamples"][:2]
-    assert [example["id"] for example in examples] == ["e1", "e2"]
-    assert [example["fragments"][0]["source"] for example in examples] == ["body", "title"]
-    assert [example["fragments"][0]["start"] for example in examples] == [5, 0]
-
-
-def test_title_example_preserves_exact_whitespace_source_offsets_and_true_identity():
-    notes = source_notes()
-    notes[0]["title"] = "  这是标题  "
-    reading = reading_for("n1")
-    reading["examples"][0]["excerptIds"] = ["t"]
-    model = FakeCalls(notes=notes, readings={"n1": reading})
-    result = asyncio.run(run_staged_account_report(context_for(notes), model))
-    bound = result.model_metadata["boundExamples"][0]
-    assert bound["fragments"] == [{"excerptId": "t", "source": "title", "start": 0,
-                                    "end": 8, "quote": "  这是标题  "}]
-    assert bound["title"] == notes[0]["title"]
-    assert bound["stableId"] == "stable-a"
-    finding = result.output["profile"]["accountPortrait"]["strengths"][0]
-    assert finding["examples"][0]["fragments"][0]["quote"] == "  这是标题  "
-    verified = verified_portrait(result.output["profile"]["accountPortrait"], snapshot_for(notes))
-    assert verified["strengths"][0]["examples"] == finding["examples"]
-
-
-def test_noncontiguous_fragments_keep_one_shared_interpretation_without_fabricated_joined_quote():
-    notes = source_notes()
-    notes[0]["body"] = "开头。先把问题问清。中间补充条件。再把条件问清。"
-    reading = reading_for("n1")
-    reading["examples"] = [{"excerptIds": ["b2", "b4"],
-                            "interpretation": "两处相同句式把提问对象从问题推进到条件。"}]
-    model = FakeCalls(notes=notes, readings={"n1": reading})
-    result = asyncio.run(run_staged_account_report(context_for(notes), model))
-    example = result.output["profile"]["accountPortrait"]["strengths"][0]["examples"][0]
-    assert example["interpretation"] == reading["examples"][0]["interpretation"]
-    assert "quote" not in example
-    assert [fragment["quote"] for fragment in example["fragments"]] \
-        == ["先把问题问清。", "再把条件问清。"]
-    assert example["fragments"][0]["end"] < example["fragments"][1]["start"]
-    conclusion = model.calls[-1][2]["readings"][0]["examples"]
-    assert conclusion == [{"id": "e1", "observation": example["interpretation"]}]
-    verified = verified_portrait(result.output["profile"]["accountPortrait"], snapshot_for(notes))
-    assert verified["strengths"][0]["examples"] == [example]
-
-
-def test_repeated_identical_short_sentences_are_bound_by_distinct_ids_and_offsets():
-    notes = source_notes()
-    repeated, middle = "再试一次。", "中间说明。"
-    notes[0]["body"] = repeated + middle + repeated
-    reading = reading_for("n1")
-    reading["examples"] = [{"excerptIds": ["b1", "b3"],
-                            "interpretation": "重复相同短句形成前后呼应。"}]
-    model = FakeCalls(notes=notes, readings={"n1": reading})
-    result = asyncio.run(run_staged_account_report(context_for(notes), model))
-    example = result.model_metadata["boundExamples"][0]
-    assert example["fragments"] == [
-        {"excerptId": "b1", "source": "body", "quote": repeated,
-         "start": 0, "end": len(repeated)},
-        {"excerptId": "b3", "source": "body", "quote": repeated,
-         "start": len(repeated + middle), "end": len(notes[0]["body"])},
+    catalog = reading_fragments(source_notes()[0]["title"], source_notes()[0]["body"])
+    assert [example["fragments"] for example in bound] \
+        == [[catalog[key] for key in ids] for ids in keys]
+    assert model.calls[-1][2]["readings"][0]["examples"] == [
+        {"excerptIds": ids, "observation": example["interpretation"]}
+        for ids, example in zip(keys, reading["examples"], strict=True)
     ]
-    portrait = result.output["profile"]["accountPortrait"]
-    verified = verified_portrait(portrait, snapshot_for(notes))
-    assert verified["strengths"][0]["examples"] == portrait["strengths"][0]["examples"]
-
-
-def test_overlapping_excerpt_groups_can_reuse_one_fragment_without_losing_either_explanation():
-    reading = reading_for("n1")
-    reading["examples"] = [
-        {"excerptIds": ["b1", "b2"], "interpretation": "从开头引出动作。"},
-        {"excerptIds": ["b2", "b3"], "interpretation": "把动作接到后面的收束。"},
-    ]
-    synthesis = synthesis_for()
-    synthesis["strengths"][0]["exampleIds"] = ["e1", "e2"]
-    synthesis["writing"] = []
-    model = FakeCalls(readings={"n1": reading}, synthesis=synthesis)
-    result = asyncio.run(run_staged_account_report(context_for(), model))
-    portrait = result.output["profile"]["accountPortrait"]
-    examples = portrait["strengths"][0]["examples"]
-    assert examples[0]["fragments"][-1] == examples[1]["fragments"][0]
-    assert [example["interpretation"] for example in examples] \
-        == [example["interpretation"] for example in reading["examples"]]
-    verified = verified_portrait(portrait, snapshot_for(source_notes()))
-    assert verified["strengths"][0]["examples"] == examples
+    assert "quote" not in json.dumps(model.calls[-1][2]["readings"])
+    assert "fragments" not in json.dumps(model.calls[-1][2]["readings"])
 
 
 @pytest.mark.parametrize("fragment_count", [4, 6])
-def test_four_to_six_continuous_questions_and_a_reused_fragment_survive_as_complete_groups(
+def test_complete_question_groups_and_reused_fragments_survive_audit_and_expression_compile(
     fragment_count,
 ):
     notes = source_notes()
@@ -682,218 +389,118 @@ def test_four_to_six_continuous_questions_and_a_reused_fragment_survive_as_compl
          "interpretation": "连续设问把注意力从决策者推进到具体行动。"},
         {"excerptIds": ["b4"], "interpretation": "第四问把关注点转向问题本身。"},
     ]
-    synthesis = synthesis_for()
-    synthesis["strengths"][0]["exampleIds"] = ["e1", "e2"]
-    synthesis["writing"][0]["exampleIds"] = ["e1"]
+    synthesis = synthesis_for(notes=notes)
+    synthesis["profile"]["expressionReadings"][0]["examples"][0].update(
+        fromExcerptId="b1", toExcerptId=f"b{fragment_count}",
+    )
     model = FakeCalls(notes=notes, readings={"n1": reading}, synthesis=synthesis)
     result = asyncio.run(run_staged_account_report(context_for(notes), model))
-    portrait = result.output["profile"]["accountPortrait"]
-    examples = portrait["strengths"][0]["examples"]
-    assert len(examples[0]["fragments"]) == fragment_count
-    assert [fragment["excerptId"] for fragment in examples[0]["fragments"]] \
-        == reading["examples"][0]["excerptIds"]
-    assert examples[0]["fragments"][3] == examples[1]["fragments"][0]
-    assert portrait["expressionPatterns"][0]["examples"] == [examples[0]]
-    verified = verified_portrait(portrait, snapshot_for(notes))
-    assert verified["strengths"][0]["examples"] == examples
-    assert verified["expressionPatterns"][0]["examples"] == [examples[0]]
+    bound = result.model_metadata["boundExamples"]
+    assert len(bound[0]["fragments"]) == fragment_count
+    assert bound[0]["fragments"][3] == bound[1]["fragments"][0]
+    whole = "".join(fragment["quote"] for fragment in bound[0]["fragments"])
+    assert whole in result.output["profile"]["voiceFingerprint"][0]
 
 
-def test_more_than_six_fragments_in_one_reading_group_is_rejected():
+@pytest.mark.parametrize("title", ["  这是标题  ", "完整原标题" * 50, "先核对费用。"])
+def test_title_fragments_preserve_whitespace_length_position_and_identity(title):
     notes = source_notes()
-    notes[0]["body"] = "一。二。三。四。五。六。七。"
+    notes[0]["title"] = title
     reading = reading_for("n1")
-    reading["examples"] = [{"excerptIds": [f"b{index}" for index in range(1, 8)],
-                            "interpretation": "超过单组片段上限。"}]
-    model = FakeCalls(notes=notes, readings={"n1": reading})
-    with pytest.raises(PydanticValidationError):
-        asyncio.run(run_staged_account_report(context_for(notes), model))
-    assert "synthesis" not in [stage for stage, _, _ in model.calls]
-
-
-def test_nine_fragments_across_three_groups_survive_with_deduplicated_note_scope_evidence():
-    notes = source_notes()
-    notes[0]["body"] = "甲一。甲二。甲三。甲四。甲五。甲六。"
-    notes[1]["body"] = "乙一。乙二。乙三。"
-    readings = {
-        "n1": {**reading_for("n1"), "examples": [
-            {"excerptIds": ["b1", "b2", "b3"], "interpretation": "第一组形成三句排比。"},
-            {"excerptIds": ["b4", "b5", "b6"], "interpretation": "第二组继续推进层次。"},
-        ]},
-        "n2": {**reading_for("n2"), "examples": [
-            {"excerptIds": ["b1", "b2", "b3"], "interpretation": "另一篇也有三句并列。"},
-        ]},
-    }
-    synthesis = synthesis_for()
-    synthesis["strengths"][0]["exampleIds"] = ["e1", "e2", "e3"]
-    synthesis["writing"] = []
-    model = FakeCalls(notes=notes, readings=readings, synthesis=synthesis)
-    result = asyncio.run(run_staged_account_report(context_for(notes), model))
-    portrait = ProfileStageResult.model_validate(result.output).profile.accountPortrait
-    finding = portrait["strengths"][0]
-    assert finding["evidence"] == [{"noteId": "stable-a", "scope": "note"},
-                                    {"noteId": "stable-b", "scope": "note"}]
-    assert len(finding["examples"]) == 3
-    assert sum(len(example["fragments"]) for example in finding["examples"]) == 9
-    verified = verified_portrait(portrait, snapshot_for(notes))
-    assert verified["strengths"][0]["examples"] == finding["examples"]
-
-
-def test_long_original_title_selected_by_id_is_not_truncated_or_rejected_by_legacy_quote_limit():
-    notes = source_notes()
-    notes[0]["title"] = "完整原标题" * 50
-    reading = reading_for("n1")
-    reading["examples"] = [{"excerptIds": ["t"], "interpretation": "完整标题仍是一个来源片段。"}]
-    model = FakeCalls(notes=notes, readings={"n1": reading})
-    result = asyncio.run(run_staged_account_report(context_for(notes), model))
-    portrait = result.output["profile"]["accountPortrait"]
-    example = portrait["strengths"][0]["examples"][0]
-    assert example["fragments"] == [reading_fragments(notes[0]["title"], notes[0]["body"])["t"]]
-    assert len(example["fragments"][0]["quote"]) > 160
-    verified = verified_portrait(portrait, snapshot_for(notes))
-    assert verified["strengths"][0]["examples"] == [example]
-
-
-@pytest.mark.parametrize("mode", ["unknown", "duplicate-in-finding"])
-def test_synthesis_rejects_unknown_or_repeated_example_ids_within_one_claim(mode):
-    synthesis = synthesis_for()
-    if mode == "unknown":
-        synthesis["strengths"][0]["exampleIds"] = ["e404"]
-    else:
-        synthesis["strengths"][0]["exampleIds"] = ["e1", "e1"]
-    model = FakeCalls(synthesis=synthesis)
-    with pytest.raises(ValueError, match="重复|不存在"):
-        asyncio.run(run_staged_account_report(context_for(), model))
-    assert [stage for stage, _, _ in model.calls].count("synthesis") == 1
-
-
-@pytest.mark.parametrize("reuse_section", ["strengths", "writing"])
-def test_same_example_can_support_different_claims_without_rebinding_or_shared_mutable_fragments(
-    reuse_section,
-):
-    synthesis = synthesis_for()
-    second = {"text": "同一原文也提供另一项具体观察。", "exampleIds": ["e1"]}
-    if reuse_section == "strengths":
-        synthesis["strengths"].append(second)
-    else:
-        synthesis["writing"] = [second]
-    result = asyncio.run(run_staged_account_report(context_for(), FakeCalls(synthesis=synthesis)))
-    portrait = result.output["profile"]["accountPortrait"]
-    section = "strengths" if reuse_section == "strengths" else "expressionPatterns"
-    index = 1 if reuse_section == "strengths" else 0
-    first = portrait["strengths"][0]["examples"][0]
-    reused = portrait[section][index]["examples"][0]
-    assert first == reused
-    assert first["fragments"] is not reused["fragments"]
-    verified = verified_portrait(portrait, snapshot_for(source_notes()))
-    assert verified["strengths"][0]["examples"] == [first]
-    assert verified[section][index]["examples"] == [reused]
-
-
-@pytest.mark.parametrize("section", ["summary", "keywords", "directions", "nextSteps"])
-def test_synthesis_rejects_unknown_source_note_in_every_claim_section(section):
-    synthesis = synthesis_for()
-    target = synthesis[section] if section == "summary" else synthesis[section][0]
-    target["noteIds"] = ["n404"]
-    with pytest.raises(ValueError, match="未提供的笔记"):
-        asyncio.run(run_staged_account_report(context_for(), FakeCalls(synthesis=synthesis)))
-
-
-def test_source_refs_are_resolved_and_deduplicated_without_inventing_quotes():
-    synthesis = synthesis_for()
-    synthesis["summary"]["noteIds"] = ["n3", "n1", "n3"]
-    result = asyncio.run(run_staged_account_report(context_for(), FakeCalls(synthesis=synthesis)))
-    assert result.output["profile"]["accountPortrait"]["summary"]["evidence"] == [
-        {"noteId": "stable-c", "scope": "note"}, {"noteId": "stable-a", "scope": "note"},
+    reading["examples"] = [
+        {"excerptIds": ["t"], "interpretation": "标题本身的具体观察。"},
+        {"excerptIds": ["b2"], "interpretation": "正文动作的具体观察。"},
     ]
+    model = FakeCalls(notes=notes, readings={"n1": reading})
+    model.synthesis["profile"]["accountPortrait"]["strengths"][0]["statement"] = (
+        "在这篇作品中，你把判断落到明确动作。"
+    )
+    result = asyncio.run(run_staged_account_report(context_for(notes), model))
+    first, second = result.model_metadata["boundExamples"][:2]
+    assert first["fragments"] == [{"excerptId": "t", "source": "title", "quote": title,
+                                    "start": 0, "end": len(title)}]
+    assert first["stableId"] == second["stableId"] == "stable-a"
+    assert second["fragments"][0]["source"] == "body"
+    assert result.output["profile"]["titleFormulas"][0]["examples"] == [title]
 
 
-def test_empty_examples_allow_empty_strengths_and_writing_without_synthetic_evidence():
+def test_empty_reader_examples_do_not_prevent_synthesis_reading_the_original_sources():
     readings = {note_id: {**reading_for(note_id), "examples": []} for note_id in ("n1", "n2")}
-    model = FakeCalls(readings=readings, synthesis=synthesis_for(examples=False))
+    model = FakeCalls(readings=readings)
     result = asyncio.run(run_staged_account_report(context_for(), model))
-    portrait = result.output["profile"]["accountPortrait"]
-    assert portrait["strengths"] == portrait["expressionPatterns"] == []
     assert result.model_metadata["boundExamples"] == []
     assert all(item["examples"] == [] for item in model.calls[-1][2]["readings"])
+    assert "先核对费用。" in result.output["profile"]["voiceFingerprint"][0]
 
 
-def test_single_note_runs_exactly_three_calls_and_keeps_one_note_scope():
+def test_empty_optional_sections_compile_without_synthetic_evidence():
+    result = asyncio.run(run_staged_account_report(
+        context_for(), FakeCalls(synthesis=synthesis_for(examples=False)),
+    ))
+    profile = result.output["profile"]
+    assert profile["accountPortrait"]["strengths"] == []
+    assert profile["voiceFingerprint"] == profile["hookStyles"] == []
+    assert profile["viralStructure"] == {"name": "", "steps": []}
+
+
+def test_single_note_runs_exactly_three_calls_and_keeps_one_source_scope():
     notes = source_notes()[:1]
-    synthesis = synthesis_for()
-    synthesis["summary"]["noteIds"] = ["n1"]
-    synthesis["directions"][0]["noteIds"] = ["n1"]
-    synthesis["writing"] = []
-    model = FakeCalls(notes=notes, ids=("n1",), synthesis=synthesis)
+    model = FakeCalls(notes=notes, ids=("n1",))
     result = asyncio.run(run_staged_account_report(context_for(notes), model))
     assert [stage for stage, _, _ in model.calls] == ["overview", "read", "synthesis"]
+    assert result.model_metadata["requestCount"] == 3
+    assert result.model_metadata["retryCount"] == 0
     assert result.model_metadata["representativeNoteIds"] == ["stable-a"]
     assert len(result.model_metadata["boundExamples"]) == 1
+    assert len(model.calls[-1][2]["notes"]) == 1
 
 
-def test_three_representatives_use_at_most_five_model_calls_and_can_leave_examples_unused():
-    readings = {"n3": {
-        "assessment": "丙篇有不同题材。", "correction": "不能强求全部共享写法。",
-        "examples": [{"excerptIds": ["b1"],
-                      "interpretation": "保持对不同作品的区分。"}],
-    }}
-    model = FakeCalls(ids=("n1", "n2", "n3"), readings=readings)
+def test_three_representatives_use_at_most_five_model_calls_and_can_leave_observations_unused():
+    reading = {"assessment": "丙篇有不同题材。", "correction": "不能强求全部共享写法。",
+               "examples": [{"excerptIds": ["b1"], "interpretation": "保持对不同作品的区分。"}]}
+    model = FakeCalls(ids=("n1", "n2", "n3"), readings={"n3": reading})
     result = asyncio.run(run_staged_account_report(context_for(), model))
     assert [stage for stage, _, _ in model.calls] \
         == ["overview", "read", "read", "read", "synthesis"]
     assert len(result.model_metadata["calls"]) == 5
+    assert result.model_metadata["requestCount"] == 5
+    assert result.model_metadata["retryCount"] == 0
     assert len(result.model_metadata["boundExamples"]) == 3
     assert result.model_metadata["representativeNoteIds"] == ["stable-a", "stable-b", "stable-c"]
-    portrait = result.output["profile"]["accountPortrait"]
-    assert all(example["noteId"] != "stable-c"
-               for section in ("strengths", "expressionPatterns")
-               for finding in portrait[section] for example in finding["examples"])
 
 
-@pytest.mark.parametrize("failure", ["provider", "excerpt-validation", "callback"])
-def test_failed_read_cancels_pending_sibling_and_never_runs_synthesis(failure):
+def test_parent_cancellation_cancels_both_readers_without_synthesis():
     async def scenario():
-        started, cancelled = asyncio.Event(), asyncio.Event()
         model = FakeCalls()
-        stages = []
-
-        async def progress(update):
-            if failure == "callback" and update["phase"] == "reading" and update["completed"] == 1:
-                raise RuntimeError("进度回调失败")
+        started, cancelled, both_started = set(), set(), asyncio.Event()
 
         async def call(stage, system, user):
-            stages.append(stage)
             if stage != "read":
                 return await model(stage, system, user)
-            if json.loads(user)["note"]["title"] == source_notes()[1]["title"]:
-                started.set()
-                try:
-                    await asyncio.Event().wait()
-                except asyncio.CancelledError:
-                    cancelled.set()
-                    raise
-            await started.wait()
-            if failure == "provider":
-                raise RuntimeError("精读接口失败")
-            response = await model(stage, system, user)
-            if failure == "excerpt-validation":
-                response.output["examples"][0]["excerptIds"] = ["b404"]
-            return response
+            title = json.loads(user)["note"]["title"]
+            started.add(title)
+            if len(started) == 2:
+                both_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.add(title)
+                raise
 
-        with pytest.raises((RuntimeError, ValueError), match="失败|片段"):
-            await asyncio.wait_for(
-                run_staged_account_report(context_for(), call, on_update=progress), timeout=2,
-            )
-        assert cancelled.is_set()
-        assert stages == ["overview", "read", "read"]
+        task = asyncio.create_task(run_staged_account_report(context_for(), call))
+        await asyncio.wait_for(both_started.wait(), timeout=2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert started == cancelled
+        assert [stage for stage, _, _ in model.calls] == ["overview"]
 
     asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("stage", ["overview", "synthesis"])
 def test_stage_provider_failure_is_not_retried_or_replaced_with_partial_output(stage):
-    model = FakeCalls()
-    calls = []
+    model, calls = FakeCalls(), []
 
     async def call(current, system, user):
         calls.append(current)
@@ -907,25 +514,24 @@ def test_stage_provider_failure_is_not_retried_or_replaced_with_partial_output(s
                      else ["overview", "read", "read", "synthesis"])
 
 
-def test_metadata_keeps_per_call_records_and_sums_only_integer_token_usage():
-    model = FakeCalls()
-    metadata = []
+def test_metadata_sums_integer_usage_without_double_counting_reasoning_or_retaining_content():
+    model, metadata = FakeCalls(), []
 
     async def call(stage, system, user):
         response = await model(stage, system, user)
         index = len(metadata) + 1
         usage = {"prompt_tokens": index, "completion_tokens": 2 * index,
-                 "total_tokens": 3 * index, "cached_tokens": 99}
+                 "total_tokens": 3 * index, "reasoning_tokens": index, "cached_tokens": 99}
         if stage == "synthesis":
-            usage.update(prompt_tokens=True, completion_tokens="8", total_tokens=12.5)
+            usage.update(prompt_tokens=True, completion_tokens="8", total_tokens=12.5,
+                         reasoning_tokens=False)
         item = {"model": "fake", "requestId": f"call-{index}", "usage": usage}
         metadata.append(item)
         return ModelCallResponse(output=response.output, model_metadata=item)
 
     result = asyncio.run(run_staged_account_report(context_for(), call))
-    assert len(result.model_metadata["calls"]) == 4
     assert result.model_metadata["usage"] == {
-        "prompt_tokens": 6, "completion_tokens": 12, "total_tokens": 18,
+        "prompt_tokens": 6, "completion_tokens": 12, "total_tokens": 18, "reasoning_tokens": 6,
     }
     assert [item["metadata"]["requestId"] for item in result.model_metadata["calls"]] \
         == ["call-1", "call-2", "call-3", "call-4"]
@@ -933,6 +539,67 @@ def test_metadata_keeps_per_call_records_and_sums_only_integer_token_usage():
     for item in metadata:
         item["usage"]["prompt_tokens"] = 100000
     assert result.model_metadata == before
+
+
+@pytest.mark.parametrize("error", [RuntimeError("unknown failure"), ValueError("bad config"),
+                                  PermissionError("unauthorized"), asyncio.CancelledError()])
+def test_non_output_exceptions_are_never_retried(error):
+    model = ScriptedCalls({("overview", ""): [error]})
+    with pytest.raises(type(error)):
+        asyncio.run(run_staged_account_report(context_for(), model))
+    assert model.counts == {("overview", ""): 1}
+
+
+@pytest.mark.parametrize("failure", [401, 503, "runtime"])
+def test_late_non_output_failure_keeps_prior_usage_and_actual_calls_without_retry(failure):
+    if failure == "runtime":
+        error = RuntimeError("private-runtime-detail")
+    else:
+        request = httpx.Request("POST", "https://provider.invalid/model")
+        response = httpx.Response(failure, request=request)
+        error = httpx.HTTPStatusError("private-http-detail", request=request, response=response)
+    message = str(error)
+    model = ScriptedCalls({("synthesis", ""): [error]})
+    with pytest.raises(type(error)) as raised:
+        asyncio.run(run_staged_account_report(context_for(), model))
+    assert raised.value is error and str(raised.value) == message
+    assert [stage for stage, _, _ in model.raw_calls] == [
+        "overview", "read", "read", "synthesis",
+    ]
+    metadata = error.pipeline_metadata
+    assert metadata["requestCount"] == 4 and metadata["retryCount"] == 0
+    assert metadata["usage"] == {"prompt_tokens": 3, "completion_tokens": 6,
+                                 "total_tokens": 9, "reasoning_tokens": 3}
+    assert [call["status"] for call in metadata["calls"]] == [
+        "completed", "completed", "completed", "failed",
+    ]
+    last = metadata["calls"][-1]
+    assert last["stage"] == "synthesis" and last["requestIndex"] == 4
+    assert last["errorCode"] == "request_failed" and last["usageUnavailable"] is True
+    assert "metadata" not in last
+    assert "private-" not in json.dumps(metadata)
+
+
+def test_unknown_compiler_runtime_failure_keeps_usage_without_becoming_retryable(monkeypatch):
+    from app.services import account_report_pipeline
+
+    error = RuntimeError("private-compiler-detail")
+
+    def fail_compile(output, snapshot, *, omissions=None):
+        raise error
+
+    monkeypatch.setattr(account_report_pipeline, "compile_usable_account_report", fail_compile)
+    model = ScriptedCalls({})
+    with pytest.raises(RuntimeError) as raised:
+        asyncio.run(run_staged_account_report(context_for(), model))
+    assert raised.value is error
+    metadata = error.pipeline_metadata
+    assert metadata["requestCount"] == 4 and metadata["retryCount"] == 0
+    assert metadata["usage"]["total_tokens"] == 12
+    assert metadata["calls"][-1]["status"] == "failed"
+    assert metadata["calls"][-1]["errorCode"] == "processing_failed"
+    assert metadata["calls"][-1]["metadata"]["usage"]["total_tokens"] == 3
+    assert "private-" not in json.dumps(metadata)
 
 
 @pytest.mark.parametrize("packet", [
@@ -945,91 +612,445 @@ def test_metadata_keeps_per_call_records_and_sums_only_integer_token_usage():
     {"schemaVersion": "account-reading-input/v2", "notes": [{"noteId": "a", "body": []}]},
     {"schemaVersion": "account-reading-input/v2", "notes": [{"noteId": "a", "title": None}]},
     {"schemaVersion": "account-reading-input/v2", "notes": [{"noteId": "a"}, {"noteId": "a"}]},
+    {"schemaVersion": "account-reading-input/v2", "notes": [{"noteId": "a", "bodyExcerpts": []}]},
+    {"schemaVersion": "account-reading-input/v2", "notes": [{"noteId": "n2"}, {"noteId": "a"}]},
 ])
-def test_invalid_source_packet_is_rejected_before_model_use(packet):
+def test_invalid_or_ambiguous_source_packet_is_rejected_before_model_use(packet):
     model = FakeCalls()
     with pytest.raises(ValueError):
         asyncio.run(run_staged_account_report({"historicalPosts": json.dumps(packet)}, model))
     assert model.calls == []
 
 
-@pytest.mark.parametrize("stage", ["overview", "read", "synthesis"])
-def test_stage_outputs_reject_additional_unbound_fields(stage):
-    model = FakeCalls()
-    target = {"overview": model.overview, "read": model.readings["n1"],
-              "synthesis": model.synthesis}[stage]
-    target["inventedNoteTitle"] = "不能由模型替换真实原标题"
-    with pytest.raises(PydanticValidationError, match="Extra inputs"):
-        asyncio.run(run_staged_account_report(context_for(), model))
-
-
-def test_keyword_length_is_validated_before_assembling_report():
-    synthesis = synthesis_for()
-    synthesis["keywords"][0]["text"] = "长" * 13
-    with pytest.raises(ValueError, match="关键词不能超过12字"):
-        asyncio.run(run_staged_account_report(context_for(), FakeCalls(synthesis=synthesis)))
-
-
-def test_valid_long_staged_claims_and_bound_examples_survive_profile_verification():
+@pytest.mark.parametrize("grouped", [False, True])
+def test_old_saved_single_and_grouped_reports_stay_readable_without_the_old_generator(grouped):
     notes = source_notes()
-    notes[0]["title"] = "完整原标题" * 20
-    notes[0]["body"] = "开头。" + "甲" * 159 + "。" + "乙" * 159 + "。"
-    readings = {"n1": {
-        "assessment": "有完整例子。", "correction": "",
-        "examples": [{"excerptIds": ["b2"], "interpretation": "释" * 200},
-                     {"excerptIds": ["b3"], "interpretation": "析" * 200}],
-    }}
-    synthesis = synthesis_for()
-    synthesis["summary"]["text"] = "总" * 200
-    synthesis["directions"][0]["text"] = "方" * 200
-    synthesis["strengths"][0].update(text="判" * 200, exampleIds=["e1", "e2"])
-    synthesis["writing"][0]["exampleIds"] = ["e3"]
-    synthesis["nextSteps"][0]["text"] = "试" * 200
-    model = FakeCalls(notes=notes, readings=readings, synthesis=synthesis)
-    result = asyncio.run(run_staged_account_report(context_for(notes), model))
-    portrait = ProfileStageResult.model_validate(result.output).profile.accountPortrait
-    verified = verified_portrait(portrait, snapshot_for(notes))
-    assert verified is not None
-    assert verified["summary"] is not None
-    assert verified["summary"]["statement"] == "总" * 200
-    for section in ("readerValue", "strengths", "expressionPatterns", "nextSteps"):
-        assert [item["statement"] for item in verified[section]] \
-            == [item["statement"] for item in portrait[section]]
-    assert len(verified["strengths"][0]["examples"]) == 2
-    assert verified["strengths"][0]["examples"] == portrait["strengths"][0]["examples"]
-    assert sum(sum(len(fragment["quote"]) for fragment in item["fragments"])
-               + len(item["interpretation"])
-               for item in verified["strengths"][0]["examples"]) > 700
+    note, quote = notes[0], "先核对费用。"
+    example = {"noteId": note["noteId"], "title": note["title"],
+               "interpretation": "以动作说明准备。"}
+    if grouped:
+        example["fragments"] = [reading_fragments(note["title"], note["body"])["b2"]]
+        evidence = {"noteId": note["noteId"], "scope": "note"}
+    else:
+        start = note["body"].index(quote)
+        example.update(source="body", quote=quote, start=start, end=start + len(quote))
+        evidence = {"noteId": note["noteId"], "quote": quote}
+    saved = {"profile": {"accountPortrait": {
+        "summary": {"statement": "旧报告仍有原来的判断。", "evidence": [evidence]},
+        "strengths": [{"statement": "具体动作提供参照。", "evidence": [evidence],
+                       "examples": [example]}],
+    }}}
+    before = deepcopy(saved)
+    compiled = compile_editorial_profile(saved, snapshot_for(notes))
+    assert compiled == saved == before
+    parsed = ProfileStageResult.model_validate(compiled).profile.accountPortrait
+    assert verified_portrait(parsed, snapshot_for(notes))["strengths"][0]["examples"] == [example]
+    assert saved == before
 
 
-@pytest.mark.parametrize(("target", "change"), [
-    ("group", {"title": "模型改写的错误标题"}),
-    ("group", {"noteId": "stable-b"}),
-    ("group", {"interpretation": ""}),
-    ("fragment", {"source": "title"}),
-    ("fragment", {"source": []}),
-    ("fragment", {"quote": "原文没有这句话"}),
-    ("fragment", {"start": 0}),
-    ("fragment", {"end": 10000}),
-    ("fragment", {"start": True}),
-    ("fragment", {"excerptId": "b404"}),
+
+def test_default_prompt_is_the_final_contract_and_auxiliary_selection_is_optional():
+    assert PIPELINE_VERSION.endswith("v5.1-balanced-default")
+    assert MAX_EXTRA_REQUESTS == 1
+    assert SYNTHESIS_PROMPT == SOURCE_LED_PROFILE_PROMPT
+    assert OVERVIEW_PROMPT.startswith(TEXT_SCOPE)
+    assert READ_PROMPT.startswith(TEXT_SCOPE)
+    assert "没有合适篇目可以不选" in OVERVIEW_PROMPT
+    assert "先认识本篇的题材与具体做法" in READ_PROMPT
+    assert "原句怎么写→产生什么阅读作用→同类内容如何沿用" in READ_PROMPT
+    assert "b编号仅用于定位原文，不表示自然段" in READ_PROMPT
+    assert "不必每篇都拆标题、标点和全文结构" in READ_PROMPT
+    assert "兼顾不同题材与内容价值" in OVERVIEW_PROMPT
+
+
+def test_readers_run_in_parallel_but_synthesis_does_not_inherit_overview_or_questions():
+    async def scenario():
+        model = FakeCalls()
+        started = set()
+        both_started = asyncio.Event()
+        events = []
+
+        async def call(stage, system, user):
+            payload = decode_payload(stage, user)
+            events.append(stage)
+            if stage == "read":
+                title = payload["note"]["title"]
+                started.add(title)
+                if len(started) == 2:
+                    both_started.set()
+                await both_started.wait()
+                assert set(payload) == {"question", "note"}
+                assert "account" not in payload and "summary" not in payload
+                for other in source_notes():
+                    if other["title"] != title:
+                        assert other["title"] not in user and other["body"] not in user
+            elif stage == "synthesis":
+                assert len(started) == 2
+                assert system == SOURCE_LED_PROFILE_PROMPT
+                assert model.overview["summary"]["text"] not in user
+                assert model.overview["hypotheses"][0] not in user
+                assert "initialView" not in user
+                assert all("question" not in observation for observation in payload["readings"])
+                assert [item["assessment"] for item in payload["readings"]] == [
+                    reading_for(note_id)["assessment"] for note_id in ("n1", "n2")
+                ]
+                assert "context-private" not in user and "packet-private" not in user
+                assert "不应进入精读" not in user
+            return await model(stage, system, user)
+
+        result = await asyncio.wait_for(run_staged_account_report(context_for(), call), timeout=2)
+        assert events == ["overview", "read", "read", "synthesis"]
+        assert result.output == compile_usable_account_report(
+            model.synthesis, snapshot_for(source_notes()),
+        )
+        assert result.model_metadata["omittedStages"] == {}
+        assert result.model_metadata["degradedStages"] == {}
+        assert result.model_metadata["omissionCount"] == 0
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("missing", ["summary", "directions", "hypotheses", "readings"])
+def test_missing_overview_fields_are_not_retried(missing):
+    overview = overview_for()
+    del overview[missing]
+    model = ScriptedCalls({}, overview=overview)
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert result.output["profile"]
+    assert model.counts[("overview", "")] == 1
+    assert result.model_metadata["retryCount"] == 0
+    assert result.model_metadata["requestCount"] == (2 if missing == "readings" else 4)
+
+
+@pytest.mark.parametrize("overview", [{}, {"readings": []}, {"summary": "bad"},
+                                       {"readings": [{"noteId": "n404", "question": "why"}]}])
+def test_no_readings_use_the_exact_default_prompt_without_a_fallback_call(overview):
+    model = ScriptedCalls({}, overview=overview)
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert [stage for stage, _, _ in model.raw_calls] == ["overview", "synthesis"]
+    assert model.raw_calls[-1][1:] == build_source_led_profile_prompt(context_for())
+    assert result.model_metadata["representativeNoteIds"] == []
+    assert result.model_metadata["retryCount"] == 0
+
+
+@pytest.mark.parametrize("overview", [
+    {}, {"readings": []}, {"readings": [{"noteId": "n2", "question": "如何制造反差？"}]},
 ])
-def test_profile_verifier_rejects_tampered_bound_example_blocks_without_crashing(target, change):
-    result = asyncio.run(run_staged_account_report(context_for(), FakeCalls()))
-    portrait = deepcopy(result.output["profile"]["accountPortrait"])
-    example = portrait["strengths"][0]["examples"][0]
-    (example if target == "group" else example["fragments"][0]).update(change)
-    verified = verified_portrait(portrait, snapshot_for(source_notes()))
-    assert verified is not None
-    assert verified["strengths"] == []
-    assert verified["expressionPatterns"][0]["examples"] \
-        == portrait["expressionPatterns"][0]["examples"]
+def test_fixed_selection_is_program_authority_even_when_the_model_omits_or_swaps_it(overview):
+    model = FakeCalls(overview=overview)
+    result = asyncio.run(run_staged_account_report(
+        context_for(), model, representative_note_ids=["n1"],
+    ))
+    assert result.model_metadata["representativeNoteIds"] == ["stable-a"]
+    reader = next(payload for stage, _, payload in model.calls if stage == "read")
+    assert reader["question"] == DEFAULT_READING_QUESTION
+    assert reader["note"]["title"] == source_notes()[0]["title"]
 
 
-def test_profile_verifier_requires_bound_example_to_match_the_claim_evidence():
-    result = asyncio.run(run_staged_account_report(context_for(), FakeCalls()))
-    portrait = deepcopy(result.output["profile"]["accountPortrait"])
-    portrait["strengths"][0]["evidence"] = [{"noteId": "stable-b", "scope": "note"}]
-    verified = verified_portrait(portrait, snapshot_for(source_notes()))
-    assert verified is not None
-    assert verified["strengths"] == []
+def test_fixed_selection_is_preserved_even_when_overview_json_is_invalid():
+    model = ScriptedCalls({("overview", ""): [AccountReportOutputError("invalid_json")]})
+    result = asyncio.run(run_staged_account_report(
+        context_for(), model, representative_note_ids=["n1", "n2"],
+    ))
+    assert result.model_metadata["representativeNoteIds"] == ["stable-a", "stable-b"]
+    assert result.model_metadata["omittedStages"] == {"overview": 1}
+    assert [call["status"] for call in result.model_metadata["calls"]] == [
+        "omitted", "completed", "completed", "completed",
+    ]
+
+
+@pytest.mark.parametrize("question", [None, "", "  ", 123])
+def test_auto_selection_with_a_valid_note_id_does_not_require_a_model_question(question):
+    task = {"noteId": "n1"}
+    if question is not None:
+        task["question"] = question
+    overview = {"readings": [task]}
+    model = FakeCalls(overview=overview)
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert result.model_metadata["representativeNoteIds"] == ["stable-a"]
+    assert [stage for stage, _, _ in model.calls] == ["overview", "read", "synthesis"]
+    assert model.calls[1][2]["question"] == DEFAULT_READING_QUESTION
+    assert model.overview == overview
+    assert result.model_metadata["retryCount"] == 0
+
+
+@pytest.mark.parametrize("ids,expected", [
+    (("n1", "n1"), ["stable-a"]), (("n1", "n404"), ["stable-a"]),
+    (("stable-a",), []), ((), []),
+    (("n1", "n2", "n3", "n4"), ["stable-a", "stable-b", "stable-c"]),
+])
+def test_only_legal_unique_representatives_run_without_forcing_two(ids, expected):
+    model = FakeCalls(ids=ids)
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert result.model_metadata["representativeNoteIds"] == expected
+    assert result.model_metadata["requestCount"] == 2 + len(expected)
+    assert result.model_metadata["retryCount"] == 0
+
+
+@pytest.mark.parametrize("section", ["summary", "directions"])
+@pytest.mark.parametrize("invalid", [
+    {"text": "无效来源", "noteIds": ["n404"]}, {"text": "没有来源", "noteIds": []},
+    "无来源旧文字", {"text": 123, "noteIds": ["n1"]},
+])
+def test_invalid_overview_claim_is_dropped_without_losing_valid_selection(section, invalid):
+    overview = overview_for()
+    overview[section] = invalid if section == "summary" else [invalid, claim("有效短方向")]
+    model = FakeCalls(overview=overview)
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert result.model_metadata["representativeNoteIds"] == ["stable-a", "stable-b"]
+    assert result.model_metadata["degradedStages"] == {"overview": 1}
+    assert result.model_metadata["retryCount"] == 0
+
+
+def test_short_valid_question_and_missing_correction_do_not_add_admission_gates():
+    overview = overview_for(("n1",))
+    overview["summary"] = claim("独立判断")
+    overview["readings"][0]["question"] = "如何制造反差？"
+    reading = {"assessment": "用反问引入。"}
+    model = FakeCalls(overview=overview, readings={"n1": reading})
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert result.model_metadata["readingAssessments"][0]["assessment"] == reading["assessment"]
+    assert result.model_metadata["readingAssessments"][0]["correction"] == ""
+    assert result.model_metadata["boundExamples"] == []
+    assert result.model_metadata["retryCount"] == 0
+
+
+@pytest.mark.parametrize("bad", [
+    {"excerptIds": ["b404"], "interpretation": "错来源"},
+    {"excerptIds": ["n2:b2"], "interpretation": "串台"},
+    {"excerptIds": ["b2", "b2"], "interpretation": "重复"},
+    {"excerptIds": ["b3", "b2"], "interpretation": "倒序"},
+    {"excerptIds": [], "interpretation": "无来源"},
+    {"excerptIds": [1], "interpretation": "错类型"},
+    {"source": "body", "quote": "凭空引用", "interpretation": "旧例子"},
+])
+def test_one_bad_reading_example_does_not_discard_assessment_or_good_example(bad):
+    reading = reading_for("n1")
+    good = deepcopy(reading["examples"][0])
+    reading["examples"] = [bad, good]
+    model = FakeCalls(readings={"n1": reading})
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    example = result.model_metadata["boundExamples"][0]
+    assert example["fragments"][0]["quote"] == "先核对费用。"
+    assert len([item for item in result.model_metadata["boundExamples"]
+                if item["stableId"] == "stable-a"]) == 1
+    assert result.model_metadata["readingAssessments"][0]["assessment"] == reading["assessment"]
+    assert result.model_metadata["degradedStages"] == {"read": 1}
+    assert result.model_metadata["retryCount"] == 0
+
+
+def test_fragment_id_existing_only_in_another_note_is_not_bound():
+    notes = source_notes()
+    notes[1]["body"] += "另一篇第四句。"
+    reading = reading_for("n1")
+    reading["examples"][0]["excerptIds"] = ["b4"]
+    result = asyncio.run(run_staged_account_report(
+        context_for(notes), FakeCalls(notes=notes, readings={"n1": reading}),
+    ))
+    assert all(item["stableId"] != "stable-a" for item in result.model_metadata["boundExamples"])
+    assert result.model_metadata["representativeNoteIds"] == ["stable-a", "stable-b"]
+
+
+@pytest.mark.parametrize("excerpt_id", ["t", "b1"])
+def test_blank_source_example_is_removed_but_report_remains_available(excerpt_id):
+    notes = source_notes()
+    notes[0].update(title="   ", body="   \n实际正文。")
+    reading = reading_for("n1")
+    reading["examples"][0]["excerptIds"] = [excerpt_id]
+    model = FakeCalls(notes=notes, readings={"n1": reading})
+    result = asyncio.run(run_staged_account_report(context_for(notes), model))
+    assert all(item["stableId"] != "stable-a" for item in result.model_metadata["boundExamples"])
+    assert result.model_metadata["retryCount"] == 0
+
+
+@pytest.mark.parametrize("code", ["invalid_json", "output_truncated", "empty_output",
+                                  "invalid_response", "schema_validation"])
+@pytest.mark.parametrize("stage", ["overview", "read"])
+def test_auxiliary_output_failures_are_omitted_once_with_known_usage_retained(stage, code):
+    key = (stage, "n1" if stage == "read" else "")
+    model = ScriptedCalls({key: [AccountReportOutputError(code, usage={"total_tokens": 7})]})
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    metadata = result.model_metadata
+    assert metadata["retryCount"] == 0 and model.counts[key] == 1
+    assert metadata["omittedStages"] == {stage: 1}
+    failed = next(call for call in metadata["calls"] if call["status"] == "omitted")
+    assert failed["errorCode"] == code and failed["metadata"]["usage"]["total_tokens"] == 7
+    assert metadata["usage"]["total_tokens"] == 7 + 3 * (metadata["requestCount"] - 1)
+    assert "private-" not in json.dumps(metadata)
+
+
+def test_omitted_reader_does_not_cancel_sibling_or_publish_an_invented_success_preview():
+    async def scenario():
+        started, omitted = asyncio.Event(), asyncio.Event()
+        updates = []
+        model = FakeCalls()
+
+        async def progress(update):
+            updates.append(deepcopy(update))
+            if update["phase"] == "reading" and update["completed"] == 1:
+                omitted.set()
+
+        async def call(stage, system, user):
+            if stage != "read":
+                return await model(stage, system, user)
+            if json.loads(user)["note"]["title"] == source_notes()[1]["title"]:
+                started.set()
+                await omitted.wait()
+                return await model(stage, system, user)
+            await started.wait()
+            raise AccountReportOutputError("invalid_json", usage={"total_tokens": 11})
+
+        result = await asyncio.wait_for(run_staged_account_report(
+            context_for(), call, on_update=progress,
+        ), timeout=2)
+        assert result.model_metadata["representativeNoteIds"] == ["stable-b"]
+        assert result.model_metadata["omittedStages"] == {"read": 1}
+        finished = [update for update in updates if update["phase"] == "reading"]
+        assert [update["completed"] for update in finished] == [0, 1, 2]
+        assert finished[1]["preview"] == ""
+        assert source_notes()[1]["title"] in finished[-1]["preview"]
+        assert source_notes()[0]["title"] not in finished[-1]["preview"]
+
+    asyncio.run(scenario())
+
+
+def test_all_invalid_reader_assessments_fall_back_to_the_same_default_call():
+    model = ScriptedCalls({}, readings={"n1": {}, "n2": {"assessment": "  "}})
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert model.raw_calls[-1][1:] == build_source_led_profile_prompt(context_for())
+    assert result.model_metadata["requestCount"] == 4
+    assert result.model_metadata["omittedStages"] == {"read": 2}
+    assert result.model_metadata["readingAssessments"] == []
+    assert result.model_metadata["retryCount"] == 0
+
+
+@pytest.mark.parametrize("code", ["invalid_json", "output_truncated", "empty_output"])
+def test_only_unusable_final_report_retries_once_without_repeating_auxiliary_work(code):
+    model = ScriptedCalls({("synthesis", ""): [AccountReportOutputError(
+        code, usage={"total_tokens": 9},
+    )]})
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert model.counts == {("overview", ""): 1, ("read", "n1"): 1,
+                            ("read", "n2"): 1, ("synthesis", ""): 2}
+    assert result.model_metadata["retryCount"] == 1
+    assert result.model_metadata["usage"]["total_tokens"] == 21
+    first, second = model.raw_calls[-2:]
+    assert first[2] == second[2]
+    assert second[1] == first[1] + "\n\n" + FORMAT_RECOVERY_PROMPT
+
+
+def test_empty_final_report_retries_but_missing_optional_sections_does_not():
+    empty = {"profile": {"reportFormat": "source-led/v3", "accountPortrait": {}}}
+    model = ScriptedCalls({("synthesis", ""): [empty]})
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert result.model_metadata["retryCount"] == 1
+    sparse = synthesis_for()
+    for key in ("titleReadings", "expressionReadings", "structureReading", "nextMoves"):
+        sparse["profile"].pop(key)
+    sparse["profile"]["accountPortrait"].pop("keywords")
+    model = ScriptedCalls({}, synthesis=sparse)
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert result.model_metadata["retryCount"] == 0
+    assert result.output["profile"]["accountPortrait"]["summary"]
+
+
+def test_missing_summary_can_still_deliver_useful_source_bound_expression_analysis():
+    synthesis = synthesis_for()
+    synthesis["profile"]["accountPortrait"] = {}
+    result = asyncio.run(run_staged_account_report(context_for(), FakeCalls(synthesis=synthesis)))
+    assert result.output["profile"]["voiceFingerprint"]
+    assert result.model_metadata["retryCount"] == 0
+
+
+@pytest.mark.parametrize("section", [
+    "titleReadings", "expressionReadings", "structureReading", "nextMoves",
+])
+def test_bad_optional_final_section_does_not_discard_the_report(section):
+    synthesis = synthesis_for()
+    synthesis["profile"][section] = (
+        [{"invented": "bad"}] if section != "structureReading" else {"bad": True}
+    )
+    result = asyncio.run(run_staged_account_report(context_for(), FakeCalls(synthesis=synthesis)))
+    assert result.output["profile"]["accountPortrait"]["summary"]
+    assert result.model_metadata["retryCount"] == 0
+    assert result.model_metadata["degradedStages"] == {"synthesis": 1}
+
+
+def test_three_readings_and_one_final_recovery_never_exceed_six_requests():
+    model = ScriptedCalls(
+        {("synthesis", ""): [AccountReportOutputError("invalid_json")]},
+        ids=("n1", "n2", "n3"),
+    )
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert result.model_metadata["requestCount"] == 6
+    assert result.model_metadata["retryCount"] == 1
+
+
+def test_second_final_failure_remains_clear_and_retains_safe_audit():
+    model = ScriptedCalls({("synthesis", ""): [
+        AccountReportOutputError("invalid_json", usage={"total_tokens": 4}),
+        AccountReportOutputError("empty_output", usage={"total_tokens": 5}),
+    ]})
+    with pytest.raises(AccountReportOutputError) as raised:
+        asyncio.run(run_staged_account_report(context_for(), model))
+    metadata = raised.value.pipeline_metadata
+    assert metadata["requestCount"] == 5 and metadata["retryCount"] == 1
+    assert metadata["usage"]["total_tokens"] == 18
+    assert "private-" not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize("failure", ["provider", "callback"])
+def test_true_request_or_callback_failure_cancels_pending_reader(failure):
+    async def scenario():
+        model = FakeCalls()
+        started, cancelled = asyncio.Event(), asyncio.Event()
+
+        async def progress(update):
+            if failure == "callback" and update["phase"] == "reading" and update["completed"] == 1:
+                raise RuntimeError("progress failure")
+
+        async def call(stage, system, user):
+            if stage != "read":
+                return await model(stage, system, user)
+            if json.loads(user)["note"]["title"] == source_notes()[1]["title"]:
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+            await started.wait()
+            if failure == "provider":
+                raise RuntimeError("request failure")
+            return await model(stage, system, user)
+
+        with pytest.raises(RuntimeError):
+            await asyncio.wait_for(run_staged_account_report(
+                context_for(), call, on_update=progress,
+            ), timeout=2)
+        assert cancelled.is_set()
+
+    asyncio.run(scenario())
+
+
+def test_final_recovery_callback_failure_is_not_mistaken_for_bad_model_output():
+    model = ScriptedCalls({("synthesis", ""): [AccountReportOutputError("invalid_json")]})
+
+    async def progress(update):
+        if "recovery" in update:
+            raise AccountReportOutputError("invalid_response")
+
+    with pytest.raises(AccountReportOutputError) as raised:
+        asyncio.run(run_staged_account_report(context_for(), model, on_update=progress))
+    assert model.counts[("synthesis", "")] == 1
+    assert raised.value.pipeline_metadata["retryCount"] == 0
+
+
+@pytest.mark.parametrize("stage", ["overview", "read"])
+def test_extra_unbound_output_fields_are_ignored_and_never_replace_source_text(stage):
+    model = FakeCalls()
+    target = model.overview if stage == "overview" else model.readings["n1"]
+    target["inventedNoteTitle"] = "不能替换原文"
+    result = asyncio.run(run_staged_account_report(context_for(), model))
+    assert "不能替换原文" not in json.dumps(result.output, ensure_ascii=False)
+    assert result.model_metadata["retryCount"] == 0

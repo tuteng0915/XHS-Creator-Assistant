@@ -77,3 +77,58 @@ def test_profile_timeout_is_bounded(value):
     with pytest.raises(ValueError, match="QWEN_PROFILE_READ_TIMEOUT_SECONDS"):
         Settings(database_path=Path(":memory:"), upload_directory=Path("."),
                  qwen_profile_read_timeout_seconds=value)
+
+
+@pytest.mark.parametrize("value,expected", [
+    (None, False), ("false", False), ("true", True), (" TRUE ", True), ("False", False),
+])
+def test_profile_thinking_requires_an_explicit_boolean_environment_opt_in(
+    monkeypatch, value, expected,
+):
+    monkeypatch.setattr("app.config.load_env_file_defaults", lambda _: None)
+    monkeypatch.delenv("QWEN_PROFILE_ENABLE_THINKING", raising=False)
+    if value is not None:
+        monkeypatch.setenv("QWEN_PROFILE_ENABLE_THINKING", value)
+    assert Settings.from_environment().qwen_profile_enable_thinking is expected
+    defaults = Settings(database_path=Path(":memory:"), upload_directory=Path("."))
+    assert defaults.qwen_profile_enable_thinking is False
+    assert defaults.qwen_profile_thinking_budget == 4096
+
+
+@pytest.mark.parametrize("value", ["", "yes", "no", "1", "0", "invalid"])
+def test_profile_thinking_rejects_invalid_environment_value(monkeypatch, value):
+    monkeypatch.setattr("app.config.load_env_file_defaults", lambda _: None)
+    monkeypatch.setenv("QWEN_PROFILE_ENABLE_THINKING", value)
+    with pytest.raises(ValueError, match="QWEN_PROFILE_ENABLE_THINKING"):
+        Settings.from_environment()
+
+
+@pytest.mark.parametrize("value", [0, 1, "true", None])
+def test_profile_thinking_rejects_non_boolean_direct_value(value):
+    with pytest.raises(ValueError, match="QWEN_PROFILE_ENABLE_THINKING"):
+        Settings(database_path=Path(":memory:"), upload_directory=Path("."),
+                 qwen_profile_enable_thinking=value)
+
+
+@pytest.mark.parametrize("value,expected", [(None, 4096), ("1", 1), ("8192", 8192)])
+def test_profile_thinking_budget_from_environment(monkeypatch, value, expected):
+    monkeypatch.setattr("app.config.load_env_file_defaults", lambda _: None)
+    monkeypatch.delenv("QWEN_PROFILE_THINKING_BUDGET", raising=False)
+    if value is not None:
+        monkeypatch.setenv("QWEN_PROFILE_THINKING_BUDGET", value)
+    assert Settings.from_environment().qwen_profile_thinking_budget == expected
+
+
+@pytest.mark.parametrize("value", ["", "not-an-integer", "1.5", "0", "8193", "-1"])
+def test_profile_thinking_budget_rejects_invalid_environment_value(monkeypatch, value):
+    monkeypatch.setattr("app.config.load_env_file_defaults", lambda _: None)
+    monkeypatch.setenv("QWEN_PROFILE_THINKING_BUDGET", value)
+    with pytest.raises(ValueError, match="QWEN_PROFILE_THINKING_BUDGET"):
+        Settings.from_environment()
+
+
+@pytest.mark.parametrize("value", [0, -1, 8193, True, 1.5, float("inf"), "4096", None])
+def test_profile_thinking_budget_is_bounded_even_when_disabled(value):
+    with pytest.raises(ValueError, match="QWEN_PROFILE_THINKING_BUDGET"):
+        Settings(database_path=Path(":memory:"), upload_directory=Path("."),
+                 qwen_profile_thinking_budget=value)

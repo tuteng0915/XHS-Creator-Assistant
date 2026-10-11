@@ -171,9 +171,11 @@ def test_invalid_schema_retains_output_and_empty_portrait_is_not_quality_success
     assert report["output"] == model.output
     model.output = {"profile": {}}
     report = asyncio.run(check.run_check(model, case))
-    assert report["status"] == "completed"
-    assert report["portraitVerification"]["hasVerifiedPortrait"] is False
-    assert report["semanticStatus"] == "not_reviewed"
+    assert report["status"] == "failed"
+    assert report["error"]["phase"] == "validation"
+    assert report["output"] == model.output
+    assert "result" not in report
+    assert "portraitVerification" not in report
 
 
 def test_live_refuses_existing_output_before_constructing_provider(tmp_path, monkeypatch, settings):
@@ -783,7 +785,9 @@ def test_workspace_live_uses_one_qwen_request_and_preserves_database(
             else:
                 assert "enable_thinking" not in payload
             return httpx.Response(200, json={"model": "qwen-plus", "choices": [{
-                "finish_reason": "stop", "message": {"content": '{"profile":{}}'},
+                "finish_reason": "stop", "message": {"content": json.dumps({
+                    "profile": {"hookStyles": ["先给出具体场景，再展开观察。"]},
+                })},
             }]})
         return httpx.AsyncClient(transport=httpx.MockTransport(respond), event_hooks={
             "request": [self._record_request], "response": [self._record_response],
@@ -967,7 +971,9 @@ def test_analysis_run_live_calls_current_qwen_once_and_keeps_history_unchanged(
         def respond(request):
             requests.append(request)
             return httpx.Response(200, json={"model": "qwen-plus", "choices": [{
-                "finish_reason": "stop", "message": {"content": '{"profile":{}}'},
+                "finish_reason": "stop", "message": {"content": json.dumps({
+                    "profile": {"voiceFingerprint": ["以短句交代观察，再用长句解释。"]},
+                })},
             }]})
         return httpx.AsyncClient(transport=httpx.MockTransport(respond), event_hooks={
             "request": [self._record_request], "response": [self._record_response],

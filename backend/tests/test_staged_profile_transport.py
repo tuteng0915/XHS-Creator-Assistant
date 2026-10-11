@@ -9,6 +9,7 @@ import pytest
 from app.config import Settings
 from app.errors import ValidationError
 from app.models import ModelOperation
+from app.services.account_report_contract import AccountReportOutputError
 from app.services.model_calls import MAX_TOKENS, ModelCallService
 
 
@@ -17,16 +18,17 @@ def forbid_call(*args, **kwargs):
 
 
 @pytest.mark.parametrize("value,expected", [
-    (None, "source_led"), ("source_led", "source_led"), ("staged", "staged"),
+    (None, "staged"), ("source_led", "source_led"), ("staged", "staged"),
 ])
-def test_account_report_mode_is_an_explicit_environment_opt_in(
+def test_account_report_defaults_to_staged_with_an_explicit_single_call_rollback(
     settings, monkeypatch, value, expected,
 ):
     monkeypatch.setattr("app.config.load_env_file_defaults", lambda _: None)
     monkeypatch.delenv("ACCOUNT_REPORT_MODE", raising=False)
     if value is not None:
         monkeypatch.setenv("ACCOUNT_REPORT_MODE", value)
-    assert settings.account_report_mode == "source_led"
+    assert settings.account_report_mode == "staged"
+    assert settings.qwen_profile_enable_thinking is False
     assert Settings.from_environment().account_report_mode == expected
 
 
@@ -43,17 +45,18 @@ def test_account_report_mode_rejects_invalid_environment_and_direct_values(
 
 
 @pytest.mark.parametrize("provider", ["qwen", "dashscope"])
+@pytest.mark.parametrize("thinking", [False, True])
 @pytest.mark.parametrize("stage,budget", [
-    ("overview", 1600), ("read", 1600), ("synthesis", 2000),
+    ("overview", 1600), ("read", 1600), ("synthesis", 6000),
 ])
 def test_staged_report_uses_one_profile_routed_qwen_request(
-    settings, monkeypatch, provider, stage, budget,
+    settings, monkeypatch, provider, stage, budget, thinking,
 ):
     requests = []
     before_requests = []
     output = {
         "overview": {
-            "summary": {"text": "一条有来源的整体观察", "noteIds": ["n1"]},
+            "summary": {"text": "一条有来源且完整的整体阅读观察", "noteIds": ["n1"]},
             "directions": [{"text": "有来源的内容方向", "noteIds": ["n1", "n3"]}],
             "hypotheses": ["待精读核对的判断"],
             "readings": [{"noteId": "n1", "question": "这篇如何组织真实经验？"}],
@@ -70,9 +73,12 @@ def test_staged_report_uses_one_profile_routed_qwen_request(
         requests.append(request)
         return httpx.Response(200, json={
             "model": "qwen3.8-max-response-version",
-            "usage": {"prompt_tokens": 80, "completion_tokens": 35, "total_tokens": 115},
+            "usage": {"prompt_tokens": 80, "completion_tokens": 35, "total_tokens": 115,
+                      "completion_tokens_details": {"reasoning_tokens": 10 if thinking else 0,
+                                                    "reasoning_content": "never-retain-this"}},
             "choices": [{"finish_reason": "stop", "message": {
                 "content": json.dumps(output, ensure_ascii=False),
+                "reasoning_content": "never-retain-this",
             }}],
         })
 
@@ -80,6 +86,7 @@ def test_staged_report_uses_one_profile_routed_qwen_request(
         settings, model_provider=provider, qwen_api_key="test-placeholder",
         qwen_base_url="https://qwen.example.test/v1/",
         qwen_model="qwen-plus", qwen_profile_model=" qwen3.8-max ",
+        qwen_profile_enable_thinking=thinking, qwen_profile_thinking_budget=4096,
     ), before_request=lambda: before_requests.append(True))
     operations = []
 
@@ -107,7 +114,8 @@ def test_staged_report_uses_one_profile_routed_qwen_request(
     assert requests[0].headers["authorization"] == "Bearer test-placeholder"
     assert json.loads(requests[0].content) == {
         "model": "qwen3.8-max", "max_tokens": budget, "temperature": 0.3,
-        "response_format": {"type": "json_object"}, "enable_thinking": False,
+        "response_format": {"type": "json_object"}, "enable_thinking": thinking,
+        **({"thinking_budget": 4096} if thinking else {}),
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
     }
     assert result.output == output  # Stage contracts need not contain PROFILE's profile envelope.
@@ -115,9 +123,14 @@ def test_staged_report_uses_one_profile_routed_qwen_request(
         "provider": "qwen", "operation": "profile", "stage": stage,
         "profileModel": "qwen3.8-max", "model": "qwen3.8-max-response-version",
         "modelSource": "response",
+        "responseFormat": "json_object",
+        "responseSchema": None,
+        "enableThinking": thinking, "thinkingBudget": 4096 if thinking else None,
         "systemPromptHash": hashlib.sha256(system.encode("utf-8")).hexdigest(),
-        "usage": {"prompt_tokens": 80, "completion_tokens": 35, "total_tokens": 115},
+        "usage": {"prompt_tokens": 80, "completion_tokens": 35, "total_tokens": 115,
+                  "reasoning_tokens": 10 if thinking else 0},
     }
+    assert "never-retain-this" not in result.model_dump_json()
 
 
 def test_staged_report_calls_are_independent_without_history(settings, monkeypatch):
@@ -151,6 +164,7 @@ def test_staged_report_calls_are_independent_without_history(settings, monkeypat
         ]
         assert request["model"] == "qwen-plus"
         assert "enable_thinking" not in request
+        assert "thinking_budget" not in request
     for result in results:
         assert result.model_metadata["model"] == "qwen-plus"
         assert result.model_metadata["profileModel"] == "qwen-plus"
@@ -184,36 +198,60 @@ def test_staged_report_missing_qwen_key_does_not_fallback(settings, monkeypatch)
         asyncio.run(service.call_account_report_step("overview", "system", "user"))
 
 
-@pytest.mark.parametrize("status,finish_reason,content,match", [
-    (200, "length", '{"result":[]}', "分步输出达到长度上限"),
-    (200, "stop", "not JSON", "JSON"),
-    (200, "stop", "[]", "JSON"),
-    (503, "stop", '{"result":[]}', "Model call failed"),
+@pytest.mark.parametrize("status,finish_reason,content,code", [
+    (200, "length", '{"result":[]}', "output_truncated"),
+    (200, "stop", "not JSON", "invalid_json"),
+    (200, "stop", "[]", "invalid_json"),
+    (200, "stop", "", "empty_output"),
+    (200, "stop", "{}", "empty_output"),
+    (400, "stop", '{"result":[]}', None),
+    (401, "stop", '{"result":[]}', None),
+    (503, "stop", '{"result":[]}', None),
 ])
+@pytest.mark.parametrize("thinking", [False, True])
 def test_staged_report_failure_is_not_reviewed_retried_or_fallback(
-    settings, monkeypatch, status, finish_reason, content, match,
+    settings, monkeypatch, status, finish_reason, content, code, thinking,
 ):
     requests = []
 
     def respond(request):
         requests.append(request)
         return httpx.Response(status, json={
-            "choices": [{"finish_reason": finish_reason, "message": {"content": content}}],
+            "usage": {"completion_tokens": 10, "reasoning_content": "never-retain-this",
+                      "completion_tokens_details": {"reasoning_tokens": 3}},
+            "choices": [{"finish_reason": finish_reason, "message": {
+                "content": content, "reasoning_content": "never-retain-this",
+            }}],
         })
 
-    service = ModelCallService(replace(settings, qwen_api_key="test-placeholder"))
+    service = ModelCallService(replace(
+        settings, qwen_api_key="test-placeholder", qwen_profile_enable_thinking=thinking,
+    ))
     monkeypatch.setattr(service, "_qwen_client", lambda _: httpx.AsyncClient(
         transport=httpx.MockTransport(respond),
     ))
     monkeypatch.setattr(service, "_call_anthropic", forbid_call)
     monkeypatch.setattr(service, "review_panel_output", forbid_call)
-    with pytest.raises(ValidationError, match=match):
+    with pytest.raises(AccountReportOutputError if code else ValidationError) as error:
         asyncio.run(service.call_account_report_step("read", "system", "user"))
     assert len(requests) == 1
+    if code:
+        assert error.value.code == code
+        assert error.value.metadata is error.value.model_metadata
+        assert error.value.metadata["usage"] == {"completion_tokens": 10, "reasoning_tokens": 3}
+        assert error.value.metadata["responseFormat"] == "json_object"
+        assert error.value.metadata.get("responseSchema") is None
+        assert "never-retain-this" not in json.dumps(error.value.metadata)
+    else:
+        assert not isinstance(error.value, AccountReportOutputError)
+        assert str(status) in str(error.value)
 
 
 @pytest.mark.parametrize("mode", ["source_led", "staged"])
-def test_default_profile_path_keeps_its_prompt_budget_and_schema(settings, monkeypatch, mode):
+@pytest.mark.parametrize("thinking", [False, True])
+def test_default_profile_path_keeps_its_prompt_budget_and_json_object_transport(
+    settings, monkeypatch, mode, thinking,
+):
     requests = []
 
     def respond(request):
@@ -224,6 +262,7 @@ def test_default_profile_path_keeps_its_prompt_budget_and_schema(settings, monke
 
     service = ModelCallService(replace(
         settings, account_report_mode=mode, qwen_api_key="test-placeholder",
+        qwen_profile_enable_thinking=thinking,
     ))
     monkeypatch.setattr(service, "_qwen_client", lambda _: httpx.AsyncClient(
         transport=httpx.MockTransport(respond),
@@ -233,6 +272,12 @@ def test_default_profile_path_keeps_its_prompt_budget_and_schema(settings, monke
     result = asyncio.run(service.call_operation(ModelOperation.PROFILE, context))
     assert len(requests) == 1
     assert requests[0]["max_tokens"] == 6000
+    assert requests[0]["response_format"] == {"type": "json_object"}
+    assert requests[0]["enable_thinking"] is thinking
+    if thinking:
+        assert requests[0]["thinking_budget"] == 4096
+    else:
+        assert "thinking_budget" not in requests[0]
     assert requests[0]["messages"] == [
         {"role": "system", "content": expected_system},
         {"role": "user", "content": expected_user},
@@ -254,3 +299,86 @@ def test_stage_budget_key_does_not_change_other_operations(operation):
     assert ModelCallService._output_budget(ModelOperation.PROFILE, {}) == MAX_TOKENS[
         ModelOperation.PROFILE
     ]
+
+
+@pytest.mark.parametrize("body", [
+    None, [], {}, {"choices": []}, {"choices": [None]},
+    {"choices": [{"finish_reason": "stop"}]},
+    {"choices": [{"message": {"content": 42}}]},
+    {"choices": [{"message": {"content": [{"type": "text", "text": None}]}}]},
+])
+def test_staged_malformed_response_is_a_safe_output_error(settings, monkeypatch, body):
+    service = ModelCallService(replace(settings, qwen_api_key="test-placeholder"))
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, content=json.dumps(body), headers={
+            "content-type": "application/json",
+        })
+
+    monkeypatch.setattr(service, "_qwen_client", lambda _: httpx.AsyncClient(
+        transport=httpx.MockTransport(respond),
+    ))
+    with pytest.raises(AccountReportOutputError) as error:
+        asyncio.run(service.call_account_report_step("read", "system", "user"))
+    assert error.value.code == "invalid_response"
+    assert len(requests) == 1
+
+
+def test_staged_invalid_response_json_is_a_safe_output_error(settings, monkeypatch):
+    service = ModelCallService(replace(settings, qwen_api_key="test-placeholder"))
+    monkeypatch.setattr(service, "_qwen_client", lambda _: httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, text="provider secret")),
+    ))
+    with pytest.raises(AccountReportOutputError) as error:
+        asyncio.run(service.call_account_report_step("read", "system", "user"))
+    assert error.value.code == "invalid_response"
+    assert error.value.metadata.get("responseSchema") is None
+    assert "provider secret" not in str(error.value)
+    assert "provider secret" not in json.dumps(error.value.metadata)
+
+
+def test_staged_network_failure_is_not_a_recoverable_output_error(settings, monkeypatch):
+    service = ModelCallService(replace(settings, qwen_api_key="test-placeholder"))
+
+    def respond(request):
+        raise httpx.ReadTimeout("network failure", request=request)
+
+    monkeypatch.setattr(service, "_qwen_client", lambda _: httpx.AsyncClient(
+        transport=httpx.MockTransport(respond),
+    ))
+    with pytest.raises(httpx.ReadTimeout):
+        asyncio.run(service.call_account_report_step("read", "system", "user"))
+
+
+@pytest.mark.parametrize("model", [
+    "qwen3.8-max",
+    "qwen-plus",
+    "qwen3.8-plus",
+    "qwen3.8-max-unverified-version",
+    "not-qwen3.8-max",
+])
+def test_staged_transport_does_not_add_model_specific_schema_requirements(
+    settings, monkeypatch, model,
+):
+    requests = []
+    service = ModelCallService(replace(
+        settings, qwen_api_key="test-placeholder", qwen_profile_model=model,
+    ))
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {
+            "content": '{"assessment":"观察"}',
+        }}]})
+
+    monkeypatch.setattr(service, "_qwen_client", lambda _: httpx.AsyncClient(
+        transport=httpx.MockTransport(respond),
+    ))
+    response = asyncio.run(service.call_account_report_step("read", "system", "user"))
+    assert len(requests) == 1
+    assert requests[0]["response_format"] == {"type": "json_object"}
+    assert response.model_metadata["responseFormat"] == "json_object"
+    assert response.model_metadata["responseSchema"] is None
+    assert response.output == {"assessment": "观察"}

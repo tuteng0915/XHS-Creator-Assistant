@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Literal, Protocol, TypedDict
 
@@ -26,7 +27,8 @@ from app.services.account_diagnosis_evidence import (
     verified_portrait,
 )
 from app.services.account_profile_shape import normalize_profile_stage_result
-from app.services.account_report_editorial import compile_editorial_profile
+from app.services.account_report_contract import AccountReportOutputError
+from app.services.account_report_delivery import compile_usable_account_report
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
 from app.services.model_calls import ModelCallService
@@ -39,9 +41,81 @@ ACCOUNT_GRAPH_NODE_ORDER = [
     "finalize",
 ]
 ACCOUNT_STAGE_ORDER = ["profile", "pain_points", "topics"]
+ACCOUNT_REPORT_RETRY_EXHAUSTED_MESSAGE = (
+    "已自动重试，仍未取得完整账号报告，请重试分析。"
+)
+ACCOUNT_REPORT_INCOMPLETE_MESSAGE = "暂未取得完整账号报告，请重试分析。"
+_REPORT_USAGE_KEYS = (
+    "prompt_tokens", "completion_tokens", "total_tokens", "reasoning_tokens",
+    "input_tokens", "output_tokens",
+)
+_REPORT_ERROR_CODES = {
+    "output_truncated", "empty_output", "invalid_json", "invalid_response",
+    "schema_validation", "source_validation", "request_failed", "processing_failed",
+}
 ACTIVE_EXECUTION: contextvars.ContextVar[
     _AccountDiagnosisGraphExecution | None
 ] = contextvars.ContextVar("account_diagnosis_execution", default=None)
+
+
+def _safe_report_failure_metadata(value: Any) -> dict[str, Any]:
+    """Persist execution counters, never arbitrary exception/provider contents."""
+    if not isinstance(value, dict):
+        return {}
+
+    def counters(source: Any, keys: tuple[str, ...]) -> dict[str, int]:
+        if not isinstance(source, dict):
+            return {}
+        return {key: source[key] for key in keys
+                if type(source.get(key)) is int and source[key] >= 0}
+
+    def identifiers(source: dict, keys: tuple[str, ...]) -> dict[str, str]:
+        return {key: source[key] for key in keys
+                if isinstance(source.get(key), str)
+                and re.fullmatch(r"[A-Za-z0-9_./:-]{1,160}", source[key])}
+
+    result: dict[str, Any] = identifiers(value, ("promptVersion",))
+    if value.get("accountReportMode") == "staged":
+        result["accountReportMode"] = "staged"
+    result.update(counters(value, ("requestCount", "retryCount")))
+    result.update(counters(value, ("omissionCount",)))
+    for field in ("omittedStages", "degradedStages"):
+        if isinstance(value.get(field), dict):
+            result[field] = counters(value[field], ("overview", "read", "synthesis"))
+    if isinstance(value.get("usage"), dict):
+        result["usage"] = counters(value["usage"], _REPORT_USAGE_KEYS)
+    if isinstance(value.get("calls"), list):
+        calls = []
+        for call in value["calls"]:
+            if not isinstance(call, dict):
+                continue
+            if call.get("stage") not in ("overview", "read", "synthesis"):
+                continue
+            if call.get("status") not in ("completed", "failed", "cancelled", "omitted"):
+                continue
+            safe: dict[str, Any] = {"stage": call["stage"], "status": call["status"]}
+            safe.update(counters(call, ("attempt", "requestIndex", "omittedItemCount")))
+            safe.update(identifiers(call, ("noteId",)))
+            if (isinstance(call.get("errorCode"), str)
+                    and call["errorCode"] in _REPORT_ERROR_CODES):
+                safe["errorCode"] = call["errorCode"]
+            if type(call.get("usageUnavailable")) is bool:
+                safe["usageUnavailable"] = call["usageUnavailable"]
+            source = call.get("metadata")
+            if isinstance(source, dict):
+                metadata = identifiers(source, (
+                    "provider", "operation", "stage", "model", "profileModel", "modelSource",
+                    "responseFormat", "responseSchema", "systemPromptHash",
+                ))
+                metadata.update(counters(source, ("thinkingBudget",)))
+                if type(source.get("enableThinking")) is bool:
+                    metadata["enableThinking"] = source["enableThinking"]
+                if isinstance(source.get("usage"), dict):
+                    metadata["usage"] = counters(source["usage"], _REPORT_USAGE_KEYS)
+                safe["metadata"] = metadata
+            calls.append(safe)
+        result["calls"] = calls
+    return result
 
 
 class AccountDiagnosisState(TypedDict, total=False):
@@ -280,7 +354,8 @@ class RealAccountDiagnosisModelProvider:
         historical_posts: str,
         on_update: Callable[[dict[str, Any]], Awaitable[None]],
     ):
-        # Keep the normal profile call and older provider implementations intact.
+        # Reading assistance is the Qwen default. Explicit single-call rollback,
+        # legacy text and other providers keep the existing profile operation.
         from app.services.account_report_pipeline import (
             StagedReportResult,
             run_staged_account_report,
@@ -289,6 +364,8 @@ class RealAccountDiagnosisModelProvider:
 
         context = {"positioning": positioning, "historicalPosts": historical_posts}
         if (self.model_call_service.settings.account_report_mode == "staged"
+                and self.model_call_service.settings.model_provider.strip().lower()
+                in {"qwen", "dashscope"}
                 and uses_structured_notes(context)):
             return await run_staged_account_report(
                 context,
@@ -536,7 +613,10 @@ class _AccountDiagnosisGraphExecution:
                         positioning=context["positioning"],
                         historical_posts=context["historicalPosts"],
                     )
-                prepared = compile_editorial_profile(output, snapshot)
+                omissions: list[str] = []
+                prepared = compile_usable_account_report(output, snapshot, omissions=omissions)
+                if omissions:
+                    metadata["omittedReportItems"] = omissions
                 result = ProfileStageResult.model_validate(prepared).model_dump(
                     mode="json"
                 )
@@ -674,12 +754,20 @@ class _AccountDiagnosisGraphExecution:
     async def stage_failed(
         self, stage_key: str, error: Exception, state: dict[str, Any]
     ) -> None:
+        diagnostics = (_safe_report_failure_metadata(getattr(error, "pipeline_metadata", None))
+                       if stage_key == "profile" else {})
+        report_failure = stage_key == "profile" and isinstance(error, AccountReportOutputError)
         message = self.error_message(error)
+        if report_failure:
+            message = (ACCOUNT_REPORT_RETRY_EXHAUSTED_MESSAGE
+                       if diagnostics.get("retryCount", 0) > 0
+                       else ACCOUNT_REPORT_INCOMPLETE_MESSAGE)
         state.setdefault("stage_errors", {})[stage_key] = message
         run = self.service.analysis_service.get(self.run_id)
         saved_metadata = run.model_metadata.get(stage_key)
         metadata = dict(saved_metadata) if isinstance(saved_metadata, dict) else {}
         metadata.pop("progress", None)
+        metadata.update(diagnostics)
         self.service.analysis_service.update_stage(
             self.run_id,
             stage_key,
