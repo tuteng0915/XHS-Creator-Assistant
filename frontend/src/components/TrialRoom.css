@@ -10,7 +10,7 @@
 .trial-message-meta {display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px;font-size:var(--text-sm);line-height:1.5}
 .trial-message-meta b {font-size:var(--text-sm);font-weight:600;color:var(--ink)}
 .trial-message-meta span {font-size:var(--text-xs)!important;color:var(--sub);font-weight:400}
-.trial-bubble {margin:0!important;padding:12px 16px;border-radius:3px 14px 14px;background:var(--surface-muted);white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--text-body)!important;line-height:1.75}
+.trial-bubble {margin:0!important;padding:12px 16px;border-radius:3px 14px 14px;background:var(--report-observation-surface);white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--text-body)!important;line-height:1.75}
 .trial-author {flex-direction:row-reverse}
 .trial-author .trial-bubble {background:var(--accent-soft);border-radius:14px 3px 14px 14px}
 .trial-author .trial-message-meta {justify-content:flex-end}
@@ -31,14 +31,15 @@
 .trial-composer-footer {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px}
 .trial-composer-footer small {font-size:var(--text-xs);color:var(--sub)}
 .trial-composer-footer button {flex:0 0 auto;width:auto;white-space:nowrap}
-.trial-takeaways {border-top:1px solid var(--line);padding:22px 24px;background:#fafafa}
+.trial-takeaways {border-top:1px solid var(--report-suggestion-border);padding:22px 24px;background:var(--report-suggestion-surface)}
+.trial-takeaways>h3 {color:var(--report-suggestion-ink)}
 .trial-takeaways h5 {font-size:var(--text-body)!important;font-weight:600}
 .simulation-history-target {max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trial-errors {margin:16px 24px;font-size:var(--text-sm)}
 .reader-card-heading {display:flex;gap:10px;align-items:center}
 .simulation-flow-steps {display:flex;gap:8px;list-style:none;padding:0;margin:0 0 20px;color:var(--sub);font-size:13px;flex-wrap:wrap}
 .simulation-flow-steps li {padding:5px 10px;border-radius:20px;background:var(--surface-muted)}
-.simulation-final-readers {padding:16px;border:1px solid #bfdccf;background:#f1f9f5;border-radius:12px;margin:16px 0}
+.simulation-final-readers {padding:16px;border:1px solid var(--report-observation-border);background:var(--report-observation-surface);border-radius:12px;margin:16px 0}
 .simulation-final-readers h3 {font-size:16px;margin:0 0 8px}
 .simulation-final-readers ul {display:flex;gap:12px;flex-wrap:wrap;list-style:none;padding:0}
 .simulation-final-readers li {display:flex;gap:8px;align-items:center;font-size:14px}

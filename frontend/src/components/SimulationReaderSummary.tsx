@@ -34,7 +34,7 @@ export function SimulationReaderSummary({ run }: {run: SimulationRun}) {
     return allIds.filter(other => names.get(other) === name).length > 1
       ? `${name}（${allIds.indexOf(id) + 1}）` : name
   }
-  const mode = selection.source === 'oracle_showcase' ? '预写示例名单'
+  const mode = selection.source === 'oracle_showcase' ? '已保存名单'
     : selection.source === 'recommended' ? '使用推荐'
     : selection.source === 'adjusted' ? '推荐后调整'
       : selection.source === 'manual' ? '手动选择' : '旧记录未保存选择方式'
@@ -52,7 +52,7 @@ export function SimulationReaderSummary({ run }: {run: SimulationRun}) {
             {text(item.fitReason) && <p>{text(item.fitReason)}</p>}
             {text(item.contribution) && <p>{text(item.contribution)}</p>}
           </details>}
-        </li>)}</ul> : <p className="muted">{selection.source === 'oracle_showcase' ? '本示例未执行读者推荐' : selection.source === 'manual' ? '本次未使用推荐' : '此记录未保存推荐名单'}</p>}
+        </li>)}</ul> : <p className="muted">{selection.source === 'oracle_showcase' ? '本次未执行读者推荐' : selection.source === 'manual' ? '本次未使用推荐' : '此记录未保存推荐名单'}</p>}
       </div>
       <div className="account-performance-group">
         <b>{run.personaDefinitions.length ? '实际参与者' : '本次选择'}</b>

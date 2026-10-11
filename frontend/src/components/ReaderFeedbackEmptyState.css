@@ -1,0 +1,9 @@
+.reader-feedback-empty { min-width: 0; }
+.reader-feedback-empty > p { margin: 0 0 14px; }
+.reader-feedback-empty h4 { margin: 0 0 10px; font-size: 14px; }
+.reader-feedback-source-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.reader-feedback-source-list li { min-width: 0; padding: 10px 12px; border-radius: 8px; background: var(--report-observation-surface); overflow-wrap: anywhere; }
+.reader-feedback-source-list blockquote { margin: 0; font-size: 14px; line-height: 1.65; color: var(--ink); white-space: pre-wrap; }
+.reader-feedback-source-title { display: block; margin-top: 4px; color: var(--sub); font-size: 12px; line-height: 1.5; }
+.reader-feedback-empty details { margin-top: 12px; }
+.reader-feedback-empty summary { color: var(--sub); font-size: 13px; cursor: pointer; margin-bottom: 10px; }

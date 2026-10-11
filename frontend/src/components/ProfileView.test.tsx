@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it } from 'vitest'
 import { ProfileView } from './StageResultViews'
 import type { Observations } from './AccountPortraitView'
@@ -24,27 +24,50 @@ const observations: Observations = {
   ],
 }
 
-it('uses frozen counts and directly displays content and actions without legacy nested disclosures', () => {
+it('preserves saved comparison prose beside frozen counts without reusing model metric strings', () => {
   const original = JSON.stringify({ data, observations })
   render(<ProfileView data={data} observations={observations} />)
   expect(screen.queryByText('更多内容归纳')).not.toBeInTheDocument()
   expect(screen.getByText(data.contrast.takeaways[0]).closest('details')).toBeNull()
   expect(screen.getByRole('status')).toHaveTextContent('点赞数据 2 / 2 条 · 中位数 15')
-  expect(screen.queryByText(/None|999|30%|15%|模型指定/)).not.toBeInTheDocument()
+  const performance = screen.getByRole('heading', { name: '历史笔记表现', level: 4 }).closest('section')!
+  const higher = screen.getByRole('heading', { name: '较高表现' }).parentElement!
+  const lower = screen.getByRole('heading', { name: '较低表现' }).parentElement!
+  expect(performance).toContainElement(higher)
+  expect(performance).toContainElement(lower)
+  expect(performance).toContainElement(screen.getByRole('combobox', { name: '比较指标' }))
+  expect(within(performance).getAllByRole('heading', { level: 4 })).toHaveLength(1)
+  expect(higher).toContainElement(screen.getByText(data.contrast.winners[0].title))
+  expect(higher).toContainElement(screen.getByText(data.contrast.winFactors[0]))
+  expect(lower).toContainElement(screen.getByText(data.contrast.losers[0].title))
+  expect(lower).toContainElement(screen.getByText(data.contrast.loseFactors[0]))
+  for (const item of [...data.contrast.winners, ...data.contrast.losers]) {
+    expect(screen.queryByText(item.metric, { exact: false })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: item.title })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: item.title })).not.toBeInTheDocument()
+  }
   expect(screen.queryByText(/高表现 vs 低表现/)).not.toBeInTheDocument()
   expect(screen.getByText('生活记录')).toBeInTheDocument()
   expect(screen.getByText(data.contrast.takeaways[0])).toBeInTheDocument()
   fireEvent.change(screen.getByRole('combobox', { name: '比较指标' }), { target: { value: 'shares' } })
   expect(screen.getByRole('status')).toHaveTextContent('分享数据 1 / 2 条 · 中位数 0 · 1 条未获取')
+  expect(higher).toContainElement(screen.getByText(data.contrast.winFactors[0]))
+  expect(lower).toContainElement(screen.getByText(data.contrast.loseFactors[0]))
   expect(JSON.stringify({ data, observations })).toBe(original)
 })
 
 it('opens duplicate titles by frozen note ID without inferring a link from the model title', () => {
-  render(<ProfileView data={data} observations={observations} notes={[
+  const report = { ...data, contrast: { ...data.contrast, winners: [{ title: '同名笔记', metric: '收藏999；分享None' }] } }
+  render(<ProfileView data={report} observations={observations} notes={[
     { noteId: 'first', title: '同名笔记', desc: '第一份冻结正文', metrics: { liked: 10 }, comments: [] },
     { noteId: 'second', title: '同名笔记', desc: '第二份冻结正文', metrics: { liked: 20 }, comments: [] },
   ]} />)
+  const savedHigher = screen.getByRole('heading', { name: '较高表现' }).parentElement!
+  expect(within(savedHigher).getByText('同名笔记')).toBeInTheDocument()
+  expect(within(savedHigher).queryByRole('button', { name: '同名笔记' })).not.toBeInTheDocument()
+  expect(within(savedHigher).queryByRole('link', { name: '同名笔记' })).not.toBeInTheDocument()
   const buttons = screen.getAllByRole('button', { name: '同名笔记' })
+  expect(buttons).toHaveLength(2)
   fireEvent.click(buttons[0])
   fireEvent.click(screen.getByRole('button', { name: /同名笔记 赞 20/ }))
   expect(screen.getByText('第二份冻结正文')).toBeInTheDocument()
@@ -56,10 +79,39 @@ it('opens duplicate titles by frozen note ID without inferring a link from the m
   expect(screen.queryByText('第二份冻结正文')).not.toBeInTheDocument()
 })
 
-it('does not fall back to model metrics when the structured snapshot is empty', () => {
+it('keeps saved comparison prose when the structured snapshot is empty without inventing counts', () => {
   render(<ProfileView data={data} observations={{ ...observations, notes: [] }} />)
   expect(screen.getByRole('status')).toHaveTextContent('本次未获取点赞数据')
-  expect(screen.queryByText(/None|999|30%|15%|模型指定/)).not.toBeInTheDocument()
+  for (const text of [data.contrast.winners[0].title, data.contrast.losers[0].title,
+    ...data.contrast.winFactors, ...data.contrast.loseFactors]) {
+    expect(screen.getByText(text)).toBeInTheDocument()
+  }
+  expect(screen.queryByText(/None|999|赞-1|本次点赞第/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: data.contrast.winners[0].title })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: data.contrast.losers[0].title })).not.toBeInTheDocument()
+})
+
+it('keeps original report groups fixed when a different metric changes the frozen ranking', () => {
+  const snapshot: Observations = { ...observations, notes: [
+    { noteId: 'a', title: '笔记甲', metrics: { liked: 100, shares: 0 } },
+    { noteId: 'b', title: '笔记乙', metrics: { liked: 80, shares: 1 } },
+    { noteId: 'c', title: '笔记丙', metrics: { liked: 20, shares: 100 } },
+    { noteId: 'd', title: '笔记丁', metrics: { liked: 0, shares: 30 } },
+  ] }
+  const original = JSON.stringify({ data, snapshot })
+  render(<ProfileView data={data} observations={snapshot} notes={snapshot.notes.map(note => ({
+    noteId: note.noteId, title: note.title, desc: '冻结正文', metrics: {}, comments: [],
+  }))} />)
+  const higher = screen.getByRole('heading', { name: '较高表现' }).parentElement!
+  const lower = screen.getByRole('heading', { name: '较低表现' }).parentElement!
+  const savedText = [higher.textContent, lower.textContent]
+  const rankedTitles = () => screen.getAllByRole('button', { name: /^笔记[甲乙丙丁]$/ }).map(button => button.textContent)
+  expect(rankedTitles()).toEqual(['笔记甲', '笔记乙', '笔记丁', '笔记丙'])
+  fireEvent.change(screen.getByRole('combobox', { name: '比较指标' }), { target: { value: 'shares' } })
+  expect(rankedTitles()).toEqual(['笔记丙', '笔记丁', '笔记甲', '笔记乙'])
+  expect([higher.textContent, lower.textContent]).toEqual(savedText)
+  expect(screen.getByRole('status')).toHaveTextContent('分享数据 4 / 4 条 · 中位数 15.5')
+  expect(JSON.stringify({ data, snapshot })).toBe(original)
 })
 
 it('keeps reports without observations readable without rewriting their saved content', () => {
@@ -122,7 +174,7 @@ it('combines report parts in reading order without repeating findings or hiding 
   const original = JSON.stringify(report)
   render(<ProfileView data={report} observations={observations} />)
   const headings = screen.getAllByRole('heading', {level:4}).map(heading => heading.textContent?.trim())
-  expect(headings).toEqual(['这个账号给人的印象','值得继续放大的优势','内容方向与读者价值','你的表达方式','笔记表现','接下来值得试什么'])
+  expect(headings).toEqual(['这个账号给人的印象','历史笔记表现','值得继续放大的优势','内容方向与读者价值','你的表达方式','接下来值得试什么'])
   expect(screen.getAllByText(statement)).toHaveLength(1)
   for (const text of ['常用“但”转入自己的判断','先说实际场景，再写反差','例：下班很晚，但我不想直接回家','从一个现场动作切入','解释选择',report.contrast.takeaways[0]]) {
     expect(screen.getByText(text).closest('details')).toBeNull()

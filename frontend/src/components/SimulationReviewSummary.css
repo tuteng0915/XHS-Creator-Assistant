@@ -1,4 +1,4 @@
-.simulation-review-summary {padding:22px 24px;border-top:1px solid var(--line);background:#fafafa;min-width:0;overflow-wrap:anywhere;color:var(--ink);font-size:var(--text-body);line-height:1.7}
+.simulation-review-summary {padding:22px 24px;border-top:1px solid var(--line);background:#fff;min-width:0;overflow-wrap:anywhere;color:var(--ink);font-size:var(--text-body);line-height:1.7}
 .simulation-review-summary h3,.simulation-review-summary h4 {margin:0 0 10px;font-size:var(--text-section);font-weight:600;line-height:1.5}
 .simulation-review-summary p {margin:0;font-size:var(--text-body)}
 .simulation-review-summary .simulation-review-lead {margin:0 0 20px}
@@ -7,8 +7,13 @@
 .simulation-review-summary summary {cursor:pointer;color:var(--sub);font-size:var(--text-sm);line-height:1.6}
 .simulation-review-summary summary:focus-visible {outline:2px solid var(--accent);outline-offset:4px;border-radius:3px}
 .simulation-review-summary details[open]>summary {margin-bottom:10px}
-.simulation-review-directions {margin:18px 0}
+.simulation-review-directions {margin:18px 0;padding:12px 14px;border-left:3px solid var(--report-suggestion-border);border-radius:8px;background:var(--report-suggestion-surface)}
+.simulation-review-directions>h4 {color:var(--report-suggestion-ink)}
 .simulation-review-observations {display:grid;gap:12px;margin:18px 0}
+.simulation-review-observations>details {padding:10px 14px;border-left:3px solid var(--report-observation-border);border-radius:8px;background:var(--report-observation-surface)}
+.simulation-review-observations>.simulation-review-observation>summary {color:var(--report-observation-ink)}
+.simulation-review-observations>.simulation-review-strength {border-color:var(--report-strength-border);background:var(--report-strength-surface)}
+.simulation-review-observations>.simulation-review-strength>summary {color:var(--report-strength-ink)}
 .simulation-review-ideas {border-top:1px solid var(--line);margin-top:22px;padding-top:20px}
 .simulation-review-idea {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 20px;align-items:start;padding:16px 0}
 .simulation-review-idea+.simulation-review-idea {border-top:1px solid var(--line)}

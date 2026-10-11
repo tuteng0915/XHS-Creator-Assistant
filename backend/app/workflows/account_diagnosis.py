@@ -380,11 +380,26 @@ class RealAccountDiagnosisModelProvider:
         )
 
     async def pain_points(self, *, comments: str) -> dict[str, Any]:
-        response = await self.model_call_service.call_operation(
-            ModelOperation.PAIN_POINTS,
-            {"sourceText": comments},
+        response = await self.pain_points_with_updates(
+            comments=comments, source_profile=None, on_update=None,
         )
         return response.output
+
+    async def pain_points_with_updates(
+        self,
+        *,
+        comments: str,
+        source_profile: dict[str, Any] | None,
+        on_update: Callable[[dict[str, Any]], Awaitable[None]] | None,
+    ):
+        from app.services.reader_feedback_pipeline import run_reader_feedback
+
+        return await run_reader_feedback(
+            comments,
+            source_profile,
+            self.model_call_service.call_reader_feedback_step,
+            on_update=on_update,
+        )
 
     async def topics(
         self,
@@ -640,17 +655,51 @@ class _AccountDiagnosisGraphExecution:
                 await self.stage_failed("profile", error, updated)
 
         async def run_pain_points() -> None:
-            if updated.get("pain_points"):
+            if updated.get("pain_points") is not None:
                 return
             await self.emit("stage.started", "pain_points", "running", {})
             try:
-                output = await provider.pain_points(
-                    # Rebuild from the frozen raw profile, including old pending runs
-                    # whose derived text still mixed author and reader comments.
-                    comments=(reader_comments_text(snapshot["xhsCreatorProfile"])
-                              if snapshot.get("xhsCreatorProfile")
-                              else str(snapshot["comments"]["content"]))
-                )
+                source_profile = snapshot.get("xhsCreatorProfile")
+                if not isinstance(source_profile, dict):
+                    source_profile = None
+                # Rebuild from the frozen raw profile, including old pending runs
+                # whose derived text still mixed author and reader comments.
+                comments = (reader_comments_text(source_profile)
+                            if source_profile is not None
+                            else str(snapshot["comments"]["content"]))
+                metadata = {"engine": "langgraph"}
+                latest_preview = ""
+
+                async def on_update(progress: dict[str, Any]) -> None:
+                    nonlocal latest_preview
+                    if isinstance(progress.get("preview"), str) and progress["preview"]:
+                        latest_preview = progress["preview"]
+                    progress = {**progress, "preview": latest_preview}
+                    self.service.analysis_service.update_stage(
+                        self.run_id,
+                        "pain_points",
+                        AnalysisStageUpdate(
+                            status=AnalysisRunStatus.RUNNING,
+                            model_metadata={
+                                **metadata, "readerFeedbackMode": "two_stage",
+                                "progress": dict(progress),
+                            },
+                        ),
+                    )
+                    await self.emit("stage.progress", "pain_points", "running", progress)
+
+                with_updates = getattr(provider, "pain_points_with_updates", None)
+                if callable(with_updates):
+                    response = await with_updates(
+                        comments=comments,
+                        source_profile=source_profile,
+                        on_update=on_update,
+                    )
+                    output = response.output
+                    metadata.update(response.model_metadata)
+                    metadata.pop("progress", None)
+                else:
+                    output = await provider.pain_points(comments=comments)
                 result = PainPointsStageResult.model_validate(output).model_dump(
                     mode="json"
                 )
@@ -660,7 +709,7 @@ class _AccountDiagnosisGraphExecution:
                     AnalysisStageUpdate(
                         status=AnalysisRunStatus.COMPLETED,
                         result=result,
-                        model_metadata={"engine": "langgraph"},
+                        model_metadata=metadata,
                     ),
                 )
                 updated["pain_points"] = result["painPoints"]

@@ -96,7 +96,7 @@ describe('WorkspaceShell', () => {
     const navigation = screen.getByRole('navigation', { name: '创作者功能导航' })
 
     expect(within(navigation).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      '账号概览', '我的笔记', '账号诊断', '分析历史',
+      '账号概览', '我的笔记', '账号诊断', '诊断历史',
       '受众分析', '模拟粉丝', '受众模拟', '选题库', 'AI 创作助手',
     ])
     expect(within(navigation).getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual([

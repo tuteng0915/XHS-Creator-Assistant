@@ -67,7 +67,7 @@ const CREATOR_NAVIGATION: Array<{
       { page: 'creator-overview', label: '账号概览', icon: 'overview' },
       { page: 'source-materials', label: '我的笔记', icon: 'notes', child: true },
       { page: 'account-diagnosis', label: '账号诊断', icon: 'analysis' },
-      { page: 'history', label: '分析历史', icon: 'history', child: true },
+      { page: 'history', label: '诊断历史', icon: 'history', child: true },
     ],
   },
   {

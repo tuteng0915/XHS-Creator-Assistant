@@ -6,6 +6,7 @@ import type {MediaAsset, TextInputAsset} from '../types'
 import {CreatorDialog} from './CreatorDialog'
 import {CreatorNoteSelectionDialog} from './CreatorNoteSelectionDialog'
 import {InfoHint} from './InfoHint'
+import {OracleNotice} from './OracleNotice'
 import './CreatorReferencePicker.css'
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -56,9 +57,9 @@ export function CreatorReferencePicker({workspaceId, selection, onChange, disabl
     if (kind === 'imported_note') {setLoading(false); return}
     const request = kind === 'account_analysis'
       ? analysisRunApi.list(workspaceId).then(rows => rows.filter(row => row.workspaceId === workspaceId && row.workflowType === 'account_diagnosis' && row.status === 'completed')
-        .map(row => ({reference: {kind: 'account_analysis' as const, id: row.id}, label: `${referenceDate(row.createdAt)}${row.origin === 'oracle_showcase' ? ' · 预写示例' : ''}`})))
+        .map(row => ({reference: {kind: 'account_analysis' as const, id: row.id}, label: referenceDate(row.createdAt)})))
       : audienceAnalysisApi.list(workspaceId).then(rows => rows.filter(row => row.workspaceId === workspaceId && row.status === 'completed')
-        .map(row => ({reference: {kind: 'audience_analysis' as const, id: row.id}, label: `${referenceDate(row.createdAt)} · ${row.result.groups?.length || 0} 位候选${row.result.origin === 'oracle_showcase' ? ' · 预写示例' : ''}`})))
+        .map(row => ({reference: {kind: 'audience_analysis' as const, id: row.id}, label: `${referenceDate(row.createdAt)} · ${row.result.groups?.length || 0} 位候选`})))
     void request.then(rows => {if (current) setChoices(rows)}).catch(e => {if (current) setError(errorText(e))}).finally(() => {if (current) setLoading(false)})
     return () => {current = false}
   }, [workspaceId, kind, open, viewing, listReload])
@@ -115,7 +116,7 @@ export function CreatorReferencePicker({workspaceId, selection, onChange, disabl
       {!loading && !viewing && kind !== 'imported_note' && !choices.length && !error && <p className="creator-reference-empty">还没有已完成的{referenceKindNames[kind]}，也可以不添加参考，直接开始创作。</p>}
       {previewLoading && <p role="status">正在读取这份材料…</p>}
       {error && <div className="creator-reference-error" role="alert"><p>{error}</p><button type="button" onClick={() => {if (viewing || selectedId) setPreviewReload(value => value + 1); else setListReload(value => value + 1)}}>重试读取</button></div>}
-      {preview && <section className="creator-reference-preview" aria-label={preview.note ? '原笔记原文' : '参考摘要'}><div><strong>{preview.label}</strong>{preview.isExample && <small>预写示例</small>}</div><small>{preview.scope}</small>
+      {preview && <section className="creator-reference-preview" aria-label={preview.note ? '原笔记原文' : '参考摘要'}><div><strong>{preview.label}</strong>{preview.isExample && <OracleNotice label="参考来源说明" />}</div><small>{preview.scope}</small>
         {previewImages.length > 0 && <div className="creator-reference-note-images">{previewImages.map(image => <img key={image.id} src={image.fileUrl} alt={`${preview.note?.title || '原笔记'} · 已保存图片`} />)}</div>}
         <p className={preview.note ? 'creator-reference-note-body' : undefined}>{preview.summary}</p>{preview.lines.length > 0 && <ul>{preview.lines.map((line, index) => <li key={index}>{line}</li>)}</ul>}</section>}
       <div className="creator-reference-actions"><button type="button" onClick={close}>{viewing ? '关闭' : '取消'}</button>{!viewing && kind !== 'imported_note' && <button type="button" className="primary" disabled={disabled || !preview || previewLoading || alreadySelected || selection.references.length >= 8} onClick={add}>{alreadySelected ? '已添加' : '添加这份材料'}</button>}</div>

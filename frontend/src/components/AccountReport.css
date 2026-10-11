@@ -24,6 +24,7 @@
 .account-report h4,
 .account-report.account-portrait-view section h4 {
   margin: 0 0 12px;
+  color: var(--report-observation-ink);
   font-size: 16px;
   font-weight: 600;
   line-height: 1.5;
@@ -45,6 +46,35 @@
 .account-report .account-portrait-claim:first-child { padding-top: 0; }
 .account-report .account-portrait-claim:last-child { padding-bottom: 0; }
 .account-report .account-portrait-keywords { margin-top: 4px; }
+
+.account-report .account-portrait-keyword,
+.account-report .account-profile-tag {
+  border-color: var(--report-observation-border);
+  background: var(--report-observation-surface);
+  color: var(--report-observation-ink);
+}
+
+.account-report .account-portrait-keyword[aria-expanded="true"] {
+  border-color: var(--report-observation-ink);
+  background: var(--report-observation-surface);
+  color: var(--report-observation-ink);
+}
+
+.account-report .account-portrait-keyword-detail,
+.account-report .account-portrait-evidence {
+  border-color: var(--report-observation-border);
+  background: var(--report-observation-surface);
+}
+
+.account-report .account-portrait-quotes span { border-color: var(--report-observation-border); }
+
+.account-report.account-portrait-view .account-portrait-strengths > h4 { color: var(--report-strength-ink); }
+.account-report .account-portrait-strengths > .account-portrait-claims {
+  padding: 10px 14px;
+  border-left: 3px solid var(--report-strength-border);
+  border-radius: 8px;
+  background: var(--report-strength-surface);
+}
 
 .account-report .account-report-topics {
   display: flex;
@@ -85,14 +115,17 @@
 
 .account-report .account-profile-formula .account-report-example {
   padding-left: 10px;
-  border-left: 2px solid var(--accent-border);
+  border-left: 2px solid var(--report-observation-border);
+  color: var(--report-observation-ink);
 }
 
 .account-report .account-report-bound-example {
   min-width: 0;
   margin: 8px 0;
-  padding-left: 10px;
-  border-left: 2px solid var(--accent-border);
+  padding: 6px 10px;
+  border-left: 2px solid var(--report-observation-border);
+  border-radius: 4px;
+  background: var(--report-observation-surface);
   font-size: 14px;
   overflow-wrap: anywhere;
 }
@@ -104,14 +137,41 @@
 
 .account-report .account-report-example-quote { color: var(--ink); }
 
-.account-report .account-report-next-steps li::marker { color: var(--accent-ink); }
+.account-report .account-report-next-steps > h4,
+.account-report.account-portrait-view .account-report-next-steps > h4 { color: var(--report-suggestion-ink); }
+.account-report .account-report-next-steps > .account-portrait-claims,
+.account-report .account-report-next-steps > ol {
+  padding: 10px 14px;
+  border-left: 3px solid var(--report-suggestion-border);
+  border-radius: 8px;
+  background: var(--report-suggestion-surface);
+}
+.account-report .account-report-next-steps > ol { padding-left: 34px; }
+.account-report .account-report-next-steps li::marker { color: var(--report-suggestion-ink); }
 .account-report .account-portrait-source { font-size: 12px; }
 .account-report .account-portrait-source > summary,
 .account-report .account-portrait-source > summary > span { font-size: 12px; }
 .account-report .account-portrait-coverage { font-size: 12px; }
-.account-report .account-report-legacy-performance .cmp-col { border-color: var(--line); }
-.account-report .account-report-legacy-performance .cmp-item { font-size: 14px; }
-
-@media (max-width: 600px) {
-  .account-report .account-report-legacy-performance .cmp { grid-template-columns: minmax(0, 1fr); }
+.account-report .account-report-legacy-performance .cmp,
+.account-report .account-report-saved-performance .cmp {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
 }
+.account-report .account-report-legacy-performance .cmp-col,
+.account-report .account-report-saved-performance .cmp-col { min-width: 0; }
+.account-report .account-report-legacy-performance .cmp-win,
+.account-report .account-report-saved-performance .cmp-win {
+  border-color: var(--accent-border-strong);
+  background: var(--accent-soft);
+}
+.account-report .account-report-legacy-performance .cmp-win h5,
+.account-report .account-report-saved-performance .cmp-win h5 { color: var(--accent-ink); }
+.account-report .account-report-legacy-performance .cmp-lose,
+.account-report .account-report-saved-performance .cmp-lose {
+  border-color: var(--report-lower-border);
+  background: var(--report-lower-surface);
+}
+.account-report .account-report-legacy-performance .cmp-lose h5,
+.account-report .account-report-saved-performance .cmp-lose h5 { color: var(--report-lower-ink); }
+.account-report .account-report-legacy-performance .cmp-item,
+.account-report .account-report-saved-performance .cmp-item { font-size: 14px; }

@@ -1,26 +1,3 @@
-.oracle-record-badge,
-.run-row .oracle-record-badge {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  padding: 2px 7px;
-  border-radius: 5px;
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-  font-size: var(--text-xs, 12px);
-  font-weight: 500;
-  line-height: 1.5;
-  white-space: nowrap;
-  vertical-align: middle;
-}
-
-.oracle-record-notice {
-  margin: 8px 0 14px;
-  color: var(--sub, #71696c);
-  font-size: var(--text-sm, 13px);
-  line-height: 1.65;
-}
-
 .oracle-history-settings,
 .oracle-source-note {
   margin: 0 0 16px;

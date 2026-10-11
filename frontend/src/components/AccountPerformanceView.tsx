@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { CreatorNote } from '../creatorNotes'
 import type { MediaAsset } from '../types'
 import { CreatorNoteBrowser } from './CreatorNoteBrowser'
@@ -27,11 +27,12 @@ function valid(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
-export function AccountPerformanceView({ observations, summaries, notes, mediaAssets }: {
+export function AccountPerformanceView({ observations, summaries, notes, mediaAssets, comparison }: {
   observations: PerformanceNote[]
   summaries?: MetricSummary[]
   notes: CreatorNote[]
   mediaAssets: MediaAsset[]
+  comparison?: ReactNode
 }) {
   const [metric, setMetric] = useState<Metric>('liked')
   const [openNote, setOpenNote] = useState<string | null>(null)
@@ -46,16 +47,17 @@ export function AccountPerformanceView({ observations, summaries, notes, mediaAs
   // Old histories have frozen raw counts but no summary; derive a display-only fallback.
   const median = values.length ? (values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2) : null
   const medianValue = saved && saved.validCount === values.length && saved.median === median ? saved.median : median
-  const upper = sorted.slice(0, 2)
-  const lower = sorted.length >= 4
+  const upper = sorted.slice(0, Math.min(2, Math.ceil(sorted.length / 2)))
+  const lower = sorted.length >= 2
     ? sorted.filter(note => note.metrics[metric]! < upper[upper.length - 1].metrics[metric]!).slice(-2).reverse()
     : []
   const equal = values.length > 1 && ranks.size === 1
   const missing = observations.length - sorted.length
 
-  function renderGroup(title: string, entries: PerformanceNote[]) {
+  const paired = !comparison && lower.length > 0
+  function renderGroup(title: string, entries: PerformanceNote[], tone: 'higher' | 'lower') {
     if (!entries.length) return null
-    return <div className="account-performance-group"><h5>{title}</h5>
+    return <div className={`account-performance-group${paired ? ` account-performance-${tone}` : ''}`}><h5>{title}</h5>
       {entries.map(note => <div key={note.noteId} className="account-performance-row">
         <div className="account-performance-row-summary">
           <div className="account-performance-description">
@@ -77,8 +79,10 @@ export function AccountPerformanceView({ observations, summaries, notes, mediaAs
   }
 
   return <section className="account-performance account-performance-view">
+    <h4>历史笔记表现</h4>
+    {comparison}
     <div className="account-performance-heading">
-      <h4>笔记表现 <InfoHint label="笔记表现数据说明">按抓取时的累计互动比较，缺失不算零、同数值并列。评论数不等于已抓取的评论条数；发布日期和累计时间可能不同，不代表点击率、内容质量分或增长趋势。</InfoHint></h4>
+      <h5>互动数据 <InfoHint label="笔记表现数据说明">按抓取时的累计互动比较，缺失不算零、同数值并列。评论数不等于已抓取的评论条数；发布日期和累计时间可能不同，不代表点击率、内容质量分或增长趋势。</InfoHint></h5>
       <select aria-label="比较指标" value={metric} onChange={event => {
         setMetric(event.target.value as Metric)
         setOpenNote(null)
@@ -91,9 +95,9 @@ export function AccountPerformanceView({ observations, summaries, notes, mediaAs
       {missing > 0 && sorted.length > 0 ? ` · ${missing} 条未获取` : ''}
       {sorted.length > 0 && ' · 每组最多展示 2 条'}
     </p>
-    <div className="account-performance-grid">
-      {renderGroup(equal ? `所选笔记${label}相同` : `按${label}排序`, upper)}
-      {renderGroup(`所选笔记中${label}较低`, lower)}
+    <div className={`account-performance-grid${paired ? ' account-performance-paired' : ''}`}>
+      {renderGroup(equal ? `所选笔记${label}相同` : sorted.length === 1 ? '本次笔记' : comparison ? `按${label}排序` : '较高表现', upper, 'higher')}
+      {renderGroup(comparison ? `所选笔记中${label}较低` : '较低表现', lower, 'lower')}
     </div>
   </section>
 }

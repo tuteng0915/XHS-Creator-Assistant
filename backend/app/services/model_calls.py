@@ -87,9 +87,17 @@ PROMPT_PAIN_POINTS = """你是评论区分析师。聚合评论区原文，提�
 只输出 JSON，不要任何解释或 markdown 代码块。schema:
 {"painPoints":[{"theme":"","intensity":"高/中","count":0,"evidence":[]}]}"""
 
+PROMPT_READER_FEEDBACK = """你是评论区分析师。只根据本次候选评论原文，提炼 0~5 个有证据的读者反馈主题，不强制凑足条数。反馈包括明确提问、具体需求、困惑和正向反馈，不局限于痛点。
+单条明确提问或需求也可保留，count 为实际支持该主题的评论条数；少量样本不代表普遍或高频需求。感谢、认可等明确正向表达可归为正向反馈，不改写成困难或痛点。不完整的问题只概括原文明确表达的部分，不补全具体项目、经历或动机。
+已识别的作者评论已在输入前排除；sourceRole=non_author 仅表示不是该笔记作者，unknown 表示身份无法比较，仍可根据其原文分析反馈，但不确认其读者身份，不凭昵称或语气猜身份。
+没有候选文本，或文本确实没有可识别的反馈信息时，painPoints 可以返回空数组；不要因评论少、身份为 unknown 或部分笔记没有评论而忽略其余有效反馈。不从笔记标题、图片占位符或统计计数编造评论反馈。
+每个主题的 evidence 必须逐字引用支持它的评论原文；intensity 仅表示反馈表达强度，不因只有一条评论就夸大强度。排序规则：intensity 高→中，同级按 count 降序。
+只输出 JSON，沿用 painPoints 字段，不要解释或 markdown 代码块。schema:
+{"painPoints":[{"theme":"","intensity":"高/中","count":0,"evidence":[]}]}"""
+
 PROMPT_TOPICS = """你是内容选题策略师。基于账号定位、爆款基因诊断和评论区痛点，生成 3~4 个选题 + 2 组标题变体。
 重要约束：
-① topics[0] 必须对应 painPoints[0]（最高频/最高强度痛点），直接命中它
+① 优先回应评论中明确可行动的问题或需求，不强制 topics[0] 对应 painPoints[0]。正向反馈不得改写成痛点；评论反馈为空或仅有感谢、认可等正向反馈时，可依据账号诊断（profile）建议选题，并在 whyFit 中说明这是基于账号内容的建议，而非已验证的读者需求。
 ② 每个 whyFit 必须结合账号的惯用结构和风格指纹，不能是通用表述
 ③ titles 选 topics[0] 和 topics[1] 各给 3 条变体，贴合已归纳的标题公式，不贩卖焦虑
 ④ 输入的账号诊断是模型归纳，不是个人经历的原始证据。标题、angle、whyFit 和标题变体不得把风格示例改写成作者亲历，不编造数字、场景、人物对话或身份。
@@ -320,6 +328,7 @@ MAX_TOKENS = {
 }
 
 _ACCOUNT_REPORT_STAGE_BUDGETS = {"overview": 1600, "read": 1600, "synthesis": 6000}
+_READER_FEEDBACK_STAGE_BUDGETS = {"retrieve": 2200, "rank": 500}
 
 TOKEN_USAGE_KEYS = (
     "prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens",
@@ -392,6 +401,26 @@ class ModelCallService:
             )
         response = await call_once(operation, context)
         return await self.review_panel_output(operation, context, response, call_once=call_once)
+
+    async def call_reader_feedback_step(
+        self, stage: str, system: str, user: str,
+    ) -> ModelCallResponse:
+        """One account-feedback step; keep trend pain points on their old path."""
+        if stage not in _READER_FEEDBACK_STAGE_BUDGETS:
+            raise ValidationError("Unsupported reader feedback stage")
+        provider = self.settings.model_provider.strip().lower()
+        if provider in {"qwen", "dashscope"}:
+            call_once = self._call_qwen
+        elif provider == "anthropic":
+            call_once = self._call_anthropic
+        else:
+            raise ValidationError("Unsupported model provider")
+        response = await call_once(
+            ModelOperation.PAIN_POINTS, {"_readerFeedbackStage": stage},
+            review_prompt=(system, user),
+        )
+        return ModelCallResponse(output=response.output,
+                                 model_metadata={**response.model_metadata, "stage": stage})
 
     async def review_panel_output(self, operation, context, response, *, call_once=None):
         """At most one extra call; useful also for replaying frozen failure outputs."""
@@ -610,6 +639,10 @@ class ModelCallService:
 
     @staticmethod
     def _output_budget(operation: ModelOperation, context: dict) -> int:
+        feedback_stage = context.get("_readerFeedbackStage")
+        if (operation == ModelOperation.PAIN_POINTS and isinstance(feedback_stage, str)
+                and feedback_stage in _READER_FEEDBACK_STAGE_BUDGETS):
+            return _READER_FEEDBACK_STAGE_BUDGETS[feedback_stage]
         stage = context.get("_accountReportStage")
         if (operation == ModelOperation.PROFILE and isinstance(stage, str)
                 and stage in _ACCOUNT_REPORT_STAGE_BUDGETS):
@@ -687,7 +720,9 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
             )
         if operation == ModelOperation.PAIN_POINTS:
             source = context.get("sourceText", context.get("comments", ""))
-            return (PROMPT_PAIN_POINTS, str(source))
+            prompt = (PROMPT_READER_FEEDBACK if context.get("sourceKind") == "reader_comments"
+                      else PROMPT_PAIN_POINTS)
+            return (prompt, str(source))
         if operation == ModelOperation.TOPICS:
             return (
                 PROMPT_TOPICS,

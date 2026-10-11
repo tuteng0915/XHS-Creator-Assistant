@@ -139,7 +139,7 @@ export function getWorkspaceHelpContent({
 
   if (activePage === 'history') {
     return {
-      title: '分析结果帮助',
+      title: publicMode ? '诊断历史帮助' : '分析结果帮助',
       description: '这里保存每次账号诊断、热点分析、视频博主质量诊断的运行历史。',
       bullets: [
         '每条 run 都包含 workflow type、status、input snapshot、stage results 和 errors。',

@@ -10,8 +10,8 @@
 .audience-group-card .reader-card-heading { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
 .audience-group-card h2 { min-width: 0; margin: 0; font-size: var(--text-section); font-weight: 600; line-height: 1.5; }
 .audience-group-card p { margin: 0; line-height: 1.7; white-space: pre-wrap; font-size: var(--text-body); }
-.audience-group-card .audience-reader-need { margin-top: 10px; }
-.audience-reader-need > span { display: block; margin-bottom: 2px; color: var(--sub); font-size: var(--text-xs); }
+.audience-group-card .audience-reader-need { margin-top: 10px; padding: 8px 10px; border-left: 2px solid var(--report-observation-border); border-radius: 4px; background: var(--report-observation-surface); }
+.audience-reader-need > span { display: block; margin-bottom: 2px; color: var(--report-observation-ink); font-size: var(--text-xs); }
 .audience-group-card .audience-reader-interests { margin-top: 12px; color: var(--sub); font-size: var(--text-sm); }
 .audience-card-action { margin: 16px 0 12px; }
 .audience-card-action:last-child { margin-bottom: 0; }
@@ -21,6 +21,7 @@
 .audience-group-card > details p { margin-top: 10px; }
 .audience-evidence-ref { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); min-width: 0; }
 .audience-evidence-ref b { font-weight: 600; }
+.audience-evidence-ref > p { padding: 8px 10px; border-left: 2px solid var(--report-observation-border); background: var(--report-observation-surface); }
 .audience-evidence .creator-note-grid { grid-template-columns: minmax(0, 1fr); margin-top: 10px; }
 .audience-evidence .creator-note-placeholder { display: none; }
 .audience-evidence .creator-note-card { width: 100%; }

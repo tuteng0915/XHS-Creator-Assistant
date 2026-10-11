@@ -15,7 +15,7 @@ import {SimulationChat} from './SimulationChat'
 import {simulationCategoryFor, simulationCategoryLabel, simulationStatusLabel} from '../simulationChat'
 import type {ReaderFeedbackIntent} from '../contentCollaboration'
 import {isOracleShowcase} from '../recordOrigin'
-import {OracleBadge, OracleNotice} from './OracleNotice'
+import {OracleNotice} from './OracleNotice'
 
 type ReviewDraft = {
   reviewStatus: ReviewStatus
@@ -101,7 +101,7 @@ export function SimulationHistoryPage({
               className={`run-row ${selectedSimulationRun?.id === run.id ? 'active' : ''}`}
               onClick={() => onOpenSimulationRun(run.id)}
             >
-              <span>{run.parentSimulationId ? '同组复测' : run.simulationCategory?`${simulationCategoryLabel(simulationCategoryFor(run))}模拟`:'受众模拟'}{isOracleShowcase(run) && <> <OracleBadge /></>}</span>
+              <span>{run.parentSimulationId ? '同组复测' : run.simulationCategory?`${simulationCategoryLabel(simulationCategoryFor(run))}模拟`:'受众模拟'}</span>
               {run.targetTitle&&<span className="simulation-history-target">{run.targetTitle}</span>}
               <b>{simulationStatusLabel(run.status)}</b>
               <small>{reviewStatusLabel(run.reviewStatus)}</small>
@@ -117,8 +117,7 @@ export function SimulationHistoryPage({
           <>
             <div className="detail-head">
               <div>
-                <h2>{publicMode?`${simulationCategoryLabel(simulationCategoryFor(selectedSimulationRun))}模拟记录`:'受众模拟'}</h2>
-                {isOracleShowcase(selectedSimulationRun) && <OracleBadge />}
+                <h2>{publicMode?`${simulationCategoryLabel(simulationCategoryFor(selectedSimulationRun))}模拟记录`:'受众模拟'}{isOracleShowcase(selectedSimulationRun) && <OracleNotice />}</h2>
                 <p>
                   {simulationStatusLabel(selectedSimulationRun.status)} ·{' '}
                   {new Date(selectedSimulationRun.createdAt).toLocaleString()}
@@ -128,7 +127,6 @@ export function SimulationHistoryPage({
                 在输出区打开
               </button>}
             </div>
-            {isOracleShowcase(selectedSimulationRun) && <OracleNotice />}
             {publicMode && isOracleShowcase(selectedSimulationRun) && simulationCategoryFor(selectedSimulationRun) === 'published_note'
               && <FrozenPublishedNote key={`source-note:${selectedSimulationRun.id}`} run={selectedSimulationRun} />}
             {selectedSimulationRun.parentSimulationId && <section aria-label="复测来源">

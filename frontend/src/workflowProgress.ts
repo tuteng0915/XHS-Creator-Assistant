@@ -1,5 +1,5 @@
 export type WorkflowProgress = {
-  phase: 'overview' | 'reading' | 'synthesis'
+  phase: 'overview' | 'reading' | 'synthesis' | 'feedback_retrieval' | 'feedback_ranking'
   status: 'running' | 'completed'
   completed: number
   total: number
@@ -9,7 +9,7 @@ export type WorkflowProgress = {
 export function parseWorkflowProgress(value: unknown): WorkflowProgress | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const item = value as Record<string, unknown>
-  if (!['overview', 'reading', 'synthesis'].includes(String(item.phase))
+  if (!['overview', 'reading', 'synthesis', 'feedback_retrieval', 'feedback_ranking'].includes(String(item.phase))
       || !['running', 'completed'].includes(String(item.status))
       || !Number.isInteger(item.completed) || !Number.isInteger(item.total)
       || Number(item.completed) < 0 || Number(item.total) < 1
@@ -23,6 +23,9 @@ export function parseWorkflowProgress(value: unknown): WorkflowProgress | undefi
 }
 
 export function workflowProgressLabel(progress: WorkflowProgress): string {
-  const labels = {overview: '整体阅读', reading: '逐篇细读', synthesis: '汇总报告'}
+  const labels = {
+    overview: '整体阅读', reading: '逐篇细读', synthesis: '汇总报告',
+    feedback_retrieval: '提取评论反馈', feedback_ranking: '筛选重要反馈',
+  }
   return `${labels[progress.phase]} · ${progress.completed}/${progress.total}`
 }

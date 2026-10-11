@@ -12,13 +12,15 @@
 .editor-feedback .feedback-section + .feedback-section { margin-top: 24px; }
 .editor-feedback .feedback-section > h4 { margin: 0 0 10px; font-size: var(--text-section); font-weight: 600; }
 .editor-feedback .editor-feedback-card { min-width: 0; margin: 10px 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.editor-feedback .editor-feedback-card.feedback-keep { border-color: var(--report-strength-border); background: var(--report-strength-surface); }
+.editor-feedback .feedback-keep .feedback-kind { color: var(--report-strength-ink); }
 .editor-feedback .feedback-card-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; color: var(--sub); font-size: var(--text-xs); }
 .editor-feedback .feedback-option-label { margin-left: auto; }
 .editor-feedback .editor-feedback-card h5 { margin: 8px 0; font-size: var(--text-body); line-height: 1.65; font-weight: 600; }
 .editor-feedback p { margin: 8px 0; white-space: pre-wrap; }
 .editor-feedback b { font-size: var(--text-sm); font-weight: 600; }
-.editor-feedback .feedback-suggestion { margin-top: 12px; border-left: 2px solid var(--line); padding-left: 12px; }
-.editor-feedback .feedback-suggestion > b { color: var(--sub); }
+.editor-feedback .feedback-suggestion { margin-top: 12px; border-left: 2px solid var(--report-suggestion-border); padding: 8px 12px; background: var(--report-suggestion-surface); border-radius: 4px; }
+.editor-feedback .feedback-suggestion > b { color: var(--report-suggestion-ink); }
 .editor-feedback ul { margin: 6px 0; padding-left: 20px; }
 .editor-feedback li { margin: 4px 0; white-space: pre-wrap; }
 .editor-feedback .feedback-card-actions { display: flex; flex-wrap: wrap; margin-top: 14px; }
@@ -28,7 +30,7 @@
 .editor-feedback .feedback-evidence[open] { border-top: 1px solid var(--line); padding-top: 12px; }
 .editor-feedback .feedback-source { border-bottom: 1px solid var(--line); padding: 12px 0; }
 .editor-feedback .feedback-source blockquote,
-.editor-feedback .feedback-original { margin: 8px 0; border-left: 2px solid var(--line); padding: 4px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.editor-feedback .feedback-original { margin: 8px 0; border-left: 2px solid var(--report-observation-border); padding: 4px 12px; background: var(--report-observation-surface); white-space: pre-wrap; overflow-wrap: anywhere; }
 .editor-feedback .feedback-original { max-height: 280px; overflow: auto; }
 .editor-feedback .feedback-original mark { background: #fff0b3; color: var(--ink); }
 .editor-feedback .feedback-concerns { margin: 12px 0; }

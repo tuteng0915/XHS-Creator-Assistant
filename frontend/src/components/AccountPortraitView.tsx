@@ -94,13 +94,14 @@ function appendExamples(existing: BoundExample[], incoming?: BoundExample[]): Bo
   })]
 }
 
-export function AccountPortraitView({ portrait, observations, notes, mediaAssets, contentDetails, expressionDetails, nextSteps }: {
+export function AccountPortraitView({ portrait, observations, notes, mediaAssets, contentDetails, expressionDetails, performanceComparison, nextSteps }: {
   portrait?: Portrait | null
   observations: Observations
   notes: CreatorNote[]
   mediaAssets: MediaAsset[]
   contentDetails?: ReactNode
   expressionDetails?: ReactNode
+  performanceComparison?: ReactNode
   nextSteps?: ReactNode
 }) {
   const [openClaim, setOpenClaim] = useState<string | null>(null)
@@ -186,29 +187,28 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
   }
 
   return <div className="account-portrait-view account-report">
-    {hasPortrait ? <>
-      {hasIntro && <div className="account-portrait-intro">
-        <h4>这个账号给人的印象</h4>
-        {summary && <div className="account-portrait-summary">{renderClaim(summary, 'summary')}</div>}
-        {keywords.length > 0 && <div className="account-portrait-keyword-section">
-          <div className="account-portrait-keywords" role="group" aria-label="账号关键词">
-            {keywords.map((claim, index) => <button type="button" className="account-portrait-keyword" key={index}
-              aria-label={`${claim.statement}：查看 ${new Set(claim.evidence.map(ref => ref.noteId)).size} 条笔记依据`}
-              aria-expanded={openClaim === `keyword-${index}`} aria-controls={keywordEvidenceId}
-              onClick={() => setOpenClaim(openClaim === `keyword-${index}` ? null : `keyword-${index}`)}>{claim.statement}</button>)}
-          </div>
-          <div id={keywordEvidenceId} hidden={!openKeyword}>
-            {openKeyword && <div className="account-portrait-keyword-detail" role="region" aria-label={`${openKeyword.statement}的依据`} key={openClaim}>
-              {renderEvidence(openKeyword)}
-            </div>}
-          </div>
-        </div>}
+    {hasIntro && <div className="account-portrait-intro">
+      <h4>这个账号给人的印象</h4>
+      {summary && <div className="account-portrait-summary">{renderClaim(summary, 'summary')}</div>}
+      {keywords.length > 0 && <div className="account-portrait-keyword-section">
+        <div className="account-portrait-keywords" role="group" aria-label="账号关键词">
+          {keywords.map((claim, index) => <button type="button" className="account-portrait-keyword" key={index}
+            aria-label={`${claim.statement}：查看 ${new Set(claim.evidence.map(ref => ref.noteId)).size} 条笔记依据`}
+            aria-expanded={openClaim === `keyword-${index}`} aria-controls={keywordEvidenceId}
+            onClick={() => setOpenClaim(openClaim === `keyword-${index}` ? null : `keyword-${index}`)}>{claim.statement}</button>)}
+        </div>
+        <div id={keywordEvidenceId} hidden={!openKeyword}>
+          {openKeyword && <div className="account-portrait-keyword-detail" role="region" aria-label={`${openKeyword.statement}的依据`} key={openClaim}>
+            {renderEvidence(openKeyword)}
+          </div>}
+        </div>
       </div>}
-      {strengths.length > 0 && <section className="account-portrait-strengths">
-        <h4>值得继续放大的优势</h4>
-        <div className="account-portrait-claims">{strengths.map((claim, index) => renderClaim(claim, `strength-${index}`))}</div>
-      </section>}
-    </> : null}
+    </div>}
+    <AccountPerformanceView observations={observations.notes} summaries={observations.metricSummaries} notes={notes} mediaAssets={mediaAssets} comparison={performanceComparison} />
+    {strengths.length > 0 && <section className="account-portrait-strengths">
+      <h4>值得继续放大的优势</h4>
+      <div className="account-portrait-claims">{strengths.map((claim, index) => renderClaim(claim, `strength-${index}`))}</div>
+    </section>}
     {hasContent && <section className="account-report-content">
       <h4>内容方向与读者价值</h4>
       {contentDetails}
@@ -228,7 +228,6 @@ export function AccountPortraitView({ portrait, observations, notes, mediaAssets
       {expressionDetails}
     </section>}
     {!hasPortrait && !nextSteps && suggestedSteps.length === 0 && <p className="muted">本次暂无可展示的账号画像，已保留的内容归纳与笔记数据不受影响。</p>}
-    <AccountPerformanceView observations={observations.notes} summaries={observations.metricSummaries} notes={notes} mediaAssets={mediaAssets} />
     {suggestedSteps.length > 0 && <section className="account-report-next-steps">
       <h4>接下来值得试什么</h4>
       <div className="account-portrait-claims">{suggestedSteps.map((claim, index) => renderClaim(claim, `next-step-${index}`))}</div>

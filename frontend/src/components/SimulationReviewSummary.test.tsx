@@ -16,6 +16,16 @@ const topic:Topic={id:'new-topic',workspaceId:'w',title:'写下第一句话',ang
 beforeEach(()=>{vi.spyOn(panelInterviewApi,'list').mockResolvedValue([])})
 afterEach(()=>{cleanup();vi.restoreAllMocks()})
 
+it.each([
+  {readerNeeds:['想在碎片时间开始'],keepDoing:['保持具体示例']},
+  {readerNeeds:[],keepDoing:['保持具体示例']},
+  {readerNeeds:['想在碎片时间开始'],keepDoing:[]},
+])('assigns report colors by meaning even when an adjacent section is absent',review=>{
+  render(<SimulationReviewSummary readOnly run={{...run,synthesis:{review}}}/>)
+  if(review.readerNeeds.length)expect(screen.getByText('读者在意什么').closest('details')).toHaveClass('simulation-review-observation')
+  if(review.keepDoing.length)expect(screen.getByText('值得继续保持').closest('details')).toHaveClass('simulation-review-strength')
+})
+
 it('shows account directions and sampling, never treats the account as a title-only draft',()=>{
   const adopt=vi.spyOn(simulationRunApi,'adoptTopicIdea').mockResolvedValue(topic)
   render(<SimulationChat run={run}/>)

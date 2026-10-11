@@ -16,6 +16,11 @@ function select(value:string) { fireEvent.change(screen.getByRole('combobox',{na
 
 it('keeps the display limit visible and explains the metrics on hover or focus', async () => {
   setup()
+  expect(screen.getByRole('heading', {name:'历史笔记表现'})).toBeInTheDocument()
+  expect(screen.getByRole('heading', {name:'较高表现'})).toBeInTheDocument()
+  expect(screen.getByRole('heading', {name:'较低表现'})).toBeInTheDocument()
+  expect(screen.getByRole('heading', {name:'较高表现'}).parentElement).toHaveClass('account-performance-higher')
+  expect(screen.getByRole('heading', {name:'较低表现'}).parentElement).toHaveClass('account-performance-lower')
   const hint = screen.getByRole('button', {name:'笔记表现数据说明'})
   expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   expect(screen.getByRole('status')).toHaveTextContent('每组最多展示 2 条')
@@ -48,9 +53,11 @@ it('switches independent metrics and displays medians, missingness and frozen no
 })
 
 it('does not put tied zero-value notes into opposing high and low groups', () => {
-  setup(notes.map(note=>({...note,metrics:{liked:0}})))
+  const {container} = setup(notes.map(note=>({...note,metrics:{liked:0}})))
+  expect(container.querySelector('.account-performance-paired')).toBeNull()
   expect(screen.getByText('所选笔记点赞相同')).toBeInTheDocument()
-  expect(screen.queryByText('所选笔记中点赞较低')).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', {name:'较高表现'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', {name:'较低表现'})).not.toBeInTheDocument()
   expect(screen.getAllByText(/本次点赞第 1/)).toHaveLength(2)
   expect(screen.getByRole('status')).toHaveTextContent('中位数 0')
 })
@@ -61,6 +68,22 @@ it('keeps tied cutoff values out of the lower group', () => {
   expect(within(lower).getAllByRole('button')).toHaveLength(1)
   expect(within(lower).getByRole('button')).toHaveTextContent('分享突出')
   expect(within(lower).getByText(/本次点赞第 2/)).toBeInTheDocument()
+})
+
+it.each([2, 3])('shows both relative groups for %i distinct notes without duplicating an entry', count => {
+  setup(notes.slice(0, count))
+  const higher = screen.getByRole('heading', {name:'较高表现'}).parentElement!
+  const lower = screen.getByRole('heading', {name:'较低表现'}).parentElement!
+  const titles = [...within(higher).getAllByRole('button'), ...within(lower).getAllByRole('button')].map(button => button.textContent)
+  expect(titles).toHaveLength(count)
+  expect(new Set(titles).size).toBe(count)
+})
+
+it('does not label a single note as a high or low performer', () => {
+  setup(notes.slice(0, 1))
+  expect(screen.getByRole('heading', {name:'本次笔记'})).toBeInTheDocument()
+  expect(screen.queryByRole('heading', {name:'较高表现'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', {name:'较低表现'})).not.toBeInTheDocument()
 })
 
 it('still offers other metrics when all likes are missing', () => {

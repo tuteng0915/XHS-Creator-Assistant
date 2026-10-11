@@ -1,7 +1,16 @@
-.account-performance-view .account-performance-heading h4 {
-  font-size: var(--text-section, 16px);
+.account-performance-view .account-performance-heading h5 {
+  margin: 0;
+  font-size: var(--text-body, 14px);
   font-weight: 600;
 }
+
+.account-performance-observation-label {
+  margin: 0 0 10px;
+  color: var(--sub);
+  font-size: var(--text-xs, 12px);
+}
+
+.account-report-saved-performance { margin-bottom: 20px; }
 
 .account-performance-view .account-performance-summary {
   margin: 8px 0 16px;
@@ -27,6 +36,28 @@
   font-size: var(--text-sm, 13px);
   font-weight: 400;
 }
+
+.account-performance-view .account-performance-paired {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.account-performance-paired .account-performance-group {
+  padding: 10px;
+  border-left: 3px solid;
+  border-radius: 10px;
+}
+.account-performance-paired .account-performance-higher {
+  border-color: var(--accent-border-strong);
+  background: var(--accent-soft);
+}
+.account-performance-paired .account-performance-higher > h5 { color: var(--accent-ink); }
+.account-performance-paired .account-performance-lower {
+  border-color: var(--report-lower-border);
+  background: var(--report-lower-surface);
+}
+.account-performance-paired .account-performance-lower > h5 { color: var(--report-lower-ink); }
+.account-performance-paired .account-performance-row-summary { grid-template-columns: minmax(0, 1fr); }
+.account-performance-paired .account-performance-value { text-align: left; }
 
 .account-performance-view .account-performance-row {
   display: grid;

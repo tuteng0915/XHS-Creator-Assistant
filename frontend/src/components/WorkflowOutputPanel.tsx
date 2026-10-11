@@ -6,7 +6,7 @@ import { SimulationStageNotice } from './SimulationStageNotice'
 import { stageDisplayStatus } from '../simulationStageStatus'
 import type { FeedbackRun } from '../editorFeedback'
 import { isOracleShowcase } from '../recordOrigin'
-import { OracleBadge, OracleNotice } from './OracleNotice'
+import { OracleNotice } from './OracleNotice'
 import { workflowProgressLabel, type WorkflowProgress } from '../workflowProgress'
 
 export type StageView = {
@@ -46,7 +46,6 @@ export function WorkflowOutputPanel({
   const renderedViews = isSimulation ? withSimulationPersonaLabels(views) : views
   return (
     <section className="output-panel">
-      {views.some(isOracleShowcase) && <><OracleBadge /><OracleNotice /></>}
       {runError && <div className="error-banner">⚠ {runError}</div>}
       {!views.length ? (
         <div className="output-empty">
@@ -60,14 +59,14 @@ export function WorkflowOutputPanel({
                   ? '视频创作者诊断待运行'
                   : '热点分析待运行'}
           </h2>
-          <p>运行后结果会渐进渲染，并保存到分析结果。</p>
+          <p>运行后结果会渐进渲染，并保存到{!isSimulation && targetTab === 'account' ? '诊断历史' : '分析结果'}。</p>
         </div>
       ) : (
-        renderedViews.map((stage) => (
+        renderedViews.map((stage, index) => (
           <div className="stage" key={stage.key}>
             <div className="stage-h">
               <div className="stage-n">{stage.n}</div>
-              <h3>{stage.title}</h3>
+              <h3>{stage.title}{index === 0 && views.some(isOracleShowcase) && <OracleNotice />}</h3>
               <div className={`stage-status ${isSimulation ? stageDisplayStatus(stage).className : stage.status}`}>
                 {isSimulation ? stageDisplayStatus(stage).label : stage.status === 'running'
                   ? '分析中…'
@@ -86,7 +85,9 @@ export function WorkflowOutputPanel({
             )}
             {stage.status === 'running' && stage.progress?.preview && (
               <div className="stage-progress-preview" role="status">
-                <small>阶段阅读摘要，完整报告仍在生成</small>
+                <small>{stage.key === 'pain_points'
+                  ? '候选反馈摘要，重要反馈仍在筛选'
+                  : '阶段阅读摘要，完整报告仍在生成'}</small>
                 <p style={{whiteSpace: 'pre-line'}}>{stage.progress.preview}</p>
               </div>
             )}

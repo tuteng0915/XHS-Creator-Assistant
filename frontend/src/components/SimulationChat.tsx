@@ -98,9 +98,9 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
       {!!run.debateResults.length&&<div className="trial-divider">读者互相回应</div>}
       {run.debateResults.map(item=>bubble(item,true))}
     </div>
-    {oracle&&text(oracleInterview.question).trim()&&<section className="trial-interview" aria-label="预写作者访谈">
-      <div className="trial-divider">作者追问 · 预写示例</div>
-      <div role="log" aria-label="预写访谈发言">
+    {oracle&&text(oracleInterview.question).trim()&&<section className="trial-interview" aria-label="作者访谈记录">
+      <div className="trial-divider">作者访谈记录 <InfoHint label="访谈记录说明">此处展示已保存的访谈内容，仅供阅读，不能继续追问。</InfoHint></div>
+      <div role="log" aria-label="访谈记录发言">
         <article className="trial-message trial-author">
           <ReaderAvatar id="creator" name="作者"/>
           <div className="trial-message-main"><div className="trial-message-meta"><b>作者</b><span>询问 参与读者</span></div><p className="trial-bubble">{text(oracleInterview.question)}</p></div>

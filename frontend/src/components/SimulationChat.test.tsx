@@ -157,7 +157,11 @@ it.each(['summary','metadata','snapshot'] as const)('makes an oracle %s record r
     question:'什么样的第一步，你愿意今天就试？',answers:[{personaId:'a',quote:'留一个词就够了，我不想补作业。'},
       {personaId:'not-in-this-panel',quote:'不能伪装成这场的参与者'},{personaId:'b',quote:''}]}}
   render(<SimulationChat run={{...run,...origin,status:'running',inputSnapshot}} readOnly={false} topics={[writingTopic]} onUseReaderFeedback={useFeedback}/>)
-  const interview=screen.getByRole('region',{name:'预写作者访谈'})
+  const interview=screen.getByRole('region',{name:'作者访谈记录'})
+  expect(screen.queryByText(/预写示例/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  fireEvent.click(within(interview).getByRole('button',{name:'访谈记录说明'}))
+  expect(screen.getByRole('tooltip')).toHaveTextContent('此处展示已保存的访谈内容，仅供阅读，不能继续追问。')
   expect(within(interview).getByText('什么样的第一步，你愿意今天就试？')).toBeVisible()
   expect(within(interview).getByText('留一个词就够了，我不想补作业。')).toBeVisible()
   expect(within(interview).getByRole('img',{name:'轻松尝试型的头像'})).toBeVisible()
@@ -177,7 +181,7 @@ it.each(['summary','metadata','snapshot'] as const)('makes an oracle %s record r
 it('does not present frozen oracle dialogue on an unmarked ordinary record',async()=>{
   render(<SimulationChat run={{...run,inputSnapshot:{...run.inputSnapshot,oracleInterview:{question:'示例追问',answers:[{personaId:'a',quote:'示例回答'}]}}}}/>)
   expect(screen.queryByText('示例追问')).not.toBeInTheDocument()
-  expect(screen.queryByRole('region',{name:'预写作者访谈'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('region',{name:'作者访谈记录'})).not.toBeInTheDocument()
   expect(screen.getByLabelText('作者追问')).toBeVisible()
   await waitFor(()=>expect(panelInterviewApi.list).toHaveBeenCalledOnce())
 })

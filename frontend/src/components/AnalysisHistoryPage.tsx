@@ -6,7 +6,7 @@ import type { AnalysisRun, AnalysisRunSummary, ReviewStatus } from '../types'
 import { reviewStatusLabel, workflowLabel } from '../appUtils'
 import { stageSeedFromRun } from '../workflowStageViews'
 import { isOracleShowcase } from '../recordOrigin'
-import { OracleBadge, OracleNotice } from './OracleNotice'
+import { OracleNotice } from './OracleNotice'
 import { creatorNotesFromPayload } from '../creatorNotes'
 import type { RunStatus } from '../types'
 
@@ -62,7 +62,7 @@ export function RunReviewEditor({
           })
         }
       >
-        <option value="unreviewed">未复盘</option>
+        <option value="unreviewed">未标记</option>
         <option value="useful">有用</option>
         <option value="rejected">弃用</option>
       </select>
@@ -87,6 +87,7 @@ export function RunReviewEditor({
 }
 
 type AnalysisHistoryPageProps = {
+  embedded?: boolean
   publicMode?: boolean
   analysisRuns: AnalysisRunSummary[]
   selectedRun: AnalysisRun | null
@@ -100,6 +101,7 @@ type AnalysisHistoryPageProps = {
 }
 
 export function AnalysisHistoryPage({
+  embedded = false,
   publicMode = false,
   analysisRuns,
   selectedRun,
@@ -112,11 +114,11 @@ export function AnalysisHistoryPage({
   onSaveAnalysisRunReview,
 }: AnalysisHistoryPageProps) {
   return (
-    <div className="workspace-page">
+    <div className={`workspace-page${embedded ? ' diagnosis-history-embedded' : ''}`} role="region" aria-label={publicMode ? '诊断历史' : '分析结果'}>
       <section className="history-list">
-        <div className="panel-title">◷ 分析结果</div>
+        <div className="panel-title">◷ {publicMode ? '诊断历史' : '分析结果'}</div>
         {analysisRuns.length === 0 ? (
-          <div className="empty-card">暂无分析运行。</div>
+          <div className="empty-card">{publicMode ? '暂无诊断记录。完成分析后会保存在这里。' : '暂无分析运行。'}</div>
         ) : (
           analysisRuns.map((run) => (
             <button
@@ -124,9 +126,9 @@ export function AnalysisHistoryPage({
               className={`run-row ${selectedRun?.id === run.id ? 'active' : ''}`}
               onClick={() => onOpenRun(run.id)}
             >
-              <span>{workflowLabel(run.workflowType)}{isOracleShowcase(run) && <> <OracleBadge /></>}</span>
+              <span>{workflowLabel(run.workflowType)}</span>
               <b>{publicMode ? analysisStatusLabel(run.status) : run.status}</b>
-              <small>{reviewStatusLabel(run.reviewStatus)}</small>
+              {run.reviewStatus !== 'unreviewed' && <small>{reviewStatusLabel(run.reviewStatus)}</small>}
               <small>{new Date(run.createdAt).toLocaleString()}</small>
             </button>
           ))
@@ -139,8 +141,7 @@ export function AnalysisHistoryPage({
           <>
             <div className="detail-head">
               <div>
-                <h2>{workflowLabel(selectedRun.workflowType)}</h2>
-                {isOracleShowcase(selectedRun) && <OracleBadge />}
+                <h2>{workflowLabel(selectedRun.workflowType)}{isOracleShowcase(selectedRun) && <OracleNotice />}</h2>
                 <p>
                   {publicMode ? analysisStatusLabel(selectedRun.status) : selectedRun.status} ·{' '}
                   {new Date(selectedRun.createdAt).toLocaleString()}
@@ -150,7 +151,6 @@ export function AnalysisHistoryPage({
                 在输出区打开
               </button>}
             </div>
-            {isOracleShowcase(selectedRun) && <OracleNotice />}
             <details open={!publicMode}><summary>复盘备注</summary><RunReviewEditor
               idPrefix="analysis-run-review"
               draft={analysisReviewDraft}
@@ -175,7 +175,7 @@ export function AnalysisHistoryPage({
             ))}
           </>
         ) : (
-          !['saving','error'].includes(loadState?.phase || '') && <div className="empty-card">选择一次运行查看输入和结果。</div>
+          !['saving','error'].includes(loadState?.phase || '') && <div className="empty-card">{publicMode ? '选择一条诊断记录查看结果。' : '选择一次运行查看输入和结果。'}</div>
         )}
       </section>
     </div>

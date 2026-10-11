@@ -171,7 +171,9 @@ def test_real_provider_selects_staged_pipeline_by_default_for_qwen(
         call_operation=AsyncMock(),
     )
     provider = RealAccountDiagnosisModelProvider(model)
-    provider.pain_points = AsyncMock(return_value={"painPoints": []})
+    provider.pain_points_with_updates = AsyncMock(return_value=SimpleNamespace(
+        output={"painPoints": []}, model_metadata={},
+    ))
     provider.topics = AsyncMock(return_value={"topics": [], "titles": []})
     app.state.account_workflow_service.live_provider = provider
     collect(app, run["id"])

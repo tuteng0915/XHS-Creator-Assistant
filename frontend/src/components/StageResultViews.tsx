@@ -5,6 +5,8 @@ import { accountStatementKey } from '../accountReportText'
 import { replyPersonaId, simulationPersonaLabels } from '../simulationPersonaLabels'
 import { EditorFeedbackView } from './EditorFeedbackView'
 import { feedbackCards, type FeedbackRun } from '../editorFeedback'
+import { InfoHint } from './InfoHint'
+import { ReaderFeedbackEmptyState } from './ReaderFeedbackEmptyState'
 
 export type SaveState = { phase: SavePhase; message?: string }
 
@@ -114,9 +116,34 @@ export function ProfileView({ data, observations, notes = [], mediaAssets = [] }
     const alreadyDisplayed = new Set(displayedClaims.filter(claim => claim?.statement && claim.evidence?.length).map(claim => accountStatementKey(claim!.statement)))
     const sections = profileDetails(data, alreadyDisplayed, notes)
     return <AccountPortraitView portrait={portrait} observations={observations} notes={notes} mediaAssets={mediaAssets}
+      performanceComparison={savedPerformanceComparison(data.contrast)}
       contentDetails={sections.content} expressionDetails={sections.expression} nextSteps={sections.nextSteps} />
   }
   return <LegacyProfileView data={data} notes={notes} />
+}
+
+function savedPerformanceComparison(value: unknown) {
+  if (!value || typeof value !== 'object') return null
+  const contrast = value as Record<string, unknown>
+  const groups = [
+    {key: 'win', title: '较高表现', notes: contrast.winners, factors: contrast.winFactors},
+    {key: 'lose', title: '较低表现', notes: contrast.losers, factors: contrast.loseFactors},
+  ].map(group => ({...group,
+    titles: (Array.isArray(group.notes) ? group.notes : []).flatMap(item =>
+      item && typeof item.title === 'string' && item.title.trim() ? [item.title] : []),
+    factors: (Array.isArray(group.factors) ? group.factors : []).filter((item): item is string => typeof item === 'string' && !!item.trim()),
+  })).filter(group => group.titles.length || group.factors.length)
+  if (!groups.length) return null
+  // Preserve the report's own examples and wording. They are not the current
+  // metric ranking; never bind its titles to note IDs or model-written counts.
+  return <div className="account-report-saved-performance">
+    <p className="account-performance-observation-label">报告中的内容观察 <InfoHint label="表现解读说明">保留生成这份报告时的笔记分组与解读；下方指标切换仅改变数据排序。</InfoHint></p>
+    <div className="cmp">{groups.map(group => <div className={`cmp-col cmp-${group.key}`} key={group.key}>
+      <h5>{group.title}</h5>
+      {group.titles.map((title, index) => <div className="cmp-item" key={index}>{title}</div>)}
+      {group.factors.length > 0 && <ul>{group.factors.map((factor, index) => <li key={index}>{factor}</li>)}</ul>}
+    </div>)}</div>
+  </div>
 }
 
 function profileText(value: unknown): string {
@@ -248,10 +275,12 @@ function LegacyProfileView({ data, notes }: {data: Record<string, unknown>; note
   )
 }
 
-export function PainPointsView({ items }: { items: unknown }) {
+export function PainPointsView({ items, profile, rankingFallback = false }: { items: unknown; profile?: unknown; rankingFallback?: boolean }) {
   const painPoints = Array.isArray(items) ? items : []
+  if (!painPoints.length) return <ReaderFeedbackEmptyState profile={profile} />
   return (
     <>
+      {rankingFallback && <p className="muted">重要性排序暂未完成，先保留已提取的反馈。</p>}
       {painPoints.map((item) => {
         const point = item as {
           theme?: string

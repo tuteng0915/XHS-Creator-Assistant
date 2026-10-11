@@ -65,15 +65,19 @@ it('keeps prewritten readers within the existing history and waits for manual ad
   const run:AudienceAnalysis={id:'oracle-a',workspaceId:'w',sourceMaterialId:'p',status:'completed',error:'',createdAt:'2026-10-09',
     inputSnapshot:{scope:{scope:'all',selectedNoteCount:2},notes:[]},result:{origin:'oracle_showcase',summary:'有人找入门路径，也有人判断经验如何迁移。',groups:[
       {id:'g',name:'先试一小步',profile:'先用一个小任务判断是否适合自己',coreConcern:'希望明确今天可以做什么',evidence:[]}]}}
+  const original=JSON.stringify(run)
   render(<AudienceAnalysisPage workspaceId="w" analyses={[run]} selectedId={run.id} onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()}/>)
-  expect(screen.getByRole('option')).toHaveTextContent('预写示例')
-  expect(screen.getByText('预写示例',{selector:'span'})).toBeVisible()
-  expect(screen.getByText('基于本账号已保存笔记人工编排，未调用模型。')).toBeVisible()
+  expect(screen.getByRole('option')).not.toHaveTextContent('预写示例')
+  expect(screen.queryByText('预写示例')).not.toBeInTheDocument()
+  expect(screen.queryByText(/人工编排/)).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'记录来源说明'}))
+  expect(screen.getByRole('tooltip')).toHaveTextContent('基于本账号已保存笔记人工编排，未调用模型。')
   expect(create).not.toHaveBeenCalled()
   expect(screen.getByRole('status')).toHaveTextContent('已收录 0 位')
   fireEvent.click(screen.getByRole('button',{name:'收录为模拟读者'}))
   await waitFor(()=>expect(screen.getByRole('button',{name:'已收录'})).toBeDisabled())
   expect(create).toHaveBeenCalledExactlyOnceWith('w','oracle-a','g')
+  expect(JSON.stringify(run)).toBe(original)
 })
 it('makes history loading failures visible rather than appearing as empty history', () => {
   render(<AudienceAnalysisPage workspaceId="w" analyses={[]} selectedId="" onSelect={vi.fn()} onRefresh={vi.fn()} onSimulate={vi.fn()} loadError="网络中断" />)

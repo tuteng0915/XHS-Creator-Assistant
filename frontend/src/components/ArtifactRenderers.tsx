@@ -145,7 +145,11 @@ export function StageResultRenderer({
       <TrendAnalysisView data={result.trendAnalysis as Record<string, unknown>} />
     )
   }
-  if (stage.key === 'pain_points') return <PainPointsView items={result.painPoints} />
+  if (stage.key === 'pain_points') {
+    const metadata = currentRun?.modelMetadata.pain_points
+    const rankingFallback = !!(metadata && typeof metadata === 'object' && 'rankingFallback' in metadata && metadata.rankingFallback)
+    return <PainPointsView items={result.painPoints} profile={currentRun?.inputSnapshot.xhsCreatorProfile} rankingFallback={rankingFallback} />
+  }
   if (stage.key === 'topics') {
     return (
       <>

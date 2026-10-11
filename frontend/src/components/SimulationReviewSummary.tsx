@@ -60,7 +60,7 @@ export function SimulationReviewSummary({run,onTopicAdded,topics=[],readOnly=fal
         <ul>{nextTimeSuggestions.map((item,index)=><li key={index}>{item}</li>)}</ul>
       </section>}
       {(readerNeeds.length>0||keepDoing.length>0)&&<div className="simulation-review-observations">
-        {([{label:'读者在意什么',items:readerNeeds},{label:'值得继续保持',items:keepDoing}]).map(({label,items})=>items.length>0&&<details key={label}>
+        {([{label:'读者在意什么',items:readerNeeds,tone:'observation'},{label:'值得继续保持',items:keepDoing,tone:'strength'}]).map(({label,items,tone})=>items.length>0&&<details className={`simulation-review-${tone}`} key={label}>
           <summary>{label}</summary><ul>{items.map((item,index)=><li key={index}>{item}</li>)}</ul>
         </details>)}
       </div>}

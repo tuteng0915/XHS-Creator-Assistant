@@ -2711,6 +2711,22 @@ function WorkspaceApp() {
     return <DraftStructureRenderer value={value} />
   }
 
+  function renderAnalysisHistoryPage(embedded = false): ReactNode {
+    return <AnalysisHistoryPage
+      embedded={embedded}
+      publicMode={!internalMode}
+      analysisRuns={analysisRuns.filter(run => internalMode || run.workflowType === 'account_diagnosis')}
+      selectedRun={selectedRun}
+      loadState={analysisHistoryLoad}
+      analysisReviewDraft={analysisReviewDraft}
+      analysisReviewSaveState={saveStates.analysisReview}
+      renderStageResult={renderStageResult}
+      onOpenRun={openRun}
+      onAnalysisReviewDraftChange={editAnalysisReview}
+      onSaveAnalysisRunReview={saveAnalysisRunReview}
+    />
+  }
+
   const topicDraftSource = useRef<Topic | null>(null)
   useEffect(() => {
     const previous = topicDraftSource.current
@@ -2832,6 +2848,7 @@ function WorkspaceApp() {
             runError={runError}
             renderStageResult={renderStageResult}
           />}
+          {analysisStageViewsByWorkflow.account.length === 0 && renderAnalysisHistoryPage(true)}
         </CreatorDiagnosisPage>)}
       {!loading &&
         workspace &&
@@ -2842,22 +2859,7 @@ function WorkspaceApp() {
         activePage === 'video-quality' &&
         renderWorkflowRunPage('video')}
 
-      {!loading && workspace && activePage === 'history' && (
-        <AnalysisHistoryPage
-          publicMode={!internalMode}
-          analysisRuns={analysisRuns.filter(
-            (run) => internalMode || run.workflowType === 'account_diagnosis',
-          )}
-          selectedRun={selectedRun}
-          loadState={analysisHistoryLoad}
-          analysisReviewDraft={analysisReviewDraft}
-          analysisReviewSaveState={saveStates.analysisReview}
-          renderStageResult={renderStageResult}
-          onOpenRun={openRun}
-          onAnalysisReviewDraftChange={editAnalysisReview}
-          onSaveAnalysisRunReview={saveAnalysisRunReview}
-        />
-      )}
+      {!loading && workspace && activePage === 'history' && renderAnalysisHistoryPage()}
       {!loading && workspace && activePage === 'topics' && (
         <TopicLibraryPage
           key={workspace.id}

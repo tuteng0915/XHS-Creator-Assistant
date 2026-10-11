@@ -48,6 +48,147 @@ def settings(**overrides: Any) -> Settings:
     return Settings(**values)
 
 
+def test_reader_feedback_prompt_accepts_sparse_unknown_and_positive_comments():
+    from app.services.model_calls import PROMPT_READER_FEEDBACK
+
+    source = "请问有面试嘛？\n感谢分享"
+    service = ModelCallService(settings())
+    system, user = service._build_prompt(ModelOperation.PAIN_POINTS, {
+        "sourceText": source, "sourceKind": "reader_comments",
+    })
+
+    assert system == PROMPT_READER_FEEDBACK
+    assert user == source
+    assert "0~5" in system and "不强制凑足条数" in system
+    assert "明确提问、具体需求、困惑和正向反馈" in system
+    assert "单条明确提问或需求也可保留" in system
+    assert "不改写成困难或痛点" in system
+    assert "unknown 表示身份无法比较，仍可根据其原文分析反馈" in system
+    assert "不确认其读者身份" in system
+    assert "文本确实没有可识别的反馈信息时" in system
+    assert "逐字引用" in system
+    assert service._validate_model_output(ModelOperation.PAIN_POINTS, {"painPoints": []}) == {
+        "painPoints": [],
+    }
+
+
+@pytest.mark.parametrize("context", [
+    {"sourceText": "以下是小红书相关热帖的标题和内容，请归纳痛点"},
+    {"comments": "普通文本评论"},
+    {"sourceText": "# 小红书一级评论样本（由 xhs_creator_profile 派生）"},
+    {"sourceText": "其他输入", "sourceKind": "other"},
+])
+def test_generic_pain_prompt_is_not_changed_or_selected_by_source_text(context):
+    from app.services.model_calls import PROMPT_PAIN_POINTS
+
+    system, user = ModelCallService(settings())._build_prompt(ModelOperation.PAIN_POINTS, context)
+
+    assert system == PROMPT_PAIN_POINTS
+    assert user == context.get("sourceText", context.get("comments"))
+
+
+def test_account_provider_uses_feedback_retrieval_but_trend_provider_stays_generic():
+    from app.models import ModelCallResponse
+    from app.workflows.account_diagnosis import RealAccountDiagnosisModelProvider
+    from app.workflows.trend_analysis import RealTrendAnalysisModelProvider
+
+    received = []
+
+    class Model:
+        async def call_operation(self, operation, context):
+            received.append((operation, context))
+            return ModelCallResponse(output={"painPoints": []}, model_metadata={})
+
+        async def call_reader_feedback_step(self, stage, system, user):
+            received.append((stage, json.loads(user)))
+            return ModelCallResponse(output={"candidates": []}, model_metadata={})
+
+    model = Model()
+    account_result = asyncio.run(RealAccountDiagnosisModelProvider(model).pain_points(
+        comments="请问有面试嘛？",
+    ))
+    trend_result = asyncio.run(RealTrendAnalysisModelProvider(model).pain_points(
+        trend_keyword="申请", posts_text="热帖正文",
+    ))
+
+    assert account_result == trend_result == {"painPoints": []}
+    assert received[0] == ("retrieve", {
+        "comments": [{"id": "c1", "text": "请问有面试嘛？"}],
+    })
+    assert received[1][0] == ModelOperation.PAIN_POINTS
+    assert set(received[1][1]) == {"sourceText"}
+    assert "归纳读者高频痛点" in received[1][1]["sourceText"]
+
+
+@pytest.mark.parametrize("stage,budget,output", [
+    ("retrieve", 2200, {"candidates": [{"theme": "面试询问", "commentIds": ["c1"]}]}),
+    ("rank", 500, {"selectedIds": ["f2", "f1"]}),
+])
+def test_feedback_steps_use_configured_qwen_and_phase_budgets(monkeypatch, stage, budget, output):
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.response_status_code = 200
+    FakeAsyncClient.response_body = {
+        "model": "qwen-plus", "choices": [{"message": {"content": json.dumps(output)}}],
+        "usage": {"prompt_tokens": 15, "completion_tokens": 8},
+    }
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    service = ModelCallService(settings(model_provider="qwen", qwen_api_key="placeholder-key"))
+
+    response = asyncio.run(service.call_reader_feedback_step(stage, "阶段提示", "原文材料"))
+
+    assert response.output == output
+    assert response.model_metadata["stage"] == stage
+    request = FakeAsyncClient.requests[0]["json"]
+    assert request["model"] == "qwen-plus"
+    assert request["max_tokens"] == budget
+    assert request["messages"] == [
+        {"role": "system", "content": "阶段提示"}, {"role": "user", "content": "原文材料"},
+    ]
+    assert service._output_budget(ModelOperation.PAIN_POINTS, {}) == 1000
+    assert service._output_budget(ModelOperation.PROFILE, {"_readerFeedbackStage": stage}) == 6000
+
+
+def test_feedback_step_rejects_unknown_phase_before_a_request():
+    service = ModelCallService(settings(model_provider="qwen", qwen_api_key="placeholder-key"))
+    with pytest.raises(ValidationError, match="Unsupported reader feedback stage"):
+        asyncio.run(service.call_reader_feedback_step("unknown", "", ""))
+
+
+@pytest.mark.parametrize("stage", ["retrieve", "rank"])
+def test_feedback_step_does_not_use_truncated_json(monkeypatch, stage):
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.response_status_code = 200
+    FakeAsyncClient.response_body = {"choices": [{
+        "message": {"content": '{"selectedIds":["f1"]}'}, "finish_reason": "length",
+    }]}
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    service = ModelCallService(settings(model_provider="qwen", qwen_api_key="placeholder-key"))
+    with pytest.raises(ValidationError, match="输出不完整"):
+        asyncio.run(service.call_reader_feedback_step(stage, "", ""))
+
+
+@pytest.mark.parametrize("feedback", [[], [
+    {"theme": "正向反馈：感谢分享", "intensity": "中", "count": 1, "evidence": ["感谢分享"]},
+]])
+def test_account_topics_do_not_turn_positive_or_empty_feedback_into_pain(feedback):
+    from app.services.model_calls import PROMPT_TOPICS, PROMPT_TOPICS_B
+
+    service = ModelCallService(settings())
+    context = {"profile": {"pillars": ["申请经验"]}, "painPoints": feedback}
+    account_system, account_user = service._build_prompt(ModelOperation.TOPICS, context)
+    trend_system, _ = service._build_prompt(ModelOperation.TREND_TOPICS, context)
+
+    assert account_system == PROMPT_TOPICS
+    assert "正向反馈不得改写成痛点" in account_system
+    assert "可依据账号诊断（profile）建议选题" in account_system
+    assert "而非已验证的读者需求" in account_system
+    assert "topics[0] 必须对应" not in account_system
+    assert "申请经验" in account_user
+    assert json.dumps(feedback, ensure_ascii=False) in account_user
+    assert trend_system == PROMPT_TOPICS_B
+    assert "topics[0] 必须对应 painPoints[0]" in trend_system
+
+
 def test_qwen_profile_length_stop_is_not_accepted_even_with_parseable_json(monkeypatch):
     FakeAsyncClient.requests = []
     FakeAsyncClient.response_status_code = 200

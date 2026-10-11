@@ -326,6 +326,76 @@ def test_account_comment_projection_retains_raw_source_and_unknowns(all_authors)
     assert snapshot == original
 
 
+def test_sparse_account_comments_are_counted_once_and_keep_source_attribution():
+    comments = ["请问有面试嘛？", "诶 请问贵公司招人吗", "感谢分享", "哥 想问下美国那边的"]
+    snapshot = {"notes": [
+        {"noteId": f"n{i}", "title": f"有评论笔记{i}", "comments": [
+            {"commentId": f"c{i}", "content": content, "likeCount": i, "subCommentCount": 1},
+        ]}
+        for i, content in enumerate(comments)
+    ] + [{"noteId": f"empty{i}", "title": f"无评论笔记{i}", "comments": []}
+         for i in range(6)]}
+    original = deepcopy(snapshot)
+
+    text = reader_comments_text(snapshot)
+
+    header = text.split("## 有评论笔记0")[0]
+    assert "范围笔记数：10；抓取评论总数：4；已排除作者评论总数：0" in header
+    assert "候选评论总数：4；非空文本候选总数：4" in header
+    assert "身份未验证（unknown）候选数：4" in header
+    assert "无候选评论的笔记数：6" in header
+    assert "没有可用于" not in text
+    assert "无评论笔记" not in text
+    assert text.count("sourceRole：unknown") == 4
+    for i, content in enumerate(comments):
+        assert f"## 有评论笔记{i}" in text and f"note_id：n{i}" in text
+        assert f"1. {content}" in text
+        assert f"comment_id：c{i}；sourceRole：unknown；赞：{i}；二级评论数：1" in text
+    assert snapshot == original
+
+
+def test_comment_totals_distinguish_text_empty_candidates_and_excluded_authors():
+    snapshot = payload()
+    snapshot["notes"][0]["comments"].extend([
+        {"commentId": "image", "authorHash": OTHER, "content": None},
+        {"commentId": "spaces", "content": "  \n"},
+    ])
+    original = deepcopy(snapshot)
+
+    text = reader_comments_text(snapshot)
+
+    assert "抓取评论总数：5；已排除作者评论总数：1" in text
+    assert "候选评论总数：4；非空文本候选总数：2" in text
+    assert "身份未验证（unknown）候选数：2" in text
+    assert "请发到我的邮箱" not in text
+    assert "第一步需要什么材料" in text and "想知道时间" in text
+    assert "comment_id：image；sourceRole：non_author" in text
+    assert "comment_id：spaces；sourceRole：unknown" in text
+    assert text.count("（图片评论或空文本评论）") == 1
+    assert snapshot == original
+
+
+@pytest.mark.parametrize("comments", [
+    [],
+    [{"content": "作者留言", "authorHash": AUTHOR}],
+    [{"content": None}, {"content": "  "}],
+])
+def test_no_text_candidates_have_only_one_global_empty_notice(comments):
+    snapshot = {"notes": [
+        {"noteId": "n", "title": "不可用标题推断需求", "authorHash": AUTHOR,
+         "comments": comments},
+        {"noteId": "empty", "comments": []},
+    ]}
+    original = deepcopy(snapshot)
+
+    text = reader_comments_text(snapshot)
+
+    assert "非空文本候选总数：0" in text
+    assert text.count("没有可用于读者需求推导的评论文本") == 1
+    assert "作者留言" not in text
+    assert snapshot == original
+
+
 def test_legacy_projection_excludes_duplicate_author_ids_and_bounds_note_count():
     note = {
         "noteId": "n", "title": "正文", "content": "正文",

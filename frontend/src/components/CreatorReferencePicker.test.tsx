@@ -89,6 +89,35 @@ it('previews saved content and cancels without committing a reference', async ()
   expect(onChange).not.toHaveBeenCalled()
 })
 
+it.each(['account_analysis', 'audience_analysis'] as const)('keeps %s reference choices unlabelled and its source available in the preview', async kind => {
+  const record = kind === 'account_analysis'
+    ? account('saved-oracle', {origin: 'oracle_showcase', modelMetadata: {origin: 'oracle_showcase', provider: 'none', modelCalled: false}})
+    : audience('saved-oracle', {result: {...audience().result, origin: 'oracle_showcase'}})
+  const original = JSON.stringify(record)
+  if (kind === 'account_analysis') {
+    vi.mocked(analysisRunApi.list).mockResolvedValue([record as AnalysisRun])
+    vi.mocked(analysisRunApi.get).mockResolvedValue(record as AnalysisRun)
+  } else {
+    vi.mocked(audienceAnalysisApi.list).mockResolvedValue([record as AudienceAnalysis])
+    vi.mocked(audienceAnalysisApi.get).mockResolvedValue(record as AudienceAnalysis)
+  }
+  const {onChange} = setup()
+  await openPicker()
+  if (kind === 'audience_analysis') fireEvent.change(screen.getByRole('combobox', {name: '资料类型'}), {target: {value: kind}})
+  await waitFor(() => expect(within(screen.getByRole('combobox', {name: '分析记录'})).getAllByRole('option')).toHaveLength(2))
+  expect(screen.queryByText(/预写示例/)).not.toBeInTheDocument()
+  choose('saved-oracle')
+  const hint = await screen.findByRole('button', {name: '参考来源说明'})
+  expect(screen.queryByText(/预写示例|人工编排/)).not.toBeInTheDocument()
+  fireEvent.focus(hint)
+  expect(screen.getByRole('tooltip')).toHaveTextContent('基于本账号已保存笔记人工编排，未调用模型。')
+  fireEvent.keyDown(document, {key: 'Escape'})
+  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', {name: '添加这份材料'})).toBeEnabled()
+  expect(onChange).not.toHaveBeenCalled()
+  expect(JSON.stringify(record)).toBe(original)
+})
+
 it('adds an exact audience record only on confirmation and keeps account and audience choices separate', async () => {
   vi.mocked(audienceAnalysisApi.list).mockResolvedValue([audience(), audience('failed', {status: 'failed'}), audience('foreign', {workspaceId: 'workspace-2'})])
   vi.mocked(audienceAnalysisApi.get).mockResolvedValue(audience())

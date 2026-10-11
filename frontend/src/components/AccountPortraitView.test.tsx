@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AccountPortraitView, type Observations } from './AccountPortraitView'
+import { AccountPortraitView, type Observations, type Portrait } from './AccountPortraitView'
 import { StageResultRenderer } from './ArtifactRenderers'
 import type { AnalysisRun, MediaAsset } from '../types'
 
@@ -13,6 +13,41 @@ const observations:Observations = {
   notes:[note],
 }
 const summary = {statement:'把过程讲得具体',evidence:[{noteId:'n1',quote:'先列成本'},{noteId:'n1',quote:'再分步骤'}]}
+
+it('reads impression, frozen performance, strengths and remaining advice in order', () => {
+  const portrait = {
+    summary,
+    strengths:[{...summary,statement:'具体步骤让过程容易跟上'}],
+    readerValue:[{...summary,statement:'帮助读者做好准备'}],
+    expressionPatterns:[{...summary,statement:'先交代成本再展开过程'}],
+    nextSteps:[{...summary,statement:'下一篇继续说明取舍'}],
+  }
+  const sourceNotes = [{...note,metrics:{liked:999}}]
+  const original = JSON.stringify({portrait,observations,sourceNotes})
+  render(<AccountPortraitView portrait={portrait} observations={observations} notes={sourceNotes} mediaAssets={[]}
+    performanceComparison={<p>这份报告保留的表现解读</p>} />)
+  expect(screen.getAllByRole('heading',{level:4}).map(heading => heading.textContent)).toEqual([
+    '这个账号给人的印象','历史笔记表现','值得继续放大的优势','内容方向与读者价值','你的表达方式','接下来值得试什么',
+  ])
+  const performance = screen.getByRole('heading',{name:'历史笔记表现'}).closest('section')!
+  expect(performance).toContainElement(screen.getByText('这份报告保留的表现解读'))
+  expect(screen.getAllByRole('combobox',{name:'比较指标'})).toHaveLength(1)
+  expect(screen.getByRole('status')).toHaveTextContent('点赞数据 1 / 1 条 · 中位数 12')
+  expect(JSON.stringify({portrait,observations,sourceNotes})).toBe(original)
+})
+
+it.each<{portrait?:Portrait;headings:string[]}>([
+  {portrait:{strengths:[summary]},headings:['历史笔记表现','值得继续放大的优势']},
+  {portrait:{summary},headings:['这个账号给人的印象','历史笔记表现']},
+  {portrait:{summary:null,strengths:[]},headings:['历史笔记表现']},
+  {portrait:undefined,headings:['历史笔记表现']},
+])('keeps performance once and omits absent intro or strengths: $headings', ({portrait,headings}) => {
+  const {container} = render(<AccountPortraitView portrait={portrait} observations={observations} notes={[note]} mediaAssets={[]} />)
+  expect(screen.getAllByRole('heading',{level:4}).map(heading => heading.textContent)).toEqual(headings)
+  expect(container.querySelectorAll('.account-portrait-intro')).toHaveLength(portrait?.summary ? 1 : 0)
+  expect(container.querySelectorAll('.account-portrait-strengths')).toHaveLength(portrait?.strengths?.length ? 1 : 0)
+  expect(screen.getAllByRole('combobox',{name:'比较指标'})).toHaveLength(1)
+})
 
 it('renders noncontiguous grouped fragments separately under one title and interpretation', () => {
   const source = {...note, desc:'先列成本。中间另谈一件事。再分步骤。'}
@@ -186,7 +221,7 @@ it('places note-linked next steps after performance and preserves legacy next st
   expect(screen.queryByText(/本次暂无可展示/)).not.toBeInTheDocument()
   const step = screen.getByText(nextStep.statement)
   expect(step.closest('details')).toBeNull()
-  expect(screen.getByText('笔记表现').compareDocumentPosition(step) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(screen.getByText('历史笔记表现').compareDocumentPosition(step) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(step.compareDocumentPosition(screen.getByText('分析范围')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   fireEvent.click(screen.getByRole('button',{name:'查看依据 · 1 条笔记'}))
   expect(screen.getByRole('button',{name:/准备过程 赞/})).toBeInTheDocument()
@@ -247,7 +282,7 @@ it('shows supporting findings directly and folds only source metadata after note
   expect(screen.queryByText('表达特点')).not.toBeInTheDocument()
   const source = screen.getByText('分析范围').closest('details')!
   expect(source).not.toHaveAttribute('open')
-  expect(screen.getByText('笔记表现').compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(screen.getByText('历史笔记表现').compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   fireEvent.click(screen.getByText('分析范围'))
   expect(source).toHaveAttribute('open')
   expect(screen.getByText('1 条缺少发布时间')).toBeInTheDocument()

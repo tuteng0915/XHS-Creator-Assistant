@@ -20,7 +20,7 @@ def comment_source_role(note: dict, comment: dict) -> str:
 
 def reader_comments_text(profile: dict) -> str:
     """Derived inference input only; keep raw comments and platform counts intact."""
-    lines = ["# 小红书一级评论样本（由 xhs_creator_profile 派生）", ""]
+    projected = []
     for note in profile.get("notes", []):
         if not isinstance(note, dict):
             continue
@@ -28,15 +28,37 @@ def reader_comments_text(profile: dict) -> str:
         candidates = [(comment, comment_source_role(note, comment)) for comment in comments
                       if isinstance(comment, dict)]
         readers = [(comment, role) for comment, role in candidates if role != "author"]
+        projected.append((note, comments, readers, sum(role == "author" for _, role in candidates)))
+
+    reader_count = sum(len(readers) for _, _, readers, _ in projected)
+    text_count = sum(
+        isinstance(comment.get("content"), str) and bool(comment["content"].strip())
+        for _, _, readers, _ in projected for comment, _ in readers
+    )
+    unknown_count = sum(
+        role == "unknown" for _, _, readers, _ in projected for _, role in readers
+    )
+    lines = [
+        "# 小红书一级评论样本（由 xhs_creator_profile 派生）", "",
+        f"- 范围笔记数：{len(projected)}；抓取评论总数："
+        f"{sum(len(comments) for _, comments, _, _ in projected)}；"
+        f"已排除作者评论总数：{sum(excluded for _, _, _, excluded in projected)}",
+        f"- 候选评论总数：{reader_count}；非空文本候选总数：{text_count}；"
+        f"其中身份未验证（unknown）候选数：{unknown_count}",
+        f"- 无候选评论的笔记数：{sum(not readers for _, _, readers, _ in projected)}"
+        "（已合并略去；下方保留候选评论的原文与所属笔记。）", "",
+    ]
+    if not text_count:
+        lines.extend(["（本次没有可用于读者需求推导的评论文本，不从笔记标题推断评论反馈。）", ""])
+    for note, comments, readers, excluded in projected:
+        if not readers:
+            continue
         lines.extend([
             f"## {note.get('title') or '未命名笔记'}", "",
             f"- note_id：{note.get('noteId') or '未知'}",
             f"- 抓取评论数：{len(comments)}；本次候选评论数：{len(readers)}；"
-            f"已排除作者评论数：{sum(role == 'author' for _, role in candidates)}", "",
+            f"已排除作者评论数：{excluded}", "",
         ])
-        if not readers:
-            lines.extend(["（本次没有可用于读者需求推导的评论，不推断评论需求。）", ""])
-            continue
         for index, (comment, role) in enumerate(readers, start=1):
             lines.extend([
                 f"{index}. {comment.get('content') or '（图片评论或空文本评论）'}",

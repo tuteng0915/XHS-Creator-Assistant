@@ -3356,15 +3356,15 @@ describe('workspace UI', () => {
       ? new Promise<Response>(done=>{resolve=done}) : original(input,init))
     render(<App />)
     await waitFor(()=>expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
-    fireEvent.click(await screen.findByRole('button',{name:/分析历史/}))
-    const list=(await screen.findByText('◷ 分析结果')).closest('section') as HTMLElement
+    fireEvent.click(await screen.findByRole('button',{name:/诊断历史/}))
+    const list=(await screen.findByText('◷ 诊断历史')).closest('section') as HTMLElement
     fireEvent.click(within(list).getByRole('button'))
     await screen.findByText('正在读取分析记录…')
     fireEvent.change(screen.getByLabelText('当前账号档案'),{target:{value:'workspace-2'}})
     await waitFor(()=>expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
     fireEvent.change(screen.getByLabelText('当前账号档案'),{target:{value:'workspace-1'}})
     await waitFor(()=>expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
-    fireEvent.click(screen.getByRole('button',{name:/分析历史/}))
+    fireEvent.click(screen.getByRole('button',{name:/诊断历史/}))
     await act(async()=>resolve(await original('/api/analysis-runs/run-1',{method:'GET'})))
     expect(screen.queryByText('中介费到底该花在哪三步')).not.toBeInTheDocument()
     expect(screen.queryByText('正在读取分析记录…')).not.toBeInTheDocument()
@@ -3384,8 +3384,8 @@ describe('workspace UI', () => {
     })
     render(<App/> )
     if(publicMode) await screen.findByRole('button',{name:'开始导入'})
-    fireEvent.click(await screen.findByRole('button',{name:publicMode?/分析历史/:/分析结果/}))
-    const list=(await screen.findByText('◷ 分析结果')).closest('section') as HTMLElement
+    fireEvent.click(await screen.findByRole('button',{name:publicMode?/诊断历史/:/分析结果/}))
+    const list=(await screen.findByText(publicMode ? '◷ 诊断历史' : '◷ 分析结果')).closest('section') as HTMLElement
     const open=within(list).getAllByRole('button')[0]
     fireEvent.click(open)
     await screen.findByLabelText('复盘备注')
@@ -3435,7 +3435,7 @@ describe('workspace UI', () => {
     fireEvent.click(screen.getByRole('button',{name:'保存复盘'}))
     fireEvent.change(screen.getByLabelText('当前账号档案'),{target:{value:'workspace-2'}})
     await waitFor(()=>expect(screen.getByLabelText('当前账号档案')).toBeEnabled())
-    fireEvent.click(screen.getByRole('button',{name:/分析历史/}))
+    fireEvent.click(screen.getByRole('button',{name:/诊断历史/}))
     await act(async()=>pending[0].resolve(await jsonResponse({...saved,userNotes:'上个账号的备注'})))
     expect(screen.queryByLabelText('复盘备注')).not.toBeInTheDocument()
   })

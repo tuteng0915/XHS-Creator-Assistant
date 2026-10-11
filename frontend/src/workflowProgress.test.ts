@@ -51,3 +51,44 @@ describe('account report segmented progress', () => {
     expect(stageSeedFromRun(run({modelMetadata: {}}))[0].progress).toBeUndefined()
   })
 })
+
+describe('reader feedback two-stage progress', () => {
+  const retrieval = {phase: 'feedback_retrieval', status: 'running', completed: 0, total: 2} as const
+  const ranking = {phase: 'feedback_ranking', status: 'running', completed: 1, total: 2,
+    preview: '候选：想了解 DIY 的具体步骤。'} as const
+  const feedbackEvent = (kind: string, data: Record<string, unknown>) => ({
+    ...event(kind, data), stageKey: 'pain_points',
+  })
+
+  it('recognizes both phases and keeps retrieved candidates out of final results', () => {
+    expect(parseWorkflowProgress(retrieval)).toEqual(retrieval)
+    expect(parseWorkflowProgress(ranking)).toEqual(ranking)
+    expect(workflowProgressLabel(retrieval)).toBe('提取评论反馈 · 0/2')
+    expect(workflowProgressLabel(ranking)).toBe('筛选重要反馈 · 1/2')
+    const first = applyAnalysisStageEvent(stageSeed('account'), feedbackEvent('stage.progress', retrieval), 'run')
+    const states = applyAnalysisStageEvent(first, feedbackEvent('stage.progress', ranking), 'run')
+    expect(states.find(stage => stage.key === 'pain_points')).toMatchObject({status: 'running', progress: ranking})
+    expect(states.find(stage => stage.key === 'pain_points')?.result).toBeUndefined()
+    expect(states.find(stage => stage.key === 'profile')?.progress).toBeUndefined()
+  })
+
+  it('restores candidates from persisted progress but never from completed empty feedback', () => {
+    const running = run({modelMetadata: {pain_points: {progress: ranking}}})
+    expect(stageSeedFromRun(running).find(stage => stage.key === 'pain_points')).toMatchObject({
+      status: 'running', progress: ranking,
+    })
+    const finished = {...running, stageResults: {pain_points: {painPoints: []}}}
+    expect(stageSeedFromRun(finished).find(stage => stage.key === 'pain_points')).toMatchObject({
+      status: 'completed', result: {painPoints: []}, progress: undefined,
+    })
+  })
+
+  it.each(['stage.succeeded', 'stage.failed'])('clears feedback candidates on %s and ignores late ranking updates', kind => {
+    const running = applyAnalysisStageEvent(stageSeed('account'), feedbackEvent('stage.progress', ranking), 'run')
+    const finished = applyAnalysisStageEvent(running, feedbackEvent(kind, {painPoints: []}), 'run')
+    const stage = finished.find(item => item.key === 'pain_points')
+    expect(stage?.progress).toBeUndefined()
+    expect(applyAnalysisStageEvent(finished, feedbackEvent('stage.progress', ranking), 'run')
+      .find(item => item.key === 'pain_points')).toBe(stage)
+  })
+})
