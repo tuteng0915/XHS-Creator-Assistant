@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" fill="none" role="img" aria-labelledby="cover-title cover-desc">
   <title id="cover-title">SqsAgent — 认识账号，听见读者，打磨下一篇</title>
-  <desc id="cover-desc">柔和红色与中性灰封面。左侧为产品名称与“从认识账号，到听见读者”标语，右侧用账号卡、读者头像和创作卡呈现创作者工作区的概念流程。这是品牌插图，不是产品界面截图。</desc>
+  <desc id="cover-desc">柔和红色与中性灰封面。左侧为产品名称与“用自己的积累，写好下一篇”标语，右侧用账号卡、读者头像和创作卡呈现创作者工作区的概念流程。这是品牌插图，不是产品界面截图。</desc>
   <defs>
     <linearGradient id="paper" x1="44" y1="18" x2="1220" y2="352" gradientUnits="userSpaceOnUse">
       <stop stop-color="#FCFAFA"/>
@@ -29,8 +29,8 @@
     <path d="M72 66H84M72 73H84M72 80H79" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/>
     <text x="109" y="78" font-size="12" font-weight="600" letter-spacing="2.3" fill="#757174">CREATOR WORKSPACE</text>
     <text x="59" y="160" font-size="67" font-weight="700" letter-spacing="-2.5" fill="#352F32">SqsAgent</text>
-    <text x="62" y="218" font-size="29" font-weight="500" letter-spacing="0.4" fill="#575155">从认识账号，到听见读者。</text>
-    <text x="64" y="254" font-size="16" fill="#797276">把你的积累、想法与读者反馈，放在一起。</text>
+    <text x="62" y="218" font-size="29" font-weight="500" letter-spacing="0.4" fill="#575155">用自己的积累，写好下一篇。</text>
+    <text x="64" y="254" font-size="16" fill="#797276">读懂作品里的优势，听见不同的声音。</text>
     <path d="M64 296H88" stroke="#C62F46" stroke-width="3" stroke-linecap="round"/>
     <text x="101" y="301" font-size="12" letter-spacing="1.1" fill="#797276">ANALYZE · LISTEN · CREATE</text>
   </g>

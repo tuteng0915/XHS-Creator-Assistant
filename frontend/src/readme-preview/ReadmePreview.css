@@ -1,0 +1,3 @@
+/* Screenshot framing only: all product components retain their shipped styles. */
+.readme-preview-frame { max-width: 1440px; margin: 0 auto; }
+.readme-preview-label { padding: 7px 20px; background: var(--accent-surface); color: var(--sub); border-bottom: 1px solid var(--line); font-size: 12px; text-align: right; }
