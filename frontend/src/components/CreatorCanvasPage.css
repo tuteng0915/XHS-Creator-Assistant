@@ -1,4 +1,8 @@
 .creator-canvas-page .creator-canvas { align-items: stretch; min-height: 66vh; }
+.creator-canvas-page .creator-page-actions { align-items: center; justify-content: flex-end; flex: 1; }
+.creator-canvas-page .creator-page-actions .creator-topic-select { min-width: 0; width: min(32vw, 380px); }
+.creator-canvas-page .creator-canvas.is-chat-first { width: min(100%, 860px); margin-inline: auto; }
+.creator-canvas-page .canvas-chat-first-actions { display: flex; justify-content: flex-end; width: min(100%, 860px); margin: 0 auto 10px; }
 .canvas-dialogue-pane { display: flex; flex-direction: column; min-width: 0; gap: 12px; }
 .canvas-dialogue-pane > .canvas-chat { flex: 1; }
 .canvas-dialogue-pane > .canvas-reader-feedback { margin: 0; }
@@ -9,6 +13,10 @@
 .creator-canvas-page .canvas-editor > input { font-size: var(--text-section); line-height: 1.5; font-weight: 600; }
 .creator-canvas-page .canvas-editor > textarea { min-height: 380px; line-height: 1.85; }
 .creator-canvas-page .canvas-editor .canvas-candidate-preview { margin: 0; padding: 14px; background: var(--accent-surface); border-color: var(--accent-border); }
+.creator-canvas-page .canvas-editor .canvas-candidate-preview.is-first-draft { padding: 0; border: 0; background: transparent; display: flex; flex-direction: column; flex: 1; gap: 14px; }
+.canvas-candidate-preview.is-first-draft > input { font-size: var(--text-section); font-weight: 600; }
+.canvas-candidate-preview.is-first-draft > label { display: flex; flex: 1; }
+.canvas-candidate-preview.is-first-draft textarea { min-height: 380px; flex: 1; line-height: 1.85; }
 .creator-canvas-page .canvas-editor .canvas-selection-tools { margin: 0; padding: 12px; }
 .creator-canvas-page .canvas-selection-hint { margin: 0; }
 .creator-canvas-page .canvas-editor .save-row { margin-top: 0; gap: 10px; }
@@ -26,6 +34,8 @@
   .creator-canvas-page .canvas-editor > textarea { min-height: 48vh; }
 }
 @media (max-width: 480px) {
+  .creator-canvas-page .creator-page-actions { justify-content: flex-start; }
+  .creator-canvas-page .creator-page-actions .creator-topic-select { width: 100%; flex-basis: 100%; }
   .creator-canvas-page .canvas-editor { padding: 12px; }
   .creator-canvas-page > .creator-page-head { align-items: stretch; flex-direction: column; gap: 12px; }
   .creator-canvas-page > .creator-page-head > .creator-topic-select { width: 100%; max-width: 100%; flex: 1 1 auto; }

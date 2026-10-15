@@ -15,7 +15,6 @@ export function SimulationCategoryTabs({value, runs, onChange}: {
 }) {
   return <section className="simulation-hub-heading" aria-label="受众模拟分类">
     <h1>受众模拟</h1>
-    <p>选择你想了解的对象，邀请读者一起聊聊。可以先推荐，也可以直接手选。</p>
     <div className="simulation-category-tabs" role="tablist" aria-label="模拟类别">
       {SIMULATION_CATEGORIES.map((category, index) => <button type="button" role="tab"
         key={category.id} id={`simulation-category-${category.id}`} aria-controls="simulation-category-content"

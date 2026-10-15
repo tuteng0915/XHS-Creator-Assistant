@@ -16,6 +16,7 @@ from app.models import (
     AnalysisRunStatus,
     AnalysisRunTransition,
     AnalysisStageUpdate,
+    ModelCallResponse,
     ModelOperation,
     WorkflowType,
 )
@@ -31,7 +32,7 @@ from app.services.account_report_contract import AccountReportOutputError
 from app.services.account_report_delivery import compile_usable_account_report
 from app.services.analysis_runs import AnalysisRunService
 from app.services.common import utc_now
-from app.services.model_calls import ModelCallService
+from app.services.model_calls import ModelCallService, safe_token_usage
 from app.services.run_events import RunEvent, RunEventEmitter, RunEventType
 from app.services.xhs_comment_roles import reader_comments_text
 
@@ -56,6 +57,26 @@ _REPORT_ERROR_CODES = {
 ACTIVE_EXECUTION: contextvars.ContextVar[
     _AccountDiagnosisGraphExecution | None
 ] = contextvars.ContextVar("account_diagnosis_execution", default=None)
+
+
+def _account_call_metadata(value: dict[str, Any]) -> dict[str, Any]:
+    """Keep the provider receipt, not arbitrary data returned by a provider."""
+    result = {
+        key: value[key] for key in (
+            "provider", "operation", "model", "modelSource", "systemPromptHash",
+            "responseFormat", "promptVersion",
+        )
+        if isinstance(value.get(key), str)
+        and re.fullmatch(r"[A-Za-z0-9_./:-]{1,160}", value[key])
+    }
+    for key in ("thinkingBudget", "requestCount"):
+        if type(value.get(key)) is int and value[key] >= 0:
+            result[key] = value[key]
+    if type(value.get("enableThinking")) is bool:
+        result["enableThinking"] = value["enableThinking"]
+    if isinstance(value.get("usage"), dict):
+        result["usage"] = safe_token_usage(value["usage"])
+    return result
 
 
 def _safe_report_failure_metadata(value: Any) -> dict[str, Any]:
@@ -354,8 +375,8 @@ class RealAccountDiagnosisModelProvider:
         historical_posts: str,
         on_update: Callable[[dict[str, Any]], Awaitable[None]],
     ):
-        # Reading assistance is the Qwen default. Explicit single-call rollback,
-        # legacy text and other providers keep the existing profile operation.
+        # Supported account providers share the same report workflow. Explicit
+        # single-call rollback and legacy text retain their existing prompt.
         from app.services.account_report_pipeline import (
             StagedReportResult,
             run_staged_account_report,
@@ -365,18 +386,18 @@ class RealAccountDiagnosisModelProvider:
         context = {"positioning": positioning, "historicalPosts": historical_posts}
         if (self.model_call_service.settings.account_report_mode == "staged"
                 and self.model_call_service.settings.model_provider.strip().lower()
-                in {"qwen", "dashscope"}
+                in {"qwen", "dashscope", "deepseek"}
                 and uses_structured_notes(context)):
             return await run_staged_account_report(
                 context,
                 self.model_call_service.call_account_report_step,
                 on_update=on_update,
             )
+        response = await self.model_call_service.call_operation(
+            ModelOperation.PROFILE, context,
+        )
         return StagedReportResult(
-            output=await self.profile(
-                positioning=positioning, historical_posts=historical_posts,
-            ),
-            model_metadata={},
+            output=response.output, model_metadata=_account_call_metadata(response.model_metadata),
         )
 
     async def pain_points(self, *, comments: str) -> dict[str, Any]:
@@ -408,6 +429,15 @@ class RealAccountDiagnosisModelProvider:
         profile: dict[str, Any] | None,
         pain_points: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
+        response = await self.topics_with_metadata(
+            positioning=positioning, profile=profile, pain_points=pain_points,
+        )
+        return response.output
+
+    async def topics_with_metadata(
+        self, *, positioning: str, profile: dict[str, Any] | None,
+        pain_points: list[dict[str, Any]] | None,
+    ):
         response = await self.model_call_service.call_operation(
             ModelOperation.TOPICS,
             {
@@ -416,7 +446,9 @@ class RealAccountDiagnosisModelProvider:
                 "painPoints": pain_points,
             },
         )
-        return response.output
+        return ModelCallResponse(
+            output=response.output, model_metadata=_account_call_metadata(response.model_metadata),
+        )
 
 class GraphExecutionPaused(Exception):
     pass
@@ -736,13 +768,22 @@ class _AccountDiagnosisGraphExecution:
         await self.emit("stage.started", "topics", "running", {})
         try:
             run = self.service.analysis_service.get(self.run_id)
-            output = await self.provider().topics(
-                positioning=str(run.input_snapshot["accountPositioning"]),
-                profile=topic_profile_context(
+            context = {
+                "positioning": str(run.input_snapshot["accountPositioning"]),
+                "profile": topic_profile_context(
                     updated.get("profile"), run.input_snapshot, run.created_at.isoformat()
                 ),
-                pain_points=updated.get("pain_points"),
-            )
+                "pain_points": updated.get("pain_points"),
+            }
+            provider = self.provider()
+            metadata = {"engine": "langgraph"}
+            with_metadata = getattr(provider, "topics_with_metadata", None)
+            if callable(with_metadata):
+                response = await with_metadata(**context)
+                output = response.output
+                metadata.update(response.model_metadata)
+            else:
+                output = await provider.topics(**context)
             result = TopicsStageResult.model_validate(output).model_dump(mode="json")
             self.service.analysis_service.update_stage(
                 self.run_id,
@@ -750,7 +791,7 @@ class _AccountDiagnosisGraphExecution:
                 AnalysisStageUpdate(
                     status=AnalysisRunStatus.COMPLETED,
                     result=result,
-                    model_metadata={"engine": "langgraph"},
+                    model_metadata=metadata,
                 ),
             )
             updated["topics"] = result["topics"]

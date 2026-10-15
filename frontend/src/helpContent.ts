@@ -33,9 +33,16 @@ export function getWorkspaceHelpContent({
     ],
   }
   if (publicMode && activePage !== 'creator-start') {
+    const descriptions: Partial<Record<ActivePage, string>> = {
+      'creator-overview': '先浏览已导入的笔记，再选择一组内容分析，看看账号特点与读者关注什么。',
+      'account-diagnosis': '选择这次想分析的笔记，获取账号画像、读者反馈和后续选题。历史报告可从右上角回看。',
+      history: '每份诊断保留当时选中的笔记与结果。查看笔记数量和日期，再打开需要的那一份。',
+      topics: '在这里整理和选择想写的题目，点“AI 创作助手”回到共创页面；也可以从一个新想法开始。',
+      drafts: '先说一个想法，与 AI 讨论角度或起草。有初稿后再展开编辑，已有稿件可以继续修改。',
+    }
     return {
       title: activePage === 'source-materials' ? '浏览笔记' : '使用帮助',
-      description: '所有材料、分析和创作结果都保存在当前账号下。',
+      description: descriptions[activePage] || '所有材料、分析和创作结果都保存在当前账号下。',
       bullets: [
         '从账号概览查看已读取的内容；点击笔记封面可查看正文和对应评论。',
         '默认分析最近 10 条已导入笔记，也可以调整为最近 7、30、90 天或全部。缺少发布时间的旧笔记不纳入日期筛选。',

@@ -8,6 +8,7 @@ import {
 import type { WorkflowAssetSummary, Workspace } from '../types'
 import type { WorkflowTab } from '../workflows'
 import { CreatorNavIcon, type CreatorNavIconName } from './CreatorNavIcon'
+import { InfoHint } from './InfoHint'
 import './CreatorShell.css'
 
 export type ActivePage =
@@ -67,7 +68,6 @@ const CREATOR_NAVIGATION: Array<{
       { page: 'creator-overview', label: '账号概览', icon: 'overview' },
       { page: 'source-materials', label: '我的笔记', icon: 'notes', child: true },
       { page: 'account-diagnosis', label: '账号诊断', icon: 'analysis' },
-      { page: 'history', label: '诊断历史', icon: 'history', child: true },
     ],
   },
   {
@@ -81,8 +81,7 @@ const CREATOR_NAVIGATION: Array<{
   {
     label: '创作',
     items: [
-      { page: 'topics', label: '选题库', icon: 'topics' },
-      { page: 'drafts', label: 'AI 创作助手', icon: 'writing', child: true },
+      { page: 'drafts', label: 'AI 创作助手', icon: 'writing' },
     ],
   },
 ]
@@ -106,6 +105,7 @@ export function WorkspaceShell({
   onSetWorkflowTab,
   onToggleHelp,
 }: WorkspaceShellProps) {
+  const navigationPage = activePage === 'history' ? 'account-diagnosis' : activePage === 'topics' ? 'drafts' : activePage
   if (internalMode) {
     return (
       <DeveloperWorkspaceShell
@@ -162,8 +162,8 @@ export function WorkspaceShell({
                 <button
                   key={item.page}
                   type="button"
-                  className={`${item.child ? 'creator-nav-child ' : ''}${activePage === item.page ? 'active' : ''}`}
-                  aria-current={activePage === item.page ? 'page' : undefined}
+                  className={`${item.child ? 'creator-nav-child ' : ''}${navigationPage === item.page ? 'active' : ''}`}
+                  aria-current={navigationPage === item.page ? 'page' : undefined}
                   onClick={() => item.page === 'source-materials'
                     ? onOpenInputAsset('xhs_creator_profiles')
                     : onSetActivePage(item.page)}
@@ -180,41 +180,8 @@ export function WorkspaceShell({
 
       <main className="workspace-main">
         <header className="topbar">
-          <button
-            className={`help-button ${showHelp ? 'active' : ''}`}
-            type="button"
-            aria-expanded={showHelp}
-            aria-controls="workspace-help-panel"
-            onClick={onToggleHelp}
-          >
-            帮助
-          </button>
+          <InfoHint key={activePage} label="页面帮助">{helpContent.description}</InfoHint>
         </header>
-
-        {showHelp && (
-          <section
-            id="workspace-help-panel"
-            className="help-panel"
-            aria-label="当前页面帮助"
-          >
-            <div>
-              <span>使用路径</span>
-              <p>
-                导入账号后，了解账号与读者，进行受众模拟，再整理选题、继续创作。
-                所有结果都会保存在当前账号档案中。
-              </p>
-            </div>
-            <div>
-              <span>{helpContent.title}</span>
-              <p>{helpContent.description}</p>
-              <ul>
-                {helpContent.bullets.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          </section>
-        )}
 
         {children}
       </main>

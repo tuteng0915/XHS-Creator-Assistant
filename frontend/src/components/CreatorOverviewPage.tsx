@@ -1,5 +1,6 @@
 import type { TextInputAsset, Workspace } from '../types'
 import { xhsCreatorProfileSummaryFromAsset } from '../xhsCreatorProfile'
+import { InfoHint } from './InfoHint'
 
 export function CreatorOverviewPage({ workspace, profile, onNotes, onAnalyze, onImport }: {
   workspace: Workspace
@@ -11,7 +12,9 @@ export function CreatorOverviewPage({ workspace, profile, onNotes, onAnalyze, on
   const summary = xhsCreatorProfileSummaryFromAsset(profile)
   return <section className="creator-materials-page creator-overview-page">
     <div className="creator-page-head"><h1>{summary?.displayName || workspace.name}</h1>
-      <button className="primary" onClick={summary ? onAnalyze : onImport}>{summary ? '分析账号' : '导入账号'}</button>
+      {summary ? <InfoHint label="分析账号说明" action={{label: '分析账号', className: 'primary', onClick: onAnalyze}}>
+        先选想分析的笔记，了解账号的内容特点、读者反馈，以及下一篇可以写什么。
+      </InfoHint> : <button className="primary" onClick={onImport}>导入账号</button>}
     </div>
     {summary ? <>
       <dl className="creator-overview-metrics" aria-label="账号数据">

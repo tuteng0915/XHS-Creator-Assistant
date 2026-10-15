@@ -169,6 +169,7 @@ def create_app(
         analysis_repository,
     )
     model_call_service = ModelCallService(active_settings)
+    account_model_call_service = ModelCallService(active_settings.for_account_diagnosis())
     draft_service = DraftService(
         database,
         draft_repository,
@@ -257,7 +258,7 @@ def create_app(
         checkpoint_repository=checkpoint_repository,
         analysis_service=analysis_service,
         fake_provider=FakeAccountDiagnosisModelProvider(),
-        live_provider=RealAccountDiagnosisModelProvider(model_call_service),
+        live_provider=RealAccountDiagnosisModelProvider(account_model_call_service),
     )
     trend_workflow_service = TrendAnalysisWorkflowService(
         database=database,

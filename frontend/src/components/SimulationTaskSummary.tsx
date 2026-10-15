@@ -15,14 +15,19 @@ function savedTask(value: unknown): PanelTask | null {
   return task as unknown as PanelTask
 }
 
-export function SimulationTaskSummary({run}: {run: SimulationRun}) {
+export function SimulationTaskSummary({run, compact = false, missingOnly = false}: {run: SimulationRun; compact?: boolean; missingOnly?: boolean}) {
   const raw = run.inputSnapshot.panelTask
   const task = savedTask(raw)
+  if(missingOnly&&task)return null
   const topic=run.inputSnapshot.topic as Record<string,unknown>|undefined
   const titleOnly=topic&&typeof topic==='object'&&!topic.body&&!run.inputSnapshot.draft
   const category=simulationCategoryFor(run)
   const account=run.inputSnapshot.sourceAccount as {scope?:{selectionMethod?:string}}|undefined
   const selectedAccountNotes=category==='account'&&account?.scope?.selectionMethod==='explicit_ids'
+  if(compact)return task?<div className="simulation-task-inline" aria-label="当次试读设置">
+    {task.readingMode==='guided'?<ul>{task.focusQuestions.map((question,index)=><li key={index}>{question}</li>)}</ul>:null}
+    <span>{task.readingMode==='guided'?'围绕问题讨论':category==='account'?selectedAccountNotes?'所选笔记阅读':'账号整体阅读':category==='published_note'?'已发布笔记复盘':titleOnly?'只看标题':'全文试读'} · {task.discussionEnabled?'互相回应':'独立表达'}</span>
+  </div>:null
   return <section className="simulation-task-summary" aria-label="当次试读设置">
     <div className="reader-card-heading"><h3>当次试读</h3>{task&&<InfoHint label="试读设置说明">{task.discussionEnabled
       ? '这是当时的设置；是否完成回应见下方结果。'

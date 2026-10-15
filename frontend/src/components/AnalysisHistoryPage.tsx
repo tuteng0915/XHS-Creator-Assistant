@@ -129,7 +129,7 @@ export function AnalysisHistoryPage({
               <span>{workflowLabel(run.workflowType)}</span>
               <b>{publicMode ? analysisStatusLabel(run.status) : run.status}</b>
               {run.reviewStatus !== 'unreviewed' && <small>{reviewStatusLabel(run.reviewStatus)}</small>}
-              <small>{new Date(run.createdAt).toLocaleString()}</small>
+              <small>{run.noteCount != null && <>共 {run.noteCount} 条笔记 · </>}{new Date(run.createdAt).toLocaleString()}</small>
             </button>
           ))
         )}
@@ -144,6 +144,7 @@ export function AnalysisHistoryPage({
                 <h2>{workflowLabel(selectedRun.workflowType)}{isOracleShowcase(selectedRun) && <OracleNotice />}</h2>
                 <p>
                   {publicMode ? analysisStatusLabel(selectedRun.status) : selectedRun.status} ·{' '}
+                  {selectedRun.noteCount != null && <>共 {selectedRun.noteCount} 条笔记 · </>}
                   {new Date(selectedRun.createdAt).toLocaleString()}
                 </p>
               </div>

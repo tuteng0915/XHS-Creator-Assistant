@@ -41,6 +41,20 @@ it('keeps duplicate selection text folded while retaining explicit save guidance
   expect(screen.queryByText('只替换下面选中的这段文字，其余正文保持不变。')).not.toBeInTheDocument()
 })
 
+it('keeps identical candidate prose distinct when it targets another occurrence', async () => {
+  const firstSelection = selectionFromTextarea(body,body.indexOf('重复。'),body.indexOf('重复。') + 3)!
+  const firstMessage = {...suggestion.messages[0],id:'first',modelMetadata:{...suggestion.messages[0].modelMetadata,writingFocus:{...focus,selection:firstSelection}}}
+  const record = {...suggestion,messages:[firstMessage,suggestion.messages[0]]}
+  vi.mocked(contentCollaborationApi.list).mockResolvedValue([record])
+  vi.spyOn(contentCollaborationApi,'get').mockResolvedValue(record)
+  render(<CreatorCanvasPage {...props} />)
+  fireEvent.click((await screen.findAllByRole('button',{name:'对比并修改这一段'}))[0])
+  expect(screen.getAllByRole('button',{name:'在稿件区编辑'})).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button',{name:'对比并修改这一段'}))
+  fireEvent.click(screen.getByRole('button',{name:'只替换这一段'}))
+  expect(screen.getByLabelText('创作正文')).toHaveValue('开头🙂重复。\n中间。\n这是改清楚的段落。结尾')
+})
+
 it('imports feedback without changing the editor, overwriting typed instructions, or submitting automatically', async () => {
   const send = vi.spyOn(contentCollaborationApi,'send'), consumed = vi.fn()
   const {rerender} = render(<CreatorCanvasPage {...props} onReaderFeedbackConsumed={consumed} />)

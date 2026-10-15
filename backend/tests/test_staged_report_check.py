@@ -9,6 +9,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+from app.services.account_report_pipeline import DEFAULT_READING_QUESTION
+
 
 def load_check():
     path = Path(__file__).resolve().parents[2] / "scripts/check_staged_account_report.py"
@@ -74,11 +76,12 @@ def stage_output(payload):
     }}
 
 
-def diagnostic_factory(check, settings, *, responder=None):
+def diagnostic_factory(check, settings, *, responder=None, provider="qwen"):
     services = []
     requests = []
     diagnostic_class = check.DiagnosticProfileCalls
-    configured = replace(settings, model_provider="qwen", qwen_api_key="test-secret-only")
+    configured = replace(settings, model_provider=provider, qwen_api_key="test-secret-only",
+                         deepseek_api_key="deepseek-test-secret", deepseek_model="deepseek-flash-test")
 
     def respond(request):
         user = json.loads(request.content)["messages"][1]["content"]
@@ -87,7 +90,7 @@ def diagnostic_factory(check, settings, *, responder=None):
         requests.append(payload)
         content = stage_output(payload) if responder is None else responder(payload)
         return httpx.Response(200, json={
-            "model": "qwen3.8-max-test", "usage": {
+            "model": "deepseek-flash-test" if provider == "deepseek" else "qwen3.8-max-test", "usage": {
                 "prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13,
             },
             "choices": [{"finish_reason": "stop", "message": {
@@ -129,6 +132,40 @@ def test_free_preview_reports_model_and_scope_without_constructing_model_or_writ
     assert preview["scope"]["maxRecoveryRequests"] == 1
     assert preview["scope"]["maxModelRequests"] == 5
     assert not destination.exists()
+
+
+def test_deepseek_preview_is_explicit_and_keeps_qwen_default(
+    settings, tmp_path, monkeypatch, capsys,
+):
+    check = load_check()
+    source = tmp_path / "frozen.json"
+    source.write_text(json.dumps(frozen_case()), encoding="utf-8")
+    configured = replace(settings, account_diagnosis_provider="deepseek",
+                         deepseek_model="deepseek-flash-test", qwen_profile_enable_thinking=True)
+    monkeypatch.setattr(check.Settings, "from_environment", lambda: configured)
+    monkeypatch.setattr(check, "DiagnosticProfileCalls", lambda *a, **k: pytest.fail("no calls"))
+    for arguments, expected in (([], "qwen"), (["--provider", "deepseek"], "deepseek")):
+        monkeypatch.setattr(sys, "argv", [check.__file__, "--input-from", str(source), *arguments])
+        assert check.main() == 0
+        preview = json.loads(capsys.readouterr().out)
+        assert preview["provider"] == expected
+        assert preview["configuredModel"] == (
+            "deepseek-flash-test" if expected == "deepseek" else configured.qwen_profile_model
+        )
+        assert preview["enableThinking"] is (expected == "qwen")
+        assert preview["thinkingBudget"] == (4096 if expected == "qwen" else None)
+        assert preview["requestAttempts"] == 0
+    assert configured.model_provider == "qwen"
+
+
+@pytest.mark.parametrize("options", [["--thinking", "off"], ["--thinking-budget", "2048"]])
+def test_deepseek_rejects_qwen_thinking_flags_before_configuration(monkeypatch, options):
+    check = load_check()
+    monkeypatch.setattr(check.Settings, "from_environment", lambda: pytest.fail("preflight first"))
+    monkeypatch.setattr(sys, "argv", [check.__file__, "--input-from", "frozen.json",
+                                    "--provider", "deepseek", *options])
+    with pytest.raises(SystemExit, match="2"):
+        check.main()
 
 
 @pytest.mark.parametrize("thinking,expected", [("on", True), ("off", False)])
@@ -178,7 +215,7 @@ def test_staged_report_keeps_frozen_input_diagnostics_progress_and_total_usage(s
         "prompt_tokens": 40, "completion_tokens": 12, "total_tokens": 52,
     }
     assert report["result"]["modelMetadata"]["representativeNoteIds"] == ["stable-b", "stable-a"]
-    expected_questions = ["这篇如何说明判断？（n2）", "这篇如何说明判断？（n1）"]
+    expected_questions = [DEFAULT_READING_QUESTION, DEFAULT_READING_QUESTION]
     assert [stage["input"]["question"] for stage in report["stages"]
             if stage["stage"] == "read"] == expected_questions
     assert all("question" not in item
@@ -238,6 +275,39 @@ def test_staged_report_keeps_frozen_input_diagnostics_progress_and_total_usage(s
     assert all(set(item) == {"phase", "status", "completed", "total", "elapsedSeconds"}
                for item in updates)
     assert report["elapsedSeconds"] >= 0
+
+
+def test_deepseek_staged_diagnostics_preserve_provider_counts_and_redaction(settings):
+    check = load_check()
+    case = frozen_case()
+    case["context"]["positioning"] = "deepseek-test-secret Bearer other-secret"
+    before = deepcopy(case)
+    factory, services, requests = diagnostic_factory(check, settings, provider="deepseek")
+    report = asyncio.run(check.run_check(factory, case))
+    assert report["status"] == "completed"
+    assert case == before
+    assert report["requestAttempts"] == len(services) == len(requests) == 4
+    assert report["totalUsage"] == {
+        "prompt_tokens": 40, "completion_tokens": 12, "total_tokens": 52,
+    }
+    assert [capture["stage"] for capture in report["stages"]] == [
+        "overview", "read", "read", "synthesis",
+    ]
+    for capture in report["stages"]:
+        assert capture["modelMetadata"]["provider"] == "deepseek"
+        assert capture["modelMetadata"]["model"] == "deepseek-flash-test"
+        assert capture["modelMetadata"]["profileModel"] == "deepseek-flash-test"
+        assert capture["requestAttempts"] == len(capture["requestDiagnostics"]) == 1
+        diagnostic = capture["responseDiagnostic"]
+        assert diagnostic["phase"] == "parsed"
+        assert diagnostic["enableThinking"] is False
+        assert diagnostic["thinkingBudget"] is None
+        assert diagnostic["timeoutsSeconds"]["read"] == settings.deepseek_read_timeout_seconds
+    assert all(call["metadata"]["provider"] == "deepseek"
+               for call in report["result"]["modelMetadata"]["calls"])
+    serialized = json.dumps(report)
+    assert "deepseek-test-secret" not in serialized and "other-secret" not in serialized
+    assert "[REDACTED]" in serialized
 
 
 def test_invalid_forced_scope_makes_zero_calls(settings):
@@ -465,6 +535,63 @@ def test_live_cli_saves_one_report_for_success_or_failure_without_console_raw_co
     assert "先确认费用" not in console
     assert "冻结的账号介绍" not in console
     assert json.loads(console.splitlines()[-1])["semanticStatus"] == "not_reviewed"
+
+
+@pytest.mark.parametrize("timeout_override", [None, 144])
+def test_deepseek_live_cli_uses_explicit_provider_model_key_and_timeout(
+    settings, tmp_path, monkeypatch, capsys, timeout_override,
+):
+    check = load_check()
+    source = tmp_path / "frozen.json"
+    source.write_text(json.dumps(frozen_case()), encoding="utf-8")
+    destination = tmp_path / "deepseek-report"
+    configured = replace(settings, model_provider="qwen", account_diagnosis_provider="qwen",
+                         deepseek_api_key="deepseek-test-secret", deepseek_model="deepseek-flash-test",
+                         deepseek_read_timeout_seconds=188, qwen_api_key="")
+    factory, services, _ = diagnostic_factory(check, configured, provider="deepseek")
+    captured = []
+
+    def construct(active, **kwargs):
+        captured.append((active, kwargs))
+        return factory()
+
+    monkeypatch.setattr(check.Settings, "from_environment", lambda: configured)
+    monkeypatch.setattr(check, "DiagnosticProfileCalls", construct)
+    monkeypatch.setattr(sys, "argv", [check.__file__, "--input-from", str(source),
+        "--provider", "deepseek", "--live", "--output", str(destination),
+        *(["--read-timeout-seconds", str(timeout_override)] if timeout_override else [])])
+    assert check.main() == 0
+    assert len(captured) == len(services) == 4
+    for active, kwargs in captured:
+        assert active.model_provider == "deepseek"
+        assert active.deepseek_api_key == "deepseek-test-secret"
+        assert kwargs["read_timeout_seconds"] == (timeout_override or 188)
+    report = json.loads((destination / "report.json").read_text())
+    assert report["provider"] == "deepseek" and report["configuredModel"] == "deepseek-flash-test"
+    assert report["enableThinking"] is False and report["thinkingBudget"] is None
+    assert report["requestAttempts"] == 4
+    console = capsys.readouterr().out
+    for private in ("deepseek-test-secret", "rawText", "先确认费用", "冻结的账号介绍"):
+        assert private not in console
+    assert configured.model_provider == "qwen"
+
+
+def test_deepseek_live_cli_requires_own_key_before_creating_output(
+    settings, tmp_path, monkeypatch,
+):
+    check = load_check()
+    source = tmp_path / "frozen.json"
+    source.write_text(json.dumps(frozen_case()), encoding="utf-8")
+    destination = tmp_path / "not-created"
+    monkeypatch.setattr(check.Settings, "from_environment", lambda: replace(
+        settings, qwen_api_key="qwen-key-must-not-be-used", deepseek_api_key="",
+    ))
+    monkeypatch.setattr(check, "DiagnosticProfileCalls", lambda *a, **k: pytest.fail("no calls"))
+    monkeypatch.setattr(sys, "argv", [check.__file__, "--input-from", str(source),
+                                    "--provider", "deepseek", "--live", "--output", str(destination)])
+    with pytest.raises(SystemExit, match="2"):
+        check.main()
+    assert not destination.exists()
 
 
 def test_existing_destination_is_rejected_without_calls_or_overwrite(

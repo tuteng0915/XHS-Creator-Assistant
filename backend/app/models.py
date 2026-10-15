@@ -867,6 +867,7 @@ class AnalysisStageUpdate(APIModel):
 class AnalysisRunSummary(APIModel):
     id: str
     origin: str | None = None
+    note_count: int | None = Field(default=None, ge=0)
     workspace_id: str
     workflow_type: WorkflowType
     status: AnalysisRunStatus

@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, within} from '@testing-library/react'
+import {cleanup, fireEvent, render, screen} from '@testing-library/react'
 import {afterEach, expect, it, vi} from 'vitest'
 import type {SimulationRun} from '../types'
 import {SimulationTaskSummary} from './SimulationTaskSummary'
@@ -67,9 +67,11 @@ it('history switches task and reader snapshots together and never fetches curren
     onSaveSimulationRunReview:vi.fn(),stageSeedFromSimulation:()=>[],renderStageResult:()=>null}
   const {rerender}=render(<SimulationHistoryPage {...props} />)
   expect(screen.getByText('第一步清楚吗？')).toBeInTheDocument()
-  expect(within(screen.getByRole('region',{name:'本次读者选择'})).getByText('当时的读者')).toBeInTheDocument()
+  expect(screen.getByLabelText('本次参与读者')).toHaveTextContent('当时的读者')
   rerender(<SimulationHistoryPage {...props} selectedSimulationRun={{...run,id:'old',inputSnapshot:{},personaDefinitions:[]}} />)
-  expect(screen.getByText('旧记录未保存试读设置。')).toBeInTheDocument()
+  expect(screen.getByText('旧记录未保存试读设置。')).not.toBeVisible()
+  fireEvent.click(screen.getByText('推荐依据与备注',{selector:'summary'}))
+  expect(screen.getByText('旧记录未保存试读设置。')).toBeVisible()
   expect(screen.queryByText('第一步清楚吗？')).not.toBeInTheDocument()
   expect(screen.queryByText('当时的读者')).not.toBeInTheDocument()
   expect(fetch).not.toHaveBeenCalled()

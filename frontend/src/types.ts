@@ -356,6 +356,7 @@ export type ReviewStatus = 'unreviewed' | 'useful' | 'rejected'
 export interface AnalysisRunSummary {
   id: string
   origin?: string
+  noteCount?: number | null
   workspaceId: string
   workflowType: WorkflowType
   status: RunStatus

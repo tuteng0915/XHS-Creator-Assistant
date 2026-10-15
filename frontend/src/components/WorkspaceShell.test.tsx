@@ -96,15 +96,16 @@ describe('WorkspaceShell', () => {
     const navigation = screen.getByRole('navigation', { name: '创作者功能导航' })
 
     expect(within(navigation).getAllByRole('button').map((button) => button.textContent)).toEqual([
-      '账号概览', '我的笔记', '账号诊断', '诊断历史',
-      '受众分析', '模拟粉丝', '受众模拟', '选题库', 'AI 创作助手',
+      '账号概览', '我的笔记', '账号诊断',
+      '受众分析', '模拟粉丝', '受众模拟', 'AI 创作助手',
     ])
     expect(within(navigation).getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual([
       '账号', '读者', '创作',
     ])
     expect(within(navigation).getByRole('button', { name: '受众模拟' })).toHaveAttribute('aria-current', 'page')
-    expect(within(navigation).getByRole('button', { name: '选题库' })).not.toHaveAttribute('aria-current')
-    expect(navigation.querySelectorAll('svg[aria-hidden="true"][focusable="false"]')).toHaveLength(9)
+    expect(within(navigation).queryByRole('button', { name: '选题库' })).not.toBeInTheDocument()
+    expect(within(navigation).queryByRole('button', { name: '诊断历史' })).not.toBeInTheDocument()
+    expect(navigation.querySelectorAll('svg[aria-hidden="true"][focusable="false"]')).toHaveLength(7)
   })
 
   it('preserves workspace switching protection while busy', () => {
@@ -136,15 +137,18 @@ describe('WorkspaceShell', () => {
     expect(screen.getByText('热点分析')).toBeInTheDocument()
   })
 
-  it('toggles and displays help content when requested', () => {
-    const props = renderShell({ showHelp: true })
+  it.each([['history', '账号诊断'], ['topics', 'AI 创作助手']] as const)('keeps %s within its parent task navigation', (activePage, label) => {
+    renderShell({activePage})
+    expect(within(screen.getByRole('navigation')).getByRole('button', {name: label})).toHaveAttribute('aria-current', 'page')
+  })
 
-    expect(screen.getByRole('button', { name: '帮助' })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    )
-    expect(screen.getByText('整体帮助')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '帮助' }))
-    expect(props.onToggleHelp).toHaveBeenCalledTimes(1)
+  it('keeps public help supplementary even if the old expanded preference was set', () => {
+    renderShell({ showHelp: true })
+    expect(screen.queryByLabelText('当前页面帮助')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '页面帮助' }))
+    expect(screen.getByRole('tooltip')).toHaveTextContent('这里是帮助内容')
+    fireEvent.keyDown(document, {key: 'Escape'})
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 })

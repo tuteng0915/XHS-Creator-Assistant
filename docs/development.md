@@ -64,9 +64,25 @@ npm run dev -- --host 127.0.0.1
 
 ## 模型配置
 
-主应用的 live generation 统一经后端模型代理调用，浏览器不持有模型 API key。默认 provider 是 Qwen / DashScope 的 OpenAI-compatible API。
+主应用的 live generation 统一经后端模型代理调用，浏览器不持有模型 API key。全局仍默认 Qwen；账号诊断通过独立配置默认使用 DeepSeek，不改变受众分析、Panel、创作助手与媒体功能。
 
-### Qwen 默认配置与本地文件
+### 账号诊断：DeepSeek V4.1 Flash
+
+```dotenv
+ACCOUNT_DIAGNOSIS_PROVIDER=deepseek
+DEEPSEEK_API_KEY=替换为自己的密钥
+DEEPSEEK_MODEL=deepseek-flash
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_READ_TIMEOUT_SECONDS=180
+```
+
+`deepseek-flash` 为[官方当前的 V4.1 Flash 调用名](https://api-docs.deepseek.com/zh-cn/)。本应用显式发送 `thinking: {type: "disabled"}`，使用 JSON object 和既有提示／输出预算，不同时更换报告模板。账号画像（含概览、精读、汇总）、反馈召回／排序、诊断内选题均走独立服务；不把 `MODEL_PROVIDER` 全局改成 DeepSeek。读取超时接受 1～300 秒，连接／写入／连接池仍为 90 秒。缺密钥明确报错，不静默改调 Qwen；原有输出恢复规则不变。
+
+回退用 `ACCOUNT_DIAGNOSIS_PROVIDER=qwen`，画像使用 `QWEN_PROFILE_MODEL`，其他诊断步骤使用 `QWEN_MODEL`；`inherit` 或空值跟随全局 provider。查看已有报告不需要密钥，也不重新生成。旧未完成任务仍按恢复时配置执行剩余阶段，不能将其当作纯新模型结果；切换前应先结束旧任务，新模型比较请新建分析。正式部署／重启另行授权，不自动修改已有运行服务或提交包。
+
+### Qwen 配置与本地文件
+
+以下 Qwen PROFILE 参数在账号诊断显式回退到 Qwen 时生效，不覆盖 DeepSeek 配置。
 
 在启动后端的 shell 设置，或写入仓库根目录 `.env.local`：
 
@@ -97,7 +113,7 @@ export QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 ### 默认账号报告与单次回退
 
-`ACCOUNT_REPORT_MODE` 默认为 `staged`。结构化所选笔记会走“整体阅读 → 可选最多三篇并行精读 → 默认模板报告”，正常二至五次 Qwen 请求，仍使用 `QWEN_PROFILE_MODEL`。显式设为 `source_led` 可回到单次生成。普通旧文本输入保持原路径；多阶段只用于 Qwen/dashscope，不切其他服务商。此设置不会迁移旧报告；上线／重启仍需用户授权，不因定时触发自动启动服务。
+`ACCOUNT_REPORT_MODE` 默认为 `staged`。结构化所选笔记会走“整体阅读 → 可选最多三篇并行精读 → 默认模板报告”，正常二至五次请求。DeepSeek 使用 `DEEPSEEK_MODEL`，显式 Qwen/dashscope 回退使用 `QWEN_PROFILE_MODEL`。设为 `source_led` 可回到单次生成，旧文本输入保持单次路径；Anthropic 不启用多阶段。此设置不会迁移旧报告；上线／重启仍需用户授权，不因定时触发自动启动服务。
 
 前端以阶段摘要显示进度。v5.1-balanced-default 最终与单次链使用同一个提示构建器，保留全部所选原标题与完整正文片段，只额外附加有效精读观察、修正和例子；概览初判、假设和提问不进入最终上下文。账号印象／方向／优势继续面向全部作品，结构回看全文，精读主要供标题／表达／建议参考。没有有效观察时最终请求逐字等于单次链。未精读篇也保留全文，旧报告及分组例子仍可读。分析 SSE 重连发送最新快照，序号接在客户端游标之后，不是历史事件的逐条重放。质量状态与已知限制见 [状态记录](status-and-todo.md)。
 

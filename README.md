@@ -99,10 +99,12 @@ npm --prefix frontend ci
 MODEL_PROVIDER=qwen
 QWEN_API_KEY=你的密钥
 QWEN_MODEL=qwen-plus
-QWEN_PROFILE_MODEL=qwen3.8-max
+ACCOUNT_DIAGNOSIS_PROVIDER=deepseek
+DEEPSEEK_API_KEY=你的DeepSeek密钥
+DEEPSEEK_MODEL=deepseek-flash
 ```
 
-账号报告默认使用 Qwen3.8-Max 非思考模式，整体阅读后并行精读代表作，再汇总报告；其余功能沿用 `QWEN_MODEL`。密钥仅由后端读取，`.env.local` 已被 Git 忽略。更多设置见[模型配置](docs/development.md#模型配置)。
+账号诊断默认使用 DeepSeek V4.1 Flash 非思考模式，整体阅读后并行精读代表作，再汇总报告；读者反馈与诊断内选题使用同一模型，其余功能保持 Qwen。旧报告无需重新生成；也可显式切回 Qwen。密钥仅由后端读取，`.env.local` 已被 Git 忽略。更多设置见[模型配置](docs/development.md#模型配置)。
 
 ### 3. 启动应用
 

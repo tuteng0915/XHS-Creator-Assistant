@@ -3,7 +3,7 @@ import type { MediaAsset, TextInputAsset } from '../types'
 import { ANALYSIS_SCOPE_LABELS, creatorNotes, selectCreatorNotes, type AnalysisScope } from '../creatorNotes'
 import { CreatorNoteSelectionDialog } from './CreatorNoteSelectionDialog'
 
-export function CreatorDiagnosisPage({ profile, mediaAssets = [], scope, selectedNoteIds, onScopeChange, running, onRun, onImport, children }: {
+export function CreatorDiagnosisPage({ profile, mediaAssets = [], scope, selectedNoteIds, onScopeChange, running, onRun, onImport, onOpenHistory, children }: {
   profile?: TextInputAsset
   mediaAssets?: MediaAsset[]
   selectedNoteIds?: string[]
@@ -12,6 +12,7 @@ export function CreatorDiagnosisPage({ profile, mediaAssets = [], scope, selecte
   running: boolean
   onRun: () => void
   onImport: () => void
+  onOpenHistory?: () => void
   children: ReactNode
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -19,7 +20,9 @@ export function CreatorDiagnosisPage({ profile, mediaAssets = [], scope, selecte
   const count = selectedNoteIds ? notes.filter(note => selectedNoteIds.includes(note.noteId)).length : selectCreatorNotes(notes, scope).length
   const stale = selectedNoteIds !== undefined && count !== selectedNoteIds.length
   return <section className="creator-diagnosis-page">
-    <div className="creator-page-head"><h1>账号诊断</h1></div>
+    <div className="creator-page-head"><h1>账号诊断</h1>
+      {onOpenHistory && <button type="button" onClick={onOpenHistory}>诊断历史</button>}
+    </div>
     <div className="creator-diagnosis-controls">
       <span>{selectedNoteIds ? '手动选择' : ANALYSIS_SCOPE_LABELS[scope]} · {count} 条笔记</span>
       <button type="button" disabled={running} onClick={() => setSettingsOpen(true)}>调整范围</button>

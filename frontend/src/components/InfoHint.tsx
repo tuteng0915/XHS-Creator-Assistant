@@ -3,7 +3,11 @@ import {createPortal} from 'react-dom'
 import './InfoHint.css'
 
 /** Short, supplementary help only. Keep errors and action consequences visible. */
-export function InfoHint({label, children}: {label: string; children: ReactNode}) {
+export function InfoHint({label, children, action}: {
+  label: string
+  children: ReactNode
+  action?: {label: string; onClick: () => void; className?: string}
+}) {
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
   const bubble = useRef<HTMLSpanElement>(null)
@@ -66,7 +70,16 @@ export function InfoHint({label, children}: {label: string; children: ReactNode}
     return () => {document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape, true)}
   }, [open, close])
 
-  return <span className="info-hint">
+  return <span className={`info-hint${action ? ' info-hint-with-action' : ''}`}>
+    {action && <button type="button" className={action.className}
+      aria-describedby={open ? id : undefined}
+      onMouseEnter={show} onMouseLeave={leave}
+      onPointerDown={() => {pointerFocus.current = true}}
+      onPointerUp={() => {pointerFocus.current = false}}
+      onPointerCancel={() => {pointerFocus.current = false}}
+      onFocus={() => {if (!pointerFocus.current) {focused.current = true; show()}}}
+      onBlur={() => {pointerFocus.current = false; focused.current = false; leave()}}
+      onClick={() => {close(); action.onClick()}}>{action.label}</button>}
     <button ref={trigger} type="button" className="info-hint-trigger" aria-label={label}
       aria-describedby={open ? id : undefined} aria-expanded={open}
       onMouseEnter={show} onMouseLeave={leave}

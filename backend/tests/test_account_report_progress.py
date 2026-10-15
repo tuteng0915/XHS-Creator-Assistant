@@ -137,9 +137,11 @@ def test_real_provider_preserves_single_call_rollback_legacy_text_and_other_prov
 ):
     model = SimpleNamespace(settings=SimpleNamespace(
         account_report_mode=mode, model_provider=model_provider,
-    ))
+    ), call_operation=AsyncMock(return_value=SimpleNamespace(
+        output={"profile": {"pillars": ["旧路径"]}},
+        model_metadata={"provider": model_provider, "model": "recorded-model"},
+    )))
     provider = RealAccountDiagnosisModelProvider(model)
-    provider.profile = AsyncMock(return_value={"profile": {"pillars": ["旧路径"]}})
     callback = AsyncMock()
     body = (json.dumps({"schemaVersion": "account-reading-input/v2", "notes": []})
             if structured else "旧版纯文本")
@@ -147,12 +149,16 @@ def test_real_provider_preserves_single_call_rollback_legacy_text_and_other_prov
         positioning="账号", historical_posts=body, on_update=callback,
     ))
     assert result.output == {"profile": {"pillars": ["旧路径"]}}
-    provider.profile.assert_awaited_once_with(positioning="账号", historical_posts=body)
+    model.call_operation.assert_awaited_once()
+    assert model.call_operation.await_args.args[1] == {
+        "positioning": "账号", "historicalPosts": body,
+    }
+    assert result.model_metadata["model"] == "recorded-model"
     callback.assert_not_called()
 
 
-@pytest.mark.parametrize("model_provider", ["qwen", "dashscope"])
-def test_real_provider_selects_staged_pipeline_by_default_for_qwen(
+@pytest.mark.parametrize("model_provider", ["qwen", "dashscope", "deepseek"])
+def test_real_provider_selects_staged_pipeline_by_default_for_supported_providers(
     app, settings, monkeypatch, model_provider,
 ):
     from app.services import account_report_pipeline
@@ -174,7 +180,10 @@ def test_real_provider_selects_staged_pipeline_by_default_for_qwen(
     provider.pain_points_with_updates = AsyncMock(return_value=SimpleNamespace(
         output={"painPoints": []}, model_metadata={},
     ))
-    provider.topics = AsyncMock(return_value={"topics": [], "titles": []})
+    provider.topics_with_metadata = AsyncMock(return_value=SimpleNamespace(
+        output={"topics": [], "titles": []},
+        model_metadata={"provider": model_provider, "model": "recorded-topic-model"},
+    ))
     app.state.account_workflow_service.live_provider = provider
     collect(app, run["id"])
     assert pipeline.await_count == 1
@@ -186,3 +195,5 @@ def test_real_provider_selects_staged_pipeline_by_default_for_qwen(
     model.call_operation.assert_not_called()
     stored = app.state.analysis_service.get(run["id"])
     assert stored.model_metadata["profile"]["accountReportMode"] == "staged"
+    assert stored.model_metadata["topics"]["provider"] == model_provider
+    assert stored.model_metadata["topics"]["model"] == "recorded-topic-model"

@@ -220,6 +220,8 @@ def main() -> int:
                         help="已有检查报告中的完整冻结输入；不读取当前数据库")
     parser.add_argument("--read-note-ids", help="可选：逗号分隔的1～3个 n 编号，例如 n1,n3,n17")
     parser.add_argument("--live", action="store_true", help="明确执行整体阅读、并行精读和汇总")
+    parser.add_argument("--provider", choices=("qwen", "deepseek"), default="qwen",
+                        help="仅本次诊断使用的服务；默认 qwen，DeepSeek 需显式选择")
     parser.add_argument("--output", type=Path, help="新的诊断报告目录，拒绝覆盖")
     parser.add_argument("--read-timeout-seconds", type=int,
                         help="仅本次每个请求的读取等待上限，1～300秒；默认使用画像配置")
@@ -234,6 +236,8 @@ def main() -> int:
         parser.error("--read-timeout-seconds 必须为1～300的整数")
     if args.thinking_budget is not None and not 1 <= args.thinking_budget <= 8192:
         parser.error("--thinking-budget 必须为1～8192的整数")
+    if args.provider == "deepseek" and (args.thinking is not None or args.thinking_budget is not None):
+        parser.error("--thinking 和 --thinking-budget 仅用于 Qwen；DeepSeek 固定关闭思考")
     if args.output is not None and args.output.exists():
         parser.error("--output 已存在，拒绝覆盖")
     try:
@@ -242,23 +246,29 @@ def main() -> int:
         ids = ([item.strip() for item in args.read_note_ids.split(",")]
                if args.read_note_ids is not None else None)
         scope = preview_scope(case, ids)
-        settings = replace(Settings.from_environment(), model_provider="qwen")
+        settings = replace(Settings.from_environment(),
+                           account_diagnosis_provider=args.provider).for_account_diagnosis()
         if args.thinking is not None:
             settings = replace(settings, qwen_profile_enable_thinking=args.thinking == "on")
         if args.thinking_budget is not None:
             settings = replace(settings, qwen_profile_thinking_budget=args.thinking_budget)
-        model = settings.qwen_profile_model.strip() or settings.qwen_model
+        is_deepseek = args.provider == "deepseek"
+        model = (settings.deepseek_model.strip() if is_deepseek
+                 else settings.qwen_profile_model.strip() or settings.qwen_model)
+        model_details = {
+            "provider": args.provider, "configuredModel": model,
+            "enableThinking": False if is_deepseek else settings.qwen_profile_enable_thinking,
+            "thinkingBudget": (settings.qwen_profile_thinking_budget
+                               if not is_deepseek and settings.qwen_profile_enable_thinking else None),
+        }
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.error(f"输入预检失败：{type(error).__name__}")
     if not args.live:
-        print(json.dumps({"mode": "preview", "provider": "qwen", "configuredModel": model,
-                          "enableThinking": settings.qwen_profile_enable_thinking,
-                          "thinkingBudget": (settings.qwen_profile_thinking_budget
-                                             if settings.qwen_profile_enable_thinking else None),
+        print(json.dumps({"mode": "preview", **model_details,
                           "requestAttempts": 0, "scope": scope}, ensure_ascii=False))
         return 0
-    if not settings.qwen_api_key:
-        parser.error("未配置 Qwen 密钥")
+    if not (settings.deepseek_api_key.strip() if is_deepseek else settings.qwen_api_key):
+        parser.error("未配置 DeepSeek 密钥" if is_deepseek else "未配置 Qwen 密钥")
     try:
         args.output.mkdir(parents=True, exist_ok=False)
     except OSError as error:
@@ -268,17 +278,15 @@ def main() -> int:
         return DiagnosticProfileCalls(
             settings,
             read_timeout_seconds=(args.read_timeout_seconds
-                                  or settings.qwen_profile_read_timeout_seconds),
+                                  or (settings.deepseek_read_timeout_seconds if is_deepseek
+                                      else settings.qwen_profile_read_timeout_seconds)),
         )
 
     report = asyncio.run(run_check(service_factory, case, read_note_ids=ids,
                                   on_progress=lambda event: print(json.dumps({
                                       "event": "progress", **event,
                                   }, ensure_ascii=False), flush=True)))
-    report.update(provider="qwen", configuredModel=model,
-                  enableThinking=settings.qwen_profile_enable_thinking,
-                  thinkingBudget=(settings.qwen_profile_thinking_budget
-                                  if settings.qwen_profile_enable_thinking else None), inputSource={
+    report.update(**model_details, inputSource={
         "type": "previous_profile_report",
         "sha256": source_hash,
     })

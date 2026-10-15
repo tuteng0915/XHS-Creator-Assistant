@@ -55,8 +55,9 @@ async function openNoteType() {
   await screen.findByRole('region', {name: '原笔记参考'})
 }
 function openNoteSelection() {
-  fireEvent.click(screen.getByRole('button', {name: '选择原笔记'}))
-  return screen.getByRole('dialog', {name: '选择原笔记参考'})
+  expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  expect(screen.queryByRole('button', {name: '选择原笔记'})).not.toBeInTheDocument()
+  return screen.getByRole('dialog', {name: '添加参考'})
 }
 
 it('starts with no implicit references and lists only completed account analyses for the active workspace', async () => {
@@ -241,10 +242,10 @@ it('starts original-note selection empty, previews saved images and full text, a
   fireEvent.click(within(detail).getByRole('button', {name: '关闭'}))
   fireEvent.click(within(picker).getByRole('checkbox', {name: '选择笔记：第一篇原笔记'}))
   fireEvent.click(within(picker).getByRole('button', {name: '取消'}))
-  expect(screen.queryByRole('dialog', {name: '选择原笔记参考'})).not.toBeInTheDocument()
-  expect(screen.getByRole('dialog', {name: '添加参考'})).toBeVisible()
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   expect(onChange).not.toHaveBeenCalled()
   expect(inputAssetApi.get).not.toHaveBeenCalled()
+  await openNoteType()
   expect(within(openNoteSelection()).getByRole('status')).toHaveTextContent('已选 0 / 2 条笔记')
 })
 
@@ -286,7 +287,7 @@ it.each([undefined, profile(undefined, {workspaceId: 'foreign'}), profile(undefi
   const {onChange} = setup(emptyCreatorContext(), false, source)
   await openNoteType()
   expect(screen.getByText('请先导入账号笔记，再添加原笔记参考。')).toBeVisible()
-  expect(screen.getByRole('button', {name: '选择原笔记'})).toBeDisabled()
+  expect(screen.queryByRole('button', {name: '完成'})).not.toBeInTheDocument()
   expect(screen.queryByRole('button', {name: '添加这份材料'})).not.toBeInTheDocument()
   expect(onChange).not.toHaveBeenCalled()
   expect(inputAssetApi.get).not.toHaveBeenCalled()
@@ -354,20 +355,20 @@ it('discards a late original-note response after the workspace changes', async (
   expect(onChange).not.toHaveBeenCalled()
 })
 
-it('closes a pending note choice when changes are disabled or the profile source changes', async () => {
+it('discards a pending note choice when changes are disabled or the profile source changes', async () => {
   const source = profile()
   const {rerender, onChange} = setup(emptyCreatorContext(), false, source)
   await openNoteType()
   const picker = openNoteSelection()
   fireEvent.click(within(picker).getByRole('checkbox', {name: '选择笔记：第一篇原笔记'}))
   rerender(<CreatorReferencePicker workspaceId="workspace-1" selection={emptyCreatorContext()} onChange={onChange} disabled profile={source} />)
-  expect(screen.queryByRole('dialog', {name: '选择原笔记参考'})).not.toBeInTheDocument()
-  expect(screen.getByRole('button', {name: '选择原笔记'})).toBeDisabled()
+  expect(screen.queryByRole('button', {name: '完成'})).not.toBeInTheDocument()
   expect(onChange).not.toHaveBeenCalled()
   rerender(<CreatorReferencePicker workspaceId="workspace-1" selection={emptyCreatorContext()} onChange={onChange} disabled={false} profile={source} />)
-  openNoteSelection()
+  expect(within(openNoteSelection()).getByRole('status')).toHaveTextContent('已选 0 / 2 条笔记')
+  fireEvent.click(screen.getByRole('checkbox', {name: '选择笔记：第一篇原笔记'}))
   rerender(<CreatorReferencePicker workspaceId="workspace-1" selection={emptyCreatorContext()} onChange={onChange} disabled={false} profile={profile(undefined, {id: 'replacement'})} />)
-  expect(screen.queryByRole('dialog', {name: '选择原笔记参考'})).not.toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('已选 0 / 2 条笔记')
   expect(onChange).not.toHaveBeenCalled()
 })
 
@@ -378,7 +379,7 @@ it('rejects a selected note removed from the same source while its picker is ope
   fireEvent.click(within(picker).getByRole('checkbox', {name: '选择笔记：第一篇原笔记'}))
   rerender(<CreatorReferencePicker workspaceId="workspace-1" selection={emptyCreatorContext()} onChange={onChange} disabled={false} profile={profile([importedNotes[1]])} />)
   fireEvent.click(within(picker).getByRole('button', {name: '完成'}))
-  expect(screen.queryByRole('dialog', {name: '选择原笔记参考'})).not.toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('已选 0 / 1 条笔记')
   expect(screen.getByRole('alert')).toHaveTextContent('所选原笔记已变化，请重新选择。')
   expect(onChange).not.toHaveBeenCalled()
 })

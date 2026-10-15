@@ -4,7 +4,7 @@ import {creatorReferenceKey, type CreatorContextReference, type CreatorContextSe
 import {importedReferenceNotes, importedReferencePreview, loadCreatorReference, referenceDate, referenceKindNames, type CreatorReferencePreview} from '../creatorReferences'
 import type {MediaAsset, TextInputAsset} from '../types'
 import {CreatorDialog} from './CreatorDialog'
-import {CreatorNoteSelectionDialog} from './CreatorNoteSelectionDialog'
+import {CreatorNoteSelectionPanel} from './CreatorNoteSelectionDialog'
 import {InfoHint} from './InfoHint'
 import {OracleNotice} from './OracleNotice'
 import './CreatorReferencePicker.css'
@@ -28,15 +28,13 @@ export function CreatorReferencePicker({workspaceId, selection, onChange, disabl
   const [error, setError] = useState('')
   const [listReload, setListReload] = useState(0)
   const [previewReload, setPreviewReload] = useState(0)
-  const [notePicker, setNotePicker] = useState<{workspaceId: string; sourceMaterialId: string} | null>(null)
+  const [noteChoiceRevision, setNoteChoiceRevision] = useState(0)
   const selectedKey = selection.references.map(creatorReferenceKey).join('|')
   const sourceProfile = profile?.workspaceId === workspaceId && profile.type === 'xhs_creator_profile' ? profile : undefined
   const notes = importedReferenceNotes(sourceProfile)
   const availableNotes = notes.filter(note => !selection.references.some(reference => reference.kind === 'imported_note' && reference.id === sourceProfile?.id && reference.noteId === note.noteId))
   const savedImages = mediaAssets.filter(asset => asset.workspaceId === workspaceId && asset.mediaType.startsWith('image/'))
   const previewImages = preview?.note ? savedImages.filter(asset => asset.id === preview.note?.coverMediaAssetId || asset.metadata.noteId === preview.note?.noteId) : []
-
-  useEffect(() => {setNotePicker(null)}, [workspaceId, profile?.id, disabled])
 
   useEffect(() => {
     let current = true
@@ -77,7 +75,7 @@ export function CreatorReferencePicker({workspaceId, selection, onChange, disabl
     return () => {current = false}
   }, [workspaceId, open, viewing, selectedId, choices, previewReload, kind])
 
-  function close() {setOpen(false); setNotePicker(null); setViewing(null); setError(''); setPreview(null)}
+  function close() {setOpen(false); setViewing(null); setError(''); setPreview(null)}
   function add() {
     if (!preview || disabled || selection.references.length >= 8) return
     const reference = preview.reference
@@ -85,12 +83,12 @@ export function CreatorReferencePicker({workspaceId, selection, onChange, disabl
     close()
   }
   function addNotes(ids?: string[]) {
-    if (disabled || !sourceProfile || !notePicker || notePicker.workspaceId !== workspaceId || notePicker.sourceMaterialId !== sourceProfile.id || !ids?.length) return
+    if (disabled || !sourceProfile || !ids?.length) return
     const selectedNotes = [...new Set(ids)].map(id => notes.find(note => note.noteId === id))
-    if (selectedNotes.some(note => !note)) {setError('所选原笔记已变化，请重新选择。'); setNotePicker(null); return}
+    if (selectedNotes.some(note => !note)) {setError('所选原笔记已变化，请重新选择。'); setNoteChoiceRevision(value => value + 1); return}
     const previews = selectedNotes.filter(note => !!note).map(note => importedReferencePreview(sourceProfile, note))
       .filter(value => !selection.references.some(reference => creatorReferenceKey(reference) === creatorReferenceKey(value.reference)))
-    if (selection.references.length + previews.length > 8) {setError('最多添加 8 项参考，请减少所选原笔记。'); setNotePicker(null); return}
+    if (selection.references.length + previews.length > 8) {setError('最多添加 8 项参考，请减少所选原笔记。'); return}
     if (previews.length) {
       setCache(previous => ({...previous, ...Object.fromEntries(previews.map(value => [`${workspaceId}:${creatorReferenceKey(value.reference)}`, value]))}))
       onChange({...selection, references: [...selection.references, ...previews.map(value => value.reference)]})
@@ -104,14 +102,17 @@ export function CreatorReferencePicker({workspaceId, selection, onChange, disabl
       const key = creatorReferenceKey(reference), label = cache[`${workspaceId}:${key}`]?.label || `${referenceKindNames[reference.kind]} ${index + 1}`
       return <li key={key}><button type="button" className="text-button" onClick={() => {setViewing(reference); setOpen(true)}}>{label}</button><button type="button" className="icon-button" disabled={disabled} aria-label={`移除${label}`} onClick={() => onChange({...selection, references: selection.references.filter(item => creatorReferenceKey(item) !== key)})}>×</button></li>
     })}</ul>}
-    {open && <CreatorDialog title={viewing ? '参考材料' : '添加参考'} onClose={close} className="creator-reference-dialog">
+    {open && <CreatorDialog title={viewing ? '参考材料' : '添加参考'} onClose={close} wide={!viewing && kind === 'imported_note'} className="creator-reference-dialog">
       {!viewing && <div className="creator-reference-selectors"><label>资料类型<select value={kind} onChange={event => setKind(event.target.value as CreatorContextReference['kind'])}><option value="account_analysis">账号分析</option><option value="audience_analysis">受众分析</option><option value="imported_note">原笔记</option></select></label>
         {kind !== 'imported_note' && <label>分析记录<select disabled={loading} value={selectedId} onChange={event => setSelectedId(event.target.value)}><option value="">{loading ? '正在读取…' : '选择一份分析'}</option>{choices.map(choice => <option key={choice.reference.id} value={choice.reference.id}>{choice.label}{selection.references.some(reference => creatorReferenceKey(reference) === creatorReferenceKey(choice.reference)) ? ' · 已添加' : ''}</option>)}</select></label>}
       </div>}
       {!viewing && kind === 'imported_note' && <section className="creator-reference-note-choice" aria-label="原笔记参考">
-        <p>{!sourceProfile ? '请先导入账号笔记，再添加原笔记参考。' : !notes.length ? '当前没有可添加的有效原笔记。' : !availableNotes.length ? '这些原笔记已全部添加。' : `可添加 ${availableNotes.length} 篇原笔记 · 本次还可添加 ${Math.max(0, 8 - selection.references.length)} 项参考`}
+        <p>{!sourceProfile ? '请先导入账号笔记，再添加原笔记参考。' : !notes.length ? '当前没有可添加的有效原笔记。' : !availableNotes.length ? '这些原笔记已全部添加。' : `本次还可添加 ${Math.max(0, 8 - selection.references.length)} 篇原笔记`}
           <InfoHint label="原笔记参考说明">可以查看已保存的图片与原文。助手只读取你所选笔记的标题与正文，不读取评论、图片或其他账号资料。</InfoHint></p>
-        <button type="button" disabled={disabled || !sourceProfile || !availableNotes.length || selection.references.length >= 8} onClick={() => {if (sourceProfile) {setError(''); setNotePicker({workspaceId, sourceMaterialId: sourceProfile.id})}}}>选择原笔记</button>
+        {!disabled && sourceProfile && availableNotes.length > 0 && selection.references.length < 8 && <CreatorNoteSelectionPanel
+          key={`${workspaceId}:${sourceProfile.id}:${noteChoiceRevision}`}
+          notes={availableNotes.map(note => ({...note, title: note.title || '未命名笔记'}))} mediaAssets={savedImages} scope="all" selectedIds={[]} includeComments={false} contentOnlyPreview
+          maxSelection={8 - selection.references.length} onClose={close} onConfirm={(_scope, ids) => addNotes(ids)} />}
       </section>}
       {!loading && !viewing && kind !== 'imported_note' && !choices.length && !error && <p className="creator-reference-empty">还没有已完成的{referenceKindNames[kind]}，也可以不添加参考，直接开始创作。</p>}
       {previewLoading && <p role="status">正在读取这份材料…</p>}
@@ -119,10 +120,7 @@ export function CreatorReferencePicker({workspaceId, selection, onChange, disabl
       {preview && <section className="creator-reference-preview" aria-label={preview.note ? '原笔记原文' : '参考摘要'}><div><strong>{preview.label}</strong>{preview.isExample && <OracleNotice label="参考来源说明" />}</div><small>{preview.scope}</small>
         {previewImages.length > 0 && <div className="creator-reference-note-images">{previewImages.map(image => <img key={image.id} src={image.fileUrl} alt={`${preview.note?.title || '原笔记'} · 已保存图片`} />)}</div>}
         <p className={preview.note ? 'creator-reference-note-body' : undefined}>{preview.summary}</p>{preview.lines.length > 0 && <ul>{preview.lines.map((line, index) => <li key={index}>{line}</li>)}</ul>}</section>}
-      <div className="creator-reference-actions"><button type="button" onClick={close}>{viewing ? '关闭' : '取消'}</button>{!viewing && kind !== 'imported_note' && <button type="button" className="primary" disabled={disabled || !preview || previewLoading || alreadySelected || selection.references.length >= 8} onClick={add}>{alreadySelected ? '已添加' : '添加这份材料'}</button>}</div>
+      {(viewing || kind !== 'imported_note') && <div className="creator-reference-actions"><button type="button" onClick={close}>{viewing ? '关闭' : '取消'}</button>{!viewing && <button type="button" className="primary" disabled={disabled || !preview || previewLoading || alreadySelected || selection.references.length >= 8} onClick={add}>{alreadySelected ? '已添加' : '添加这份材料'}</button>}</div>}
     </CreatorDialog>}
-    {open && notePicker?.workspaceId === workspaceId && notePicker.sourceMaterialId === sourceProfile?.id && !disabled && <CreatorNoteSelectionDialog
-      notes={availableNotes.map(note => ({...note, title: note.title || '未命名笔记'}))} mediaAssets={savedImages} scope="all" selectedIds={[]} title="选择原笔记参考" includeComments={false} contentOnlyPreview
-      maxSelection={Math.max(0, 8 - selection.references.length)} onClose={() => setNotePicker(null)} onConfirm={(_scope, ids) => addNotes(ids)} />}
   </div>
 }

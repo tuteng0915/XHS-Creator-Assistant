@@ -251,3 +251,99 @@ def test_source_led_result_never_triggers_editorial_call_or_validation_retry(
     else:
         assert report["status"] == "completed"
         assert report["result"]["profile"]["titleFormulas"][0]["examples"] == ["真实标题"]
+
+
+def test_deepseek_profile_diagnostics_use_own_transport_and_safe_metadata(tmp_path, settings):
+    check = load_check()
+    case = check.prepare_case(raw_export(tmp_path))
+    original = deepcopy(case)
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        assert str(request.url) == "https://deepseek.invalid/v1/chat/completions"
+        assert request.headers["authorization"] == "Bearer private-deepseek-key"
+        payload = json.loads(request.content)
+        assert payload["model"] == "deepseek-flash-test"
+        assert payload["thinking"] == {"type": "disabled"}
+        assert "enable_thinking" not in payload and "thinking_budget" not in payload
+        assert request.extensions["timeout"]["read"] == 179
+        body = response_body({"profile": {"pillars": ["private-deepseek-key"]}}, usage={
+            "prompt_tokens": 12, "completion_tokens": 6, "total_tokens": 18,
+            "completion_tokens_details": {"reasoning_tokens": 2,
+                                           "reasoning_content": "private-reasoning"},
+            "headers": {"authorization": "never-retain-header"},
+        })
+        body["model"] = "deepseek-returned-model"
+        body["choices"][0]["message"]["reasoning_content"] = "private-reasoning"
+        return httpx.Response(200, json=body, headers={"x-private": "never-retain-header"})
+
+    service = check.DiagnosticProfileCalls(
+        replace(settings, model_provider="deepseek", deepseek_api_key="private-deepseek-key",
+                deepseek_model="deepseek-flash-test", deepseek_base_url="https://deepseek.invalid/v1",
+                deepseek_read_timeout_seconds=179, qwen_profile_enable_thinking=True),
+        transport=httpx.MockTransport(respond),
+    )
+    report = asyncio.run(check.run_check(service, case))
+    assert report["status"] == "completed"
+    assert case == original
+    assert report["requestAttempts"] == len(requests) == 1
+    metadata = report["modelMetadata"]
+    assert metadata["provider"] == "deepseek"
+    assert metadata["model"] == "deepseek-returned-model"
+    assert metadata["modelSource"] == "response"
+    assert metadata["requestCount"] == 1
+    assert metadata["usage"] == {"prompt_tokens": 12, "completion_tokens": 6,
+                                 "total_tokens": 18, "reasoning_tokens": 2}
+    diagnostic = report["responseDiagnostic"]
+    request_diagnostic, = diagnostic["requests"]
+    assert request_diagnostic["timeoutsSeconds"]["read"] == 179
+    assert request_diagnostic["requestedMaxTokens"] == 6000
+    assert request_diagnostic["responseFormat"] == "json_object"
+    for record in (metadata, diagnostic, request_diagnostic):
+        assert record["enableThinking"] is False
+        assert record["thinkingBudget"] is None
+    serialized = json.dumps(report)
+    for private in ("private-deepseek-key", "private-reasoning", "reasoning_content",
+                    "never-retain-header", "https://deepseek.invalid"):
+        assert private not in serialized
+    assert "[REDACTED]" in diagnostic["rawText"]
+
+
+@pytest.mark.parametrize("failure,attempts,phase", [
+    ("configuration", 0, "configuration"), ("http", 1, "http_status"),
+    ("transport", 1, "transport"), ("json", 1, "model_json"),
+    ("length", 1, "output_length"),
+])
+def test_deepseek_profile_failures_have_no_retry_or_qwen_fallback(
+    tmp_path, settings, failure, attempts, phase,
+):
+    check = load_check()
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        assert request.url.host == "deepseek.invalid"
+        if failure == "http":
+            return httpx.Response(429, json={"error": "private-deepseek-error"})
+        if failure == "transport":
+            raise httpx.ReadTimeout("private-deepseek-error", request=request)
+        return httpx.Response(200, json=response_body(
+            "invalid json" if failure == "json" else {"profile": {}},
+            finish="length" if failure == "length" else "stop",
+        ))
+
+    service = check.DiagnosticProfileCalls(
+        replace(settings, model_provider="deepseek", deepseek_base_url="https://deepseek.invalid",
+                deepseek_api_key="" if failure == "configuration" else "private-deepseek-error",
+                qwen_api_key="qwen-key-must-not-be-used"),
+        transport=httpx.MockTransport(respond),
+    )
+    report = asyncio.run(check.run_check(service, check.prepare_case(raw_export(tmp_path))))
+    assert report["status"] == "failed"
+    assert report["requestAttempts"] == len(requests) == attempts
+    assert report["responseDiagnostic"]["phase"] == phase
+    assert report["responseDiagnostic"]["enableThinking"] is False
+    assert len(report["responseDiagnostic"]["requests"]) == attempts
+    assert "private-deepseek-error" not in json.dumps(report)
+    assert "qwen-key-must-not-be-used" not in json.dumps(report)

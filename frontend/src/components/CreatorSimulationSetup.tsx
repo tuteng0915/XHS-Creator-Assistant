@@ -87,6 +87,7 @@ export function CreatorSimulationSetup(props: Props) {
   }
   function editPersona(id:string,field:keyof SimulationPersonaOverrides[string],value:string) {
     setPersonaOverrides(current=>({...current,[id]:{...current[id],[field]:value}}))
+    if(!activeAdoption)setManualChoice(true)
   }
 
   async function apply() {
@@ -111,6 +112,8 @@ export function CreatorSimulationSetup(props: Props) {
   const rolesChanged=selectedOverrides.length>0
   const invalidPersonaIds=selectedOverrides.filter(([,fields])=>Object.entries(fields).some(([field,value])=>!value?.trim()||value.length>(field==='profile'?4000:2000))).map(([id])=>id)
   const changed=activeAdoption&&(JSON.stringify(proposals.map(p=>p.fanId))!==JSON.stringify(fans.ids)||rolesChanged)
+  const checkingAdoption=!!activeAdoption&&recommendation.busy
+  const startLabel=checkingAdoption?'正在核验推荐…':activeAdoption&&!adoptionReady?'按当前名单开始':!selectionDecided&&fans.ids.length&&target?'确认名单并开始':'开始模拟'
   const hasActiveFans=fans.rows.some(f=>f.status==='active')
   const proposalCards=<ul>{proposals.map(p => <li key={p.fanId}>
     <div className="reader-card-heading"><ReaderAvatar id={(() => {const fan=fans.rows.find(f=>f.id===p.fanId);return fan?`${fan.sourceAnalysisId}:${fan.sourceGroupId}`:p.fanId})()} name={record?.inputSnapshot.candidates.find(f=>f.id===p.fanId)?.name||'读者'}/><strong>{record?.inputSnapshot.candidates.find(f => f.id === p.fanId)?.name || '已保存读者'}</strong></div>
@@ -118,7 +121,6 @@ export function CreatorSimulationSetup(props: Props) {
   </li>)}</ul>
 
   return <section className="creator-diagnosis-controls creator-simulation-setup" aria-label="模拟准备">
-    <ol className="simulation-flow-steps" aria-label="试读步骤"><li>1 选择内容</li><li>2 推荐或手选读者</li><li>3 确认名单，进入讨论</li></ol>
     {!props.category&&!!props.profile&&<div className="simulation-target-kind"><button aria-pressed={targetKind==='topic'} disabled={running||applying} onClick={()=>{setLegacyTargetKind('topic');resetTarget()}}>创作中的选题</button><button aria-pressed={targetKind==='note'} disabled={running||applying} onClick={()=>{setLegacyTargetKind('note');resetTarget()}}>已发布的笔记</button></div>}
     {targetKind==='topic'?<label className="simulation-target">选题
       <select aria-label="模拟选题" value={topic?.id || ''} disabled={running || applying}
@@ -177,7 +179,12 @@ export function CreatorSimulationSetup(props: Props) {
         <InfoHint label="互相回应说明">{discussionEnabled ? '先各自表达，再回应其他人的公开留言。' : '只做独立表达，省去互相回应。'}</InfoHint>
       </div>
     </fieldset>
-    <div className="reader-recommendation" aria-label="读者推荐">
+    <section className="simulation-final-readers" aria-label="确认实际参与者">
+      <div className="simulation-participant-heading"><div className="reader-card-heading"><h3>参与读者 · {fans.ids.length} 位</h3>
+        {activeAdoption&&adoptionReady&&<span className="muted simulation-selection-origin" role="status">{changed?'推荐后调整':'已采用推荐'}</span>}
+        {!activeAdoption&&manualChoice&&<span className="muted simulation-selection-origin" role="status">手选</span>}
+        {!!selectedFans.length&&<InfoHint label="本次角色说明">可调整本次角色，不影响读者档案里的长期画像。</InfoHint>}
+      </div>
       <div className="reader-recommendation-actions">
         <button type="button" disabled={!target || !taskValid || running || recommendation.busy || applying || !hasActiveFans}
           onClick={() => {setApplyError('');setAdopted(null); void recommendation.recommend(Math.max(1, fans.slots.length))}}>
@@ -186,8 +193,9 @@ export function CreatorSimulationSetup(props: Props) {
           onClick={() => void (recommendation.hasReceipt ? recommendation.refresh() : recommendation.recommend(fans.slots.length))}>
           {recommendation.hasReceipt ? '重试读取' : '重试原请求'}</button>}
       </div>
+      </div>
+    <div className="reader-recommendation simulation-recommendation-inline" aria-label="读者推荐">
       {recommendation.busy&&<p className="trial-progress" role="status">正在比较读者的需求与当前内容 · {waited} 秒</p>}
-      {!activeAdoption&&<p className="muted">最多推荐 {fans.slots.length} 位；只有一位相关，也可以直接开始。</p>}
       {recommendation.error && <p role="alert">{recommendation.error}</p>}
       {record?.freshness?.status === 'stale' && <p role="status">内容或读者已变化，请重新推荐，或继续手动选择。</p>}
       {record?.freshness?.status === 'unavailable' && <p role="status">这份推荐的来源暂不可核验，仍可手动选择。</p>}
@@ -195,20 +203,14 @@ export function CreatorSimulationSetup(props: Props) {
       {record?.status === 'partially_completed' && <p role="status">部分完成，已保留有效读者。</p>}
       {!!proposals.length && (activeAdoption?<details className="simulation-recommendation-details"><summary>查看推荐依据 · {proposals.length} 位</summary>{proposalCards}</details>:proposalCards)}
       {record?.status === 'completed' && !proposals.length && <p role="status">{record.result?.unmatchedReason || '暂未找到合适读者。'}</p>}
-      {!!proposals.length && !activeAdoption && <button type="button" disabled={!target || !valid || running || applying} onClick={() => void apply()}>使用这组</button>}
+      {!!proposals.length && !activeAdoption && <button type="button" disabled={!target || !valid || running || applying} onClick={() => void apply()}>采用这组读者</button>}
       {applyError && <p role="alert">{applyError}</p>}
-      {activeAdoption && <div className="reader-recommendation-actions"><span role="status">{adoptionReady ? '已采用推荐，可继续调整名单。' : '已采用的推荐需要重新核验。'}</span>
-        <button type="button" disabled={running} onClick={() => {setAdopted(null);setManualChoice(true)}}>仅按当前手选名单继续</button></div>}
-      {!!proposals.length&&!activeAdoption&&!manualChoice&&<p role="status">推荐还未采用。点击“使用这组”，或明确选择下方的手选名单。</p>}
-      {!activeAdoption&&<button disabled={running||applying||!hasActiveFans} onClick={()=>setManualChoice(true)}>{manualChoice?'正在使用手选名单':'我来选择读者'}</button>}
     </div>
-    <section className="simulation-final-readers" aria-label="确认实际参与者"><div className="reader-card-heading"><h3>本次实际参与 · {fans.ids.length} 位</h3>{!!selectedFans.length&&<InfoHint label="本次角色说明">需要换个观察角度？可展开调整本次角色，不影响读者库里的长期画像。</InfoHint>}</div>
       {fans.loading&&<p role="status">{fans.loaded?'正在刷新读者，已选名单保留。':'正在读取已保存读者…'}</p>}
       {fans.error&&<div className="simulation-readers-error"><p role="alert">读者列表暂时未能读取。{fans.loaded?'已保留当前名单。':''}</p><button type="button" disabled={fans.loading||running||applying} onClick={()=>void fans.refresh()}>{fans.loading?'正在重试…':'重试读取读者'}</button></div>}
       {hasActiveFans&&<>
-      <p className="muted">{activeAdoption?(changed?'已采用推荐，并调整了名单或本次角色':'使用推荐名单'):manualChoice?`使用你的手选名单${rolesChanged?' · 本次角色已调整':''}`:'在下面选择读者，或采用上方推荐'}</p>
       <fieldset className="simulation-reader-controls" disabled={running || applying}>
-      <SimulatedFanPicker rows={fans.rows} slots={fans.slots} onSlotChange={(index,id)=>{fans.setSlot(index,id);clearRemovedOverrides(fans.slots.map((value,i)=>i===index?id:value));if(!activeAdoption)setManualChoice(true)}} onAddSlot={fans.addSlot} onRemoveSlot={index=>{fans.removeSlot(index);clearRemovedOverrides(fans.slots.filter((_,i)=>i!==index))}}
+      <SimulatedFanPicker compactSlots rows={fans.rows} slots={fans.slots} onSlotChange={(index,id)=>{fans.setSlot(index,id);clearRemovedOverrides(fans.slots.map((value,i)=>i===index?id:value));if(!activeAdoption)setManualChoice(true)}} onAddSlot={fans.addSlot} onRemoveSlot={index=>{fans.removeSlot(index);clearRemovedOverrides(fans.slots.filter((_,i)=>i!==index));if(!activeAdoption)setManualChoice(true)}}
         renderSelected={f=><details className="simulation-role-editor" key={f.id}>
         <summary>调整 {f.editable.name} 的本次角色{invalidPersonaIds.includes(f.id)?' · 请补全':personaOverrides[f.id]?' · 已调整':''}</summary>
         <fieldset disabled={running||applying}>
@@ -223,17 +225,18 @@ export function CreatorSimulationSetup(props: Props) {
       </>}
       {fans.loaded&&!fans.loading&&!fans.error&&!hasActiveFans&&<div className="simulation-readers-empty"><p>还没有可用的模拟读者。</p><button type="button" onClick={onAddFans}>从受众分析添加模拟粉丝</button></div>}
       {!!invalidPersonaIds.length&&<p role="status">还有 {invalidPersonaIds.length} 位读者的本次设定需要补全，完成或恢复后即可开始。</p>}
-    <button className="primary simulation-start" disabled={running || applying || !taskValid || !!invalidPersonaIds.length || !fans.ids.length || !target || !adoptionReady || !selectionDecided}
-      onClick={() => {const link=activeAdoption ? {
+    <button className="primary simulation-start" disabled={running || applying || checkingAdoption || !taskValid || !!invalidPersonaIds.length || !fans.ids.length || !target}
+      onClick={() => {const link=activeAdoption&&adoptionReady ? {
         readerSelectionId: activeAdoption.readerSelectionId,
         readerSelectionInputHash: activeAdoption.readerSelectionInputHash,
       } : undefined;
+        if(!link){setAdopted(null);setManualChoice(true)}
         const overrides=Object.fromEntries(Object.entries(personaOverrides).filter(([id])=>fans.ids.includes(id)))
         const extra: [SimulationPersonaOverrides?]=Object.keys(overrides).length?[overrides]:[]
         if(accountNoteSelection)props.onRunAccount?.(accountNoteSelection,link,panelTask,...extra)
         else if(noteRef)props.onRunNote?.(noteRef,link,panelTask,...extra)
         else if(topic)onRun(topic,link,panelTask,...extra)
-      }}>开始模拟</button>
+      }}>{startLabel}</button>
     </section>
   </section>
 }

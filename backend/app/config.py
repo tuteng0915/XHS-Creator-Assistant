@@ -1,6 +1,6 @@
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 ENV_LINE_RE = re.compile(
@@ -63,13 +63,20 @@ class Settings:
     # opt-ins through MODEL_PROVIDER rather than becoming an accidental
     # fallback when a local env file is absent.
     model_provider: str = "qwen"
-    # Structured Qwen reports add isolated reading assistance by default;
+    # Account diagnosis has its own provider; other product flows keep Qwen.
+    # Use qwen for rollback, or inherit/empty to follow MODEL_PROVIDER.
+    account_diagnosis_provider: str = "deepseek"
+    # Structured reports add isolated reading assistance by default;
     # source_led remains the explicit single-call rollback option.
     account_report_mode: str = "staged"
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-20250514"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     anthropic_messages_url: str = ""
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-flash"
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_read_timeout_seconds: int = 180
     qwen_api_key: str = ""
     qwen_model: str = "qwen-plus"
     qwen_profile_model: str = "qwen3.8-max"
@@ -87,8 +94,18 @@ class Settings:
     video_preview_frame_count: int = 8
 
     def __post_init__(self) -> None:
+        if (not isinstance(self.account_diagnosis_provider, str)
+                or self.account_diagnosis_provider.strip().lower()
+                not in {"", "inherit", "deepseek", "qwen", "dashscope", "anthropic"}):
+            raise ValueError(
+                "ACCOUNT_DIAGNOSIS_PROVIDER must be deepseek, qwen, dashscope, "
+                "anthropic, or inherit"
+            )
         if self.account_report_mode not in ("source_led", "staged"):
             raise ValueError("ACCOUNT_REPORT_MODE must be 'source_led' or 'staged'")
+        value = self.deepseek_read_timeout_seconds
+        if type(value) is not int or not 1 <= value <= 300:
+            raise ValueError("DEEPSEEK_READ_TIMEOUT_SECONDS must be an integer from 1 to 300")
         value = self.qwen_profile_read_timeout_seconds
         if type(value) is not int or not 1 <= value <= 300:
             raise ValueError("QWEN_PROFILE_READ_TIMEOUT_SECONDS must be an integer from 1 to 300")
@@ -97,6 +114,13 @@ class Settings:
         value = self.qwen_profile_thinking_budget
         if type(value) is not int or not 1 <= value <= 8192:
             raise ValueError("QWEN_PROFILE_THINKING_BUDGET must be an integer from 1 to 8192")
+
+    def for_account_diagnosis(self) -> "Settings":
+        """Scope the account override without mutating the general model settings."""
+        provider = self.account_diagnosis_provider.strip().lower()
+        return replace(self, model_provider=(
+            self.model_provider if provider in {"", "inherit"} else provider
+        ))
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -126,6 +150,7 @@ class Settings:
                 )
             ),
             model_provider=os.getenv("MODEL_PROVIDER", "qwen"),
+            account_diagnosis_provider=os.getenv("ACCOUNT_DIAGNOSIS_PROVIDER", "deepseek"),
             account_report_mode=os.getenv("ACCOUNT_REPORT_MODE", "staged"),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
@@ -133,6 +158,10 @@ class Settings:
                 "ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"
             ),
             anthropic_messages_url=os.getenv("ANTHROPIC_MESSAGES_URL", ""),
+            deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+            deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-flash"),
+            deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            deepseek_read_timeout_seconds=environment_integer("DEEPSEEK_READ_TIMEOUT_SECONDS", 180),
             qwen_api_key=os.getenv("QWEN_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
             qwen_model=os.getenv("QWEN_MODEL", "qwen-plus"),
             qwen_profile_model=os.getenv("QWEN_PROFILE_MODEL", "qwen3.8-max"),

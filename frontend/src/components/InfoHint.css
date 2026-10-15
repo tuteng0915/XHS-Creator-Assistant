@@ -1,4 +1,5 @@
 .info-hint { display: inline-flex; flex: 0 0 auto; vertical-align: middle; margin-inline-start: 4px; line-height: 1; }
+.info-hint-with-action { align-items: center; gap: 4px; margin-inline-start: 0; }
 .info-hint > button.info-hint-trigger { display: inline-flex; align-items: center; justify-content: center; width: 26px; min-width: 26px; height: 26px; min-height: 26px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--sub, #696268); font-weight: 400; line-height: 1; }
 .info-hint > button.info-hint-trigger:hover, .info-hint > button.info-hint-trigger[aria-expanded=true] { color: var(--accent-ink, #9e243b); background: var(--accent-soft, #fff1f3); }
 .info-hint > button.info-hint-trigger:focus-visible { outline: 2px solid var(--accent, #c62f46); outline-offset: 2px; }

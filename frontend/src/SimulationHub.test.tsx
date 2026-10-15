@@ -49,7 +49,7 @@ function setup(withFeedback=false) {
 async function openHub() {
   await screen.findByText('我的历史笔记')
   fireEvent.click(screen.getByRole('button',{name:'受众模拟'}))
-  await waitFor(()=>expect(screen.getAllByRole('option',{name:'认真读者'})).toHaveLength(3))
+  await waitFor(()=>expect(screen.getAllByRole('option',{name:'认真读者'})).toHaveLength(1))
 }
 
 function chooseAccountNotes(ids=['note']) {
@@ -139,9 +139,8 @@ it('submits each target without retrieval and keeps one-off role changes out of 
   fireEvent.click(within(picker).getByRole('button',{name:'完成'}))
   expect(screen.getByRole('region',{name:'待试读笔记'})).toHaveTextContent('我的历史笔记')
   expect(screen.getByLabelText('认真读者的本次关切')).toHaveValue('时间投入')
-  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
-  fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
-  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  expect(screen.getByRole('button',{name:'确认名单并开始'})).toBeEnabled()
+  fireEvent.click(screen.getByRole('button',{name:'确认名单并开始'}))
   await waitFor(()=>expect(requests()).toHaveLength(2))
   await screen.findByText('检查请求后停止，不调用模型')
   expect(requests()[1]).toMatchObject({sourceMaterialId:'profile',noteId:'note',simulatedFanIds:['reader']})
@@ -150,8 +149,7 @@ it('submits each target without retrieval and keeps one-off role changes out of 
   expect(requests()[1]).not.toHaveProperty('personaOverrides')
   fireEvent.click(screen.getByRole('tab',{name:/创作级/}))
   fireEvent.change(screen.getByLabelText('模拟选题'),{target:{value:'topic'}})
-  fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
-  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  fireEvent.click(screen.getByRole('button',{name:'确认名单并开始'}))
   await waitFor(()=>expect(requests()).toHaveLength(3))
   expect(requests()[2]).toMatchObject({topicId:'topic',simulatedFanIds:['reader']})
   expect(requests()[2]).not.toHaveProperty('noteId')
@@ -168,8 +166,7 @@ it('requires confirmation of multiple account notes before either retrieval or s
   expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
   chooseAccountNotes(['note','other-note'])
   expect(screen.getByRole('region',{name:'待模拟账号'})).toHaveTextContent('已选 2 / 2 篇笔记')
-  fireEvent.click(screen.getByRole('button',{name:'我来选择读者'}))
-  fireEvent.click(screen.getByRole('button',{name:'开始模拟'}))
+  fireEvent.click(screen.getByRole('button',{name:'确认名单并开始'}))
   await screen.findByText('检查请求后停止，不调用模型')
   const requests=fetch.mock.calls.filter(([url,init])=>String(url).endsWith('/simulation-runs')&&init?.method==='POST')
   expect(requests).toHaveLength(1)

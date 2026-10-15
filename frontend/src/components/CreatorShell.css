@@ -149,6 +149,12 @@
   font-size: 12px;
 }
 
+.creator-subpage-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
 @media (min-width: 761px) {
   .creator-focused-shell .workspace-sidebar {
     position: sticky;

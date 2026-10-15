@@ -115,6 +115,10 @@ function setup({emptyHistory = false}: {emptyHistory?: boolean} = {}) {
 }
 
 function navigate(name: string) {
+  if (name === '诊断历史') {
+    fireEvent.click(screen.getByRole('button', {name}))
+    return
+  }
   fireEvent.click(within(screen.getByRole('navigation', {name: '创作者功能导航'})).getByRole('button', {name}))
 }
 
@@ -139,6 +143,8 @@ describe('diagnosis history on the public diagnosis page', () => {
     expect(within(history).queryByText('热点分析')).not.toBeInTheDocument()
     expect(within(history).queryByText('未复盘')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', {name: '分析历史'})).not.toBeInTheDocument()
+    expect(within(screen.getByRole('navigation')).queryByRole('button', {name: '诊断历史'})).not.toBeInTheDocument()
+    expect(screen.getByRole('button', {name: '诊断历史'}).closest('.creator-page-head')).toBeTruthy()
 
     openOnlyHistoryRow(history)
     expect(await within(history).findByText('甲账号的历史诊断结论')).toBeVisible()

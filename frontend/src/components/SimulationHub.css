@@ -26,6 +26,19 @@
 .simulation-recommendation-details summary { cursor: pointer; color: var(--sub); }
 .simulation-readers-error, .simulation-readers-empty { font-size: 14px; }
 .simulation-start { margin-top: 12px; }
+.simulation-participant-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.simulation-participant-heading h3 { margin: 0; }
+.simulation-selection-origin { font-size: 12px; white-space: nowrap; }
+.simulation-final-readers .simulation-recommendation-inline { padding: 0; border: 0; background: transparent; }
+.simulation-recommendation-inline:empty { display: none; }
+.simulation-final-readers .simulation-recommendation-inline > ul { display: grid; gap: 8px; }
+.simulation-final-readers .simulation-recommendation-inline > ul > li { display: block; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.simulation-session-summary { margin: 0 0 14px; color: var(--sub); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.simulation-participants-inline { margin: 5px 0 0; }
+.simulation-participants-inline > span { margin-right: 8px; }
+.simulation-task-inline ul { margin: 0 0 5px; padding-left: 18px; color: var(--ink); }
+.simulation-history-provenance { margin-top: 18px; }
+.simulation-history-provenance .simulation-reader-summary { margin-top: 12px; }
 .simulation-note-target { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
 .simulation-note-target > div { flex: 1 1 180px; min-width: 0; }
 .simulation-note-target h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }

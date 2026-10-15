@@ -2840,6 +2840,7 @@ function WorkspaceApp() {
           running={running}
           onRun={() => void runDiagnosis('account')}
           onImport={openExistingCreatorImport}
+          onOpenHistory={() => setActivePage('history')}
         >
           {(analysisStageViewsByWorkflow.account.length > 0 || runError) && <WorkflowOutputPanel
             targetTab="account"
@@ -2859,8 +2860,17 @@ function WorkspaceApp() {
         activePage === 'video-quality' &&
         renderWorkflowRunPage('video')}
 
-      {!loading && workspace && activePage === 'history' && renderAnalysisHistoryPage()}
+      {!loading && workspace && activePage === 'history' && <>
+        {!internalMode && <div className="creator-page-head"><h1>诊断历史</h1>
+          <button type="button" onClick={() => setActivePage('account-diagnosis')}>返回账号诊断</button>
+        </div>}
+        {renderAnalysisHistoryPage()}
+      </>}
       {!loading && workspace && activePage === 'topics' && (
+        <>
+        {!internalMode && <div className="creator-subpage-actions">
+          <button type="button" onClick={() => {if (confirmEditorLeave()) setActivePage('drafts')}}>返回创作助手</button>
+        </div>}
         <TopicLibraryPage
           key={workspace.id}
           onLeaveGuardChange={onEditorLeaveGuardChange}
@@ -2894,10 +2904,17 @@ function WorkspaceApp() {
           onTopicDraftChange={setTopicDraft}
           onSaveTopicEdits={updateSelectedTopic}
         />
+        </>
       )}
       {!loading && workspace && activePage === 'drafts' && !internalMode && <CreatorCanvasPage
         key={workspace.id} workspaceId={workspace.id} topic={selectedTopic} topics={topics.filter(t => t.sourceWorkflow !== 'trend_analysis')}
         profile={xhsCreatorProfileMaterial} mediaAssets={mediaAssets}
+        onOpenTopics={() => {if (confirmEditorLeave()) setActivePage('topics')}}
+        onNew={() => {if (!confirmEditorLeave()) return; setReaderFeedback(null); setSelectedTopic(null)}}
+        onCreated={topic => {
+          if (selectedWorkspaceRef.current !== topic.workspaceId) return
+          setTopics(current => [topic, ...current.filter(item => item.id !== topic.id)])
+        }}
         onLeaveGuardChange={onEditorLeaveGuardChange}
         readerFeedback={readerFeedback?.workspaceId===workspace.id&&readerFeedback.topicId===selectedTopic?.id?readerFeedback:undefined}
         onReaderFeedbackConsumed={() => setReaderFeedback(null)}
@@ -2916,7 +2933,11 @@ function WorkspaceApp() {
         }}
         simulationRuns={simulationRuns}
         agentId={agents.find(a => a.agentId === 'topic_draft_editor')?.id}
-        onSelect={topic => {if (!confirmEditorLeave()) return; setReaderFeedback(null); setSelectedTopic(topic)}} onUpdated={topic => {if(selectedWorkspaceRef.current !== topic.workspaceId) return; setSelectedTopic(topic); setTopics(current => current.map(t => t.id === topic.id ? topic : t))}}
+        onSelect={topic => {if (!confirmEditorLeave()) return; setReaderFeedback(null); setSelectedTopic(topic)}} onUpdated={topic => {
+          if(selectedWorkspaceRef.current !== topic.workspaceId) return
+          setSelectedTopic(current => current?.id === topic.id ? topic : current)
+          setTopics(current => current.map(t => t.id === topic.id ? topic : t))
+        }}
       />}
       {!loading && workspace && activePage === 'drafts' && internalMode && (
         <DraftsPage

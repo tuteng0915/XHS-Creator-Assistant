@@ -103,7 +103,7 @@ it('removes simulation labels while preserving its target, provenance hint and r
   expect(screen.queryByLabelText('作者追问')).not.toBeInTheDocument()
 })
 
-it('puts prewritten reader settings behind one disclosure without hiding the conversation',()=>{
+it('shows participants and conversation first without repeating empty recommendation panels',()=>{
   const run:SimulationRun={...simulation,personaDefinitions:[{id:'r',name:'先算投入'}],
     reactionResults:[{personaId:'r',quote:'我会先看看这一步需要多少时间。'}],
     inputSnapshot:{readerSelection:{source:'oracle_showcase',actualFanIds:['r'],proposedReaders:[]}}}
@@ -112,25 +112,42 @@ it('puts prewritten reader settings behind one disclosure without hiding the con
     reviewStatusLabel:()=> '未复盘',onOpenSimulationRun:vi.fn(),onSimulationReviewDraftChange:vi.fn(),
     onSaveSimulationRunReview:vi.fn(),stageSeedFromSimulation:()=>[],renderStageResult:()=>null}
   const page=render(<SimulationHistoryPage {...props}/>)
-  const settings=screen.getByText('本次读者与设置',{selector:'summary'})
+  const settings=screen.getByText('推荐依据与备注',{selector:'summary'})
   expect(settings.closest('details')).not.toHaveAttribute('open')
   expect(screen.getByText('我会先看看这一步需要多少时间。')).toBeVisible()
-  expect(screen.getByText('实际参与者')).not.toBeVisible()
+  expect(screen.getByLabelText('本次参与读者')).toHaveTextContent('先算投入')
+  expect(screen.queryByText('实际参与者')).not.toBeInTheDocument()
+  expect(screen.queryByText('未复盘')).not.toBeInTheDocument()
+  expect(screen.getByRole('region',{name:'读者试读群聊'}).compareDocumentPosition(settings)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   fireEvent.click(settings)
-  expect(screen.getByText('实际参与者')).toBeVisible()
-  expect(screen.getByText('本次未执行读者推荐')).toBeVisible()
-  fireEvent.click(screen.getByText('复盘备注',{selector:'summary'}))
+  expect(screen.getByText('已保存名单')).toBeVisible()
+  expect(screen.queryByText('本次未执行读者推荐')).not.toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('复盘备注'),{target:{value:'下次保留这个视角'}})
   expect(props.onSimulationReviewDraftChange).toHaveBeenCalledWith({userNotes:'下次保留这个视角',reviewStatus:'unreviewed'})
   page.rerender(<SimulationHistoryPage {...props} simulationReviewDraft={{userNotes:'下次保留这个视角',reviewStatus:'unreviewed'}}/>)
-  fireEvent.click(screen.getByText(/本次读者与设置/,{selector:'summary'}))
-  expect(screen.getByText(/复盘未保存/)).toBeVisible()
-  fireEvent.click(screen.getByText(/本次读者与设置/,{selector:'summary'}))
+  fireEvent.click(screen.getByText(/推荐依据与备注/,{selector:'summary'}))
+  expect(screen.getByText(/备注未保存/)).toBeVisible()
+  fireEvent.click(screen.getByText(/推荐依据与备注/,{selector:'summary'}))
   expect(screen.getByLabelText('复盘备注')).toHaveValue('下次保留这个视角')
   fireEvent.click(screen.getByRole('button',{name:'保存复盘'}))
   expect(props.onSaveSimulationRunReview).toHaveBeenCalledOnce()
   page.rerender(<SimulationHistoryPage {...props} selectedSimulationRun={{...run,id:'different'}}/>)
-  expect(screen.getByText('本次读者与设置',{selector:'summary'}).closest('details')).not.toHaveAttribute('open')
+  expect(screen.getByText('推荐依据与备注',{selector:'summary'}).closest('details')).not.toHaveAttribute('open')
+})
+
+it('omits unused public history panels without hiding loading or errors',()=>{
+  const props={publicMode:true,simulationRuns:[],selectedSimulationRun:null,
+    simulationReviewDraft:{userNotes:'',reviewStatus:'unreviewed' as const},simulationReviewSaveState:idle,
+    reviewStatusLabel:()=> '未复盘',onOpenSimulationRun:vi.fn(),onSimulationReviewDraftChange:vi.fn(),
+    onSaveSimulationRunReview:vi.fn(),stageSeedFromSimulation:()=>[],renderStageResult:()=>null}
+  const page=render(<SimulationHistoryPage {...props}/>)
+  expect(page.container).toBeEmptyDOMElement()
+  page.rerender(<SimulationHistoryPage {...props} loadState={{phase:'saving'}}/>)
+  expect(screen.getByRole('status')).toHaveTextContent('正在读取模拟记录')
+  page.rerender(<SimulationHistoryPage {...props} loadState={{phase:'error',message:'读取失败'}}/>)
+  expect(screen.getByRole('alert')).toHaveTextContent('读取失败')
+  page.rerender(<SimulationHistoryPage {...props} publicMode={false}/>)
+  expect(screen.getByText('暂无受众模拟。')).toBeVisible()
 })
 
 it('shows frozen account source notes in public history without exposing raw payloads',()=>{

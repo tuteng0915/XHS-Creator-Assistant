@@ -180,13 +180,44 @@ def test_account_topics_do_not_turn_positive_or_empty_feedback_into_pain(feedbac
 
     assert account_system == PROMPT_TOPICS
     assert "正向反馈不得改写成痛点" in account_system
-    assert "可依据账号诊断（profile）建议选题" in account_system
-    assert "而非已验证的读者需求" in account_system
+    assert "没有对应评论时写“作品延伸：……”" in account_system
+    assert "某题没有对应评论不等于整个账号没有反馈" in account_system
     assert "topics[0] 必须对应" not in account_system
     assert "申请经验" in account_user
+    assert "读者反馈（painPoints）" in account_user
+    assert "评论痛点" not in account_user
     assert json.dumps(feedback, ensure_ascii=False) in account_user
     assert trend_system == PROMPT_TOPICS_B
     assert "topics[0] 必须对应 painPoints[0]" in trend_system
+
+
+def test_account_topics_use_existing_coverage_without_extra_context_or_schema():
+    service = ModelCallService(settings())
+    profile = {
+        "accountPortrait": {"summary": {"statement": "比较不同学习路径"}},
+        "performanceObservations": {"notes": [{"noteId": "n1", "title": "已选项目就读体验"}]},
+    }
+    feedback = [{"theme": "询问是否有面试", "evidence": ["请问有面试嘛？"]}]
+    system, user = service._build_prompt(ModelOperation.TOPICS, {
+        "positioning": "升学选择", "profile": profile, "painPoints": feedback,
+    })
+    assert "performanceObservations.notes" in system
+    assert "不只看评论所属那一篇" in system
+    assert "其他篇目已交代的事实直接承接，不再索要确认" in system
+    assert "不把已交代的事实再次当成信息空白" in system
+    assert "标题或摘要未提到，也不代表原文没有" in system
+    assert "可以跨篇提炼共同问题" in system
+    assert "真实能力或资格的不足不能靠表达技巧补足" in system
+    assert "不必每题套用惯用结构和风格指纹" in system
+    assert "不重复索要输入已经明确的事实" in system
+    # The existing projection already carries selected titles and report evidence.
+    # Do not duplicate original bodies or invent a new required output protocol.
+    assert user.count(json.dumps(profile, ensure_ascii=False)) == 1
+    assert user.count(json.dumps(feedback, ensure_ascii=False)) == 1
+    schema = json.loads(system.split("schema:\n", 1)[1])
+    assert set(schema["topics"][0]) == {
+        "title", "angle", "pain", "whyFit", "pendingSuggestions",
+    }
 
 
 def test_qwen_profile_length_stop_is_not_accepted_even_with_parseable_json(monkeypatch):

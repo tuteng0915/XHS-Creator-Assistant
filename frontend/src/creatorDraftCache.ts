@@ -1,4 +1,5 @@
-import type { CreatorContextSelection } from './contentCollaboration'
+import type { CollaborationCandidate, CreatorContextSelection } from './contentCollaboration'
+import { frozenWritingFocus } from './contentCollaboration'
 import type { Topic } from './types'
 
 export interface CreatorDraft {
@@ -14,9 +15,21 @@ export interface CreatorMessageDraft {
   version: 1
   message: string
   selection: CreatorContextSelection
+  pendingTopicId?: string
+  sessionCreationKey?: string
+  pendingRequest?: {content: string; focusSignature: string; contextSignature: string; key: string}
 }
 
-type CacheKind = 'draft' | 'message'
+export interface CreatorCandidateDraft {
+  version: 1
+  baseUpdatedAt: string
+  baseTitle: string
+  title: string
+  body: string
+  candidate: CollaborationCandidate
+}
+
+type CacheKind = 'draft' | 'message' | 'candidate'
 export function creatorDraftKey(kind: CacheKind, workspaceId: string, topicId: string) {
   return `sqs:creator:${kind}:v1:${encodeURIComponent(workspaceId)}:${encodeURIComponent(topicId)}`
 }
@@ -40,6 +53,9 @@ export function readCreatorDraft(workspaceId: string, topicId: string) {
 
 export function readCreatorMessage(workspaceId: string, topicId: string) {
   return read<CreatorMessageDraft>('message', workspaceId, topicId, (value): value is CreatorMessageDraft => record(value) && value.version === 1
+    && (value.pendingTopicId === undefined || typeof value.pendingTopicId === 'string')
+    && (value.sessionCreationKey === undefined || typeof value.sessionCreationKey === 'string')
+    && (value.pendingRequest === undefined || record(value.pendingRequest) && ['content', 'focusSignature', 'contextSignature', 'key'].every(key => typeof (value.pendingRequest as Record<string, unknown>)[key] === 'string'))
     && typeof value.message === 'string' && record(value.selection) && value.selection.schemaVersion === 'creator-context-selection/v1'
     && Array.isArray(value.selection.references) && value.selection.references.length <= 8
     && value.selection.references.every(item => record(item) && typeof item.id === 'string' && !!item.id.trim()
@@ -48,7 +64,15 @@ export function readCreatorMessage(workspaceId: string, topicId: string) {
         : ['account_analysis', 'audience_analysis'].includes(String(item.kind)) && (item.noteId === undefined || item.noteId === null))))
 }
 
-export function writeCreatorCache(kind: CacheKind, workspaceId: string, topicId: string, value: CreatorDraft | CreatorMessageDraft | null): boolean {
+export function readCreatorCandidate(workspaceId: string, topicId: string) {
+  return read<CreatorCandidateDraft>('candidate', workspaceId, topicId, (value): value is CreatorCandidateDraft => record(value) && value.version === 1
+    && ['baseUpdatedAt', 'baseTitle', 'title', 'body'].every(key => typeof value[key] === 'string') && record(value.candidate)
+    && value.candidate.kind === 'copy_option' && typeof value.candidate.title === 'string' && typeof value.candidate.body === 'string'
+    && !value.candidate.focusUnavailable && (value.candidate.writingFocus === undefined
+      || !!frozenWritingFocus(value.candidate.writingFocus) && !frozenWritingFocus(value.candidate.writingFocus)?.selection))
+}
+
+export function writeCreatorCache(kind: CacheKind, workspaceId: string, topicId: string, value: CreatorDraft | CreatorMessageDraft | CreatorCandidateDraft | null): boolean {
   try {
     const key = creatorDraftKey(kind, workspaceId, topicId)
     if (value) window.sessionStorage.setItem(key, JSON.stringify(value))

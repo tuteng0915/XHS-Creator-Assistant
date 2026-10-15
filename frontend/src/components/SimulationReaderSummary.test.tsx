@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { SimulationRun } from '../types'
 import { SimulationReaderSummary } from './SimulationReaderSummary'
@@ -82,11 +82,22 @@ it('handles empty or malformed legacy selection without making a recommendation'
 it('history page resets expanded reasons when switching runs and uses only its frozen props', () => {
   const props = {publicMode:true,simulationRuns:[],selectedSimulationRun:run,simulationReviewDraft:{reviewStatus:'unreviewed' as const,userNotes:''},simulationReviewSaveState:{phase:'idle' as const},reviewStatusLabel:(s:string)=>s,onOpenSimulationRun:vi.fn(),onSimulationReviewDraftChange:vi.fn(),onSaveSimulationRunReview:vi.fn(),stageSeedFromSimulation:()=>[],renderStageResult:()=>null}
   const {rerender} = render(<SimulationHistoryPage {...props} />)
-  fireEvent.click(screen.getByText('推荐理由'))
+  expect(screen.getByLabelText('本次参与读者')).toHaveTextContent('当时的行动派')
+  expect(screen.getByText('先考虑投入，再决定行动。')).not.toBeVisible()
+  expect(screen.getByRole('region',{name:'读者试读群聊'}).compareDocumentPosition(screen.getByText('推荐依据与备注',{selector:'summary'}))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(screen.queryByText('实际参与者')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByText('推荐依据与备注',{selector:'summary'}))
+  expect(screen.queryByText('推荐理由',{selector:'summary'})).not.toBeInTheDocument()
   expect(screen.getByText('先考虑投入，再决定行动。')).toBeVisible()
   rerender(<SimulationHistoryPage {...props} selectedSimulationRun={{...run,id:'other',personaDefinitions:[{id:'b',name:'另一运行的名字'}]}} />)
   expect(screen.getByText('先考虑投入，再决定行动。')).not.toBeVisible()
-  const section = screen.getByRole('region',{name:'本次读者选择'})
-  expect(within(section).getByText('另一运行的名字')).toBeInTheDocument()
+  expect(screen.getByLabelText('本次参与读者')).toHaveTextContent('另一运行的名字')
   expect(screen.queryByText('当时的行动派')).not.toBeInTheDocument()
+})
+
+it('keeps not-yet-started selections distinct from actual participation in compact history',()=>{
+  render(<SimulationReaderSummary variant="compact" run={{...run,status:'pending',personaDefinitions:[]}}/>)
+  expect(screen.getByText('已选读者')).toBeVisible()
+  expect(screen.queryByText('参与读者')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('本次参与读者')).toHaveTextContent('当时的行动派')
 })

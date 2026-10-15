@@ -95,13 +95,12 @@ PROMPT_READER_FEEDBACK = """你是评论区分析师。只根据本次候选评�
 只输出 JSON，沿用 painPoints 字段，不要解释或 markdown 代码块。schema:
 {"painPoints":[{"theme":"","intensity":"高/中","count":0,"evidence":[]}]}"""
 
-PROMPT_TOPICS = """你是内容选题策略师。基于账号定位、爆款基因诊断和评论区痛点，生成 3~4 个选题 + 2 组标题变体。
-重要约束：
-① 优先回应评论中明确可行动的问题或需求，不强制 topics[0] 对应 painPoints[0]。正向反馈不得改写成痛点；评论反馈为空或仅有感谢、认可等正向反馈时，可依据账号诊断（profile）建议选题，并在 whyFit 中说明这是基于账号内容的建议，而非已验证的读者需求。
-② 每个 whyFit 必须结合账号的惯用结构和风格指纹，不能是通用表述
-③ titles 选 topics[0] 和 topics[1] 各给 3 条变体，贴合已归纳的标题公式，不贩卖焦虑
-④ 输入的账号诊断是模型归纳，不是个人经历的原始证据。标题、angle、whyFit 和标题变体不得把风格示例改写成作者亲历，不编造数字、场景、人物对话或身份。
-⑤ 使用问题型、方法型标题与中性角度；如需个人故事支撑，把需要用户提供或确认的素材写入 pendingSuggestions，不将假定故事放进 title/angle。建议以“请确认是否有……经历”表达，不代写为“我曾……”。无待确认项时返回空数组。
+PROMPT_TOPICS = """你是账号诊断后的选题编辑。结合已有作品与读者反馈，提出 3~4 个值得继续写的选题 + 2 组标题变体。
+① 优先回应评论中明确可行动的问题，不强制 topics[0] 对应 painPoints[0]。pain 沿用旧字段名，逐题说明来源与阅读价值：有对应评论时概括其实际问题；没有对应评论时写“作品延伸：……”并说明可进一步帮助读者理解什么。正向反馈不得改写成痛点；某题没有对应评论不等于整个账号没有反馈，不用“评论反馈为空”解释选题。
+② 评论是当时的提问，不代表现在仍缺答案。先与 profile 中全部所选笔记标题（performanceObservations.notes）及作品证据交叉对照，不只看评论所属那一篇；其他篇目已交代的事实直接承接，不再索要确认。angle 只展开尚值得补充的比较、解释或更新，不把已交代的事实再次当成信息空白。标题或摘要未提到，也不代表原文没有。
+③ whyFit 用相关作品中的一个具体做法说明适配，不必每题套用惯用结构和风格指纹，也不把单篇写法说成全账号习惯。可以跨篇提炼共同问题，但保留各作品的对象与判断条件：比较两种方法不等于它们能互相替代，真实能力或资格的不足不能靠表达技巧补足。扩展方向写成新提议，而非作者已经覆盖的领域。
+④ titles 选 topics[0] 和 topics[1] 各给 3 条变体，参考现有标题的表达，不贩卖焦虑。输入画像是模型归纳，不是作者亲历证据；标题、angle、whyFit 和变体不编造数字、场景、对话或身份，不把读者经历写成作者经历。
+⑤ 如需新增故事、案例或规则支撑，把待提供或确认的素材写入 pendingSuggestions；不重复索要输入已经明确的事实，也不将假定故事放进 title/angle。建议以“请确认是否有……经历”表达，不代写为“我曾……”。无待确认项时返回空数组。
 只输出 JSON，不要任何解释或 markdown 代码块。schema:
 {"topics":[{"title":"","angle":"","pain":"","whyFit":"","pendingSuggestions":[]}],"titles":[{"topic":"","variants":[]}]}"""
 
@@ -332,7 +331,7 @@ _READER_FEEDBACK_STAGE_BUDGETS = {"retrieve": 2200, "rank": 500}
 
 TOKEN_USAGE_KEYS = (
     "prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens",
-    "reasoning_tokens",
+    "reasoning_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens",
 )
 
 
@@ -342,7 +341,7 @@ def safe_token_usage(value: Any) -> dict[str, int]:
         return {}
     usage = {key: value[key] for key in TOKEN_USAGE_KEYS
              if type(value.get(key)) is int and value[key] >= 0}
-    # Qwen's OpenAI-compatible API nests reasoning tokens in completion details.
+    # OpenAI-compatible APIs can nest reasoning tokens in completion details.
     # Flatten it for request totals; it is a subset of completion_tokens, not an
     # additional billable count to add to total_tokens.
     for key in ("completion_tokens_details", "output_tokens_details"):
@@ -367,9 +366,11 @@ class ModelCallService:
         """Make one independent staged-report request without review or retry."""
         if not isinstance(stage, str) or stage not in _ACCOUNT_REPORT_STAGE_BUDGETS:
             raise ValidationError("Unsupported account report stage. Use overview, read, or synthesis.")
-        if self.settings.model_provider.strip().lower() not in {"qwen", "dashscope"}:
-            raise ValidationError("Staged account reports require MODEL_PROVIDER=qwen or dashscope.")
-        response = await self._call_qwen(
+        provider = self.settings.model_provider.strip().lower()
+        if provider not in {"qwen", "dashscope", "deepseek"}:
+            raise ValidationError("Staged account reports require MODEL_PROVIDER=qwen or dashscope or deepseek.")
+        call_once = self._call_deepseek if provider == "deepseek" else self._call_qwen
+        response = await call_once(
             ModelOperation.PROFILE,
             {"_accountReportStage": stage},
             # Explicit prompts and each stage's own schema bypass PROFILE's
@@ -381,7 +382,8 @@ class ModelCallService:
             model_metadata={
                 **response.model_metadata,
                 "stage": stage,
-                "profileModel": self.qwen_model_for(ModelOperation.PROFILE),
+                "profileModel": (self.settings.deepseek_model.strip() if provider == "deepseek"
+                                 else self.qwen_model_for(ModelOperation.PROFILE)),
             },
         )
 
@@ -395,9 +397,11 @@ class ModelCallService:
             call_once = self._call_anthropic
         elif provider in {"qwen", "dashscope"}:
             call_once = self._call_qwen
+        elif provider == "deepseek":
+            call_once = self._call_deepseek
         else:
             raise ValidationError(
-                "Unsupported MODEL_PROVIDER. Use 'anthropic', 'qwen', or 'dashscope'."
+                "Unsupported MODEL_PROVIDER. Use 'anthropic', 'qwen', 'dashscope', or 'deepseek'."
             )
         response = await call_once(operation, context)
         return await self.review_panel_output(operation, context, response, call_once=call_once)
@@ -406,13 +410,15 @@ class ModelCallService:
         self, stage: str, system: str, user: str,
     ) -> ModelCallResponse:
         """One account-feedback step; keep trend pain points on their old path."""
-        if stage not in _READER_FEEDBACK_STAGE_BUDGETS:
+        if not isinstance(stage, str) or stage not in _READER_FEEDBACK_STAGE_BUDGETS:
             raise ValidationError("Unsupported reader feedback stage")
         provider = self.settings.model_provider.strip().lower()
         if provider in {"qwen", "dashscope"}:
             call_once = self._call_qwen
         elif provider == "anthropic":
             call_once = self._call_anthropic
+        elif provider == "deepseek":
+            call_once = self._call_deepseek
         else:
             raise ValidationError("Unsupported model provider")
         response = await call_once(
@@ -433,9 +439,10 @@ class ModelCallService:
             return response
         if call_once is None:
             provider = self.settings.model_provider.strip().lower()
-            if provider not in {"qwen", "dashscope", "anthropic"}:
+            if provider not in {"qwen", "dashscope", "anthropic", "deepseek"}:
                 raise ValidationError("不支持的核对模型")
-            call_once = self._call_anthropic if provider == "anthropic" else self._call_qwen
+            call_once = (self._call_anthropic if provider == "anthropic"
+                         else self._call_deepseek if provider == "deepseek" else self._call_qwen)
         # A failed/malformed review fails the stage. Never silently return the
         # unchecked original, never regenerate readers/copy or retry this check.
         reviewed = await call_once(operation, context, review_prompt=plan.prompt)
@@ -517,35 +524,66 @@ class ModelCallService:
             raise ValidationError(
                 "QWEN_API_KEY or DASHSCOPE_API_KEY is required for live generation"
             )
+        return await self._call_compatible(
+            operation, context, provider="qwen", model=self.qwen_model_for(operation),
+            api_key=self.settings.qwen_api_key, base_url=self.settings.qwen_base_url,
+            thinking_parameters=self.qwen_thinking_parameters(operation),
+            client_factory=self._qwen_client, review_prompt=review_prompt,
+        )
+
+    async def _call_deepseek(
+        self, operation: ModelOperation, context: dict[str, Any], *, review_prompt=None
+    ) -> ModelCallResponse:
+        if not self.settings.deepseek_api_key.strip():
+            raise ValidationError("DEEPSEEK_API_KEY is required for live generation")
+        model = self.settings.deepseek_model.strip()
+        if not model:
+            raise ValidationError("DEEPSEEK_MODEL is required for live generation")
+        try:
+            return await self._call_compatible(
+                operation, context, provider="deepseek", model=model,
+                api_key=self.settings.deepseek_api_key, base_url=self.settings.deepseek_base_url,
+                thinking_parameters={"thinking": {"type": "disabled"}},
+                client_factory=self._deepseek_client, review_prompt=review_prompt,
+            )
+        except (httpx.RequestError, httpx.InvalidURL):
+            # Request errors can contain endpoint URLs and provider response text.
+            raise ValidationError("DeepSeek model call failed (transport error)") from None
+
+    async def _call_compatible(
+        self, operation: ModelOperation, context: dict[str, Any], *,
+        provider: str, model: str, api_key: str, base_url: str,
+        thinking_parameters: dict[str, Any], client_factory, review_prompt=None,
+    ) -> ModelCallResponse:
+        """Shared JSON-object transport; provider adapters choose routing and thinking."""
 
         system, user = review_prompt or self._build_prompt(operation, context)
-        model = self.qwen_model_for(operation)
-        thinking_parameters = self.qwen_thinking_parameters(operation)
         stage = context.get("_accountReportStage") if operation == ModelOperation.PROFILE else None
         staged = isinstance(stage, str) and stage in _ACCOUNT_REPORT_STAGE_BUDGETS
         # Use the same transport as the working single-call report. Optional
         # sections are normalized by the product, not required by the provider.
         response_format = {"type": "json_object"}
         metadata = {
-            "provider": "qwen",
+            "provider": provider,
             "systemPromptHash": hashlib.sha256(system.encode("utf-8")).hexdigest(),
             "model": model, "modelSource": "configured", "usage": {},
             "operation": operation.value,
-            **({"enableThinking": thinking_parameters.get("enable_thinking"),
+            **({"enableThinking": (False if provider == "deepseek"
+                                   else thinking_parameters.get("enable_thinking")),
                 "thinkingBudget": thinking_parameters.get("thinking_budget"),
                 "responseFormat": response_format["type"],
                 "responseSchema": None}
-               if operation == ModelOperation.PROFILE else {}),
+               if operation == ModelOperation.PROFILE or provider == "deepseek" else {}),
             **({"stage": stage, "profileModel": model} if staged else {}),
         }
         if self.before_request is not None:
             self.before_request()
-        async with self._qwen_client(operation) as client:
+        async with client_factory(operation) as client:
             response = await client.post(
-                f"{self.settings.qwen_base_url.rstrip('/')}/chat/completions",
+                f"{base_url.rstrip('/')}/chat/completions",
                 headers={
                     "content-type": "application/json",
-                    "authorization": f"Bearer {self.settings.qwen_api_key}",
+                    "authorization": f"Bearer {api_key}",
                 },
                 json={
                     "model": model,
@@ -570,21 +608,32 @@ class ModelCallService:
         except ValueError:
             if staged:
                 raise AccountReportOutputError("invalid_response", metadata=metadata) from None
+            if provider == "deepseek":
+                raise ValidationError("Model response was not valid JSON") from None
             raise
         if staged and not isinstance(body, dict):
             raise AccountReportOutputError("invalid_response", metadata=metadata)
+        if provider == "deepseek" and not isinstance(body, dict):
+            raise ValidationError("Model response must be an object")
+        response_model = body.get("model")
+        if provider == "deepseek" and (
+            not isinstance(response_model, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", response_model)
+        ):
+            response_model = None
         metadata.update({
-            "model": body.get("model", model),
-            "modelSource": "response" if body.get("model") else "configured",
+            "model": response_model or model,
+            "modelSource": "response" if response_model else "configured",
             "usage": (safe_token_usage(body.get("usage"))
-                      if operation == ModelOperation.PROFILE else body.get("usage", {})),
+                      if operation == ModelOperation.PROFILE or provider == "deepseek"
+                      else body.get("usage", {})),
         })
         if staged:
             output = self._parse_account_report_response(body, metadata)
             return ModelCallResponse(output=output, model_metadata=metadata)
+        text = self._extract_openai_compatible_text(body)
         if review_prompt and body["choices"][0].get("finish_reason") == "length":
             raise ValidationError("独立核对输出不完整，未放行原结果。")
-        text = self._extract_openai_compatible_text(body)
         if operation == ModelOperation.PROFILE and body["choices"][0].get("finish_reason") == "length":
             raise ValidationError("账号画像输出达到长度上限，未取得完整结果。")
         if operation == ModelOperation.READER_SELECTION and body["choices"][0].get("finish_reason") == "length":
@@ -659,6 +708,11 @@ class ModelCallService:
                         if operation == ModelOperation.PROFILE else 90)
         return httpx.AsyncClient(timeout=httpx.Timeout(90, read=read_timeout))
 
+    def _deepseek_client(self, operation: ModelOperation) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=httpx.Timeout(
+            90, read=self.settings.deepseek_read_timeout_seconds,
+        ))
+
     def _anthropic_messages_url(self) -> str:
         if self.settings.anthropic_messages_url.strip():
             return self.settings.anthropic_messages_url.strip()
@@ -729,7 +783,7 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
                 "账号定位："
                 f"{positioning}\n\n账号诊断：\n"
                 f"{json.dumps(context.get('profile'), ensure_ascii=False)}\n\n"
-                "评论痛点：\n"
+                "读者反馈（painPoints）：\n"
                 f"{json.dumps(context.get('painPoints'), ensure_ascii=False)}",
             )
         if operation == ModelOperation.STRUCTURE:

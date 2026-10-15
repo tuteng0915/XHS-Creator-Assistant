@@ -3,6 +3,7 @@ import { agentConversationApi } from '../api'
 import type { AgentConversation, MediaAsset, TextInputAsset, Topic } from '../types'
 import { collaborationCandidates, collaborationSummary, contentCollaborationApi, creatorContextSignature, emptyCreatorContext } from '../contentCollaboration'
 import { readCreatorMessage, writeCreatorCache } from '../creatorDraftCache'
+import { sameCreatorCandidate } from '../creatorCandidateIdentity'
 import type { CollaborationCandidate, CollaborationComposeIntent, CollaborationRole, CollaborationSession, CollaborationSummary, CreatorContextSelection, WritingFocusRequest } from '../contentCollaboration'
 import { CreatorEditSnapshot } from './CreatorEditSnapshot'
 import { PendingSuggestions } from './PendingSuggestions'
@@ -15,16 +16,23 @@ const candidateNames = {evidence: '可用材料', open_question: '等你补充',
 const isRunning = (session: CollaborationSession | null) => !!session && ['queued', 'running'].includes(session.executionStatus)
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
-export function ContentCollaborationChat({workspaceId, topic, profile, mediaAssets, blocked, beforeSend, onActivityChange, onPreview, composeIntent, onDraftStorageIssue}: {
-  workspaceId: string; topic: Topic; blocked: boolean
+export function ContentCollaborationChat({workspaceId, topic, profile, mediaAssets, blocked, beforeSend, onActivityChange, onPreview, onFirstDraft, onStarted, visibleCandidate, sendHint, composeIntent, initialMessage, onDraftStorageIssue}: {
+  workspaceId: string; topic: Topic | null; blocked: boolean
   profile?: TextInputAsset; mediaAssets?: MediaAsset[]
-  beforeSend: () => Promise<{topic: Topic; assertCurrent: () => void; writingFocus?: WritingFocusRequest}>
+  beforeSend: (message: string) => Promise<{topic: Topic; assertCurrent: () => void; writingFocus?: WritingFocusRequest}>
   onActivityChange: (busy: boolean) => void
   onPreview: (candidate: CollaborationCandidate) => void
+  onFirstDraft?: (candidate: CollaborationCandidate) => void
+  onStarted?: (topic: Topic) => void
+  visibleCandidate?: CollaborationCandidate | null
+  sendHint?: string
   composeIntent?: CollaborationComposeIntent | null
+  initialMessage?: string
   onDraftStorageIssue?: (unavailable: boolean) => void
 }) {
-  const [initialCache] = useState(() => readCreatorMessage(workspaceId, topic.id))
+  const cacheTopicId = topic?.id || '__new_creation__'
+  const creatingTopic = !topic
+  const [initialCache] = useState(() => readCreatorMessage(workspaceId, cacheTopicId))
   const [cacheUnavailable, setCacheUnavailable] = useState(initialCache.unavailable)
   const [session, setSession] = useState<CollaborationSession | null>(null)
   const [legacy, setLegacy] = useState<AgentConversation[]>([])
@@ -34,17 +42,20 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
   const [teamError, setTeamError] = useState('')
   const [ready, setReady] = useState(false)
   const [loadVersion, setLoadVersion] = useState(0)
-  const [message, setMessage] = useState(initialCache.value?.message || '')
+  const [message, setMessage] = useState(initialCache.value?.message ?? initialMessage ?? '')
   const [selection, setSelection] = useState<CreatorContextSelection>(() => initialCache.value?.selection || emptyCreatorContext())
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [pollPaused, setPollPaused] = useState(false)
   const [elapsed, setElapsed] = useState(0)
-  const [composeFocusRequest, setComposeFocusRequest] = useState('')
+  const [composeFocusRequest, setComposeFocusRequest] = useState(initialMessage ? 'initial-message' : '')
   const active = useRef(true)
   const sendLock = useRef(false)
-  const creationKey = useRef(crypto.randomUUID())
-  const requestRef = useRef<{content: string; focusSignature: string; contextSignature: string; key: string} | null>(null)
+  const creationKey = useRef(initialCache.value?.sessionCreationKey || crypto.randomUUID())
+  const pendingTopicId = useRef(initialCache.value?.pendingTopicId)
+  const requestRef = useRef<{content: string; focusSignature: string; contextSignature: string; key: string} | null>(initialCache.value?.pendingRequest || null)
+  const firstDraftRequest = useRef<{sessionId: string; runId?: string; previousMessageIds: Set<string>} | null>(null)
+  const restoredCandidate = useRef<string | null>(null)
   const selectionTouched = useRef(!!initialCache.value)
   const composedId = useRef('')
   const focusedComposeId = useRef('')
@@ -55,11 +66,16 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
   const referenceChanged = !!session?.messages.length && creatorContextSignature(selection) !== creatorContextSignature(session.creatorContextSelection || emptyCreatorContext())
   const unsavedReferences = selectionTouched.current && creatorContextSignature(selection) !== creatorContextSignature(session?.creatorContextSelection || emptyCreatorContext())
   const needsDraftProtection = !!message || unsavedReferences
+  const latestInput = useRef({message, selection})
+  latestInput.current = {message, selection}
 
   useEffect(() => {active.current = true; return () => {active.current = false}}, [])
   useEffect(() => {
-    setCacheUnavailable(!writeCreatorCache('message', workspaceId, topic.id, message || selectionTouched.current ? {version: 1, message, selection} : null))
-  }, [workspaceId, topic.id, message, selection])
+    // A topic-create receipt can arrive after this composer was reopened.
+    if (creatingTopic && !pendingTopicId.current) pendingTopicId.current = readCreatorMessage(workspaceId, cacheTopicId).value?.pendingTopicId
+    setCacheUnavailable(!writeCreatorCache('message', workspaceId, cacheTopicId, message || selectionTouched.current || pendingTopicId.current ? {version: 1, message, selection,
+      ...(creatingTopic ? {pendingTopicId: pendingTopicId.current, sessionCreationKey: creationKey.current, pendingRequest: requestRef.current || undefined} : {})} : null))
+  }, [workspaceId, cacheTopicId, message, selection, creatingTopic])
   useEffect(() => {onDraftStorageIssue?.(cacheUnavailable && needsDraftProtection)}, [cacheUnavailable, needsDraftProtection, onDraftStorageIssue])
   useEffect(() => () => onDraftStorageIssue?.(false), [onDraftStorageIssue])
   useEffect(() => {
@@ -85,6 +101,7 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
   }, [composeFocusRequest])
   useEffect(() => {onActivityChange(sending || running)}, [onActivityChange, sending, running])
   useEffect(() => {
+    if (!topic) {setReady(true); return}
     let current = true
     setReady(false)
     void contentCollaborationApi.list(workspaceId).then(async rows => {
@@ -100,8 +117,9 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
       }
     }).catch(e => {if (current) setError(`创作记录未能载入：${errorText(e)}`)})
     return () => {current = false}
-  }, [workspaceId, topic.id, loadVersion])
+  }, [workspaceId, topic?.id, loadVersion]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    if (!topic) return
     let current = true
     void agentConversationApi.list(workspaceId).then(async rows => {
       if (!current) return
@@ -110,9 +128,9 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
       if (current) setLegacy(results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []))
     }).catch(() => { /* Legacy history does not block the new room. */ })
     return () => {current = false}
-  }, [workspaceId, topic.id])
+  }, [workspaceId, topic?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!teamHistoryId) return
+    if (!teamHistoryId || !topic) return
     let current = true
     setTeamRecord(null); setTeamError('')
     void contentCollaborationApi.get(workspaceId, teamHistoryId).then(value => {
@@ -120,7 +138,7 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
       if (current) setTeamRecord(value)
     }).catch(e => {if (current) setTeamError(errorText(e))})
     return () => {current = false}
-  }, [workspaceId, topic.id, teamHistoryId])
+  }, [workspaceId, topic?.id, teamHistoryId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!running || !session || pollPaused) return
     let current = true
@@ -130,7 +148,7 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
       try {
         const latest = await contentCollaborationApi.get(workspaceId, id)
         if (!current) return
-        if (latest.id !== id || latest.workspaceId !== workspaceId || latest.contextTarget.assetId !== topic.id || latest.assistantMode !== 'single_writer') throw new Error('返回的进度不属于当前对话。')
+        if (latest.id !== id || latest.workspaceId !== workspaceId || latest.contextTarget.assetId !== session?.contextTarget.assetId || latest.assistantMode !== 'single_writer') throw new Error('返回的进度不属于当前对话。')
         setSession(latest)
         if (isRunning(latest)) timer = setTimeout(() => void poll(), 1000)
       } catch (e) {
@@ -152,6 +170,24 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
     const element = transcriptRef.current
     if (element && element.scrollHeight - element.scrollTop - element.clientHeight < 350) element.scrollTop = element.scrollHeight
   }, [session?.messages.length])
+  useEffect(() => {
+    const request = firstDraftRequest.current
+    if (!request || !session || session.id !== request.sessionId) return
+    const candidate = session.messages.filter(item => item.sender === 'writing' && !request.previousMessageIds.has(item.id)
+      && (!request.runId || item.modelMetadata.runId === request.runId))
+      .flatMap(collaborationCandidates).find(item => item.kind === 'copy_option' && !!item.body.trim() && !item.focusUnavailable && !item.writingFocus?.selection)
+    if (candidate) {
+      firstDraftRequest.current = null
+      if (!message.trim()) onFirstDraft?.(candidate)
+    } else if (!isRunning(session)) firstDraftRequest.current = null
+  }, [session, message, onFirstDraft])
+  useEffect(() => {
+    if (!ready || !session || isRunning(session) || firstDraftRequest.current || restoredCandidate.current === session.id) return
+    restoredCandidate.current = session.id
+    const candidate = [...session.messages].reverse().filter(item => item.sender === 'writing').flatMap(collaborationCandidates)
+      .find(item => item.kind === 'copy_option' && !!item.body.trim() && !item.focusUnavailable && !item.writingFocus?.selection)
+    if (candidate && !message.trim()) onFirstDraft?.(candidate)
+  }, [ready, session, message, onFirstDraft])
 
   async function send() {
     if (sendLock.current || blocked || !ready || running || !message.trim() || message.trim().length > 8000) return
@@ -160,23 +196,35 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
     const submittedMessage = message
     const submittedSelection = {schemaVersion: selection.schemaVersion, references: selection.references.map(item => ({...item}))}
     try {
-      const prepared = await beforeSend()
+      const prepared = await beforeSend(content)
       if (!active.current) return
+      prepared.assertCurrent()
+      if (!topic) pendingTopicId.current = prepared.topic.id
       const focusSignature = JSON.stringify(prepared.writingFocus || null)
       const contextSignature = creatorContextSignature(submittedSelection)
       const request = requestRef.current?.content === content && requestRef.current.contextSignature === contextSignature && requestRef.current.focusSignature === focusSignature
         ? requestRef.current : {content, focusSignature, contextSignature, key: crypto.randomUUID()}
       requestRef.current = request
-      const current = session || await contentCollaborationApi.create(workspaceId, topic.id, prepared.topic.title, creationKey.current)
+      if (!topic) setCacheUnavailable(!writeCreatorCache('message', workspaceId, cacheTopicId, {version: 1, message: latestInput.current.message, selection: latestInput.current.selection,
+        pendingTopicId: prepared.topic.id, sessionCreationKey: creationKey.current, pendingRequest: request}))
+      const current = session || await contentCollaborationApi.create(workspaceId, prepared.topic.id, prepared.topic.title, creationKey.current)
       if (!active.current) return
-      if (current.workspaceId !== workspaceId || current.contextTarget.assetId !== topic.id || current.assistantMode !== 'single_writer') throw new Error('创作会话未准备好，请重新载入后再试。')
+      if (current.workspaceId !== workspaceId || current.contextTarget.assetId !== prepared.topic.id || current.assistantMode !== 'single_writer') throw new Error('创作会话未准备好，请重新载入后再试。')
       setSession(current)
       prepared.assertCurrent()
       const result = await contentCollaborationApi.send(workspaceId, current.id, content, 'writing', request.key, prepared.writingFocus, submittedSelection)
       if (!active.current) return
-      if (result.id !== current.id || result.workspaceId !== workspaceId || result.contextTarget.assetId !== topic.id || result.assistantMode !== 'single_writer') throw new Error('返回的创作结果不属于当前对话，请重新载入。')
+      if (result.id !== current.id || result.workspaceId !== workspaceId || result.contextTarget.assetId !== prepared.topic.id || result.assistantMode !== 'single_writer') throw new Error('返回的创作结果不属于当前对话，请重新载入。')
+      if (onFirstDraft) firstDraftRequest.current = {sessionId: result.id, runId: result.runs.at(-1)?.id, previousMessageIds: new Set(current.messages.map(item => item.id))}
       setSession(result); requestRef.current = null
       setMessage(value => value === submittedMessage ? '' : value)
+      if (!topic && onStarted) {
+        const nextMessage = latestInput.current.message === submittedMessage ? '' : latestInput.current.message
+        const cached = writeCreatorCache('message', workspaceId, prepared.topic.id, {version: 1, message: nextMessage, selection: latestInput.current.selection})
+        if (!cached && nextMessage) {setError('消息已发送，但新的输入无法暂存。请先复制保留，再打开这篇创作。'); return}
+        writeCreatorCache('message', workspaceId, cacheTopicId, null)
+        onStarted(prepared.topic)
+      }
     } catch (e) {if (active.current) setError(errorText(e))}
     finally {sendLock.current = false; if (active.current) setSending(false)}
   }
@@ -211,8 +259,8 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
           <div className="collaboration-bubble"><p>{collaborationSummary(item)}</p>
             {collaborationCandidates(item).map((candidate, index) => <section className="collaboration-candidate" key={index}>
               <small>{candidateNames[candidate.kind]}</small>
-              <h3>{candidate.title}</h3><p>{candidate.body}</p>
-              {['outline', 'copy_option'].includes(candidate.kind) && <button type="button" disabled={blocked || sending || running || candidate.focusUnavailable} onClick={() => onPreview(candidate)}>{candidate.writingFocus?.selection ? '对比并修改这一段' : '预览并编辑这条建议'}</button>}
+              <h3>{candidate.title}</h3>{!sameCreatorCandidate(visibleCandidate, candidate) && <p>{candidate.body}</p>}
+              {['outline', 'copy_option'].includes(candidate.kind) && <button type="button" disabled={(blocked && !sameCreatorCandidate(visibleCandidate, candidate)) || sending || running || candidate.focusUnavailable} onClick={() => onPreview(candidate)}>{sameCreatorCandidate(visibleCandidate, candidate) ? '在稿件区编辑' : candidate.writingFocus?.selection ? '对比并修改这一段' : '预览并编辑这条建议'}</button>}
               {candidate.focusUnavailable && <p>这条建议的原文定位不完整，不能直接替换。请重新选择段落后发送。</p>}
               {candidate.kind === 'open_question' && <button type="button" disabled={sending || running} onClick={() => appendInstruction(`关于“${candidate.title}”：`)}>补充说明</button>}
             </section>)}
@@ -224,12 +272,12 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
     </div>
     {error && <div className="collaboration-error" role="alert"><p>{error}</p>{(!ready || pollPaused) && <button type="button" onClick={() => {setPollPaused(false); setError(''); setLoadVersion(value => value + 1)}}>重新载入进度</button>}</div>}
     <form className="collaboration-composer" onSubmit={event => {event.preventDefault(); void send()}}>
-      <textarea ref={composerRef} aria-label="给创作助手的消息" maxLength={8000} value={message} onChange={event => setMessage(event.target.value)} placeholder="例如：开头更像我的口吻，保留第二段的经历。" />
+      <textarea ref={composerRef} aria-label="给创作助手的消息" maxLength={8000} value={message} onChange={event => setMessage(event.target.value)} placeholder={topic ? '例如：开头更像我的口吻，保留第二段的经历。' : '聊一个想法、一段经历，或粘贴想修改的文字。'} />
       {cacheUnavailable && needsDraftProtection && !onDraftStorageIssue && <p role="alert">本页无法暂存，离开会丢失未发送的消息或参考调整。</p>}
       {message.trim().length > 8000 && <p role="alert">已保留完整输入，请精简至 8000 字以内再发送。</p>}
-      <div><small>发送时保存当前稿件。</small><button className="primary" disabled={blocked || !ready || sending || running || !message.trim() || message.trim().length > 8000}>{sending ? '正在提交…' : running ? '正在创作…' : '发送'}</button></div>
+      <div>{(sendHint || topic) && <small>{sendHint || '发送时保存当前稿件。'}</small>}<button className="primary" disabled={blocked || !ready || sending || running || !message.trim() || message.trim().length > 8000}>{sending ? '正在提交…' : running ? '正在创作…' : '发送'}</button></div>
     </form>
     {!!teamHistory.length && <details className="collaboration-legacy" onToggle={event => {if (event.currentTarget.open && !teamHistoryId) setTeamHistoryId(teamHistory[0].id)}}><summary>旧版多人协作（只读）</summary><select aria-label="旧协作记录" value={teamHistoryId} onChange={event => setTeamHistoryId(event.target.value)}><option value="">选择记录</option>{teamHistory.map(row => <option key={row.id} value={row.id}>{row.title}</option>)}</select>{teamError && <p role="alert">{teamError}</p>}{teamHistoryId && !teamRecord && !teamError && <p>正在读取…</p>}{teamRecord?.messages.map(item => <article key={item.id}><small>{roleNames[item.sender]}</small><p>{item.content}</p></article>)}</details>}
-    {!!legacy.length && <details className="collaboration-legacy"><summary>旧版创作对话（只读）</summary>{legacy.map(chat => <div key={chat.id}>{chat.messages.map(item => <article key={item.id}><small>{item.role === 'user' ? '你' : '旧版创作助手'}</small><p>{item.content}</p>{item.role === 'assistant' && <CreatorEditSnapshot metadata={item.modelMetadata} workspaceId={workspaceId} topicId={topic.id} />}<PendingSuggestions value={item.modelMetadata.pendingSuggestions} /></article>)}</div>)}</details>}
+    {!!legacy.length && topic && <details className="collaboration-legacy"><summary>旧版创作对话（只读）</summary>{legacy.map(chat => <div key={chat.id}>{chat.messages.map(item => <article key={item.id}><small>{item.role === 'user' ? '你' : '旧版创作助手'}</small><p>{item.content}</p>{item.role === 'assistant' && <CreatorEditSnapshot metadata={item.modelMetadata} workspaceId={workspaceId} topicId={topic.id} />}<PendingSuggestions value={item.modelMetadata.pendingSuggestions} /></article>)}</div>)}</details>}
   </section>
 }

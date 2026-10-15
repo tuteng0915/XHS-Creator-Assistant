@@ -1,0 +1,24 @@
+.fan-profile-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+.fan-profile-head .reader-card-heading { min-width: 0; align-items: center; }
+.fan-profile-head h2 { margin: 0; font-size: 20px; line-height: 1.5; overflow-wrap: anywhere; }
+.fan-profile-head > button { flex-shrink: 0; }
+.fan-profile-interests { margin: 0 0 14px; color: var(--sub); font-size: 13px; overflow-wrap: anywhere; }
+.fan-profile-perspective { margin: 0 0 24px; font-size: 15px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fan-profile-traits { display: grid; gap: 18px; margin: 0; }
+.fan-profile-traits dt { margin-bottom: 4px; color: var(--sub); font-size: 12px; }
+.fan-profile-traits dd { margin: 0; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fan-profile-editor > label { display: block; margin: 0 0 14px; color: var(--sub); font-size: 13px; }
+.fan-profile-editor > label > input, .fan-profile-editor > label > textarea { margin-top: 6px; color: var(--ink); }
+.fan-profile-source { font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.fan-profile-source figure { margin: 0 0 14px; }
+.fan-profile-source span, .fan-profile-source figcaption { display: block; color: var(--sub); font-size: 12px; margin-bottom: 4px; }
+.fan-profile-source blockquote { margin: 0; padding-left: 12px; border-left: 2px solid var(--line); white-space: pre-wrap; }
+.fan-profile-source p { margin: 0 0 14px; white-space: pre-wrap; }
+.fan-profile-source ul { margin: 4px 0 14px; padding-left: 20px; }
+.fan-profile-source .fan-profile-limitation { color: var(--sub); font-size: 12px; }
+.fan-profile-management { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); }
+.fan-profile-management > button { color: var(--sub); font-size: 13px; }
+@media (max-width: 480px) {
+  .fan-profile-head { flex-wrap: wrap; gap: 14px; }
+  .fan-profile-head h2 { font-size: 18px; }
+}

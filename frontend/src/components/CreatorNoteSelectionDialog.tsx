@@ -5,14 +5,22 @@ import { CreatorDialog } from './CreatorDialog'
 import { CreatorNoteBrowser } from './CreatorNoteBrowser'
 import { CreatorNoteFilters } from './CreatorNoteFilters'
 
-export function CreatorNoteSelectionDialog({notes, mediaAssets, scope, selectedIds, onConfirm, onClose, selectionMode = 'multiple', title = '分析范围', includeComments = true, maxSelection, contentOnlyPreview = false}: {
+type NoteSelectionProps = {
   notes: CreatorNote[]; mediaAssets: MediaAsset[]; scope: AnalysisScope; selectedIds?: string[];
   onConfirm: (scope: AnalysisScope, ids?: string[]) => void; onClose: () => void;
   selectionMode?: 'single' | 'multiple'; title?: string;
   includeComments?: boolean;
   maxSelection?: number;
   contentOnlyPreview?: boolean;
-}) {
+}
+
+export function CreatorNoteSelectionDialog(props: NoteSelectionProps) {
+  return <CreatorDialog title={props.title || '分析范围'} onClose={props.onClose} wide>
+    <CreatorNoteSelectionPanel {...props} />
+  </CreatorDialog>
+}
+
+export function CreatorNoteSelectionPanel({notes, mediaAssets, scope, selectedIds, onConfirm, onClose, selectionMode = 'multiple', includeComments = true, maxSelection, contentOnlyPreview = false}: NoteSelectionProps) {
   const [range, setRange] = useState<CreatorNoteRange>(scope.startsWith('last_') ? scope as CreatorNoteRange : 'all')
   const [sort, setSort] = useState<CreatorNoteSort>(scope === 'most_liked_10' ? 'liked' : scope === 'most_engaged_10' ? 'engagement' : 'newest')
   const [quantity, setQuantity] = useState('10')
@@ -34,7 +42,7 @@ export function CreatorNoteSelectionDialog({notes, mediaAssets, scope, selectedI
   const partialMetrics = sort !== 'newest' && visibleNotes.some(note => sort === 'liked'
     ? validNoteMetric(note.metrics.liked) === null
     : [note.metrics.liked, note.metrics.collected, note.metrics.comments, note.metrics.shares].some(value => validNoteMetric(value) === null))
-  return <CreatorDialog title={title} onClose={onClose} wide>
+  return <>
     <CreatorNoteFilters range={range} sort={sort} onRangeChange={setRange} onSortChange={setSort} />
     <div className="creator-note-quick-actions">
       {selectionMode === 'multiple' && <>
@@ -57,5 +65,5 @@ export function CreatorNoteSelectionDialog({notes, mediaAssets, scope, selectedI
       <button type="button" onClick={onClose}>取消</button>
       <button type="button" className="primary" disabled={!ids.length || overLimit} onClick={() => onConfirm(preset, ids)}>完成</button>
     </div>
-  </CreatorDialog>
+  </>
 }

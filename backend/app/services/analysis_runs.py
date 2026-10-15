@@ -225,9 +225,14 @@ class AnalysisRunService:
         with self.database.read() as connection:
             self.workspace_repository.get(connection, workspace_id)
             rows = self.repository.list(connection, workspace_id)
-        return [AnalysisRunSummary.model_validate({
-            **row, "origin": json.loads(row["input_snapshot_json"]).get("origin"),
-        }) for row in rows]
+        summaries = []
+        for row in rows:
+            snapshot = json.loads(row["input_snapshot_json"])
+            summaries.append(AnalysisRunSummary.model_validate({
+                **row, "origin": snapshot.get("origin"),
+                "note_count": self._snapshot_note_count(snapshot),
+            }))
+        return summaries
 
     def get(self, run_id: str) -> AnalysisRunResponse:
         with self.database.read() as connection:
@@ -1508,12 +1513,31 @@ class AnalysisRunService:
             return 0
 
     @staticmethod
+    def _snapshot_note_count(snapshot: dict) -> int | None:
+        """Summarize only frozen input; legacy free text has no reliable count."""
+        scope = snapshot.get("analysisRange")
+        if isinstance(scope, dict):
+            count = scope.get("selectedNoteCount")
+            if type(count) is int and count >= 0:
+                return count
+        profile = snapshot.get("xhsCreatorProfile")
+        if isinstance(profile, dict):
+            notes = profile.get("notes")
+            if isinstance(notes, list) and all(isinstance(note, dict) for note in notes):
+                return len(notes)
+            count = profile.get("noteCount")
+            if type(count) is int and count >= 0:
+                return count
+        return None
+
+    @staticmethod
     def _to_response(row: dict) -> AnalysisRunResponse:
         snapshot = json.loads(row["input_snapshot_json"])
         return AnalysisRunResponse.model_validate(
             {
                 **row,
                 "origin": snapshot.get("origin"),
+                "note_count": AnalysisRunService._snapshot_note_count(snapshot),
                 "input_snapshot": snapshot,
                 "stage_results": json.loads(row["stage_results_json"]),
                 "stage_errors": json.loads(row["stage_errors_json"]),

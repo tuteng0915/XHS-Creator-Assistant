@@ -5,6 +5,7 @@ import { PendingSuggestions } from './PendingSuggestions'
 import { EmptyState, JsonPreview } from './CommonUi'
 import { SaveIndicator, type SaveState } from './StageResultViews'
 import type { Topic, TopicSourceWorkflow } from '../types'
+import './TopicLibraryPage.css'
 
 type TopicFilter = TopicSourceWorkflow | 'all'
 
@@ -79,6 +80,8 @@ export function TopicLibraryPage({
   const [confirmArchive, setConfirmArchive] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState('')
+  const [editing, setEditing] = useState(false)
+  const editSaveRequested = useRef(false)
   const actionLock = useRef(false)
   const active = useRef(true)
   useEffect(() => {active.current = true; return () => {active.current = false}}, [])
@@ -91,7 +94,16 @@ export function TopicLibraryPage({
     if (message) window.addEventListener('beforeunload', warn)
     return () => {onLeaveGuardChange?.(null); window.removeEventListener('beforeunload', warn)}
   }, [publicMode, dirty, onLeaveGuardChange])
-  useEffect(() => {setMore(false); setConfirmArchive(false); setActionError('')}, [selectedTopic?.id])
+  useEffect(() => {
+    setMore(false); setConfirmArchive(false); setActionError(''); setEditing(false)
+    editSaveRequested.current = false
+  }, [selectedTopic?.id])
+  useEffect(() => {
+    if (editSaveRequested.current && !dirty && topicSaveState.phase === 'saved') {
+      editSaveRequested.current = false
+      setEditing(false)
+    }
+  }, [dirty, topicSaveState.phase])
   async function runTopicAction(action: (topic: Topic) => void | Promise<unknown>) {
     if (!selectedTopic || actionDisabled || actionLock.current) return
     actionLock.current = true; setActionBusy(true); setActionError('')
@@ -109,6 +121,10 @@ export function TopicLibraryPage({
       <div className="save-row"><button className="primary" disabled={manualTopicSaveState.phase === 'saving' || !manualTopicTitle.trim()}>保存选题</button><SaveIndicator state={manualTopicSaveState} /></div>
     </form>
   )
+  const pendingSuggestions = selectedTopic && Array.isArray(selectedTopic.generatedSnapshot.pendingSuggestions)
+    ? selectedTopic.generatedSnapshot.pendingSuggestions.filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
+    : []
+  const showTopicEditor = !publicMode || editing || dirty
   return (
     <div className={`workspace-page topics-page${publicMode ? ' creator-topics-page' : ''}`}>
       <section className="history-list">
@@ -158,8 +174,8 @@ export function TopicLibraryPage({
             onClick={() => onSelectTopicRow(topic)}
           >
             <span>{topic.pinned ? '📌 ' : ''}{topic.title}</span>
-            <b>{publicMode ? topicStatusLabel(topic.status) : topic.status}</b>
-            <small>{publicMode ? topicSourceLabel(topic.sourceWorkflow) : topic.sourceWorkflow}</small>
+            <b>{publicMode ? topic.status === 'candidate' && topic.body?.trim() ? '已有稿件' : topicStatusLabel(topic.status) : topic.status}</b>
+            {!publicMode && <small>{topic.sourceWorkflow}</small>}
           </button>
         ))}
       </section>
@@ -169,21 +185,21 @@ export function TopicLibraryPage({
             <div className="detail-head asset-detail-head">
               <div>
                 <h2>{selectedTopic.title}</h2>
-                <p>
-                  {publicMode ? topicSourceLabel(selectedTopic.sourceWorkflow) : selectedTopic.sourceWorkflow} · {publicMode ? topicStatusLabel(selectedTopic.status) : selectedTopic.status}
-                </p>
+                <p>{publicMode
+                  ? selectedTopic.body?.trim() ? `已有稿件 · ${Array.from(selectedTopic.body.trim()).length} 字` : '尚未起稿'
+                  : `${selectedTopic.sourceWorkflow} · ${selectedTopic.status}`}</p>
               </div>
               <div className="detail-actions">
                 {!publicMode && <button disabled={actionDisabled} onClick={() => onSelectCurrentTopic(selectedTopic)}>
                   设为当前
                 </button>}
                 <button className="primary" disabled={actionDisabled} onClick={() => publicMode ? selectedTopic.status === 'archived' ? void runTopicAction(onSelectCurrentTopic) : onOpenCanvas?.(selectedTopic) : onGenerateBrief(selectedTopic)}>
-                  {publicMode ? selectedTopic.status === 'archived' ? '恢复并设为当前' : 'AI 创作助手' : '生成创作 Brief'}
+                  {publicMode ? selectedTopic.status === 'archived' ? '恢复并设为当前' : selectedTopic.body?.trim() ? '继续创作' : '开始创作' : '生成创作 Brief'}
                 </button>
                 {!publicMode && <button disabled={actionDisabled} onClick={() => onGenerateDraft(selectedTopic)}>
                   生成内容结构
                 </button>}
-                {publicMode && selectedTopic.status !== 'archived' && <button disabled={actionDisabled} onClick={() => onSimulateTopic?.(selectedTopic)}>受众模拟</button>}
+                {publicMode && !showTopicEditor && <button type="button" disabled={actionDisabled} onClick={() => {editSaveRequested.current = false; setEditing(true)}}>编辑选题</button>}
                 {publicMode ? <button type="button" disabled={actionDisabled} onClick={() => {setActionError(''); setMore(true)}}>更多</button> : <button onClick={() => onArchiveTopic(selectedTopic)}>归档</button>}
               </div>
             </div>
@@ -195,13 +211,14 @@ export function TopicLibraryPage({
                   <button type="button" className="danger" disabled={actionBusy} onClick={() => void runTopicAction(onArchiveTopic)}>{actionBusy ? '正在归档…' : '确认归档'}</button></div>
               </> : <div className="detail-actions">
                 {selectedTopic.status !== 'archived' && <button type="button" disabled={actionBusy} onClick={() => void runTopicAction(onSelectCurrentTopic)}>设为当前</button>}
+                {selectedTopic.status !== 'archived' && onSimulateTopic && <button type="button" disabled={actionBusy} onClick={() => {setMore(false); onSimulateTopic(selectedTopic)}}>受众模拟</button>}
                 {onTogglePinned && <button type="button" disabled={actionBusy} onClick={() => void runTopicAction(onTogglePinned)}>{selectedTopic.pinned ? '取消置顶' : '置顶'}</button>}
                 {selectedTopic.status !== 'archived' && <button type="button" className="danger" disabled={actionBusy} onClick={() => setConfirmArchive(true)}>归档</button>}
               </div>}
               {actionBusy && !confirmArchive && <p role="status">正在更新选题…</p>}
               {actionError && <p role="alert">操作未完成：{actionError}。可以重试。</p>}
             </CreatorDialog>}
-            <div className="asset-detail-card">
+            {showTopicEditor ? <div className="asset-detail-card">
               {!publicMode && <div className="asset-section-head">
                 <h3>可编辑资产字段</h3>
                 <span>用户编辑区</span>
@@ -231,16 +248,26 @@ export function TopicLibraryPage({
                   })
                 }
               />
-              {publicMode && <><label htmlFor="topic-body">正文</label><textarea id="topic-body" disabled={actionBusy} rows={12} value={topicDraft.body || ''} onChange={event => onTopicDraftChange({...topicDraft,body:event.target.value})} /></>}
               <div className="save-row">
-                <button className="primary" disabled={publicMode && (!dirty || actionBusy || topicSaveState.phase === 'saving')} onClick={onSaveTopicEdits}>
+                <button className="primary" disabled={publicMode && (!dirty || !topicDraft.title.trim() || actionBusy || topicSaveState.phase === 'saving')} onClick={() => {editSaveRequested.current = true; onSaveTopicEdits()}}>
                   {publicMode ? '保存修改' : '保存选题资产'}
                 </button>
+                {publicMode && <button type="button" disabled={actionBusy || topicSaveState.phase === 'saving'} onClick={() => {
+                  editSaveRequested.current = false
+                  onTopicDraftChange({title: selectedTopic.title, angle: selectedTopic.angle, body: selectedTopic.body})
+                  setEditing(false)
+                }}>取消</button>}
                 <SaveIndicator state={topicSaveState} />
-                {publicMode && dirty && <small>保存修改后可继续生成或模拟。</small>}
               </div>
-            </div>
-            <div className="asset-detail-card readonly">
+            </div> : selectedTopic.angle.trim() ? <p className="creator-topic-angle">{selectedTopic.angle}</p> : null}
+            {publicMode ? <>
+              {(selectedTopic.sourceWorkflow !== 'manual' || selectedTopic.associatedPainPoint.trim() || selectedTopic.whyItFits.trim() || pendingSuggestions.length > 0) && <div className="creator-topic-source">
+                {selectedTopic.sourceWorkflow !== 'manual' && <p className="creator-topic-origin">来自{topicSourceLabel(selectedTopic.sourceWorkflow)}</p>}
+                {selectedTopic.associatedPainPoint.trim() && <p><span>想回应的问题</span>{selectedTopic.associatedPainPoint}</p>}
+                {selectedTopic.whyItFits.trim() && <p><span>选题依据</span>{selectedTopic.whyItFits}</p>}
+                {pendingSuggestions.length > 0 && <div><span>待确认建议</span><ul>{pendingSuggestions.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
+              </div>}
+            </> : <div className="asset-detail-card readonly">
               <div className="asset-section-head">
                 <h3>来源与适配理由</h3>
                 <span>只读</span>
@@ -274,7 +301,7 @@ export function TopicLibraryPage({
                 <summary>Generated Snapshot</summary>
                 <JsonPreview value={selectedTopic.generatedSnapshot} />
               </details>}
-            </div>
+            </div>}
           </>
         ) : (
           <EmptyState>选择或创建一个选题。</EmptyState>

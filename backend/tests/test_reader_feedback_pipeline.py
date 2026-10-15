@@ -8,6 +8,8 @@ from app.models import ModelCallResponse
 from app.services.reader_feedback_pipeline import (
     MAX_CANDIDATES,
     MAX_SELECTED,
+    RETRIEVE_PROMPT,
+    VERSION,
     comment_catalog,
     run_reader_feedback,
 )
@@ -310,3 +312,37 @@ def test_rank_has_original_quotes_and_their_note_context_for_ambiguous_short_fee
         {"id": "c1", "text": "这个还可以报名吗？", "noteTitle": "这份已保存的申请攻略"},
         {"id": "c2", "text": "需要准备什么？", "noteTitle": "这份已保存的申请攻略"},
     ]
+
+
+def test_whole_sample_recall_keeps_late_questions_available_before_candidate_limit():
+    # Transport coverage, not a substitute for a real-model recall check.
+    profile = source_profile(120)
+    for comment in profile["notes"][0]["comments"]:
+        comment["content"] = "谢谢分享，很喜欢！"
+    profile["notes"].append({
+        "noteId": "last-note", "title": "第一次参加行业活动",
+        "comments": [
+            {"commentId": "late-question", "content": "没到现场能否由同行者代为展示？"},
+            {"commentId": "specific-praise", "content": "报名步骤的截图让我少填错了一项"},
+        ],
+    })
+    calls = Calls({"candidates": [
+        {"theme": "是否可委托同行者展示", "commentIds": ["c121"]},
+        {"theme": "报名步骤截图帮助减少填报错误", "commentIds": ["c122"]},
+    ]}, {"selectedIds": ["f1", "f2"]})
+    result = run(calls, profile)
+
+    sent = calls.requests[0]
+    assert sent["system"] == RETRIEVE_PROMPT
+    assert "先读完全部 comments" in sent["system"]
+    assert f"最多{MAX_CANDIDATES}项候选" in sent["system"]
+    assert "需要不同回答的问题分开" in sent["system"]
+    assert len(sent["user"]["comments"]) == 122
+    assert sent["user"]["comments"][-2] == {
+        "id": "c121", "text": "没到现场能否由同行者代为展示？", "noteTitle": "第一次参加行业活动",
+    }
+    assert result.model_metadata["promptVersion"] == VERSION
+    assert result.model_metadata["requestCount"] == 2
+    assert result.model_metadata["sourceCommentCount"] == 122
+    assert [item["count"] for item in result.output["painPoints"]] == [1, 1]
+    assert result.output["painPoints"][0]["evidence"] == ["没到现场能否由同行者代为展示？"]

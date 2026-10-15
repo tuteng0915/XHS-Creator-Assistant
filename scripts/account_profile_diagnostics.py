@@ -38,7 +38,10 @@ def safe_usage(value):
 
 
 class DiagnosticProfileCalls(ModelCallService):
-    def __init__(self, settings, *, transport=None, read_timeout_seconds=90):
+    def __init__(self, settings, *, transport=None, read_timeout_seconds=None):
+        if read_timeout_seconds is None:
+            read_timeout_seconds = (settings.deepseek_read_timeout_seconds
+                                    if settings.model_provider.strip().lower() == "deepseek" else 90)
         if type(read_timeout_seconds) is not int or not 1 <= read_timeout_seconds <= 300:
             raise ValueError("read_timeout_seconds must be an integer from 1 to 300")
         super().__init__(settings)
@@ -49,8 +52,9 @@ class DiagnosticProfileCalls(ModelCallService):
         self.request_diagnostics: list[dict] = []
         self._request_recorded = False
         self._started: float | None = None
-        self._secrets = [value for value in (settings.qwen_api_key, settings.anthropic_api_key)
-                         if value]
+        self._secrets = [value for value in (
+            settings.qwen_api_key, settings.anthropic_api_key, settings.deepseek_api_key,
+        ) if value]
 
     def redact(self, value):
         if isinstance(value, str):
@@ -68,8 +72,9 @@ class DiagnosticProfileCalls(ModelCallService):
         self.request_attempts = 0
         self.request_diagnostics = []
         self._request_recorded = False
-        if operation != ModelOperation.PROFILE or self.settings.model_provider != "qwen":
-            raise ValueError("Profile diagnostics only support the Qwen profile operation")
+        if (operation != ModelOperation.PROFILE
+                or self.settings.model_provider.strip().lower() not in {"qwen", "deepseek"}):
+            raise ValueError("Profile diagnostics only support the Qwen or DeepSeek profile operation")
         self._started = time.monotonic()
         try:
             response = await super().call_operation(operation, context)
@@ -111,6 +116,24 @@ class DiagnosticProfileCalls(ModelCallService):
             if self._request_recorded:
                 self.request_diagnostics.append(deepcopy(self.diagnostic))
 
+    async def _call_deepseek(self, operation, context, *, review_prompt=None):
+        self.diagnostic = {"phase": "configuration", "enableThinking": False,
+                           "thinkingBudget": None}
+        self._request_recorded = False
+        self._started = time.monotonic()
+        try:
+            response = await super()._call_deepseek(operation, context, review_prompt=review_prompt)
+            self.diagnostic["phase"] = "parsed"
+            self._mark("parsedMs")
+            return response
+        except Exception as error:
+            self.diagnostic["failureType"] = type(error).__name__
+            raise
+        finally:
+            self._mark("finishedMs")
+            if self._request_recorded:
+                self.request_diagnostics.append(deepcopy(self.diagnostic))
+
     def _total_usage(self):
         samples = [safe_usage(item.get("usage")) for item in self.request_diagnostics]
         return {key: sum(item.get(key, 0) for item in samples) for key in USAGE_KEYS
@@ -121,7 +144,7 @@ class DiagnosticProfileCalls(ModelCallService):
         safe = {key: self.redact(metadata[key]) for key in (
             "provider", "model", "modelSource", "systemPromptHash", "promptVersion",
         ) if isinstance(metadata.get(key), str)}
-        safe.update(provider="qwen", operation=operation.value,
+        safe.update(provider=self.settings.model_provider.strip().lower(), operation=operation.value,
                     requestCount=self.request_attempts,
                     usage=safe_usage(metadata.get("usage")) or self._total_usage())
         enabled = metadata.get("enableThinking")
@@ -138,6 +161,12 @@ class DiagnosticProfileCalls(ModelCallService):
             self.diagnostic["requestNumber"] = self.request_attempts
 
     def _qwen_client(self, operation):
+        return self._diagnostic_client()
+
+    def _deepseek_client(self, operation):
+        return self._diagnostic_client()
+
+    def _diagnostic_client(self):
         self.diagnostic.update(
             phase="transport", requestedMaxTokens=MAX_TOKENS[ModelOperation.PROFILE],
         )
@@ -161,7 +190,10 @@ class DiagnosticProfileCalls(ModelCallService):
         request.extensions["trace"] = self._record_network_event
         payload = json.loads(request.content)
         self.diagnostic["requestedMaxTokens"] = payload.get("max_tokens")
-        self.diagnostic["enableThinking"] = payload.get("enable_thinking")
+        self.diagnostic["enableThinking"] = (
+            False if payload.get("thinking") == {"type": "disabled"}
+            else payload.get("enable_thinking")
+        )
         self.diagnostic["thinkingBudget"] = payload.get("thinking_budget")
         response_format = payload.get("response_format", {})
         self.diagnostic["responseFormat"] = response_format.get("type")

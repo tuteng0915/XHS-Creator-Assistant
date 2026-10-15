@@ -650,7 +650,7 @@ def test_old_saved_single_and_grouped_reports_stay_readable_without_the_old_gene
 
 
 def test_default_prompt_is_the_final_contract_and_auxiliary_selection_is_optional():
-    assert PIPELINE_VERSION.endswith("v5.1-balanced-default")
+    assert PIPELINE_VERSION.endswith("v5.2-independent-reading")
     assert MAX_EXTRA_REQUESTS == 1
     assert SYNTHESIS_PROMPT == SOURCE_LED_PROFILE_PROMPT
     assert OVERVIEW_PROMPT.startswith(TEXT_SCOPE)
@@ -661,6 +661,9 @@ def test_default_prompt_is_the_final_contract_and_auxiliary_selection_is_optiona
     assert "b编号仅用于定位原文，不表示自然段" in READ_PROMPT
     assert "不必每篇都拆标题、标点和全文结构" in READ_PROMPT
     assert "兼顾不同题材与内容价值" in OVERVIEW_PROMPT
+    assert '"readings":[{"noteId":"n1"}]' in OVERVIEW_PROMPT
+    assert '"question"' not in OVERVIEW_PROMPT
+    assert '"hypotheses"' not in OVERVIEW_PROMPT
 
 
 def test_readers_run_in_parallel_but_synthesis_does_not_inherit_overview_or_questions():
@@ -680,6 +683,8 @@ def test_readers_run_in_parallel_but_synthesis_does_not_inherit_overview_or_ques
                     both_started.set()
                 await both_started.wait()
                 assert set(payload) == {"question", "note"}
+                assert payload["question"] == DEFAULT_READING_QUESTION
+                assert all(task["question"] not in user for task in model.overview["readings"])
                 assert "account" not in payload and "summary" not in payload
                 for other in source_notes():
                     if other["title"] != title:
@@ -759,19 +764,38 @@ def test_fixed_selection_is_preserved_even_when_overview_json_is_invalid():
     ]
 
 
-@pytest.mark.parametrize("question", [None, "", "  ", 123])
-def test_auto_selection_with_a_valid_note_id_does_not_require_a_model_question(question):
+@pytest.mark.parametrize("question", [
+    None, "", "  ", 123, "这篇的开头有什么特点？",
+    "如何将宏观市场条件（税制、监管）与微观个人特质（社交力、资源）连接起来？",
+    pytest.param("过长的旧问题" * 100, id="overlong-legacy-question"),
+])
+@pytest.mark.parametrize("forced", [False, True])
+def test_selection_never_passes_model_questions_into_independent_reading(question, forced):
     task = {"noteId": "n1"}
     if question is not None:
         task["question"] = question
     overview = {"readings": [task]}
     model = FakeCalls(overview=overview)
-    result = asyncio.run(run_staged_account_report(context_for(), model))
+    result = asyncio.run(run_staged_account_report(
+        context_for(), model, representative_note_ids=["n1"] if forced else None,
+    ))
     assert result.model_metadata["representativeNoteIds"] == ["stable-a"]
     assert [stage for stage, _, _ in model.calls] == ["overview", "read", "synthesis"]
     assert model.calls[1][2]["question"] == DEFAULT_READING_QUESTION
+    assert model.calls[1][2]["note"] == {
+        "title": source_notes()[0]["title"],
+        "bodyExcerpts": [
+            {"excerptId": key, "text": value["quote"]}
+            for key, value in reading_fragments(
+                source_notes()[0]["title"], source_notes()[0]["body"],
+            ).items() if key != "t"
+        ],
+    }
+    if isinstance(question, str) and question.strip():
+        assert question not in json.dumps(model.calls[1:], ensure_ascii=False)
     assert model.overview == overview
     assert result.model_metadata["retryCount"] == 0
+    assert result.model_metadata["omissionCount"] == 0
 
 
 @pytest.mark.parametrize("ids,expected", [

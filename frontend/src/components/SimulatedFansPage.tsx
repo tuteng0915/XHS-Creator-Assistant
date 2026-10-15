@@ -4,6 +4,7 @@ import type { FanDefinition, FanVoiceTemplate, SimulatedFan } from '../types'
 import { CreatorDialog } from './CreatorDialog'
 import { ReaderAvatar } from './ReaderAvatar'
 import { InfoHint } from './InfoHint'
+import './SimulatedFansPage.css'
 
 type FanEditorHandle = { requestSwitch: (id: string) => void }
 
@@ -13,12 +14,13 @@ export function SimulatedFansPage({rows, error, onRefresh, onAnalyze}: {
   const [selectedId,setSelectedId] = useState('')
   const [editorBusy,setEditorBusy] = useState(false)
   const editor = useRef<FanEditorHandle>(null)
-  const selected = rows.find(r => r.id === selectedId)
-  return <div className="workspace-page">
+  const selected = rows.find(r => r.id === selectedId) || (!selectedId ? rows.find(r => r.status === 'active') || rows[0] : undefined)
+  useEffect(() => {if (!selectedId && selected) setSelectedId(selected.id)}, [selectedId, selected])
+  return <div className="workspace-page fan-profiles-page">
     <section className="history-list"><div className="panel-title">模拟粉丝</div>
       {error && <p role="alert">{error}</p>}
       {!rows.length && <><p>先分析历史图文中的受众，再收录你想邀请的模拟读者。</p><button className="primary" onClick={onAnalyze}>分析受众</button></>}
-      {rows.map(f => <button key={f.id} disabled={editorBusy} className={`run-row ${f.id === selectedId ? 'active' : ''}`} onClick={() => editor.current ? editor.current.requestSwitch(f.id) : setSelectedId(f.id)}><span className="reader-card-heading"><ReaderAvatar id={`${f.sourceAnalysisId}:${f.sourceGroupId}`} name={f.editable.name} size={32} /><span>{f.editable.name}</span></span><small>{f.original.origin === 'curated_preset' ? '预置整理 · ' : f.original.origin === 'voice_template' ? '预设声音 · ' : ''}{f.status === 'archived' ? '已归档' : '可邀请试读'}</small></button>)}
+      {rows.map(f => <button key={f.id} disabled={editorBusy} aria-pressed={f.id === selected?.id} className={`run-row ${f.id === selected?.id ? 'active' : ''}`} onClick={() => editor.current ? editor.current.requestSwitch(f.id) : setSelectedId(f.id)}><span className="reader-card-heading"><ReaderAvatar id={`${f.sourceAnalysisId}:${f.sourceGroupId}`} name={f.editable.name} size={32} /><span>{f.editable.name}</span></span><small>{f.original.origin === 'curated_preset' ? '预置整理 · ' : f.original.origin === 'voice_template' ? '预设声音 · ' : ''}{f.status === 'archived' ? '已归档' : '可邀请试读'}</small></button>)}
     </section>
     <section className="history-detail">{selected ? <FanEditor key={selected.id} ref={editor} fan={selected} onBusyChange={setEditorBusy} onSelect={setSelectedId} onRefresh={onRefresh} /> : <p>选择一位模拟粉丝查看档案。</p>}</section>
   </div>
@@ -32,6 +34,9 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
   const [refreshing,setRefreshing] = useState(false)
   const [refreshError,setRefreshError] = useState('')
   const [error,setError] = useState('')
+  const [editing,setEditing] = useState(false)
+  const [savedNotice,setSavedNotice] = useState(false)
+  const [showSource,setShowSource] = useState(false)
   const [voices,setVoices] = useState<FanVoiceTemplate[] | null>(null)
   const [chosenVoices,setChosenVoices] = useState<string[]>([])
   const [voiceBusy,setVoiceBusy] = useState(false)
@@ -74,8 +79,10 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
     setBusy(true); setError('')
     try {
       const updated = await simulatedFanApi.update(fan.id,{...edited,status,expectedUpdatedAt:saved.updatedAt})
-      setSaved(updated);setDraft(updated.editable);setInterestsText(updated.editable.interests?.join('、') || '')
-      return await refreshList()
+      setSaved(updated);setDraft(updated.editable);setInterestsText(updated.editable.interests?.join('、') || '');setSavedNotice(true)
+      const refreshed = await refreshList()
+      if (refreshed) setEditing(false)
+      return refreshed
     }
     catch(e) {setError(String(e)); return false} finally {setBusy(false)}
   }
@@ -112,19 +119,30 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
     } catch(e) {setVoiceError(String(e))} finally {setVoiceBusy(false)}
   }
   const fields: [Exclude<keyof FanDefinition,'interests'>,string][] = [['name','名称'],['profile','阅读视角'],['coreConcern','具体需求'],['contentPreference','内容偏好'],['expressionStyle','表达习惯']]
-  return <><h2>{saved.editable.name} <InfoHint label="模拟角色说明">模拟角色，不代表某位真实粉丝。编辑内容属于人工设定。</InfoHint></h2>
+  const source = fanSourceContent(fan.original, saved.editable.profile)
+  const hasSource = Object.values(source).some(items => items.length > 0)
+  return <><div className="fan-profile-head"><div className="reader-card-heading"><ReaderAvatar id={`${fan.sourceAnalysisId}:${fan.sourceGroupId}`} name={saved.editable.name} size={44} /><h2>{saved.editable.name} <InfoHint label="模拟角色说明">模拟角色，不代表某位真实粉丝。编辑内容属于人工设定。</InfoHint></h2></div>
+      {!editing && <button type="button" className="primary" disabled={busy || voiceBusy} onClick={() => {setEditing(true);setError('');setSavedNotice(false)}}>编辑档案</button>}
+    </div>
     {fan.original.origin === 'curated_preset' && <p className="muted">依据已保存评论预置整理，非模型接口分析；角色偏好和表达习惯是模拟假设。</p>}
-    {fields.map(([key,label]) => <Fragment key={key}><label>{label}{key === 'name'
+    {editing ? <div className="fan-profile-editor">{fields.map(([key,label]) => <Fragment key={key}><label>{label}{key === 'name'
       ? <input aria-label={label} disabled={busy || voiceBusy} value={draft[key]} onChange={e => setDraft({...draft,[key]:e.target.value})} />
       : <textarea aria-label={label} disabled={busy || voiceBusy} rows={3} value={draft[key]} onChange={e => setDraft({...draft,[key]:e.target.value})} />}</label>
       {key === 'profile' && <><label>兴趣领域<input disabled={busy || voiceBusy} value={interestsText} placeholder="如：留学、职业发展、个人成长" aria-invalid={Boolean(interestsError)} aria-describedby={interestsError ? 'fan-interests-error' : undefined} onChange={e => setInterestsText(e.target.value)} /></label>
         {interestsError && <p id="fan-interests-error" role="alert">{interestsError}</p>}</>}
     </Fragment>)}
     <div className="save-row fan-editor-actions"><button className="primary" disabled={busy || voiceBusy || Boolean(interestsError) || !dirty || !draft.name.trim() || !draft.profile.trim()} onClick={() => void save(saved.status)}>保存修改</button>
-      <span>{refreshing ? '刷新列表中…' : busy ? '保存中…' : error ? '保存失败' : dirty ? '有未保存修改' : '已保存'}</span>
-      <button disabled={busy || voiceBusy || dirty || Boolean(refreshError)} onClick={() => void save(saved.status === 'active' ? 'archived' : 'active')}>{saved.status === 'active' ? '归档' : '恢复'}</button>
-      <button ref={voiceTrigger} disabled={busy || voiceBusy || (!createdVoices && (dirty || Boolean(refreshError) || saved.status !== 'active'))} onClick={() => void openVoices()}>{createdVoices ? '查看加入结果' : voiceBusy && !voices ? '加载中…' : '添加不同声音'}</button>
-    </div>{error && <p role="alert">{error}</p>}
+      <button type="button" disabled={busy || voiceBusy} onClick={() => {
+        setDraft(saved.editable);setInterestsText(saved.editable.interests?.join('、') || '');setError('');setEditing(false)
+      }}>取消</button>
+      <span role="status">{refreshing ? '刷新列表中…' : busy ? '保存中…' : error ? '保存失败' : dirty ? '有未保存修改' : savedNotice ? '已保存' : ''}</span>
+    </div></div> : <>
+      {saved.editable.interests?.some(interest => interest.trim()) && <p className="fan-profile-interests" aria-label="兴趣领域">{saved.editable.interests.filter(interest => interest.trim()).join(' · ')}</p>}
+      <p className="fan-profile-perspective">{saved.editable.profile}</p>
+      <dl className="fan-profile-traits">{fields.filter(([key]) => key !== 'name' && key !== 'profile').map(([key,label]) => saved.editable[key]?.trim() ? <div key={key}><dt>{label}</dt><dd>{saved.editable[key]}</dd></div> : null)}</dl>
+      {savedNotice && <p className="save-state saved" role="status">已保存</p>}
+    </>}
+    {error && <p role="alert">{error}</p>}
     {!voices && (createdVoices ? <div role="status">
       <p>已加入 {createdVoices.length} 位角色，列表暂未刷新。</p>
     </div> : voiceError && <p role="alert">{voiceError}</p>)}
@@ -160,20 +178,56 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
       <button className="primary" disabled={voiceBusy || !chosenVoices.length} onClick={() => void addVoices()}>{voiceBusy ? '添加中…' : `加入 ${chosenVoices.length} 位`}</button>
       </>}
     </CreatorDialog>}
-    <details><summary>原始依据与未知项</summary><p>来源分析：{fan.sourceAnalysisId}</p>
-      <pre className="json-preview">{JSON.stringify({evidenceRefs:fan.original.evidenceRefs,unknowns:fan.original.unknowns,limitations:fan.original.limitations,profile:fan.original.profile},null,2)}</pre>
-    </details>
+    {showSource && <CreatorDialog title="档案依据" onClose={() => setShowSource(false)}><FanSource source={source} /></CreatorDialog>}
+    <div className="fan-profile-management" role="group" aria-label="档案管理">
+      {hasSource && <button type="button" className="text-button" onClick={() => setShowSource(true)}>查看依据</button>}
+      <button type="button" className="text-button" disabled={busy || voiceBusy || dirty || Boolean(refreshError)} onClick={() => void save(saved.status === 'active' ? 'archived' : 'active')}>{saved.status === 'active' ? '归档' : '恢复'}</button>
+      <button type="button" className="text-button" ref={voiceTrigger} disabled={busy || voiceBusy || (!createdVoices && (dirty || Boolean(refreshError) || saved.status !== 'active'))} onClick={() => void openVoices()}>{createdVoices ? '查看加入结果' : voiceBusy && !voices ? '加载中…' : '添加不同声音'}</button>
+    </div>
   </>
 }
 
-export function SimulatedFanPicker({rows,slots,onSlotChange,onAddSlot,onRemoveSlot,renderSelected}:{
+function sourceText(value: unknown): string[] {
+  return typeof value === 'string' ? value.trim() ? [value] : []
+    : Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())) : []
+}
+
+function fanSourceContent(original: Record<string, unknown>, profile: string) {
+  const references = Array.isArray(original.evidenceRefs) ? original.evidenceRefs.flatMap(ref => {
+    if (!ref || typeof ref !== 'object') return []
+    const source = ref as Record<string, unknown>
+    const quote = sourceText(source.quote)[0]
+    return quote ? [{quote, label: source.sourceType === 'comment' ? '评论原文' : source.sourceType === 'note' ? '笔记原文' : '历史引用'}] : []
+  }) : []
+  const legacyEvidence = sourceText(original.evidence).filter(text => !references.some(ref => ref.quote === text))
+  const unknowns = sourceText(original.unknowns)
+  const limitations = sourceText(original.limitations)
+  const originalProfile = sourceText(original.profile).filter(text => text !== profile)
+  return {references, legacyEvidence, unknowns, limitations, originalProfile}
+}
+
+function FanSource({source}: {source: ReturnType<typeof fanSourceContent>}) {
+  const {references, legacyEvidence, unknowns, limitations, originalProfile} = source
+  return <section className="fan-profile-source" aria-label="档案依据">
+    {references.map((ref, index) => <figure key={index}><figcaption>{ref.label}</figcaption><blockquote>{ref.quote}</blockquote></figure>)}
+    {legacyEvidence.map((text, index) => <p key={index}>{text}</p>)}
+    {originalProfile.map((text, index) => <p key={`profile-${index}`}><span>收录时的阅读视角</span>{text}</p>)}
+    {unknowns.length > 0 && <div><span>尚不确定</span><ul>{unknowns.map((text, index) => <li key={index}>{text}</li>)}</ul></div>}
+    {limitations.map((text, index) => <p key={`limit-${index}`} className="fan-profile-limitation">{text}</p>)}
+  </section>
+}
+
+export function SimulatedFanPicker({rows,slots,onSlotChange,onAddSlot,onRemoveSlot,renderSelected,compactSlots = false}:{
   rows:SimulatedFan[]; slots:string[]; onSlotChange:(index:number,id:string)=>void;
   onAddSlot:()=>void; onRemoveSlot:(index:number)=>void;
   renderSelected?:(fan:SimulatedFan)=>ReactNode;
+  compactSlots?:boolean;
 }) {
   const active = rows.filter(f => f.status === 'active')
+  const firstEmpty = slots.findIndex(id => !id)
   return <fieldset className={`simulated-fan-picker${renderSelected?' simulation-reader-list':''}`} aria-label="编辑参与读者">{!renderSelected&&<legend>模拟粉丝</legend>}
     {slots.map((id,index) => {
+      if (compactSlots && !id && index !== firstEmpty) return null
       const selected = active.find(f => f.id === id)
       return <div className="simulated-fan-slot" key={index}>
       <div className="simulated-fan-slot-controls">
@@ -188,7 +242,7 @@ export function SimulatedFanPicker({rows,slots,onSlotChange,onAddSlot,onRemoveSl
       </div>
       {selected && (renderSelected ? renderSelected(selected) : <FanPreview key={selected.id} fan={selected.editable} />)}
     </div>})}
-    <button type="button" className="simulated-fan-add" onClick={onAddSlot}>＋ 新增</button>
+    {(!compactSlots || firstEmpty < 0) && <button type="button" className="simulated-fan-add" onClick={onAddSlot}>＋ 新增</button>}
   </fieldset>
 }
 
