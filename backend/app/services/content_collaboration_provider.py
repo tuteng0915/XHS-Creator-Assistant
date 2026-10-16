@@ -298,6 +298,14 @@ class RealContentCollaborationProvider:
                      "sourceOrigin": reference.get("sourceOrigin", "unknown")},
                     limit=100_000,
                 )
+                # Keep the use boundary adjacent to each long reference, not
+                # only in a distant system paragraph or an ID grouping.
+                sources[source_id]["useBoundary"] = (
+                    "原笔记中明确写过的事实，保留原主体与历史时点；不补写新事件。"
+                    if reference["kind"] == "imported_note" else
+                    "写法与选题参考，不是作者亲历或当前读者的确定处境。"
+                    "其中评论属于历史评论者，不移植其时间、成绩、专业等条件。"
+                )
         workspace_context = (
             session_context.get("workspaceContext")
             if isinstance(session_context, dict) and context.get("assistantMode") != "single_writer"
@@ -319,6 +327,10 @@ class RealContentCollaborationProvider:
 
         for item in context.get("transcript", []):
             if not isinstance(item, dict):
+                continue
+            if context.get("assistantMode") == "single_writer" and item.get("sender") != "creator":
+                # Generated prose remains discussable, but cannot be cited as
+                # evidence that an event happened to the author.
                 continue
             message_id = item.get("id")
             content = item.get("content")
@@ -458,21 +470,37 @@ class RealContentCollaborationProvider:
                     "作者要正文就给可用正文；只聊角度则先讨论；局部精修只返回替换片段。"
                 ),
                 "qualityBar": [
-                    "用具体的场景、动作和判断推进，不空泛套模板或重复作者的问题。",
+                    "用已有事实或给读者的具体行动建议推进，不为生动而补造作者亲历；初稿同样适用。",
                     "默认给一个最值得采用的方案和简短理由；只有确有选择价值才给备选。",
                     "只使用当前稿件、这个上下文段内的对话，以及作者显式选择的参考。",
                     "参考分析是建议和观察，不是新稿必须照搬的选题，更不是作者新经历。",
                     "原笔记是作者选中的历史文本，可借鉴表达或已有材料；"
                     "不把其中过去的经历、时间、场景或结果自动移植成当前稿的新事实。",
+                    "不同原文中的学校、做法与判断不能拼成作者做过的一次比较；"
+                    "助手先前生成的稿件也不是作者确认的事实。",
                 ],
                 **({"writingFocusRules": packet["roleTask"]["writingFocusRules"]}
                    if isinstance(focus, dict) else {}),
             }
             packet.pop("upstreamHandoff", None)
+            packet["previousSuggestions"] = [
+                {"id": item["id"], "content": _excerpt(item["content"], limit=8_000)}
+                for item in context.get("transcript", [])
+                if isinstance(item, dict) and item.get("sender") == "writing"
+                and isinstance(item.get("id"), str) and isinstance(item.get("content"), str)
+            ]
             packet["evidence"]["sourceGroups"] = {
                 "manuscript": [key for key in sources if key == "target:topic"],
-                "selectedReferences": [key for key in sources if key.startswith("reference:")],
-                "currentConversation": [key for key in sources if key.startswith("message:")],
+                "originalNotes": [key for key in sources
+                                  if key.startswith("reference:imported_note:")],
+                "analysisObservationsNotPersonalFacts": [key for key in sources
+                                                        if key.startswith((
+                                                            "reference:account_analysis:",
+                                                            "reference:audience_analysis:",
+                                                        ))],
+                "authorMessages": [f"message:{item['id']}" for item in context.get("transcript", [])
+                                   if isinstance(item, dict) and item.get("sender") == "creator"
+                                   and f"message:{item.get('id')}" in sources],
                 "writingFocus": [key for key in sources if key.startswith("writing:")],
             }
         return packet

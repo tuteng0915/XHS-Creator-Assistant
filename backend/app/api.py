@@ -929,6 +929,12 @@ def create_api_router(
                         run.status.value == "running"
                         and stage_key not in run.stage_results
                         and stage_key not in run.stage_errors
+                        and not (
+                            run.workflow_type.value == "account_diagnosis"
+                            and stage_key == "topics"
+                            and any(key not in run.stage_results and key not in run.stage_errors
+                                    for key in ("profile", "pain_points"))
+                        )
                         and ("started", stage_key) not in emitted_stages
                     ):
                         emitted_stages.add(("started", stage_key))

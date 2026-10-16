@@ -77,10 +77,10 @@ export function WorkflowOutputPanel({
                       : '等待中'}
               </div>
             </div>
-            {stage.status === 'running' && (
+            {stage.status === 'running' && stage.progress && (
               <div className="stage-loading">
                 <span className="spinner" />
-                {stage.progress ? workflowProgressLabel(stage.progress) : '分析中…'}
+                {workflowProgressLabel(stage.progress)}
               </div>
             )}
             {stage.status === 'running' && stage.progress?.preview && (

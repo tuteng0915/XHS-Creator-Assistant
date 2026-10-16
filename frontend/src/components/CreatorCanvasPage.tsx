@@ -4,7 +4,7 @@ import type { MediaAsset, PanelRetestRequest, SimulationRun, SimulationRunSummar
 import type { PanelEditProposal } from '../panelEdits'
 import { replaceSelectedText, selectionFromTextarea, type CollaborationCandidate, type CollaborationComposeIntent, type ReaderFeedbackIntent, type WritingSelection } from '../contentCollaboration'
 import { creatorDraftFrom, draftHasSameBase, draftMatchesSaved, readCreatorCandidate, readCreatorDraft, readCreatorMessage, writeCreatorCache, type CreatorDraft } from '../creatorDraftCache'
-import { sameCreatorCandidate } from '../creatorCandidateIdentity'
+import { firstDraftTitle, sameCreatorCandidate } from '../creatorCandidateIdentity'
 import { ContentCollaborationChat } from './ContentCollaborationChat'
 import { PanelEditWorkspace } from './PanelEditWorkspace'
 import { PendingSuggestions } from './PendingSuggestions'
@@ -52,7 +52,7 @@ function NewCreation({workspaceId, profile, mediaAssets, onCreated, onLeaveGuard
     if (!createdTopic.current) {
       const pendingTopicId = readCreatorMessage(workspaceId, '__new_creation__').value?.pendingTopicId
       const title = Array.from(text.split('\n')[0]).slice(0, 80).join('')
-      const created = pendingTopicId ? await topicApi.get(pendingTopicId) : await topicApi.create(workspaceId, {title, sourceWorkflow: 'manual'})
+      const created = pendingTopicId ? await topicApi.get(pendingTopicId) : await topicApi.create(workspaceId, {title, sourceWorkflow: 'manual', generatedSnapshot: {creatorInitialTitle: title}})
       if (created.workspaceId !== workspaceId || !created.id || pendingTopicId && created.id !== pendingTopicId) throw new Error('返回的创作不属于当前账号或选题，请重试。')
       createdTopic.current = created
       const unsent = readCreatorMessage(workspaceId, '__new_creation__').value
@@ -72,7 +72,7 @@ function Canvas({workspaceId, topic, initialMessage, profile, mediaAssets, onUpd
   const [candidateCache] = useState(() => readCreatorCandidate(workspaceId, topic.id))
   const cachedCandidate = candidateCache.value
   const candidateConflict = cachedCandidate && (cachedCandidate.baseUpdatedAt !== topic.updatedAt || !!topic.body?.trim())
-    && (cachedCandidate.body !== cachedCandidate.candidate.body || cachedCandidate.title !== cachedCandidate.baseTitle)
+    && (cachedCandidate.body !== cachedCandidate.candidate.body || cachedCandidate.title !== firstDraftTitle(cachedCandidate.candidate, cachedCandidate.baseTitle, topic.generatedSnapshot))
     && (cachedCandidate.body !== topic.body || cachedCandidate.title !== topic.title)
     ? {version: 1 as const, baseUpdatedAt: cachedCandidate.baseUpdatedAt, baseTitle: cachedCandidate.baseTitle, baseBody: '', title: cachedCandidate.title, body: cachedCandidate.body} : null
   const recoverable = (initialCache.value && !draftMatchesSaved(initialCache.value, topic) ? initialCache.value : null) || candidateConflict
@@ -151,7 +151,7 @@ function Canvas({workspaceId, topic, initialMessage, profile, mediaAssets, onUpd
   }, [readerFeedback, workspaceId, topic.id, onReaderFeedbackConsumed])
   const dirty = title !== saved.title || body !== (saved.body || '')
   const firstCandidate = preview?.candidate.kind === 'copy_option' && !body.trim() && !dirty && !draftConflict && !preview.candidate.writingFocus?.selection
-  const candidateEdited = firstCandidate && (previewText !== preview?.candidate.body || previewTitle !== saved.title)
+  const candidateEdited = firstCandidate && (previewText !== preview?.candidate.body || previewTitle !== firstDraftTitle(preview.candidate, saved.title, saved.generatedSnapshot))
   const showEditor = editorOpened || !!body.trim() || !!preview || !!draftConflict
   useEffect(() => {
     if (firstCandidate && preview?.candidate.kind === 'copy_option') {
@@ -256,14 +256,14 @@ function Canvas({workspaceId, topic, initialMessage, profile, mediaAssets, onUpd
     }
     showPane('draft')
     setPreview({candidate, body, revision: editRevision.current, focus: true})
-    setPreviewText(candidate.body); setPreviewTitle(title); setPreviewMode('append'); setPreviewTarget('body'); setError('')
+    setPreviewText(candidate.body); setPreviewTitle(!body.trim() && !dirty && !candidate.writingFocus?.selection ? firstDraftTitle(candidate, title, saved.generatedSnapshot) : title); setPreviewMode('append'); setPreviewTarget('body'); setError('')
   }
   function previewFirstDraft(candidate: CollaborationCandidate) {
     if (showEditor || dirty || draftConflict || preview || candidate.kind !== 'copy_option' || !candidate.body.trim()
       || candidate.focusUnavailable || candidate.writingFocus?.selection) return
     setEditorOpened(true)
     setPreview({candidate, body, revision: editRevision.current, focus: false})
-    setPreviewText(candidate.body); setPreviewTitle(title); setPreviewMode('append'); setPreviewTarget('body'); setError('')
+    setPreviewText(candidate.body); setPreviewTitle(firstDraftTitle(candidate, title, saved.generatedSnapshot)); setPreviewMode('append'); setPreviewTarget('body'); setError('')
   }
   function closePreview() {
     writeCreatorCache('candidate', workspaceId, topic.id, null)

@@ -55,7 +55,9 @@ it('shows material requests separately on a generated topic card', () => {
   render(<StageResultRenderer publicMode stage={{key:'topics', n:'3', title:'选题', status:'completed', result:{topics:[{...candidate,pendingSuggestions:['请确认是否有亲身申请经历？']}]}}}
     currentRun={run} onSaveGeneratedTopic={vi.fn()} onSelectTopic={vi.fn()} onGenerateBrief={vi.fn()} onGenerateDraft={vi.fn()} onFillSimulationTopic={vi.fn()} />)
   expect(screen.getByText('待确认建议')).toBeInTheDocument()
-  expect(screen.getByText('请确认是否有亲身申请经历？')).toBeInTheDocument()
+  expect(screen.getByText('请确认是否有亲身申请经历？')).not.toBeVisible()
+  fireEvent.click(screen.getByText('选题依据'))
+  expect(screen.getByText('请确认是否有亲身申请经历？')).toBeVisible()
   expect(screen.getByRole('heading')).toHaveTextContent(candidate.title)
 })
 

@@ -105,6 +105,34 @@ def test_progress_event_contract_preserves_callback_payload():
     assert before == PROGRESS
 
 
+def test_account_sse_waits_for_profile_and_feedback_before_starting_topics(app, monkeypatch):
+    run = create_pending_account_run(app)
+    base = app.state.analysis_service.get(run["id"])
+    first = base.model_copy(update={"status": AnalysisRunStatus.RUNNING})
+    profile = first.model_copy(update={"stage_results": {"profile": {"summary": "完成"}}})
+    ready = profile.model_copy(update={"stage_results": {
+        **profile.stage_results, "pain_points": {"painPoints": []},
+    }})
+    final = ready.model_copy(update={
+        "status": AnalysisRunStatus.COMPLETED,
+        "stage_results": {**ready.stage_results, "topics": {"topics": []}},
+    })
+    snapshots = iter([first, first, profile, ready, final])
+    monkeypatch.setattr(app.state.analysis_service, "get", lambda _: next(snapshots))
+    response = send(app, "GET", f"/api/analysis-runs/{run['id']}/events")
+    events = [json.loads(line[6:]) for line in response.text.splitlines()
+              if line.startswith("data: ")]
+    topic_start = next(
+        i for i, item in enumerate(events)
+        if item["stageKey"] == "topics" and item["data"]["eventType"] == "stage.started"
+    )
+    assert any(item["stageKey"] == "profile" and item["data"]["eventType"] == "stage.succeeded"
+               for item in events[:topic_start])
+    # In the same ready snapshot, the preceding feedback is emitted before topics.
+    assert any(item["stageKey"] == "pain_points" and item["data"]["eventType"] == "stage.succeeded"
+               for item in events[:topic_start])
+
+
 @pytest.mark.parametrize("cursor_source", ["header", "query"])
 def test_progress_reconnect_replays_final_snapshot_above_old_cursor(app, cursor_source):
     run = create_pending_account_run(app)

@@ -340,7 +340,8 @@ def test_single_writer_provider_selects_non_team_prompt_and_all_explicit_sources
                 ]
             },
         },
-        "transcript": [message.model_dump()],
+        "transcript": [message.model_dump(), {"id": "old-ai", "sender": "writing",
+                                              "content": "我去年做过未经确认的事。"}],
         "upstreamCandidates": [],
     }
     turn = asyncio.run(
@@ -356,6 +357,17 @@ def test_single_writer_provider_selects_non_team_prompt_and_all_explicit_sources
     assert "不应该读取" not in json.dumps(packet, ensure_ascii=False)
     assert "全部选中内容" * 500 in json.dumps(packet, ensure_ascii=False)
     assert "oracle_showcase" in json.dumps(packet, ensure_ascii=False)
+    assert packet["evidence"]["sourceGroups"]["analysisObservationsNotPersonalFacts"] == [
+        "reference:account_analysis:a",
+    ]
+    assert packet["evidence"]["sourceGroups"]["authorMessages"] == [f"message:{message.id}"]
+    assert not any(item["id"] == "message:old-ai"
+                   for item in packet["evidence"]["allowedSources"])
+    assert packet["previousSuggestions"] == [
+        {"id": "old-ai", "content": "我去年做过未经确认的事。"},
+    ]
+    assert "历史评论者" in next(item for item in packet["evidence"]["allowedSources"]
+                            if item["id"] == "reference:account_analysis:a")["useBoundary"]
     system, _ = app.state.model_call_service._build_prompt(
         ModelOperation.CONTENT_COLLABORATION_TURN,
         packet,
@@ -401,6 +413,12 @@ def test_single_writer_prompt_states_reference_shape_and_fact_preserving_edit_sc
     assert "通过句序、动词、节奏、衔接或删冗" in prompt
     assert "新增原稿及作者明确补充中没有的人物、对话、时间、地点、具体动作、结果或因果" in prompt
     assert "confidence=inference 也不授权虚构" in prompt
+    assert "从零起草也遵守事实边界" in prompt
+    assert "助手旧回复不证明作者做过什么" in prompt
+    assert "无来源就改成建议或删去" in prompt
+    assert "摘要只说本版的写作取舍" in prompt
+    assert "copy_option.title 写文章标题" in prompt
+    assert "读者处境和外部条件也不能擅自具体化" in prompt
     # No concrete test story is embedded in the general writing instructions.
     assert "幻灯片" not in prompt
     assert "同事" not in prompt

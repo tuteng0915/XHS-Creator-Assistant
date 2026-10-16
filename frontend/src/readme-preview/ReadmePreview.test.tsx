@@ -49,6 +49,8 @@ it('renders the shipped canvas with three selected references and one unadopted 
   expect(screen.getByRole('button', { name: /^受众分析 · / })).toBeVisible()
   expect(screen.getByRole('button', { name: '预览并编辑这条建议' })).toBeVisible()
   expect(screen.getByLabelText('创作正文')).toHaveValue(topic.body)
+  expect(screen.getByText(/周日晚，计划表列了很长：读书、运动、整理照片。/)).not.toBeVisible()
+  fireEvent.click(screen.getByText('查看当时的原始建议'))
   expect(screen.getByText(/周日晚，计划表列了很长：读书、运动、整理照片。/)).toBeVisible()
   expect(screen.queryByText(/周日晚九点|读完一本|把它划掉/)).not.toBeInTheDocument()
 })

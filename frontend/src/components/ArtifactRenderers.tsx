@@ -53,7 +53,16 @@ function GeneratedTopicCard({
   return (
     <div className="topic">
       <h4>{topic.title}</h4>
-      <div className="angle">
+      {publicMode ? <>
+        <div className="angle">{topic.angle}</div>
+        {(topic.pain || topic.whyFit || topic.whyTrending || topic.pendingSuggestions?.length) && <details className="topic-evidence">
+          <summary>选题依据</summary>
+          {topic.pain && <p>{topic.pain}</p>}
+          {topic.whyFit && topic.whyFit !== topic.pain && <p>{topic.whyFit}</p>}
+          {topic.whyTrending && <p>{topic.whyTrending}</p>}
+          <PendingSuggestions value={topic.pendingSuggestions} />
+        </details>}
+      </> : <><div className="angle">
         切入角度：{topic.angle} · 对应痛点：{topic.pain || ''}
       </div>
       <div className="why">
@@ -66,6 +75,7 @@ function GeneratedTopicCard({
         )}
       </div>
       <PendingSuggestions value={topic.pendingSuggestions} />
+      </>}
       <div className="topic-actions">
         {publicMode ? <>
           <button onClick={() => void ensureSavedAndSelect().catch(() => undefined)}>查看选题</button>

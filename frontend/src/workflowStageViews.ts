@@ -130,7 +130,8 @@ export function stageSeedFromRun(run: AnalysisRun): StageView[] {
       ? 'failed'
       : run.stageResults[stage.key]
         ? 'completed'
-        : run.status === 'running'
+        : run.status === 'running' && !(tab === 'account' && stage.key === 'topics'
+          && ['profile', 'pain_points'].some(key => !run.stageResults[key] && !run.stageErrors[key]))
           ? 'running'
           : 'waiting',
     result: run.stageResults[stage.key],

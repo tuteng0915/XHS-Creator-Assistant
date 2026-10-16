@@ -19,6 +19,8 @@
 .collaboration-candidate small { display: block; color: var(--sub); font-size: var(--text-xs); }
 .collaboration-candidate h3 { font-size: var(--text-body); line-height: 1.5; font-weight: 600; margin: 5px 0 6px; }
 .collaboration-candidate button, .collaboration-quick-actions button { margin-top: 10px; }
+.collaboration-original-candidate summary { font-size: var(--text-xs); color: var(--sub); cursor: pointer; }
+.collaboration-original-candidate[open] p { margin-top: 8px; }
 .collaboration-empty { padding: 8px; color: var(--sub); font-size: var(--text-body); }
 .collaboration-quick-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .collaboration-progress { padding: 12px; background: var(--surface-muted); border-radius: 12px; font-size: var(--text-sm); }

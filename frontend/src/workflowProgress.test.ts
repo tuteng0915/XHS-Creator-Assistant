@@ -17,6 +17,15 @@ const run = (overrides: Partial<AnalysisRun> = {}): AnalysisRun => ({
 })
 
 describe('account report segmented progress', () => {
+  it('waits for both upstream stages before marking topic generation as running during polling', () => {
+    const topic = (value: AnalysisRun) => stageSeedFromRun(value).find(stage => stage.key === 'topics')
+    expect(topic(run())?.status).toBe('waiting')
+    expect(topic(run({stageResults:{profile:{summary:'完成'}}}))?.status).toBe('waiting')
+    expect(topic(run({stageResults:{profile:{summary:'完成'},pain_points:{painPoints:[]}}}))?.status).toBe('running')
+    expect(topic(run({stageResults:{profile:{summary:'完成'}},stageErrors:{pain_points:'失败'}}))?.status).toBe('running')
+    expect(topic(run({stageResults:{topics:{topics:[]}}}))?.status).toBe('completed')
+    expect(topic(run({stageErrors:{topics:'失败'}}))?.status).toBe('failed')
+  })
   it('keeps phase previews separate from final reports and ignores duplicate updates', () => {
     const states = applyAnalysisStageEvent(stageSeed('account'), event('stage.progress', progress), 'run')
     expect(states[0]).toMatchObject({status: 'running', progress})

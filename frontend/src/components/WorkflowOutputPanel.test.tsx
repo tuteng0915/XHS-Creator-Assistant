@@ -107,7 +107,7 @@ describe('WorkflowOutputPanel', () => {
     expect(screen.getByText('主页诊断')).toBeInTheDocument()
     expect(screen.getByText('已完成')).toBeInTheDocument()
     expect(screen.getByText('结果：完成')).toBeInTheDocument()
-    expect(screen.getAllByText('分析中…').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('分析中…')).toHaveLength(1)
     expect(screen.getByText('失败')).toBeInTheDocument()
     expect(screen.getByText('模型返回格式错误')).toBeInTheDocument()
     expect(renderStageResult).toHaveBeenCalledTimes(3)

@@ -563,6 +563,9 @@ nav a.active, nav button.active { color: var(--accent); background: var(--accent
 .opportunity { border-left: 3px solid var(--accent); }
 .topic h4 { margin: 0 0 6px; font-size: 14px; }
 .angle, .why { color: #595257; font-size: 12.5px; line-height: 1.55; }
+.topic-evidence { margin-top: 7px; color: var(--sub); font-size: var(--text-xs); line-height: 1.6; }
+.topic-evidence > summary { cursor: pointer; }
+.topic-evidence p { margin: 7px 0; }
 .topic-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
 .err { padding: 9px 10px; border-radius: 8px; color: #b91c1c; background: #fef2f2; font-size: 12.5px; }
 .json-preview {

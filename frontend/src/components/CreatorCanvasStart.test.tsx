@@ -49,7 +49,7 @@ it('opens the real composer and references immediately, creating and sending onl
   await waitFor(() => expect(send).toHaveBeenCalledOnce())
   expect(send).toHaveBeenCalledWith('w','s','想写一次跨专业选择\n重点讲犹豫和决定。','writing',expect.any(String),undefined,{schemaVersion:'creator-context-selection/v1',references:[]})
   expect(screen.getByLabelText('给创作助手的消息')).toHaveValue('')
-  expect(create).toHaveBeenCalledWith('w', {title:'想写一次跨专业选择', sourceWorkflow:'manual'})
+  expect(create).toHaveBeenCalledWith('w', {title:'想写一次跨专业选择', sourceWorkflow:'manual', generatedSnapshot:{creatorInitialTitle:'想写一次跨专业选择'}})
   await waitFor(() => expect(screen.getByRole('button', {name:/添加参考/})).toBeEnabled())
   expect(screen.getByLabelText('创作正文')).not.toBeVisible()
   expect(screen.queryByRole('separator')).not.toBeInTheDocument()
@@ -69,6 +69,52 @@ it('opens a blank draft only when requested and keeps it open after its text is 
   fireEvent.change(editor, {target:{value:'第一句'}})
   fireEvent.change(editor, {target:{value:''}})
   expect(editor).toBeVisible()
+})
+
+it('uses the generated title instead of the initial request, preserves edits and saves only on adoption', async () => {
+  const pending = {...topic, title:'请结合参考帮我写一篇完整正文和标题', generatedSnapshot:{creatorInitialTitle:'请结合参考帮我写一篇完整正文和标题'}}
+  const record = generated()
+  record.messages[1].modelMetadata.candidateSuggestions = [{kind:'copy_option',title:'标题：不急着给选择下结论',body:'先比较可以查证的事。',confidence:'inference',evidenceRefs:[]}]
+  vi.mocked(contentCollaborationApi.list).mockResolvedValue([record])
+  vi.spyOn(contentCollaborationApi,'get').mockResolvedValue(record)
+  const update = vi.spyOn(topicApi,'update').mockResolvedValue({...pending,title:'我手改的标题',body:'手动调整后的正文。',updatedAt:'v2'})
+  const first = render(<CreatorCanvasPage {...props} topic={pending} topics={[pending]} />)
+  expect(await screen.findByLabelText('候选稿标题')).toHaveValue('不急着给选择下结论')
+  expect(update).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByLabelText('候选稿标题'),{target:{value:'我手改的标题'}})
+  fireEvent.change(screen.getByLabelText('编辑写作建议'),{target:{value:'手动调整后的正文。'}})
+  fireEvent.click(screen.getByRole('button',{name:'在稿件区编辑'}))
+  expect(screen.getByLabelText('候选稿标题')).toHaveValue('我手改的标题')
+  first.unmount()
+  render(<CreatorCanvasPage {...props} topic={pending} topics={[pending]} />)
+  expect(screen.getByLabelText('候选稿标题')).toHaveValue('我手改的标题')
+  fireEvent.click(screen.getByRole('button',{name:'采用并保存'}))
+  expect(await screen.findByLabelText('创作正文')).toHaveValue('手动调整后的正文。')
+  expect(update).toHaveBeenCalledWith(topic.id,{title:'我手改的标题',body:'手动调整后的正文。',expectedUpdatedAt:'v1'})
+  const original = screen.getByText('查看当时的原始建议').closest('details')!
+  expect(original).not.toHaveAttribute('open')
+  expect(screen.getByText('先比较可以查证的事。')).not.toBeVisible()
+  fireEvent.click(screen.getByText('查看当时的原始建议'))
+  expect(screen.getByText('先比较可以查证的事。')).toBeVisible()
+  expect(screen.getByLabelText('创作正文')).toHaveValue('手动调整后的正文。')
+})
+
+it('keeps an explicitly chosen title even when the first model draft suggests a different title', async () => {
+  const edited = {...topic,title:'作者自己定的标题',generatedSnapshot:{creatorInitialTitle:'最初的起草要求'}}
+  vi.mocked(contentCollaborationApi.list).mockResolvedValue([generated()])
+  vi.spyOn(contentCollaborationApi,'get').mockResolvedValue(generated())
+  render(<CreatorCanvasPage {...props} topic={edited} topics={[edited]} />)
+  expect(await screen.findByLabelText('候选稿标题')).toHaveValue('作者自己定的标题')
+})
+
+it('keeps original suggestions collapsed after reopening a saved draft without claiming exact adoption', async () => {
+  vi.mocked(contentCollaborationApi.list).mockResolvedValue([generated()])
+  vi.spyOn(contentCollaborationApi,'get').mockResolvedValue(generated())
+  render(<CreatorCanvasPage {...props} topic={{...topic,body:'保存后的手改正文',updatedAt:'v2'}} topics={[topic]} />)
+  const disclosure = await screen.findByText('查看当时的原始建议')
+  expect(disclosure.closest('details')).not.toHaveAttribute('open')
+  expect(screen.getByText('那天我做了一个决定。')).not.toBeVisible()
+  expect(screen.getByLabelText('创作正文')).toHaveValue('保存后的手改正文')
 })
 
 it('keeps the idea and allows explicit retry after creation fails', async () => {

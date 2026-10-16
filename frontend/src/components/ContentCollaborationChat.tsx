@@ -259,7 +259,9 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
           <div className="collaboration-bubble"><p>{collaborationSummary(item)}</p>
             {collaborationCandidates(item).map((candidate, index) => <section className="collaboration-candidate" key={index}>
               <small>{candidateNames[candidate.kind]}</small>
-              <h3>{candidate.title}</h3>{!sameCreatorCandidate(visibleCandidate, candidate) && <p>{candidate.body}</p>}
+              <h3>{candidate.title}</h3>{!sameCreatorCandidate(visibleCandidate, candidate) && (candidate.kind === 'copy_option'
+                ? <details className="collaboration-original-candidate"><summary>查看当时的原始建议</summary><p>{candidate.body}</p></details>
+                : <p>{candidate.body}</p>)}
               {['outline', 'copy_option'].includes(candidate.kind) && <button type="button" disabled={(blocked && !sameCreatorCandidate(visibleCandidate, candidate)) || sending || running || candidate.focusUnavailable} onClick={() => onPreview(candidate)}>{sameCreatorCandidate(visibleCandidate, candidate) ? '在稿件区编辑' : candidate.writingFocus?.selection ? '对比并修改这一段' : '预览并编辑这条建议'}</button>}
               {candidate.focusUnavailable && <p>这条建议的原文定位不完整，不能直接替换。请重新选择段落后发送。</p>}
               {candidate.kind === 'open_question' && <button type="button" disabled={sending || running} onClick={() => appendInstruction(`关于“${candidate.title}”：`)}>补充说明</button>}
