@@ -670,6 +670,10 @@ export const readerSelectionApi = {
 }
 
 export const simulationRunApi = {
+  recover: (workspaceId:string, runId:string, payload:{requestKey:string;stageKey:string}) => request<SimulationRun>(
+    `/api/workspaces/${workspaceId}/simulation-runs/${runId}/recoveries`,
+    {method:'POST',headers:jsonHeaders,body:JSON.stringify(payload)},
+  ),
   adoptTopicIdea: (workspaceId:string, runId:string, ideaId:string) => request<Topic>(
     `/api/workspaces/${workspaceId}/simulation-runs/${runId}/topic-ideas/${encodeURIComponent(ideaId)}/adopt`,
     {method:'POST',headers:jsonHeaders,body:JSON.stringify({})},

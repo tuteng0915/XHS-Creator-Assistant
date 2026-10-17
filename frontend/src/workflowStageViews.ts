@@ -88,14 +88,14 @@ export function applySimulationStageEvent(stages: StageView[], activity: Activit
   if (frozen && activity.runId !== frozen.id) return stages
   const key = activity.stageKey
   const kind = activity.data.eventType
-  if (!key || !['stage.started', 'stage.succeeded', 'stage.failed'].includes(String(kind))) return stages
+  if (!key || !['stage.started', 'stage.progress', 'stage.succeeded', 'stage.failed'].includes(String(kind))) return stages
   const next:StageView[] = stages.map(stage => {
     if (stage.key !== key && !key.startsWith(`${stage.key}.`)) return stage
     if (kind === 'stage.started') return {...stage, status:'running'}
-    if (kind === 'stage.succeeded') {
+    if (kind === 'stage.succeeded' || kind === 'stage.progress') {
       const result = {...activity.data}
       delete result.eventType
-      return {...stage, status:'completed', result}
+      return {...stage, status:kind === 'stage.succeeded' ? 'completed' : Object.keys(stage.executionErrors||{}).length ? 'failed' : 'running', result}
     }
     const error = String(activity.data.error || '阶段执行失败')
     const raw = activity.data.stageErrors

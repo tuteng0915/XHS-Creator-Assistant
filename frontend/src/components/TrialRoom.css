@@ -36,6 +36,11 @@
 .trial-takeaways h5 {font-size:var(--text-body)!important;font-weight:600}
 .simulation-history-target {max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trial-errors {margin:16px 24px;font-size:var(--text-sm)}
+.trial-recovery-row {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.trial-recovery-row>div {min-width:0;overflow-wrap:anywhere}
+.trial-recovery-row p {margin:4px 0 0;color:var(--sub);font-size:var(--text-xs)}
+.trial-recovery-row button {flex:none;width:auto}
+.trial-recovery-row b {font-size:var(--text-sm);font-weight:500}
 .reader-card-heading {display:flex;gap:10px;align-items:center}
 .simulation-flow-steps {display:flex;gap:8px;list-style:none;padding:0;margin:0 0 20px;color:var(--sub);font-size:13px;flex-wrap:wrap}
 .simulation-flow-steps li {padding:5px 10px;border-radius:20px;background:var(--surface-muted)}

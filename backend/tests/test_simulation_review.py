@@ -1,5 +1,6 @@
 """A shared panel keeps account review, published-note review and editing distinct."""
 import asyncio
+import json
 from copy import deepcopy
 from unittest.mock import AsyncMock
 
@@ -95,6 +96,20 @@ def test_unfinished_review_and_creation_cannot_adopt_topic_ideas(app):
     assert send(app, "POST", (
         f"/api/workspaces/{wid}/simulation-runs/{run.id}/topic-ideas/idea-1/adopt"
     )).status_code == 422
+
+
+def test_summary_before_recovery_cannot_be_adopted_as_new_review(app):
+    wid, _, run = review_run(app, "account")
+    asyncio.run(app.state.simulation_workflow_service.collect_events(run.id))
+    with app.state.database.transaction() as connection:
+        connection.execute("UPDATE simulation_runs SET model_metadata_json=? WHERE id=?",
+                           (json.dumps({"recovery": {"summaryStale": True}}), run.id))
+    response = send(app, "POST", (
+        f"/api/workspaces/{wid}/simulation-runs/{run.id}/topic-ideas/idea-1/adopt"
+    ))
+    assert response.status_code == 409
+    assert "先更新汇总" in response.text
+    assert send(app, "GET", f"/api/workspaces/{wid}/topics").json() == []
 
 
 @pytest.mark.parametrize("category", ["account", "published_note"])

@@ -23,7 +23,18 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
   const [now,setNow]=useState(Date.now())
   const [loadError,setLoadError]=useState('')
   const [retry,setRetry]=useState(0)
+  const [recovering,setRecovering]=useState('')
+  const [recoveryError,setRecoveryError]=useState('')
+  const recoveryReceipt=useRef<{stageKey:string;requestKey:string}|null>(null)
+  const recoveryLock=useRef(false)
+  const currentScope=useRef('')
+  useEffect(()=>{currentScope.current=`${run.workspaceId}:${run.id}`;return()=>{currentScope.current=''}},[run.workspaceId,run.id])
   const running = !oracle&&['pending','running'].includes(run.status)
+  useEffect(()=>{
+    if(!running)return
+    const timer=setInterval(()=>setNow(Date.now()),1000)
+    return()=>clearInterval(timer)
+  },[running])
   const category=simulationCategoryFor(run)
   const review=category!=='creation'
   const feedbackReaderIds=new Set(run.personaDefinitions.map(person=>text(person.id)).filter(Boolean))
@@ -59,6 +70,29 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
   }
   const elapsed = Math.max(0,Math.round((now-Date.parse(run.startedAt || run.createdAt))/1000))
   const task=obj(run.inputSnapshot.panelTask)
+  const recovery=obj(run.modelMetadata?.recovery)
+  const summaryStale=recovery.summaryStale===true
+  function partName(key:string) {
+    if(key==='synthesis')return review?'复盘结论':'修改建议'
+    if(key==='personas')return '读者准备'
+    const initial=key.startsWith('initial_reactions.')
+    const id=key.slice((initial?'initial_reactions.':'debate_responses.').length)
+    return `${name(id)}的${initial?'试读':'回应'}`
+  }
+  async function recoverPart(stageKey:string) {
+    if(viewOnly||running||recoveryLock.current||!observing.current)return
+    recoveryLock.current=true;setRecovering(stageKey);setRecoveryError('')
+    const scope=`${run.workspaceId}:${run.id}`
+    if(recoveryReceipt.current?.stageKey!==stageKey)recoveryReceipt.current={stageKey,requestKey:crypto.randomUUID()}
+    try {
+      const next=await simulationRunApi.recover(run.workspaceId,run.id,recoveryReceipt.current)
+      if(currentScope.current!==scope)return
+      if(next.workspaceId!==run.workspaceId||obj(next.modelMetadata?.recovery).sourceRunId!==run.id)throw new Error('重试记录不匹配')
+      observing.current?.(next)
+      recoveryReceipt.current=null
+    } catch(e) {if(currentScope.current===scope)setRecoveryError(e instanceof Error?e.message:'重试未提交，请再试一次。')}
+    finally {recoveryLock.current=false;if(currentScope.current===scope)setRecovering('')}
+  }
   const settledReaders=new Set([
     ...run.reactionResults.map(r=>text(r.personaId)),
     ...Object.keys(run.stageErrors).filter(key=>key.startsWith('initial_reactions.')).map(key=>key.slice('initial_reactions.'.length)),
@@ -111,14 +145,21 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
         </article>)}
       </div>
     </section>}
-    {running&&<div className="trial-progress" role="status"><span className="trial-working-dot"/><div><b>{stage}</b><small>已等待 {elapsed} 秒</small></div></div>}
+    {running&&<div className="trial-progress" role="status"><span className="trial-working-dot"/><div><b>{recovery.stageKey?`正在恢复${partName(text(recovery.stageKey))}`:stage}</b><small>已等待 {elapsed} 秒</small></div></div>}
     {!viewOnly&&loadError&&<p role="alert">{loadError} <button onClick={()=>setRetry(x=>x+1)}>恢复查看</button></p>}
-    {!running&&Object.keys(run.stageErrors).length>0&&<details className="trial-errors"><summary>部分环节未完成，已保留现有发言</summary>{Object.entries(run.stageErrors).map(([key,e])=>{
-      const id=key.slice(key.indexOf('.')+1)
-      return <p key={key}>{people.some(p=>p.id===id)?`${name(id)}：`:''}{text(e)}</p>
-    })}</details>}
+    {Object.keys(run.stageErrors).length>0&&<section className="trial-errors" aria-label="未完成环节"><p>部分环节未完成，已保留现有发言</p>{Object.entries(run.stageErrors).map(([key,e])=>{
+      const supported=key==='synthesis'||key==='personas'||key.startsWith('initial_reactions.')||key.startsWith('debate_responses.')
+      return <div className="trial-recovery-row" key={key}><div><b>{supported?partName(key):'未完成环节'}</b><p>{text(e)}</p></div>
+        {!viewOnly&&!running&&onObserved&&supported&&<button disabled={!!recovering} aria-label={`重试${partName(key)}`} onClick={()=>void recoverPart(key)}>{recovering===key?'正在提交…':'仅重试此项'}</button>}</div>
+    })}</section>}
+    {!viewOnly&&recoveryError&&<p className="trial-context" role="alert">{recoveryError}</p>}
+    {!viewOnly&&!running&&onObserved&&run.reactionResults.length>0&&(summaryStale||!Object.keys(run.synthesis).length)&&!run.stageErrors.synthesis&&<div className="trial-progress">
+      <div><b>{summaryStale?'有新发言尚未纳入汇总':'发言已保留，可单独整理结论'}</b></div>
+      <button disabled={!!recovering} onClick={()=>void recoverPart('synthesis')}>{recovering==='synthesis'?'正在提交…':'更新汇总'}</button>
+    </div>}
     {!viewOnly&&!running&&people.length>0&&['completed','partially_completed'].includes(run.status)&&<InterviewComposer key={run.id} run={run} people={people} name={name} avatarId={avatarId} feedbackReaderIds={feedbackReaderIds} onUseFeedback={canUseFeedback?handleFeedback:undefined}/>}
-    {Object.keys(run.synthesis).length>0&&(review?<SimulationReviewSummary key={`review:${run.workspaceId}:${run.id}`} run={run} onTopicAdded={onTopicAdded} topics={topics} readOnly={readOnly}/>:<section className="trial-takeaways"><h3>修改方向</h3>
+    {summaryStale&&Object.keys(run.synthesis).length>0&&<p className="trial-context">以下是补回发言前的汇总，更新后再采用；原记录仍保留。</p>}
+    {Object.keys(run.synthesis).length>0&&(review?<SimulationReviewSummary key={`review:${run.workspaceId}:${run.id}`} run={run} onTopicAdded={onTopicAdded} topics={topics} readOnly={readOnly||summaryStale}/>:<section className="trial-takeaways"><h3>修改方向</h3>
       {text(run.synthesis.verdict)&&<p>{text(run.synthesis.verdict)}</p>}
       {text(run.synthesis.mainResistance)&&<p><b>最需要解决</b><br/>{text(run.synthesis.mainResistance)}</p>}
       <EditorFeedbackView data={run.synthesis} run={run}/>

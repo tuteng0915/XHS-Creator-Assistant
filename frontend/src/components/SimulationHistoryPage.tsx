@@ -76,6 +76,7 @@ export function SimulationHistoryPage({
   if (publicMode && !simulationRuns.length && !selectedSimulationRun && (!loadState || loadState.phase === 'idle')) return null
   const reviewChanged = selectedSimulationRun && (simulationReviewDraft.userNotes !== selectedSimulationRun.userNotes
     || simulationReviewDraft.reviewStatus !== selectedSimulationRun.reviewStatus)
+  const recovery = selectedSimulationRun?.modelMetadata?.recovery as {sourceRunId?:string}|undefined
   const readerSettings = selectedSimulationRun && <>
     <SimulationTaskSummary run={selectedSimulationRun} />
     <SimulationReaderSummary key={`readers:${selectedSimulationRun.id}`} run={selectedSimulationRun} />
@@ -130,6 +131,10 @@ export function SimulationHistoryPage({
             </div>
             {publicMode && isOracleShowcase(selectedSimulationRun) && simulationCategoryFor(selectedSimulationRun) === 'published_note'
               && <FrozenPublishedNote key={`source-note:${selectedSimulationRun.id}`} run={selectedSimulationRun} />}
+            {recovery?.sourceRunId&&<div className="trial-context" aria-label="局部恢复来源">
+              只补回所选环节，其余结果沿用原记录。{' '}
+              <button onClick={()=>onOpenSimulationRun(recovery.sourceRunId!)}>查看原记录</button>
+            </div>}
             {selectedSimulationRun.parentSimulationId && <section aria-label="复测来源">
               <p>本次沿用上次人物与阅读任务，独立阅读新版稿件。模型与提示版本尚未配对核验。</p>
               {simulationRuns.some(r => r.id === selectedSimulationRun.parentSimulationId && r.workspaceId === selectedSimulationRun.workspaceId)

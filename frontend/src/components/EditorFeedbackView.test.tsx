@@ -107,6 +107,19 @@ it('carries the correct frozen context through SSE and rejects events for anothe
   expect(document.querySelector('mark')?.textContent).toBe('先试一次。')
 })
 
+it('shows successive partial SSE results without declaring the stage complete',()=>{
+  let views=stageSeedFromSimulation({...run,reactionResults:[],debateResults:[],synthesis:{}})
+  const event=(reactions:Record<string,unknown>[],kind='stage.progress'):ActivityEvent=>({eventId:'partial',runId:run.id,runType:'audience_simulation',stageKey:'initial_reactions',status:'running',sequence:1,occurredAt:run.createdAt,data:{eventType:kind,reactions}})
+  views=applySimulationStageEvent(views,event(run.reactionResults.slice(0,1)))
+  expect(views.find(s=>s.key==='initial_reactions')?.status).toBe('running')
+  expect(views.find(s=>s.key==='initial_reactions')?.result).toEqual({reactions:run.reactionResults.slice(0,1)})
+  const more=[...run.reactionResults,{personaId:'other',understanding:'另一个具体判断'}]
+  views=applySimulationStageEvent(views,event(more))
+  expect(views.find(s=>s.key==='synthesis')?.feedbackRun?.reactionResults).toEqual(more)
+  views=applySimulationStageEvent(views,event(more,'stage.succeeded'))
+  expect(views.find(s=>s.key==='initial_reactions')?.status).toBe('completed')
+})
+
 const concern={id:'concern:1',messageId:'initial:a',personaId:'a',field:'concerns',text:'两个版本都正确时，该根据什么选择？'}
 const concernedRun={...run,reactionResults:[{...run.reactionResults[0],concerns:[concern.text]}]}
 const change={...card,kind:'clarify',observation:'补充选择标准',readerConcernIds:[concern.id],readerConcerns:[concern]}

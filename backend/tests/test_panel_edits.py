@@ -106,6 +106,17 @@ def current(app, case):
     return send(app, "GET", f"/api/topics/{case['tid']}").json()
 
 
+def test_stale_summary_cannot_prepare_new_edits(app, case):
+    before = current(app, case)
+    with app.state.database.transaction() as connection:
+        connection.execute("UPDATE simulation_runs SET model_metadata_json=? WHERE id=?",
+                           (json.dumps({"recovery": {"summaryStale": True}}), case["rid"]))
+    response = create(app, case)
+    assert response.status_code == 409
+    assert "先更新汇总" in response.text
+    assert current(app, case) == before
+
+
 def material_case(app, case):
     with app.state.simulation_service.database.transaction() as connection:
         row = connection.execute("SELECT synthesis_json FROM simulation_runs WHERE id=?",

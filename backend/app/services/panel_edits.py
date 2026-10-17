@@ -135,6 +135,8 @@ class PanelEditService:
             run = self.runs.get(connection, simulation_id)
             if run["workspace_id"] != workspace_id:
                 raise NotFoundError("模拟记录不存在")
+            if json.loads(run["model_metadata_json"]).get("recovery", {}).get("summaryStale"):
+                raise ConflictError("请先更新汇总，再根据新发言准备改稿")
             frozen = json.loads(run["input_snapshot_json"])
             if (
                 run["status"] not in {"completed", "partially_completed"}

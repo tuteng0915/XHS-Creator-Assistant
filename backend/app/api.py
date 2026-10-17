@@ -102,6 +102,7 @@ from app.services import (
 from app.services.audience_evidence import (
     AUDIENCE_METHOD_VERSION,
     DISCUSSION_SKIPPED_REASON,
+    public_reactions,
 )
 from app.services.audience_evidence import (
     discussion_skipped as is_discussion_skipped,
@@ -109,6 +110,7 @@ from app.services.audience_evidence import (
 from app.services.common import utc_now
 from app.services.panel_edits import PanelEditConfirm, PanelEditCreate, PanelEditService
 from app.services.panel_protocol import DISCUSSION_DISABLED_REASON, panel_discussion_enabled
+from app.services.panel_recovery import PanelRecoveryCreate, create_recovery
 from app.services.panel_retests import PanelRetestCreate
 from app.services.xhs_imports import XhsPackageFile
 from app.workflows import (
@@ -1054,6 +1056,17 @@ def create_api_router(
     def preview_panel_retest(workspace_id: str, simulation_id: str):
         return simulation_service.preview_retest(workspace_id, simulation_id)
 
+    @router.post(
+        "/workspaces/{workspace_id}/simulation-runs/{simulation_id}/recoveries",
+        response_model=SimulationRunResponse, status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def recover_simulation_part(
+        workspace_id: str, simulation_id: str, payload: PanelRecoveryCreate,
+    ) -> SimulationRunResponse:
+        run = create_recovery(simulation_service, workspace_id, simulation_id, payload)
+        await workflow_worker.enqueue_simulation_run(run.id)
+        return run
+
     @router.get("/workspaces/{workspace_id}/simulation-runs/{simulation_id}/comparison")
     def compare_panel_retest(workspace_id: str, simulation_id: str):
         return simulation_service.compare_retest(workspace_id, simulation_id)
@@ -1120,6 +1133,7 @@ def create_api_router(
 
         async def event_stream():
             emitted_stages: set[tuple[str, str]] = set()
+            progress_payloads: dict[str, str] = {}
             emitted_terminal = False
             sequence = 0
             while True:
@@ -1169,6 +1183,20 @@ def create_api_router(
                     "debate_responses": bool(run.debate_results) or discussion_skipped,
                     "synthesis": bool(run.synthesis),
                 }
+                # Parallel stages expose every saved cumulative result, not
+                # just the first reader. A nonempty list is not stage completion.
+                terminal = run.status.value in {"completed", "partially_completed", "failed"}
+                public = public_reactions(run.reaction_results)
+                expected_ids = {
+                    "initial_reactions": {p["id"] for p in run.persona_definitions},
+                    "debate_responses": {
+                        r["personaId"] for r in run.reaction_results
+                        if panel_discussion_enabled(run.input_snapshot)
+                        and any(p["personaId"] != r["personaId"] for p in public)
+                    },
+                }
+                results = {"initial_reactions": run.reaction_results,
+                           "debate_responses": run.debate_results}
                 for stage_key in SIMULATION_STAGE_ORDER:
                     if (
                         run.status.value == "running"
@@ -1192,16 +1220,35 @@ def create_api_router(
                         )
                         if sequence > min_sequence:
                             yield event
-                    if stage_has_result[stage_key] and ("ok", stage_key) not in emitted_stages:
-                        emitted_stages.add(("ok", stage_key))
+                    stage_complete = True
+                    if stage_key in expected_ids:
+                        settled = {r["personaId"] for r in results[stage_key]} | {
+                            key.partition(".")[2] for key in run.stage_errors
+                            if key.startswith(f"{stage_key}.")
+                        }
+                        stage_complete = terminal or (
+                            bool(expected_ids[stage_key])
+                            and expected_ids[stage_key] <= settled
+                        ) or (stage_key == "debate_responses" and discussion_skipped)
+                    progress = stage_has_result[stage_key] and not stage_complete
+                    encoded = json.dumps(stage_data[stage_key], sort_keys=True)
+                    fresh_progress = progress and progress_payloads.get(stage_key) != encoded
+                    if stage_has_result[stage_key] and (
+                        fresh_progress
+                        or (stage_complete and ("ok", stage_key) not in emitted_stages)
+                    ):
+                        if stage_complete:
+                            emitted_stages.add(("ok", stage_key))
+                        else:
+                            progress_payloads[stage_key] = encoded
                         sequence += 1
                         event = _sse_event(
                             run_id=run.id,
                             run_type="audience_simulation",
                             stage_key=stage_key,
-                            status="completed",
+                            status="completed" if stage_complete else "running",
                             sequence=sequence,
-                            event_type="stage.succeeded",
+                            event_type="stage.succeeded" if stage_complete else "stage.progress",
                             data=stage_data[stage_key],
                         )
                         if sequence > min_sequence:

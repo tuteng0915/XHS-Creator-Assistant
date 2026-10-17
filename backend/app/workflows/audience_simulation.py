@@ -50,6 +50,7 @@ SIMULATION_STAGE_ORDER = [
     "synthesis",
 ]
 MAX_CONCURRENT_PERSONA_CALLS = 4
+SIMULATION_STEP_TIMEOUT_SECONDS = 30
 ACTIVE_SIMULATION_EXECUTION: contextvars.ContextVar[
     _AudienceSimulationGraphExecution | None
 ] = contextvars.ContextVar("audience_simulation_execution", default=None)
@@ -644,6 +645,7 @@ class AudienceSimulationWorkflowService:
         self.fake_provider = fake_provider
         self.live_provider = live_provider
         self.graph = self._build_graph()
+        self.step_timeout_seconds = SIMULATION_STEP_TIMEOUT_SECONDS
 
     def initial_state_for_run(self, simulation_id: str) -> AudienceSimulationState:
         run = self.simulation_service.get(simulation_id)
@@ -758,6 +760,7 @@ class _AudienceSimulationGraphExecution:
         )
         run = service.simulation_service.get(simulation_id)
         self.response_calls = deepcopy(run.model_metadata.get("responseCalls", []))
+        self.recovery = deepcopy(run.model_metadata.get("recovery"))
 
     def record_model_response(self, operation, context, metadata):
         # Save only response provenance; never settings, credentials or raw prompts.
@@ -771,7 +774,8 @@ class _AudienceSimulationGraphExecution:
         })
 
     def model_metadata(self):
-        return {"engine": "langgraph", **({"responseCalls": self.response_calls}
+        return {"engine": "langgraph", **({"recovery": self.recovery} if self.recovery else {}),
+                **({"responseCalls": self.response_calls}
                                          if self.response_calls else {})}
 
     @classmethod
@@ -797,6 +801,20 @@ class _AudienceSimulationGraphExecution:
                 )
             await self.emit("run.started", None, "running", {})
             try:
+                if self.recovery and self.recovery["stageKey"] != "personas":
+                    # Resume only the explicitly requested unit. Successful
+                    # siblings and their original visible-message sets stay frozen.
+                    state = self.service.initial_state_for_run(self.simulation_id)
+                    stage = self.recovery["stageKey"].partition(".")[0]
+                    if stage == "initial_reactions":
+                        state = await self.initial_reactions(state)
+                    elif stage == "debate_responses":
+                        state = await self.debate_responses(state)
+                    elif stage == "synthesis":
+                        state["synthesis"] = {}
+                        state = await self.synthesis(state)
+                    await self.finalize(state)
+                    return
                 await self.service.graph.ainvoke(
                     self.service.initial_state_for_run(self.simulation_id),
                     config={"configurable": {"thread_id": self.simulation_id}},
@@ -820,8 +838,10 @@ class _AudienceSimulationGraphExecution:
             saved_personas = run.input_snapshot.get('audiencePersonas')
             if run.parent_simulation_id and not saved_personas:
                 raise ValidationError("同组复测缺少当时人物快照，不能生成新人物替代")
-            output = {'personas': saved_personas} if saved_personas else await self.provider().personas(
-                positioning=updated["positioning_snapshot"], topic=updated["topic"],
+            output = {'personas': saved_personas} if saved_personas else await self.call_once(
+                lambda: self.provider().personas(
+                    positioning=updated["positioning_snapshot"], topic=updated["topic"],
+                )
             )
             if not saved_personas:
                 for persona in output.get("personas", []):
@@ -862,6 +882,7 @@ class _AudienceSimulationGraphExecution:
             persona for persona in personas
             if str(persona["id"]) not in finished_ids
             and f"initial_reactions.{persona['id']}" not in errors
+            and self.selected_unit(f"initial_reactions.{persona['id']}")
         ]
         if not pending_personas:
             await self.save_checkpoint("parallel_initial_reactions", updated)
@@ -873,7 +894,7 @@ class _AudienceSimulationGraphExecution:
             persona_id = str(persona.get("id", "unknown"))
             try:
                 async with semaphore:
-                    output = await self.retry(
+                    output = await self.call_once(
                         lambda: self.provider().initial_reaction(
                             persona=persona, topic=updated["topic"]
                         )
@@ -888,12 +909,16 @@ class _AudienceSimulationGraphExecution:
                 validate_trigger_quote(result["reaction"]["triggerQuote"], updated["topic"])
                 result["reaction"].update(messageId=f"initial:{persona_id}", round=1)
                 delivered_reactions.append(result["reaction"])
+                if self.recovery and updated.get("synthesis"):
+                    self.recovery["summaryStale"] = True
                 self.service.simulation_service.save_progress(
                     self.simulation_id, status=SimulationRunStatus.RUNNING,
                     reaction_results=list(delivered_reactions),
                     stage_errors=updated.get("stage_errors", {}),
                     model_metadata=self.model_metadata(),
                 )
+                await self.emit("stage.progress", "initial_reactions", "running",
+                                {"reactions": list(delivered_reactions), "personaId": persona_id})
                 return result["reaction"]
             except Exception as error:
                 updated.setdefault("stage_errors", {})[
@@ -969,6 +994,7 @@ class _AudienceSimulationGraphExecution:
             persona for persona in debate_personas
             if str(persona["id"]) not in finished_ids
             and f"debate_responses.{persona['id']}" not in errors
+            and self.selected_unit(f"debate_responses.{persona['id']}")
         ]
         if not pending_personas:
             await self.save_checkpoint("parallel_debate_responses", updated)
@@ -985,7 +1011,7 @@ class _AudienceSimulationGraphExecution:
             ]
             try:
                 async with semaphore:
-                    output = await self.retry(
+                    output = await self.call_once(
                         lambda: self.provider().debate_response(
                             persona=persona,
                             topic=updated["topic"],
@@ -1009,12 +1035,16 @@ class _AudienceSimulationGraphExecution:
                 response.update(messageId=f"reply:{persona_id}", round=2,
                                 visibleMessageIds=list(visible))
                 delivered_responses.append(response)
+                if self.recovery and updated.get("synthesis"):
+                    self.recovery["summaryStale"] = True
                 self.service.simulation_service.save_progress(
                     self.simulation_id, status=SimulationRunStatus.RUNNING,
                     debate_results=list(delivered_responses),
                     stage_errors=updated.get("stage_errors", {}),
                     model_metadata=self.model_metadata(),
                 )
+                await self.emit("stage.progress", "debate_responses", "running",
+                                {"debateResponses": list(delivered_responses), "personaId": persona_id})
                 return response
             except Exception as error:
                 updated.setdefault("stage_errors", {})[
@@ -1068,11 +1098,13 @@ class _AudienceSimulationGraphExecution:
             return AudienceSimulationState(**updated)
         await self.emit("stage.started", "synthesis", "running", {})
         try:
-            output = await self.provider().synthesis(
-                topic=updated["topic"],
-                personas=updated.get("personas", []),
-                reactions=updated.get("initial_reactions", []),
-                debate_responses=updated.get("debate_responses", []),
+            output = await self.call_once(
+                lambda: self.provider().synthesis(
+                    topic=updated["topic"],
+                    personas=updated.get("personas", []),
+                    reactions=updated.get("initial_reactions", []),
+                    debate_responses=updated.get("debate_responses", []),
+                )
             )
             result = SimulationSynthesisResult.model_validate(output).model_dump(
                 mode="json"
@@ -1088,6 +1120,8 @@ class _AudienceSimulationGraphExecution:
                     replies=updated.get("debate_responses", []),
                 ))
             updated["synthesis"] = result["synthesis"]
+            if self.recovery:
+                self.recovery["summaryStale"] = False
             self.service.simulation_service.save_progress(
                 self.simulation_id,
                 status=SimulationRunStatus.RUNNING,
@@ -1162,18 +1196,14 @@ class _AudienceSimulationGraphExecution:
         )
         await self.emit("stage.failed", stage_key, "failed", {"error": message})
 
-    async def retry(
-        self, call: Callable[[], Awaitable[dict[str, Any]]], *, attempts: int = 2
-    ) -> dict[str, Any]:
-        last_error: Exception | None = None
-        for _attempt in range(attempts):
-            try:
-                return await call()
-            except Exception as error:
-                last_error = error
-        if last_error is None:
-            raise RuntimeError("retry failed without an exception")
-        raise last_error
+    def selected_unit(self, key: str) -> bool:
+        return not self.recovery or self.recovery["stageKey"] in {"personas", key}
+
+    async def call_once(self, call: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
+        # Bound the whole unit, including existing checks, with no hidden second
+        # attempt. Cancellation propagates to the transport; explicit recovery
+        # owns any subsequent request (billing after timeout remains unknown).
+        return await asyncio.wait_for(call(), timeout=self.service.step_timeout_seconds)
 
     async def save_checkpoint(self, node_key: str, state: dict[str, Any]) -> None:
         checkpoint_state = {
@@ -1272,6 +1302,8 @@ class _AudienceSimulationGraphExecution:
 
     @staticmethod
     def error_message(error: Exception) -> str:
+        if isinstance(error, TimeoutError):
+            return "本环节等待超时，已保留其他结果，可单独重试。"
         if isinstance(error, PydanticValidationError):
             return "Model response failed structured validation"
         if isinstance(error, (ValidationError, ConflictError)):

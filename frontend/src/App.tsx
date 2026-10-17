@@ -1847,7 +1847,7 @@ function WorkspaceApp() {
       const handleMessage = (message: MessageEvent<string>) => {
         const activity = JSON.parse(message.data) as ActivityEvent
         const eventType = activity.data.eventType
-        if (['stage.started', 'stage.succeeded', 'stage.failed'].includes(String(eventType)) && activity.stageKey) {
+        if (['stage.started', 'stage.progress', 'stage.succeeded', 'stage.failed'].includes(String(eventType)) && activity.stageKey) {
           if (viewingRun()) setSimulationStageViews(current => applySimulationStageEvent(current, activity))
           return
         }
@@ -1863,6 +1863,7 @@ function WorkspaceApp() {
         'run.created',
         'run.started',
         'stage.started',
+        'stage.progress',
         'stage.succeeded',
         'stage.failed',
         'run.partial',
@@ -2988,9 +2989,19 @@ function WorkspaceApp() {
             setTopics(current => [topic, ...current.filter(item => item.id !== topic.id)])
           }}
           onSimulationObserved={run => {
-            if (selectedWorkspaceRef.current !== run.workspaceId || selectedSimulationRunRef.current?.id !== run.id) return
+            if (selectedWorkspaceRef.current !== run.workspaceId) return
+            const currentId = selectedSimulationRunRef.current?.id
+            const recovery = run.modelMetadata?.recovery as {sourceRunId?:string}|undefined
+            if (currentId !== run.id && (!currentId || recovery?.sourceRunId !== currentId)) return
+            if (currentId !== run.id) {
+              // Carry local, possibly unsaved notes into the recovery view;
+              // late saves of the old history must not overwrite this record.
+              simulationHistoryRequest.current += 1
+              setSaveState('simulationReview', idleState)
+            }
             setSelectedSimulationRun(run)
-            setSimulationRuns(current => current.map(item => item.id === run.id ? run : item))
+            setSimulationRuns(current => current.some(item=>item.id===run.id)
+              ? current.map(item => item.id === run.id ? run : item) : [run,...current])
           }}
           onSimulationReviewDraftChange={editSimulationReview}
           onSaveSimulationRunReview={saveSimulationRunReview}

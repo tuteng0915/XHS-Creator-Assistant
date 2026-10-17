@@ -22,6 +22,8 @@ class SimulationTopicIdeaService:
             run = self.simulations.get(connection, simulation_id)
             if run["workspace_id"] != workspace_id:
                 raise NotFoundError("未找到当前账号的模拟记录")
+            if json.loads(run["model_metadata_json"]).get("recovery", {}).get("summaryStale"):
+                raise ConflictError("请先更新汇总，再收录后续选题")
             snapshot = json.loads(run["input_snapshot_json"])
             category = simulation_category(snapshot)
             if category == "creation":

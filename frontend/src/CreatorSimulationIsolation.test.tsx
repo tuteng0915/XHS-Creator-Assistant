@@ -169,3 +169,35 @@ it.each(['SSE', 'polling'] as const)('late %s completion from the previous accou
   expect(screen.queryByText('A后来完成的发言')).not.toBeInTheDocument()
   expect(screen.getAllByRole('button', {name: /受众模拟 已完成/})).toHaveLength(1)
 })
+
+it('follows one-unit recovery without discarding unsaved review notes or the old history',async()=>{
+  const control=setup(false)
+  const original=control.fetch.getMockImplementation()!
+  const source={...makeRun('run-b','account-0','partially_completed'),
+    personaDefinitions:[{id:'reader',name:'原读者'},{id:'failed',name:'失败读者'}],
+    reactionResults:[{personaId:'reader',action:'comment',quote:'原先已完成的具体反馈'}],
+    stageErrors:{'initial_reactions.failed':'超时'}}
+  const child={...source,id:'recovered',status:'completed',stageErrors:{},
+    modelMetadata:{recovery:{sourceRunId:source.id,stageKey:'initial_reactions.failed',summaryStale:false}},
+    reactionResults:[...source.reactionResults,{personaId:'failed',action:'comment',quote:'只补回这一条'}]}
+  control.fetch.mockImplementation((input,init)=>{
+    if(String(input)==='/api/simulation-runs/run-b')return Promise.resolve(Response.json(source))
+    if(String(input)==='/api/workspaces/account-0/simulation-runs/run-b/recoveries')return Promise.resolve(Response.json(child,{status:202}))
+    return original(input,init)
+  })
+  await screen.findByText('甲的笔记')
+  fireEvent.click(within(screen.getByRole('navigation',{name:'创作者功能导航'})).getByRole('button',{name:'受众模拟'}))
+  fireEvent.click(screen.getByRole('tab',{name:/创作级/}))
+  fireEvent.click(await screen.findByRole('button',{name:/受众模拟 已完成/}))
+  await screen.findByText('原先已完成的具体反馈')
+  fireEvent.click(screen.getByText('推荐依据与备注'))
+  fireEvent.change(screen.getByLabelText('复盘备注'),{target:{value:'尚未保存的作者判断'}})
+  fireEvent.click(screen.getByRole('button',{name:'重试失败读者的试读'}))
+  expect(await screen.findByText('只补回这一条')).toBeVisible()
+  expect(screen.getByText('原先已完成的具体反馈')).toBeVisible()
+  fireEvent.click(screen.getByText('推荐依据与备注'))
+  expect(screen.getByLabelText('复盘备注')).toHaveValue('尚未保存的作者判断')
+  expect(screen.getByRole('button',{name:'查看原记录'})).toBeVisible()
+  expect(control.fetch.mock.calls.filter(([url,init])=>String(url).endsWith('/recoveries')&&init?.method==='POST')).toHaveLength(1)
+  expect(screen.getAllByRole('button',{name:/受众模拟 (已完成|已有部分结果)/})).toHaveLength(2)
+})

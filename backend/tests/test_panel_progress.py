@@ -6,9 +6,9 @@ from collections import Counter
 from unittest.mock import AsyncMock
 
 import pytest
-from test_workspace_api import create_workspace
+from test_workspace_api import create_workspace, send
 
-from app.models import SimulationRunCreate
+from app.models import SimulationRunCreate, SimulationRunStatus
 from app.workflows.audience_simulation import FakeAudienceSimulationModelProvider
 
 
@@ -46,6 +46,35 @@ class StaggeredReaders(FakeAudienceSimulationModelProvider):
             persona=persona, topic=topic, other_reactions=other_reactions,
             prior_reaction=prior_reaction,
         )
+
+
+def test_sse_delivers_each_cumulative_result_before_parallel_stage_finishes(app, monkeypatch):
+    wid = create_workspace(app)["id"]
+    service = app.state.simulation_service
+    run = service.create(wid, SimulationRunCreate(manual_topic="分段展示", mode="demo"))
+    asyncio.run(app.state.simulation_workflow_service.collect_events(run.id))
+    final = service.get(run.id)
+    assert len(final.reaction_results) >= 3
+    snapshots = iter([
+        final.model_copy(update={"status": SimulationRunStatus.RUNNING,
+                                 "reaction_results": final.reaction_results[:1],
+                                 "debate_results": [], "synthesis": {}}),
+        final.model_copy(update={"status": SimulationRunStatus.RUNNING,
+                                 "reaction_results": final.reaction_results[:2],
+                                 "debate_results": [], "synthesis": {}}),
+        final,
+    ])
+    monkeypatch.setattr(service, "get", lambda _: next(snapshots))
+    response = send(app, "GET", f"/api/simulation-runs/{run.id}/events")
+    events = [json.loads(line.removeprefix("data: "))
+              for line in response.text.splitlines() if line.startswith("data: ")]
+    reactions = [e for e in events if e.get("stageKey") == "initial_reactions"
+                 and e["data"]["eventType"] in {"stage.progress", "stage.succeeded"}]
+    assert [len(e["data"]["reactions"]) for e in reactions] == [1, 2, 3]
+    assert [e["data"]["eventType"] for e in reactions] == [
+        "stage.progress", "stage.progress", "stage.succeeded",
+    ]
+    assert [e["status"] for e in reactions] == ["running", "running", "completed"]
 
 
 def test_each_reaction_and_reply_is_durable_while_slower_reader_is_still_waiting(app):

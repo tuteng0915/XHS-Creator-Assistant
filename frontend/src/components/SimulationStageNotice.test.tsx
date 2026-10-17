@@ -37,8 +37,20 @@ it('uses the same partial status and role errors in the actual history page', ()
     stageSeedFromSimulation={stageSeedFromSimulation} renderStageResult={renderer}/>)
   expect(screen.getByText(/已有部分结果/)).toBeInTheDocument()
   expect(screen.getByText('我先试试')).toBeInTheDocument()
-  fireEvent.click(screen.getByText('部分环节未完成，已保留现有发言'))
-  expect(screen.getByText('核对派：连接失败')).toBeVisible()
+  expect(screen.getByText('部分环节未完成，已保留现有发言')).toBeVisible()
+  expect(screen.getByText('核对派的试读')).toBeVisible()
+  expect(screen.getByText('连接失败')).toBeVisible()
+})
+
+it('links a single-unit recovery back to its untouched original history',()=>{
+  const open=vi.fn()
+  render(<SimulationHistoryPage publicMode simulationRuns={[]} selectedSimulationRun={{...run,modelMetadata:{recovery:{sourceRunId:'original'}}}}
+    simulationReviewDraft={{reviewStatus:'unreviewed',userNotes:'原备注'}} simulationReviewSaveState={{phase:'idle'}} reviewStatusLabel={s=>s}
+    onOpenSimulationRun={open} onSimulationReviewDraftChange={vi.fn()} onSaveSimulationRunReview={vi.fn()}
+    stageSeedFromSimulation={stageSeedFromSimulation} renderStageResult={renderer}/>)
+  expect(screen.getByLabelText('局部恢复来源')).toHaveTextContent('只补回所选环节')
+  fireEvent.click(screen.getByRole('button',{name:'查看原记录'}))
+  expect(open).toHaveBeenCalledWith('original')
 })
 
 it('retains successes for either SSE ordering and agrees with persisted history', () => {

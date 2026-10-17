@@ -141,7 +141,7 @@ def test_saved_discussion_error_is_not_replayed_as_successful_skip(app: FastAPI)
     assert after["debateResults"] == []
 
 
-def test_persona_calls_use_bounded_retry(app: FastAPI) -> None:
+def test_persona_failure_does_not_implicitly_call_the_model_twice(app: FastAPI) -> None:
     class FlakyProvider(FakeAudienceSimulationModelProvider):
         def __init__(self) -> None:
             super().__init__()
@@ -161,8 +161,9 @@ def test_persona_calls_use_bounded_retry(app: FastAPI) -> None:
     collect(app, run["id"])
 
     completed = send(app, "GET", f"/api/simulation-runs/{run['id']}").json()
-    assert completed["status"] == "completed"
-    assert len(completed["reactionResults"]) == 3
+    assert completed["status"] == "partially_completed"
+    assert len(completed["reactionResults"]) == 2
+    assert "initial_reactions.wannabe" in completed["stageErrors"]
     assert provider.reaction_attempts == 1
 
 

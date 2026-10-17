@@ -20,6 +20,77 @@ const round:PanelInterview={id:'interview',status:'completed',question:'哪一�
 beforeEach(()=>{vi.spyOn(panelInterviewApi,'list').mockResolvedValue([])})
 afterEach(()=>{cleanup();vi.useRealTimers();vi.restoreAllMocks()})
 
+const failedRun:SimulationRun={...run,status:'partially_completed',reactionResults:[run.reactionResults[0]],
+  debateResults:[],stageErrors:{'initial_reactions.b':'等待超时'},synthesis:{verdict:'已有结论保留'}}
+
+it('shows a failed unit openly and requests only that unit, retaining received comments',async()=>{
+  const next:SimulationRun={...failedRun,id:'recovered',status:'pending',stageErrors:{},
+    modelMetadata:{recovery:{sourceRunId:'run',stageKey:'initial_reactions.b',summaryStale:true}}}
+  let resolve!:(r:SimulationRun)=>void
+  const recover=vi.spyOn(simulationRunApi,'recover').mockReturnValue(new Promise(yes=>{resolve=yes}))
+  const create=vi.spyOn(simulationRunApi,'create'),observed=vi.fn()
+  render(<SimulationChat run={failedRun} onObserved={observed}/>)
+  expect(screen.getByText('等待超时')).toBeVisible()
+  const button=screen.getByRole('button',{name:'重试细节求证型的试读'})
+  fireEvent.click(button);fireEvent.click(button)
+  expect(recover).toHaveBeenCalledOnce()
+  expect(recover).toHaveBeenCalledWith('w','run',expect.objectContaining({stageKey:'initial_reactions.b'}))
+  expect(button).toBeDisabled()
+  expect(screen.getByText('不用补，我愿意试一次。')).toBeVisible()
+  expect(screen.getByText('已有结论保留')).toBeVisible()
+  await act(async()=>resolve(next))
+  expect(observed).toHaveBeenCalledWith(next)
+  expect(create).not.toHaveBeenCalled()
+})
+
+it('reuses the recovery receipt after a lost response, only on an explicit click',async()=>{
+  const recover=vi.spyOn(simulationRunApi,'recover').mockRejectedValue(new Error('连接暂时中断'))
+  render(<SimulationChat run={failedRun} onObserved={vi.fn()}/>)
+  fireEvent.click(screen.getByRole('button',{name:'重试细节求证型的试读'}))
+  await screen.findByRole('alert')
+  expect(screen.getByText('不用补，我愿意试一次。')).toBeVisible()
+  expect(recover).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button',{name:'重试细节求证型的试读'}))
+  await waitFor(()=>expect(recover).toHaveBeenCalledTimes(2))
+  expect(recover.mock.calls[0]).toEqual(recover.mock.calls[1])
+})
+
+it('ignores a recovery response after changing records',async()=>{
+  let resolve!:(r:SimulationRun)=>void
+  vi.spyOn(simulationRunApi,'recover').mockReturnValue(new Promise(yes=>{resolve=yes}))
+  const observed=vi.fn()
+  const page=render(<SimulationChat run={failedRun} onObserved={observed}/>)
+  fireEvent.click(screen.getByRole('button',{name:'重试细节求证型的试读'}))
+  page.rerender(<SimulationChat run={{...run,id:'other'}} onObserved={observed}/>)
+  await act(async()=>resolve({...failedRun,id:'child',modelMetadata:{recovery:{sourceRunId:'run'}}}))
+  expect(observed).not.toHaveBeenCalled()
+})
+
+it('marks the old summary stale and refreshes only the summary when requested',async()=>{
+  const observed=vi.fn(),recover=vi.spyOn(simulationRunApi,'recover').mockResolvedValue({
+    ...run,id:'summary',status:'pending',modelMetadata:{recovery:{sourceRunId:'run',stageKey:'synthesis'}},
+  })
+  render(<SimulationChat run={{...run,synthesis:{verdict:'旧汇总仍可看'},
+    modelMetadata:{recovery:{sourceRunId:'old',stageKey:'initial_reactions.b',summaryStale:true}}}} onObserved={observed}/>)
+  expect(screen.getByText('旧汇总仍可看')).toBeVisible()
+  expect(screen.getByText(/以下是补回发言前的汇总/)).toBeVisible()
+  expect(recover).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button',{name:'更新汇总'}))
+  await waitFor(()=>expect(observed).toHaveBeenCalledOnce())
+  expect(recover).toHaveBeenCalledWith('w','run',expect.objectContaining({stageKey:'synthesis'}))
+})
+
+it('does not offer model recovery for running, read-only or oracle records',async()=>{
+  const recover=vi.spyOn(simulationRunApi,'recover')
+  const page=render(<SimulationChat run={{...failedRun,status:'running'}} onObserved={vi.fn()}/>)
+  expect(screen.queryByRole('button',{name:/重试细节/})).not.toBeInTheDocument()
+  page.rerender(<SimulationChat run={failedRun} readOnly onObserved={vi.fn()}/>)
+  expect(screen.queryByRole('button',{name:/重试细节/})).not.toBeInTheDocument()
+  page.rerender(<SimulationChat run={{...failedRun,modelMetadata:{origin:'oracle_showcase'}}} onObserved={vi.fn()}/>)
+  expect(screen.queryByRole('button',{name:/重试细节/})).not.toBeInTheDocument()
+  expect(recover).not.toHaveBeenCalled()
+})
+
 it('shows public dialogue, named replies and hidden reading notes without inventing comments',async()=>{
   render(<SimulationChat run={run}/>)
   expect(screen.getByText('不用补，我愿意试一次。')).toBeVisible()
