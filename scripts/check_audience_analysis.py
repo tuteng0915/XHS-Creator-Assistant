@@ -1,4 +1,4 @@
-"""Preview scoped MediaCrawler input, or make one Qwen audience-analysis request.
+"""Preview scoped MediaCrawler input, or make one audience-analysis model request.
 
 No database access, crawling, retries, or asset writes. Reports contain source
 text: keep them in ignored data/evals, not in Git. Default is a free preview.
@@ -13,7 +13,6 @@ import json
 import sys
 import time
 from collections import Counter
-from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -123,7 +122,7 @@ def main() -> int:
         "--context-from", type=Path, help="复用已有报告的完整输入，不重新选取范围"
     )
     parser.add_argument(
-        "--live", action="store_true", help="仅一次 Qwen 调用，不自动重试"
+        "--live", action="store_true", help="仅一次模型调用，不自动重试"
     )
     parser.add_argument("--output", type=Path, help="新的报告目录，不覆盖现有内容")
     args = parser.parse_args()
@@ -150,9 +149,9 @@ def main() -> int:
             )
         )
         return 0
-    settings = replace(Settings.from_environment(), model_provider="qwen")
-    if not settings.qwen_api_key:
-        parser.error("未配置 Qwen 密钥")
+    settings = Settings.from_environment()
+    if not settings.has_text_model_credentials:
+        parser.error("未配置所选文字模型的密钥")
     args.output.mkdir(parents=True, exist_ok=False)
     service = ModelCallService(settings)
     report = asyncio.run(run_check(service, context))
@@ -160,8 +159,8 @@ def main() -> int:
         report["baselineReport"] = str(args.context_from)
     system, user = service._build_prompt(ModelOperation.AUDIENCE_ANALYSIS, context)
     report.update(
-        configuredModel=settings.qwen_model,
-        provider="qwen",
+        configuredModel=settings.text_model_name,
+        provider=settings.model_provider,
         promptHash=hashlib.sha256(system.encode()).hexdigest(),
         inputHash=hashlib.sha256(user.encode()).hexdigest(),
     )

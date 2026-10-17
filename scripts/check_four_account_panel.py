@@ -9,7 +9,6 @@ import json
 import sqlite3
 import sys
 import time
-from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -393,9 +392,9 @@ def main():
         return
     if not args.output or args.output.exists():
         parser.error("需要新的报告目录")
-    settings = replace(Settings.from_environment(), model_provider="qwen")
-    if not settings.qwen_api_key:
-        parser.error("未配置 Qwen 密钥")
+    settings = Settings.from_environment()
+    if not settings.has_text_model_credentials:
+        parser.error("未配置所选文字模型的密钥")
     args.output.mkdir(parents=True, exist_ok=False)
     destination = args.output / "report.json"
 

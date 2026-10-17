@@ -231,6 +231,46 @@ def audience_model_context(context: dict) -> dict:
     }
 
 
+def canonical_comment_parents(
+    refs: list[AudienceEvidence], context: dict,
+) -> tuple[list[AudienceEvidence], list[dict]]:
+    """Repair a parent ID only when the frozen comment identity is unambiguous.
+
+    Quote similarity never identifies a comment. Duplicate IDs, author comments,
+    duplicate parent notes and conflicting existing note IDs remain strict errors.
+    """
+    notes = context["notes"]
+    note_ids = [note["noteId"] for note in notes]
+    comments: dict[str, list[tuple[str, dict]]] = {}
+    excluded = set()
+    for note in notes:
+        excluded.update(note.get("excludedAuthorCommentIds", []))
+        for field in ("comments", "authorReplies"):
+            for comment in note.get(field, []):
+                cid = comment["commentId"]
+                if field == "authorReplies" or comment.get("sourceRole") == "author":
+                    excluded.add(cid)
+                comments.setdefault(cid, []).append((note["noteId"], comment))
+    resolved, repairs = [], []
+    for index, ref in enumerate(refs):
+        replacement = ref
+        matches = comments.get(ref.comment_id, [])
+        if (ref.source_type == "comment" and ref.comment_id not in excluded
+                and len(matches) == 1):
+            parent, comment = matches[0]
+            if (ref.note_id != parent and note_ids.count(parent) == 1
+                    and ref.note_id not in note_ids and ref.quote.strip()
+                    and ref.quote in comment["content"]):
+                replacement = ref.model_copy(update={"note_id": parent})
+                repairs.append({
+                    "referenceIndex": index, "code": "comment_parent_resolved",
+                    "original": ref.model_dump(mode="json", by_alias=True),
+                    "resolved": replacement.model_dump(mode="json", by_alias=True),
+                })
+        resolved.append(replacement)
+    return resolved, repairs
+
+
 def evidence_issues(refs: list[AudienceEvidence], context: dict) -> list[dict]:
     """Explain failed references without accepting paraphrases or guessing sources."""
     if not refs:

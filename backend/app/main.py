@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-from dataclasses import replace
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -234,14 +233,15 @@ def create_app(
         agent_repository=agent_repository,
         workflow_repository=workflow_asset_repository,
     )
-    # Collaboration live turns are an explicit Qwen-only feature.  Keep this
-    # separate from the application's general model provider so a demo request
-    # never starts using a different configured provider accidentally.
+    # Every text path uses configured services, never a hard-coded Qwen override.
+    # Missing credentials fail at the selected service, never via fallback.
     content_collaboration_live_provider = (
         RealContentCollaborationProvider(
-            ModelCallService(replace(active_settings, model_provider="qwen"))
+            model_call_service,
+            writing_model_call_service=ModelCallService(active_settings.for_creator_writing()),
         )
-        if active_settings.qwen_api_key
+        if (active_settings.has_text_model_credentials
+            or active_settings.for_creator_writing().has_text_model_credentials)
         else None
     )
     content_collaboration_service = ContentCollaborationSessionService(
@@ -294,17 +294,17 @@ def create_app(
     reader_selection_service = ReaderSelectionService(database)
     reader_selection_requests = ReaderSelectionRequestService(reader_selection_service)
     if (reader_selection_provider is None
-            and active_settings.model_provider.strip().lower() in {"qwen", "dashscope"}
-            and active_settings.qwen_api_key):
+            and active_settings.model_provider.strip().lower() in {"deepseek", "qwen", "dashscope"}
+            and active_settings.has_text_model_credentials):
         reader_selection_provider = RealReaderSelectionProvider(model_call_service)
     reader_selection_worker = ReaderSelectionWorker(
         reader_selection_service, reader_selection_provider,
     )
     panel_interview_service = PanelInterviewService(
         database,
-        live_provider=RealPanelInterviewProvider(
-            ModelCallService(replace(active_settings, model_provider="qwen"))
-        ) if active_settings.qwen_api_key else None,
+        live_provider=RealPanelInterviewProvider(model_call_service)
+        if (active_settings.model_provider.strip().lower() in {"deepseek", "qwen", "dashscope"}
+            and active_settings.has_text_model_credentials) else None,
     )
 
     @asynccontextmanager

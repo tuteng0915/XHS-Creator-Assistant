@@ -1,6 +1,6 @@
 """Controlled same-text persona check; no production database access.
 
-Default is a free case preview. --live performs at most seven Qwen requests in
+Default is a free case preview. --live performs at most seven model requests in
 the real graph using a temporary database; no network retries. These authored
 roles test behavior differences, not audience inference or prediction accuracy.
 --audience-from with explicit --group-ids instead reuses accepted analysis roles
@@ -379,7 +379,7 @@ async def recheck_synthesis(service, baseline: dict, panel_feedback: bool = Fals
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--live", action="store_true", help="执行有限次数真实 Qwen 调用")
+    parser.add_argument("--live", action="store_true", help="执行有限次数真实模型调用")
     parser.add_argument("--output", type=Path, help="新的独立结果目录，不覆盖已有目录")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--synthesis-from", type=Path, help="复用先前报告，只付费复测一次汇总")
@@ -414,9 +414,9 @@ def main() -> int:
         return 0
     if args.output is None:
         parser.error("真实验证必须指定 --output，例如 data/evals/reactions-20261003")
-    settings = replace(Settings.from_environment(), model_provider="qwen")
-    if not settings.qwen_api_key:
-        parser.error("未配置 Qwen 密钥")
+    settings = Settings.from_environment()
+    if not settings.has_text_model_credentials:
+        parser.error("未配置所选文字模型的密钥")
     args.output.mkdir(parents=True, exist_ok=False)
     service = ModelCallService(settings)
     if args.task_pair:
@@ -441,7 +441,7 @@ def main() -> int:
         ).hexdigest()
         for operation in operations
     }}
-    report.update(provider="qwen", configuredModel=settings.qwen_model)
+    report.update(provider=settings.model_provider, configuredModel=settings.text_model_name)
     destination = args.output / "report.json"
     destination.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"report": str(destination), "status": report["status"],

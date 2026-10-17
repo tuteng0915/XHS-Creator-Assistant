@@ -5,7 +5,6 @@ import asyncio
 import hashlib
 import json
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,7 +121,7 @@ def main():
         return
     if args.output is None:
         parser.error("需要新的报告路径")
-    settings = replace(Settings.from_environment(), model_provider="qwen")
+    settings = Settings.from_environment()
     report = asyncio.run(
         check(cases, settings, args.output, fresh_selection_label=args.fresh_selection_label)
     )

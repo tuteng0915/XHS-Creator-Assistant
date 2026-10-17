@@ -22,6 +22,8 @@ from app.services.content_collaboration import (
     SpecialistRole,
     SpecialistTurn,
 )
+from app.services.creator_reference_projection import account_writing_views
+from app.services.creator_writing_context import compact_writing_packet
 from app.services.model_calls import ModelCallService
 
 _MAX_SOURCE_CHARS = 1_600
@@ -144,7 +146,7 @@ class _CandidateSuggestion(BaseModel):
     body: str = Field(min_length=1, max_length=1_200)
     confidence: Literal["supported", "inference", "needs_creator"]
     evidence_refs: list[_EvidenceRef] = Field(
-        default_factory=list, alias="evidenceRefs", max_length=3
+        default_factory=list, alias="evidenceRefs"
     )
 
     @model_validator(mode="after")
@@ -172,7 +174,7 @@ class _WireTurn(BaseModel):
 
 
 class _WireOutput(BaseModel):
-    """Exact response envelope accepted from the model, with no aliases or extras."""
+    """Canonical envelope, after any lossless single-writer normalization."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -180,10 +182,19 @@ class _WireOutput(BaseModel):
 
 
 class RealContentCollaborationProvider:
-    """Invoke one Qwen turn without granting it product read/write capabilities."""
+    """Invoke one scoped model turn without product read/write capabilities."""
 
-    def __init__(self, model_call_service: ModelCallService) -> None:
+    def __init__(
+        self,
+        model_call_service: ModelCallService,
+        *,
+        writing_model_call_service: ModelCallService | None = None,
+    ) -> None:
         self.model_call_service = model_call_service
+        self.writing_model_call_service = (
+            writing_model_call_service if writing_model_call_service is not None
+            else model_call_service
+        )
 
     async def run(
         self,
@@ -192,12 +203,14 @@ class RealContentCollaborationProvider:
         message: CollaborationMessage,
         context: dict[str, Any],
     ) -> SpecialistTurn:
-        provider = self.model_call_service.settings.model_provider.strip().lower()
-        # This product's live specialist path is intentionally Qwen-only for
-        # now.  It keeps a demo request from unexpectedly switching providers
-        # just because another provider is globally configured.
-        if provider not in {"qwen", "dashscope"}:
-            raise ValidationError("实时协作目前仅支持已配置的 Qwen / DashScope 模型")
+        single_writer = context.get("assistantMode") == "single_writer"
+        model_service = (self.writing_model_call_service if single_writer
+                         else self.model_call_service)
+        provider = model_service.settings.model_provider.strip().lower()
+        if single_writer and provider not in {"deepseek", "qwen", "dashscope"}:
+            raise ValidationError("创作助手仅支持已配置的 DeepSeek / Qwen 模型")
+        if not single_writer and provider not in {"deepseek", "qwen", "dashscope"}:
+            raise ValidationError("实时协作仅支持已配置的 DeepSeek / Qwen 模型")
 
         all_sources = self._allowed_sources(context)
         upstream_candidates = self._upstream_candidates(context)
@@ -207,17 +220,18 @@ class RealContentCollaborationProvider:
             context=context,
             sources=all_sources,
         )
-        response = await self.model_call_service.call_operation(
+        response = await model_service.call_operation(
             ModelOperation.CONTENT_COLLABORATION_TURN,
             self._model_context(role=role, message=message, context=context, sources=sources),
         )
         try:
-            output = _WireOutput.model_validate(response.output)
+            output, ignored_outer_fields = self._parse_output(
+                response.output, single_writer=single_writer,
+            )
         except PydanticValidationError as error:
             raise ValidationError("协作角色返回格式不符合本轮交接契约") from error
 
         turn = output.turn
-        single_writer = context.get("assistantMode") == "single_writer"
         if single_writer and (role != "writing" or turn.next_recipient != "creator"):
             raise ValidationError("创作助手应直接回复作者，不转交其他角色")
         self._validate_turn(
@@ -229,7 +243,12 @@ class RealContentCollaborationProvider:
         )
         candidates = [item.model_dump(by_alias=True) for item in turn.candidate_suggestions]
         return SpecialistTurn(
-            content=self._render_turn(turn),
+            content=self._render_turn(turn) + (
+                "\n\n事实校订未完成，请核对后采用。"
+                if response.model_metadata.get("factEdit", {}).get("status")
+                in {"unavailable", "partial"}
+                else ""
+            ),
             to=turn.next_recipient,
             # Candidate suggestions are immutable discussion material, not
             # artifacts or Topic updates.  Keeping them in metadata makes the
@@ -240,8 +259,45 @@ class RealContentCollaborationProvider:
                              else "content-collaboration-turn/v2"),
                 "candidateSuggestions": candidates,
                 "usedCandidateIds": list(turn.used_candidate_ids),
+                **({"outputNormalization": {
+                    "ignoredOuterFields": ignored_outer_fields,
+                    "originalOutputHash": _content_hash(_canonical(response.output)),
+                }} if ignored_outer_fields else {}),
             },
         )
+
+    @staticmethod
+    def _parse_output(
+        raw: dict[str, Any], *, single_writer: bool = False,
+    ) -> tuple[_WireOutput, list[str]]:
+        """Accept redundant writer metadata without repairing or losing content.
+
+        The nested turn remains authoritative and fully validated. Never move
+        root-only content/references into it or guess between conflicting values.
+        Keep raw untouched so the caller can retain/hash the original receipt.
+        Legacy multi-role handoffs keep their existing strict envelope.
+        """
+        ignored: list[str] = []
+        canonical = raw
+        if single_writer and isinstance(raw, dict) and isinstance(raw.get("turn"), dict):
+            turn = raw["turn"]
+            defaults = {"candidateSuggestions": [], "usedCandidateIds": []}
+            duplicate_fields = {"summary", "nextRecipient", *defaults}
+            outer = {key: value for key, value in raw.items() if key != "turn"}
+            for key, value in outer.items():
+                is_duplicate = (
+                    key in duplicate_fields and (key in turn or key in defaults)
+                    and _canonical(value) == _canonical(turn.get(key, defaults.get(key)))
+                )
+                if (key == "evidenceRefs" and value == []) or is_duplicate:
+                    ignored.append(key)
+                else:
+                    # Let normal validation report the incompatible envelope;
+                    # do not silently discard meaningful or unknown data.
+                    return _WireOutput.model_validate(raw), []
+            if ignored:
+                canonical = {"turn": turn}
+        return _WireOutput.model_validate(canonical), sorted(ignored)
 
     @staticmethod
     def _allowed_sources(context: dict[str, Any]) -> dict[str, dict[str, str]]:
@@ -283,6 +339,10 @@ class RealContentCollaborationProvider:
             snapshot = session_context.get("creatorContextSnapshot", {})
             for reference in snapshot.get("references", []):
                 source_id = f"reference:{reference['kind']}:{reference['id']}"
+                content = reference["content"]
+                feedback = []
+                if reference["kind"] == "account_analysis":
+                    content, feedback = account_writing_views(content)
                 if reference["kind"] == "imported_note":
                     # Multiple selected notes share a material ID. Hash the
                     # pair to retain uniqueness within the bounded source ID.
@@ -294,7 +354,7 @@ class RealContentCollaborationProvider:
                     {"account_analysis": "作者选择的账号分析",
                      "audience_analysis": "作者选择的受众分析",
                      "imported_note": "作者选择的原笔记"}[reference["kind"]],
-                    {"scope": reference.get("scope", {}), "result": reference["content"],
+                    {"scope": reference.get("scope", {}), "result": content,
                      "sourceOrigin": reference.get("sourceOrigin", "unknown")},
                     limit=100_000,
                 )
@@ -306,6 +366,14 @@ class RealContentCollaborationProvider:
                     "写法与选题参考，不是作者亲历或当前读者的确定处境。"
                     "其中评论属于历史评论者，不移植其时间、成绩、专业等条件。"
                 )
+                for index, item in enumerate(feedback):
+                    feedback_id = f"{source_id}:feedback:{index + 1}"
+                    add(feedback_id, "历史评论反馈（非当前读者事实）", item, limit=100_000)
+                    sources[feedback_id]["purpose"] = "historical_feedback"
+                    sources[feedback_id]["useBoundary"] = (
+                        "用于理解历史提问与评价；具体条件仅属于各条评论者，"
+                        "不代表作者、本次读者或现在仍适用的规则。"
+                    )
         workspace_context = (
             session_context.get("workspaceContext")
             if isinstance(session_context, dict) and context.get("assistantMode") != "single_writer"
@@ -462,33 +530,73 @@ class RealContentCollaborationProvider:
                 ],
             }
         if context.get("assistantMode") == "single_writer":
-            packet["schemaVersion"] = "creator-writing-packet/v1"
+            packet["schemaVersion"] = "creator-writing-packet/v2"
             packet["assistantMode"] = "single_writer"
             packet["roleTask"] = {
-                "objective": "直接帮助作者讨论角度、起草或精修眼前稿件，保留其具体经历与表达特点。",
+                "objective": "按本轮作者要求讨论、起草或精修，借鉴原文语感。",
                 "candidatePlan": (
                     "作者要正文就给可用正文；只聊角度则先讨论；局部精修只返回替换片段。"
                 ),
-                "qualityBar": [
-                    "用已有事实或给读者的具体行动建议推进，不为生动而补造作者亲历；初稿同样适用。",
-                    "默认给一个最值得采用的方案和简短理由；只有确有选择价值才给备选。",
-                    "只使用当前稿件、这个上下文段内的对话，以及作者显式选择的参考。",
-                    "参考分析是建议和观察，不是新稿必须照搬的选题，更不是作者新经历。",
-                    "原笔记是作者选中的历史文本，可借鉴表达或已有材料；"
-                    "不把其中过去的经历、时间、场景或结果自动移植成当前稿的新事实。",
-                    "不同原文中的学校、做法与判断不能拼成作者做过的一次比较；"
-                    "助手先前生成的稿件也不是作者确认的事实。",
-                ],
                 **({"writingFocusRules": packet["roleTask"]["writingFocusRules"]}
                    if isinstance(focus, dict) else {}),
             }
             packet.pop("upstreamHandoff", None)
-            packet["previousSuggestions"] = [
-                {"id": item["id"], "content": _excerpt(item["content"], limit=8_000)}
+            # The request is a real user turn below, not a second creative
+            # brief and not a quotation asserting that an author event happened.
+            packet["creativeBrief"].pop("creatorRequest", None)
+            packet["conversation"] = [
+                {"sourceId": f"message:{item['id']}",
+                 "role": "user" if item["sender"] == "creator" else "assistant",
+                 "content": _excerpt(item["content"], limit=8_000)}
                 for item in context.get("transcript", [])
-                if isinstance(item, dict) and item.get("sender") == "writing"
+                if isinstance(item, dict) and item.get("sender") in {"creator", "writing"}
                 and isinstance(item.get("id"), str) and isinstance(item.get("content"), str)
+                and item["id"] != message.id
             ]
+            packet["conversation"].append({"sourceId": f"message:{message.id}",
+                                           "role": "user", "content": message.content})
+            packet["conversation"] = [
+                item for item in packet["conversation"] if item["content"].strip()
+            ]
+            dialogue_indexes = {
+                item["sourceId"]: index for index, item in enumerate(packet["conversation"])
+                if item["role"] == "user"
+            }
+            material_views = []
+            for source_id, source in sources.items():
+                if source_id.startswith("message:"):
+                    if source_id in dialogue_indexes:
+                        # The exact text remains in the actual dialogue and in
+                        # the server's source map for quote validation. Expose
+                        # an index, not a duplicated instruction as source text.
+                        material_views.append({
+                            "id": source_id, "sourceRole": "creator_dialogue",
+                            "dialogueIndex": dialogue_indexes[source_id],
+                            "label": "随后对话中的作者消息（要求或补充，非整段事实声明）",
+                        })
+                    continue
+                if source_id.startswith("reference:imported_note:"):
+                    source_role = "source_document"
+                elif source.get("purpose") == "historical_feedback":
+                    source_role = "historical_reader_feedback"
+                elif source_id.startswith("reference:"):
+                    source_role = "editorial_analysis"
+                elif source_id == "writing:reader_opinion":
+                    source_role = "reader_opinion"
+                else:
+                    source_role = "manuscript"
+                material_views.append({
+                    **source, "sourceRole": source_role,
+                    # Publishing/selecting a note does not establish who its
+                    # first-person narrator is (it may contain a contribution
+                    # or quotation). Keep that identity scoped to the document;
+                    # actual creator statements remain in the real dialogue.
+                    **({"narration": {
+                        "speakerScope": source_id,
+                        "creatorBinding": "not_established_by_selection",
+                    }} if source_role == "source_document" else {}),
+                })
+            packet["evidence"]["allowedSources"] = material_views
             packet["evidence"]["sourceGroups"] = {
                 "manuscript": [key for key in sources if key == "target:topic"],
                 "originalNotes": [key for key in sources
@@ -497,12 +605,16 @@ class RealContentCollaborationProvider:
                                                         if key.startswith((
                                                             "reference:account_analysis:",
                                                             "reference:audience_analysis:",
-                                                        ))],
-                "authorMessages": [f"message:{item['id']}" for item in context.get("transcript", [])
-                                   if isinstance(item, dict) and item.get("sender") == "creator"
-                                   and f"message:{item.get('id')}" in sources],
+                                                        ))
+                                                        and sources[key].get("purpose")
+                                                        != "historical_feedback"],
+                "historicalFeedbackNotCurrentReaderFacts": [key for key in sources
+                                                           if sources[key].get("purpose")
+                                                           == "historical_feedback"],
+                "creatorDialogue": [key for key in dialogue_indexes if key in sources],
                 "writingFocus": [key for key in sources if key.startswith("writing:")],
             }
+            packet = compact_writing_packet(packet)
         return packet
 
     @staticmethod

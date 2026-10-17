@@ -16,6 +16,7 @@ from app.services.audience_evidence import (
     ObservedEpisode,
     audience_context,
     audience_model_context,
+    canonical_comment_parents,
     evidence_issues,
     observed_episodes,
     validate_evidence,
@@ -120,11 +121,15 @@ class AudienceEnvelope(APIModel):
 def validate_audience_output(output: dict, context: dict) -> tuple[dict, dict]:
     """Reject whole ungrounded groups, retaining independently valid groups only."""
     envelope = AudienceEnvelope.model_validate(output)
-    accepted, rejected = [], []
+    accepted, rejected, repairs = [], [], []
     ids = [group.get("id") for group in envelope.groups if isinstance(group, dict)]
     for index, raw in enumerate(envelope.groups):
         try:
             group = AudienceGroup.model_validate(raw)
+            group.evidence_refs, corrections = canonical_comment_parents(
+                group.evidence_refs, context,
+            )
+            repairs.extend({"groupId": group.id, **item} for item in corrections)
             issues = evidence_issues(group.evidence_refs, context)
             if ids.count(group.id) > 1:
                 issues.append({"code": "duplicate_group_id", "message": "分组 ID 重复"})
@@ -142,7 +147,8 @@ def validate_audience_output(output: dict, context: dict) -> tuple[dict, dict]:
         else:
             accepted.append(group)
     diagnostics = {"phase": "evidence_validation", "acceptedGroups": len(accepted),
-                   "rejectedGroups": rejected}
+                   "rejectedGroups": rejected,
+                   **({"referenceRepairs": repairs} if repairs else {})}
     if not accepted:
         return {}, diagnostics
     summary = (envelope.summary if not rejected

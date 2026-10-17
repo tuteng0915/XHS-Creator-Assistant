@@ -1,5 +1,493 @@
 # 当前状态与 TODO
 
+## 2026-10-17 用户授权 push 前回归
+
+- 本次提交范围为当前开发分支累计的DeepSeek文字链路接入、创作来源／上下文去重、输出兼容、受众来源与反馈修复及评测工具／交接文档；不包含已撤回的邻近相关实验改动，不把其失败记作修复完成。
+- 31个相关测试文件合跑：700 passed／1 failed（30.77秒）；唯一失败为沙箱禁止绑定127.0.0.1临时HTTP端口。随后在允许回环端口的环境仅复测`tests/test_account_profile_check.py::test_network_trace_runs_through_real_local_http_transport`，1 passed（0.20秒）。未调用真实模型或启动正式后端；不是本轮全量后端测试。
+- 全部新增／修改Python文件ruff、git diff --check通过；扫描61个候选文件未发现密钥模式。排除frontend/node_modules软链接、data评测原始数据、环境文件、数据库和主仓库原promo目录；提交署名核验为littlelittlesheep <shiqishan319@gmail.com>。推送目标codex/account-reading-quality，不更新master，不部署。
+
+## 2026-10-17 邻近相关判断定点回放（修复未通过，候选产品改动已撤回）
+
+**当前问题**：独立相关性核对把“分题拆解”的偏好当成必要条件，排除面试逐题派。**验收**：冻结上轮一粒鱼829字稿、人物及首轮推荐原文；保留g6超级个体行动派和g3面试逐题派，排除用途更远的g2跨申讲故事派，不凑3人、不改写人物、不重跑生成／推荐／讨论。**预期涉及文件**：`reader_selection_prompt.py`、`panel_quality.py`及定向测试；新增单阶段回放工具。本轮尝试未满足验收，相关候选产品修改全部撤回，最终只保留`scripts/replay_reader_fit.py`和`backend/tests/test_reader_fit_replay.py`作为后续定点验证工具，以及本交接记录。既有来源修复和具体反馈保留改动未撤回。
+
+### 四次局部尝试与实际失败
+
+| 条件（每种仅一次） | 最终入选 | 未满足处 | 实际核对耗时／tokens |
+| --- | --- | --- | --- |
+| 区分阅读需要与形式偏好，允许服务部分任务 | g6 | g3仍因不是分题拆解／答题思路被排除 | 2.129秒／1423 |
+| 加入原推荐理由作为未核实主张供核对 | g6、g3、g2 | g3恢复，但g2也因叙述线可迁移被放行 | 1.629秒／1775 |
+| 在上一条件加需要／部分需要／仅形式／无关分类 | g6、g3、g2 | g2被判部分需要，未守住负例 | 1.899秒／1861 |
+| 移除推荐理由、保留分类 | g6 | g3再次因不提供具体题型而排除 | 1.668秒／1500 |
+
+- **未完成修复**。第一种原文仍说“通篇是行动建议而非分题拆解或答题思路”；传入理由后则认为候选人案例的“发现问题、做原型、找人验证、拿反馈”能帮助理解考察点，却同时把跨专业申请文书也视作相通。添加分类字段并没有解决判断，不能以结构化结果或一次选中称质量提升。观察提示形式偏好被硬化、推荐理由可能带来确认偏向，但每条件单样本，不能据此证明唯一根因。
+- **真实DeepSeek请求4次，共6559 tokens**，均为现有reader-fit核对阶段，非思考、temperature0.3、max_tokens4000，HTTP200／stop；每次硬上限1，无自动重试／模型回退。耗时是单次服务核对，不是整套产品等待；没有新增推荐／人物生成／讨论／总结请求。没有继续抽样直到得到满意名单。
+- 冻结来源为`data/evals/yili-reader-selection-retest-20261017/report.json`。四份原始packet／回答／usage／预声明验收分别保存于`data/evals/yili-reader-fit-replay-20261017`、同名前缀`-handoff`、`-basis`、`-independent-basis`目录的`report.json`，四次sourceUnchanged=true，semanticExpectedMatches=false。中间两种只增加原推荐主张，正文和原人物字段不变；其余两种checkerInputExact=true。未覆盖任何原始回执或产品历史。
+- 回放工具默认仅预览：不读凭据、不发请求、不创建输出；live只调用现有核对一次，不进入推荐provider，已存在输出拒绝覆盖，记录源hash和语义验收。命令退出0／status=completed仅说明结构处理及记录完成，**不表示语义验收通过**；以semanticExpectedMatches单独报告。
+
+### 验证、自查及边界
+
+- 回放命令结构：`PYTHONDONTWRITEBYTECODE=1 <主仓库backend/.venv/bin/python> scripts/replay_reader_fit.py --source-report <上述冻结report.json> --output <新的eval目录> --expect-include g6 --expect-include g3 --expect-exclude g2`；加`--live --env-file <已配置环境文件>`才进行1次真实核对，凭据不打印。四次只在不同条件下运行，失败原文保留；最终产品已撤回到原核对提示，不伪称当前工具可直接复现已撤回的实验提示，实验准确提示见各自packet。
+- backend：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_reader_fit_replay.py tests/test_panel_quality.py tests/test_reader_selection.py tests/test_reader_selection_model.py tests/test_reader_selection_persistence.py tests/test_panel_replay_repairs.py tests/test_panel_protocol.py` → **119 passed（8.44秒）**。包括源输入变动预先拒绝、离线预览无凭据／输出、副作用边界、邻近标签不覆盖排除决定、允许少于上限而不补人；mock入选不是实际质量证据。
+- 相关5个Python文件`ruff check --no-cache`通过；`git diff --check`检查。回退后`reader_selection_prompt.py`与`test_panel_quality.py`无diff；`panel_quality.py`仅保留上轮具体反馈相关修改，FIT_SYSTEM恢复原值，没有新增basis字段／推荐主张输入。未再跑无关全量或前端；旧LangGraph弃用提示仍在。
+- **已知限制**：邻近相关误判仍存在，未提供可上线的修复。只核对首轮推荐的3位，不虚构其他5位判断；g2是本次预先指定负例，不在失败后重定义验收或强制改名单。未开数据库、服务或UI，未收录／改稿／部署／提交／推送，主干跟踪代码及旧名单不变。
+- **需要用户决定**：无执行阻塞；本轮未达到要求，下一步应先审阅输入表示与核对职责，再做一项有针对性的修改，不继续堆提示或重复付费抽样。
+
+### 下一轮交接
+
+- **需要测试的功能**：沿用此稿与三人物，分别检验“真实阅读任务相通但形式不同”和“只有叙述方法可迁移、任务不同”；保留直接相关g6与负例g2，不重跑整套。
+- **需要新增／修改的代码**：先审查现有reader-fit输入怎样区分阅读需要、偏好及应用场景；不要直接继承推荐者结论，不加第三个模型裁判或硬编码g3姓名。已有回放工具可用于零调用输入检查。
+- **下一项改进及验收**：明确建立“稿中既有内容能帮读者完成哪一步”的具体联系，且不要求全文满足读者全部偏好；只有相似叙事手法不够。真实核对同时保留g6／g3、排除g2才可称本例修复，再保留原文供用户判断；当前尚未达到。
+
+## 2026-10-17 一粒鱼恢复候选后单次推荐（真实完成，主选贴题、邻近边界偏严）
+
+用户只要求用原稿重新推荐，不重生人物／不跑讨论。**问题**：上轮因评论归属错位丢掉g3／g6／g8，恢复后能否推荐到当前稿真正需要的读者。**验收**：原829字稿、任务、上限3人、原5候选及其顺序／ID／字段逐字不变，仅追加3位恢复角色；一次现有推荐＋相关性核对，最多2次实际DeepSeek请求，展示原始入选／排除理由，不自动收录或新建模拟。**涉及文件**：仅本节；临时评测脚本及新忽略目录回执，不改产品代码／prompt／模型。
+
+### 实际结果
+
+- 输入标题《没做过大项目，也能讲清楚一件小改进》及正文、panelTask、desiredCount均与上一轮冻结选择输入相同；旧5位人物原ID／字段／顺序完全相同，追加g3面试逐题派、g6超级个体行动派、g8广撒网比较派。用现有select_audience_personas＋FanDefinition构造同样的可选字段，恢复者仅在内存分配稳定评测UUID，未收录到正式库，也未改人物设定来迎合选题。预览0调用通过oldCandidatesExact／targetAndTaskExact断言。
+- **第一步推荐3位**：g6超级个体行动派direct、g3面试逐题派adjacent、g2跨申讲故事派adjacent；不是第一步只选了1人。g6原始理由：“本文给出的正是今天就能动手做的小改进三步法，还配了真实案例，符合他想立刻补能力、先动手做小项目的习惯。”
+- **第二步相关性核对仅保留g6**，理由对应人物已有的“今天能做什么来提升竞争力”及正文“记录麻烦—两周做粗糙版本—找真人验证”。最终completed、1位、0结构警告，未补足3人。模型预期其关注起手动作和两周内能做什么；本轮没有让人物发言，不能把预期贡献说成实际反应。
+- g3被排除，核对理由是它要分题准备和理解考察点，而本文不是分题拆解；g2被排除，理由是其需要跨专业文书动机串联，而本文服务求职简历／面试的小改进闭环。其余g1／g4／g5／g7／g8未被首轮推荐，未接受第二轮逐人核对，不能伪造模型对它们的排除理由。
+- **人工判断**：主选g6比上轮只留g2更贴题，恢复来源归属确实让最直接人物重新进入可选池；但不能称所有筛选都正确。g3没有限定只看留学面试，稿件本身帮助回答“实习做了什么、如何讲清楚”，有合理的邻近阅读联系；因“不是分题教程”排除它可能偏严。g2用途更远，排除可理解。只跑一次，输入池改变且采样不同，不能证明稳定性或断言名单唯一正确，本轮不擅自改核对门槛／prompt继续抽样。
+- **真实请求2次**：deepseek-flash非思考、temperature0.3、max_tokens4000，均HTTP200／stop，无重试／Qwen／跨模型回退。推荐HTTP2.120秒／2287 tokens，核对1.734秒／1360 tokens；端到端**3.940秒、3647 tokens**。这是服务调用耗时，不是浏览器UI体验；不与旧5人5.162秒推算稳定提速。
+
+### 验证与边界
+
+- 预览命令：`PYTHONDONTWRITEBYTECODE=1 <主仓库backend/.venv/bin/python> /private/tmp/sqs_yili_selection_retest_20261017.py --output <主仓库data/evals/yili-reader-selection-retest-20261017>` → 0请求、8候选、829字、两个exact=true。
+- 真实同命令加`--live`，使用已配置DeepSeek密钥、不打印密钥；HTTP钩子将硬上限设为2，仅调用RealReaderSelectionProvider.select一次，保留两步完整packet／原文／usage／时间及最终名单。输出目录已存在即拒绝，发生失败不重试。结果保存`data/evals/yili-reader-selection-retest-20261017/report.json`，同目录保留`run_check.py`供复查；源原始回执SHA256前后相同、sourceUnchanged=true。
+- 未打开任何数据库、未启动服务、未运行人物生成／反应／讨论／总结、未改稿或保存推荐到产品历史。产品代码本轮0改动，`git diff --check`通过；不重复跑整套后端或付费调用。上轮178项相关测试及全量环境限制见下节，不冒称本轮重跑。
+- **需要用户决定**：无阻塞。是否保留像g3这样的邻近读者值得用户审阅本次原始理由后决定，本轮不擅自扩大范围。未部署／重启／提交／推送，主干、正式人物、稿件、旧历史、提交包不变。
+
+### 下一轮交接
+
+- **需要测试的功能**：若继续验证，聚焦“分题面试需求与小改进讲述是否有邻近联系”的已有输出回放；不要再生8个人或整场群聊。真实不同判断仍需后续小规模试读，不能以推荐文字代替实际发言。
+- **需要新增／修改的代码**：暂不新增；若用户要求放宽邻近读者，先定位推荐与独立核对对adjacent的权限是否一致，不移除真实相关性检查，也不为了凑人放行留学／选校人物。
+- **下一项改进及验收**：保住g6直接相关主选，同时对g3给可解释、非“必须精确覆盖题型”的邻近判断；排除确实不搭界的选校视角，允许只一人，不新增模型阶段，完整展示得失与等待。
+
+## 2026-10-17 受众原始回执离线修复（零新增模型调用）
+
+用户本轮仅要求修两项：引用ID错位不能连带丢人物；有用反馈不能清成通用补素材。**当前问题**：一粒鱼8位候选中3位将commentId重复填入noteId，被整人拒收；QSheep具体比较问题因kind与问题列表不匹配被拒，成本问题被事实核对删除；一粒鱼讲述示范反馈被清空成统一补素材。**验收**：逐字复用这次生成／核对原始回执及冻结输入，找回可唯一定位的来源、具体读者问题保留、未经证实的替换稿不自动放行；不重跑推荐／讨论、不加调用或prompt。**涉及文件**：`audience_evidence.py`、`audience_analyses.py`、`editor_feedback.py`、`panel_quality.py`、反馈测试、新`test_panel_replay_repairs.py`、新离线工具`replay_audience_panel.py`、本节／PRD。不改UI、模型、写作链或运行服务。
+
+### 完成与实际回放
+
+- 来源问题不是内容不存在：冻结输入中可用唯一commentId找到真实父笔记，且引文逐字匹配。新增无模型的归属恢复，只修不存在的父ID；重复评论ID／父笔记ID、已有另一个有效父ID、已知作者评论、引文不存在均不猜。诊断记录original／resolved，不写回原始输出。QSheep8→8；一粒鱼5→8，恢复g3面试逐题派、g6超级个体行动派、g8广撒网比较派。头像／人物内容和手动收录流程不变。
+- QSheep“clarify＋空替换＋具体问题”无损归一为add_material，不改问题原话。“查到保研真实上限和申请门槛之后，你自己会先看哪一个条件来判断哪条路更可行？”及时间冲突取舍问题保留；成本／机会成本保留为原本optional，不强制扩写。原有效1卡→3卡，其中2条具体调整，不再只剩keep。
+- 一粒鱼原有效2卡→3卡：保留“小改进怎样写进简历或面试里讲”的具体observation、读者问题、锚点与tradeoff；有新增内容的替换稿仍撤下，不把“改完错了几次”变成已证实事实。补问使用冻结concern原文而非通用句，也不采用核对问句中可能自编的75%／五次等答案。可选跨专业后续选题保留，不塞进当前稿。
+- 事实核对的权限收窄为拟写入正文的suggestedText：没有替换文字的问题／探索不再送事实核对，也不能被旧omit回执清空；有替换稿的retain／needs_material／omit和完整ID核对仍在。历史回放用**原核对packet及原decisions**，不虚构新卡f1的模型判决；忽略的问句判决记录advisoryOnlyIds。未来同样输出下Q无需该额外核对，鱼仅f2需核对，但本轮未重新测模型等待。
+- **真实模型请求0次**，无密钥读取、网络、DB或服务启动。源`data/evals/audience-full-chain-20261017/report.json`含上一轮18次实际请求，本次只是回放，不把它们算作新增或重试。工具在新目录`data/evals/audience-panel-replay-20261017-verified/report.json`保存前后完整卡片、3个人物、来源修正、旧核对回执及源SHA256；sourceUnchanged=true，未覆盖原始评测。先前预检目录也保留。
+
+### 测试与自查
+
+- 根目录：`PYTHONDONTWRITEBYTECODE=1 <主仓库backend/.venv/bin/python> scripts/replay_audience_panel.py --source-report <主仓库data/evals/audience-full-chain-20261017/report.json> --output <主仓库data/evals/audience-panel-replay-20261017-verified>` → Q候选8→8／反馈1→3，鱼候选5→8／反馈2→3；0模型、源不变。输出目录已存在即拒绝覆盖。
+- backend：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_panel_replay_repairs.py tests/test_editor_feedback.py tests/test_panel_quality.py tests/test_audience_evidence.py tests/test_audience_diagnostics.py tests/test_audience_persona_design.py tests/test_audience_simulation_workflow.py tests/test_panel_protocol.py` → **178 passed（11.61秒）**；另`tests/test_audience_analysis_check.py`→12 passed。包含断网式回放测试、作者评论排除／重复ID／错误引文／有效ID冲突、归一后来源无效仍拒收、混合卡仅检查替换文字、原输入不变及假答案不注入。
+- 修改Python文件`ruff check --no-cache`及`git diff --check`通过；用AST逐值比对FIT_SYSTEM／EDIT_SYSTEM／PANEL_SYNTHESIS_SYSTEM／EDITOR_FEEDBACK_PROMPT与HEAD完全相同，未扩提示。初轮失败来自旧测试预期“空正文＋问题必拒”及无归一时多出空诊断键，已分别改为检验“正文＋问题冲突仍拒”与保留旧空诊断形状；没有删除来源错误／事实反例。
+- 同一backend命令不列测试文件、跑完整后端 → **2310 passed／5 failed（177.49秒）**，不是全过。1项`test_network_trace_runs_through_real_local_http_transport`因沙箱拒绝绑定127.0.0.1临时端口；3项video_creator实样例测试找不到工作树`data/xhs-fixtures`中的_tt／QSheep旧JSONL；1项`test_generic_xhs_import_package_export_script`硬编码工作树内不存在的`backend/.venv/bin/python`。均在环境准备阶段报错，本轮未改其业务代码、未联网补抓数据或创建正式服务；保留环境限制，不扩成本次无关修复。全量收集早于最后新增4个边界用例，最后178项定向包含全部20个新增回归；新增文件单跑20 passed（0.28秒）。
+- **已知限制**：恢复8位只是来源形式可用，不证明每位画像推断成立；原样本评论角色仍有unknown，不能声称全部来自真实读者。g6是否会被推荐尚未重新验证；事实核对把讲述模板误作新增事实的语义误判仍未直接纠正，本次先保住具体意见，不自动放行那段替换稿。长问题／长锚点不截断条件，全文仍随卡保留。没有前端改动或浏览器视觉验收。
+- **需要用户决定**：无。未部署／重启／提交／推送；主干跟踪代码不变，主仓库仍仅原promo目录未跟踪。既有开发树未提交改动保留；产品DB、旧人物／稿件／模拟历史及提交包未回写。
+
+### 下一轮交接
+
+- **需要测试的功能**：用户若同意继续实测，再仅重做一粒鱼当前稿的候选推荐，检查恢复的g6能否入选、是否比申请视角更贴题；不要默认重跑人物生成和整场讨论。界面检查具体观察／问题／可选选题与补素材状态能否清楚区分。
+- **需要新增／修改的代码**：本轮先不扩功能。后续如真实结果仍把讲述模板当事实，先审查事实核对的输入与权限，而非再加模型轮、扩大必填字段或长禁令；保留来源和人工采用边界。
+- **下一项改进及验收**：一粒鱼能够选到针对当前“小改进与AI求职”有实际需要的读者，显示具体不同问题；反馈不清空、原文事实不增造、每一新增请求及原文得失可见。此次只完成离线两项修复，未宣称整个受众链路调好。
+
+## 2026-10-17 第二轮改稿去重与单次默认（交付修复，内容部分改善）
+
+用户要求修复第二轮失败、去重复上下文、不加校验调用，并沿用两份首稿继续。**当前问题**：JSON模式带自然语言助手历史、同一稿件多份进入模型，导致第二轮真实空输出，额外核验不能修复起草失败。**验收**：两账号上轮增强首稿＋已存意见逐字段相同，仅真实改稿各一次；稿件单一正文、不同历史版本不删、作者事实与引用不丢；返回可用候选、采用／手改／重开一致，披露整篇得失。**涉及文件**：创作provider投影、新`creator_writing_context.py`、`model_calls.py`、显式事实编辑引用解析、相关测试、`check_creator_revision.py`、两个旧对照工具的显式诊断开关、本节／PRD／共创设计／[完整修订稿评阅](creator-revision-dedup-20261017.md)。不改UI或运行服务。
+
+### 完成与限制
+
+- 以当前creativeBrief.target提供唯一完整正文；target来源保留ID／hash、contentRef指向该稿，服务器完整原source map照常核对引用。相同baseBody/baseTitle改为基准引用、同版读者sourceTarget正文改bodyRef；来源时间／类别／原话保留。不同旧稿不替换，assistant只折叠与当前稿逐字相同的文章，不改真实user、不同未采用建议或已存历史。纯模型投影deepcopy，不回写context。
+- 模型历史assistant用JSON封套引用显示层旧回复，真实角色仍assistant，本轮user仍最后；原写作系统提示1646字符未变。没有增加禁令／必填返回字段／模型修复轮，不把所有历史混为user事实。
+- 默认创作只调用一次模型，撤掉每篇必经的陈述提取＋逐句编辑；两者方法／正反例及回执仍供显式诊断。比较工具跟随单次默认，需`--fact-edit`才加入旧三步实验；完整对照工具的enhanced臂也显式调用，避免两臂已经相同却仍称三步对照。本轮未重跑额外实验。
+- **真实只2次DeepSeek**，沿用上轮QSheep576字符／一粒鱼829字符首稿、各自首个公开试读意见，标题／正文／引用／feedback对象完全相同。临时库生产session/message API回放首轮和读者，标saved_receipt_replay／0请求；不是重新生成首稿或重模拟用户。两次改稿为真实deepseek-flash非思考，temperature0.3、max_tokens1800，HTTP200、stop；总**15,906 tokens**，无重试／Qwen／回退／额外核验。
+- **两份修订候选均交付**：Q4.865秒（HTTP4.814）、鱼3.984秒（HTTP3.911）。均初稿／意见exact，返回前未自动覆盖Topic，确认采用后新稿保存；空行手改、重开全文／标题一致，旧版本409且不能覆盖，2/2 completed。采用各0.003秒、手改保存各0.002秒为临时API耗时，不称浏览器体验。回放首稿0.12秒／读者0.002秒不是模型推理时间。
+- 全messages字符：Q18,609→16,233（-12.8%）、鱼17,111→13,694（-20.0%）；prompt tokens9,335→7,786、8,763→6,680；解码资料包当前全文均只在creativeBrief.target.body一处。原失败回执保留，新`data/evals/creator-revision-dedup-20261017/report.json`独立保存packet／rawContent／usage／时间／会话／保存回执。
+- **内容并非全过**：鱼增加可直接尝试的A表→B表脚本输入示例，原候选人案例保持，没新编作者咨询经历或成果；但原有“不用等权限”等风险仍在，829→895字符更长，没展示具体输出和验证。Q增加“比较愿意承担的代价”，回应读者，却把保研等同留熟悉环境，概括不准确；576→666字符，也没有完成约500字整篇重组。两篇均真实原文展示，不人工润色后冒充模型原稿，不称发布终稿或复测试读需求已满足。
+- 同时改了重复输入、历史格式和默认事后链，不能证明单独去重就是空返回根因。额外编辑在起草之后，取消它本身不能解释为何起草不再空；原上下文故障已在两账号续写重现通过，不推算长期稳定率。未来空输出仍要明确失败保稿，不能放宽解析把空格充作正文。
+
+### 测试与自查
+
+- 工具先默认预览，0次、不读密钥／不写输出；真实命令：`PYTHONDONTWRITEBYTECODE=1 <主仓库backend/.venv/bin/python> scripts/check_creator_revision.py --source-report <主仓库data/evals/creator-end-to-end-20261017/report.json> --live --output <主仓库data/evals/creator-revision-dedup-20261017>` →2请求、2 completed，initialExact／feedbackExact／reopenExact／staleSaveRejected均true；拒绝覆盖源回执，实际请求硬上限2，临时库结束清理。
+- backend：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_context_dedup.py tests/test_creator_revision_check.py tests/test_creator_end_to_end_check.py tests/test_creator_model_comparison.py tests/test_creator_fact_edit.py tests/test_creator_statement_regression.py tests/test_creator_output_normalization.py tests/test_single_writer_sessions.py tests/test_creator_reference_projection.py tests/test_content_collaboration_provider.py tests/test_creator_writing_provider.py tests/test_content_collaboration_persistence.py tests/test_content_collaboration_sessions.py tests/test_model_calls.py tests/test_deepseek_transport.py tests/test_default_text_provider.py tests/test_writing_focus.py` → **316 passed（9.91秒）**。包括相同稿去重／不同旧版保留／emoji／原user事实／引用、单请求生产持久化与版本冲突、原稿及反馈exact／预览／预算、显式三步诊断原始回执。先前196项定向也通过，不重复相加。
+- 初轮测试有两类预期需同步：旧测试要求历史assistant为裸文本、对照工具默认三调用；分别改为核对JSON内原文和显式诊断用例，未删除事实坏稿或放松产品接受条件。Python lint的长行已修，相关修改文件ruff和git diff --check检查；无前端变更，不宣称浏览器视觉通过或再次全后端2283项已跑。
+- **已知限制**：仅每账号一次修订、非UI；Q新段的比较条件和两篇长度仍不合格，尚未做真实读者复测。当前默认不再事后核验，不把稿件来源正确或采用成功当事实认证。既有LangGraph弃用提醒保留。
+- **需要用户决定**：无阻塞；供用户阅读真实原文后判断内容方向。未部署／重启／提交／推送，主干跟踪代码、产品DB、旧稿和提交包不变，既有未提交改动保留。
+
+### 下一轮交接
+
+- **需要测试的功能**：带不同旧版本反馈、连续第二／第三轮、未采用另一稿指代、选段／emoji范围；获部署授权后检查真实UI新旧稿、等待失败、人工修改和保存。空输出／断网保稿继续回归，不用两份成功推算稳定率。
+- **需要新增／修改的代码**：若继续质量优化，聚焦“整篇吸收意见并重组／压缩”，不是自动在尾部加段；先检查当前资料／稿件作为写作依据的适用条件，保留真实观点和原文，不恢复两次默认核验或再加另一模型校验。避免把读者要求一个例子无限扩成教程。
+- **下一项新改进及验收**：Q的代价比较不混同保研与本校、不靠新编规则填答案；鱼给最小可执行输入与验证但整篇不持续膨胀，当前案例动作与立场保留。仍每次一个写作请求，展示完整原稿／修订／取舍及真实等待，再由用户判断，而非只报通过率。
+
+## 2026-10-17 两账号完整创作对照（评测完成，四条改稿均失败）
+
+用户要求停止修小词句，用QSheep／一粒鱼走完整创作，展示文章、等待与增强取舍。**当前问题**：逐句修补的增量是否值得成为每篇必经流程，真实第二轮能否交付。**验收**：同账号同要求／同原笔记／同诊断，单次与三步增强各一条，首稿→独立试读→意见改稿→采用／手改／保存重开；原文、失败和壁钟全记录，不以格式测试代替文章质量。**涉及文件**：新增`scripts/check_creator_end_to_end.py`、对应工具测试、本节及[四篇原稿与完整评阅](creator-end-to-end-review-20261017.md)；不改产品算法／提示／默认模型。**方法**：开发库只读备份至临时库，真实DeepSeek及产品session/message API，结束清理，不进入应用lifespan或恢复旧任务。
+
+### 完成与失败
+
+- 四条首稿4/4交付、首次采用4/4成功，QSheep两位相关已保存读者并行，一粒鱼仅一位明确相关读者，不凑数。每条经同一固定定向试读问题；固定首个公开发言作为后续意见，不将沉默或内部顾虑当公开发言。独立试读历史明确标partial，本轮不跑retrieval／讨论／总结，不冒充整套panel已验收。
+- **四条意见改稿全失败，0份试读后最终稿**。DeepSeek原始content分别为大量空格＋残缺话题标签、537／497／593个空格；均HTTP200、stop，不是length、超时、缺必填字段挡住已有文章。会话保留首稿和失败状态；未重抽或修改失败原文。首稿不能改称最终稿。
+- 实际**18次DeepSeek请求／89,978 tokens**，计划最多22次；两条增强改稿在起草失败，未进入其余4次事实编辑。deepseek-flash非思考，temperature0.3，写作／编辑1800、试读1200 max_tokens，无Qwen／回退／自动重试。每账号材料相同，真实首稿请求仅作品ID／时间／消息来源ID及相关hash不同，不声称逐字输入完全一致。
+- 等待秒数（首稿／试读／改稿到失败／全程到失败）：Q单次6.113／4.065／6.924／17.184；Q增强8.906／4.069／4.569／17.576；鱼单次7.068／3.004／3.611／13.716；鱼增强10.119／3.385／5.066／18.609。全程不含人的阅读／决定；快速失败不能证明可用最终稿等待良好。
+- 首稿增强额外提取＋编辑实际耗时Q3.484秒、鱼3.738秒。Q唯一改动“最难受的不是”→“最难受的往往不是”，编辑将面向“你”的场景误作作者亲历的理由可疑；鱼28句全keep，0改动。两次facts均空。增强稿更具体／更简洁的部分来自不同首次采样，不能归功于后处理。鱼简单稿仍编“很多应届生跟我说”，增强稿仍有“很多应届生会卡”“不用等权限”等范围／建议风险，并非简单组已安全。
+- 试读指出整篇缺口：Q的信息查证不能回答“两条都可行时按什么取舍”；鱼的AI动作没有可开始的具体输入／输出实例。Q简单组两人关切确有区别，增强组却收敛为同一问题；不以人数证明多视角。
+- 改稿包同一全文至少4份（当前稿、writingFocus基准、读者源稿、assistant历史）。首个资料帧由Q11989字符增到16018～16486，鱼9135增到13394～14224；多轮assistant为自然语言渲染、请求JSON输出，存在格式示范不一致候选因素。**重复是事实，导致空输出尚未证实**。官方文档承认JSON模式空content概率，本次已有JSON字样与示例，不套用“忘写JSON”的解释。
+- 另一次临时克隆、零模型复用四首稿，手改仅空行：采用→手改保存→重开标题／全文一致→旧版本409且不覆盖，**4/4通过**，耗时0.081／0.018／0.017／0.017秒。此为单独API持久化检查，不回填创作成功，不等于UI人工编辑体验；没有正式库写入。
+- 建议保留自选参考／来源归属／真实对话角色、无歧义格式兼容、人工采用与版本、按需且相关的试读；**两次额外事实核验不宜每篇默认常开**，宜先退出必经链或按需用，不删除正例保护能力。优先第二轮可靠交付与正文去重，不新增模型评审、群聊和串行总结。此为建议，未擅自改默认开关。
+
+### 测试与自查
+
+- 工作树脚本真实命令：`PYTHONDONTWRITEBYTECODE=1 <主仓库backend/.venv/bin/python> scripts/check_creator_end_to_end.py --live --output <主仓库data/evals/creator-end-to-end-20261017>` → 退出0表示记录完成，arms四个failed；没有掩盖业务失败。输出18份packet／原始content／usage／分步时间、会话及运行快照、首稿／试读；不存请求头或reasoning，凭据字符串脱敏。
+- 零调用命令同脚本 `--persistence-from <上述目录/report.json> --output <主仓库data/evals/creator-end-to-end-20261017-persistence>` →4/4，默认预览0调用且不读取密钥／不创建app。输出目录已存在拒绝覆盖；live与持久化回放不能同时指定。
+- backend：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_end_to_end_check.py tests/test_single_writer_sessions.py tests/test_creator_output_normalization.py tests/test_creator_fact_edit.py tests/test_content_collaboration_persistence.py tests/test_writing_focus.py` → **113 passed（9.00秒）**；包括5项新工具测试：克隆隔离、预览零权限／零调用、22请求硬上限、回执脱敏／不存reasoning、真实API保存与版本冲突。早期4项工具测试也通过，不与113重复相加。
+- 两个新增Python文件 `ruff check --no-cache` 与`git diff --check`通过。预检曾因import main默认建库触及开发树不可写data而失败，改为延迟导入且导入本身也指向临时库；未访问正式库写入。脚本lint已修，没改产品代码。临时库已清理；未启动／重启／部署／提交／推送。
+- **已知限制**：每条件仅一次、非浏览器、不含完整推荐／群聊／访谈；没有任何修改后最终稿，因此没有最终稿提升结论。没有对去重／格式一致性做付费A/B，不能把候选因素当根因。相关工程测试113通过，不重跑无关全量或前端，旧LangGraph提醒仍在。
+- **需要用户决定**：无必需选择；是否按建议将事后两次核验退出默认、以及下一轮简化第二轮输入，由用户审阅本次原稿得失后决定。本轮不新增付费重试。
+
+### 下一轮交接
+
+- **需要测试的功能**：优先Q／鱼第二轮原样续写（无读者意见）与带意见续写的有限对照；保持同一首稿，看JSON／自然语言历史组织和重复全文哪个因素影响空输出。再检查失败状态下原稿可编辑保存／重开UI，不把API检查称视觉通过。
+- **需要新增／修改的代码**：先读已保存18份请求，只改变一个输入组织因素；当前稿一份，读者旧稿以版本／必要引用保留，真实角色与来源不能混淆。保留空输出失败记录与旧稿，不靠放宽解析补造文章或静默跨模型恢复。
+- **下一项新改进及验收**：让两账号“首稿→试读→带意见改稿”各有可采用正文，不新增必经模型调用；明确展示失败恢复、初稿／新稿区分和实际等待。然后用户判断文章是否更有取舍／更可开始，而非继续追逐单个频率词。未证实当前增强值得默认保留，不因已写实现而继续加码。
+
+## 2026-10-17 作者要求的证据资格与真实交流保留（定点修复，仍有泛化／等待限制）
+
+本轮承接“很多应届生跟我说”漏检。**当前问题**：完整作者要求仍进入事实编辑，任务对象被当成作者接触经历；旧keep决定没有证明具体叙述有来源。**验收条件**：使用逐字相同错误稿撤回无来源作者交流，同时保留有原文依据的交流及混在要求里的事实；观点不统一降调、有效稿不整篇拒收、不重生成好测的文章。**涉及文件**：`creator_fact_edit.py`、`model_calls.py`、事实编辑／创作持久化／对照工具测试、两个现有回放工具、新增`check_creator_statement_regression.py`及测试、本节／PRD／共创设计／[本轮完整评阅](creator-author-request-boundary-20261017.md)。**测试方法**：冻结稿与来源逐字回放、正反例同条件对照、mock失败和局部合并回归、完整后端与lint；不改UI、原文或产品库。
+
+### 完成与失败
+
+- 原失败回执明确用“作者要求回应应届生”为“跟我说”找依据。新增独立作者陈述准备：只看真实user，不看待检稿、助手旧文或分析推论；摘连续原话并校验出处，任务／假设不当经历，要求内自述仍保留。编辑只收合格来源目录，原始任务不再充当证据。它是作者自述投影，不是外部核实或语义保证。
+- **第一条件仍失败**：正确抽出空事实集后，编辑仍23句全keep，未去掉错误开场；记录保留。第二条件将编辑协议分具体事件event与观点opinion，event保留须指出合格来源原句，程序核对来源和字面，不能拿自由basis或任务解释自证；opinion不强求引用。没有继续扩写起草禁止列表或按词删除所有交流。
+- **同一错误稿定点修复**：实际把“很多应届生跟我说……”改成“很多应届生会问……”，编辑理由明确指出缺少具体对话来源；其他正文、标题逐字保留。QSheep原笔记确有“在去年这个阶段，我和家人长聊了几番”，以此构造正例短稿，两条件均原样保留；同一真实材料放入受控“要求＋经历”消息、去掉编辑中的原文后，也被正确摘录并保留。后者不是作者实际发过的产品消息；两个正例是诊断短稿，不冒充历史模型好稿。
+- **真实调用12次／12,277 tokens**，两条件各三稿、每稿陈述准备＋编辑两次；deepseek-flash非思考、temperature0.3、每次max_tokens1800，无重试／抓取／Qwen／新文章生成。条件A为9.407／1.596／2.087秒；最终条件B为43.660／3.790／1.560秒。其中第一稿陈述准备39.899秒、编辑3.760秒；这是旧稿编辑增量，不是全程等待，短输出延迟具体原因未知，不能说已优化延迟。
+- 真实完整输入／输出／usage／分步时间保存在主仓库忽略目录`data/evals/creator-statement-boundary-20261017/`与`creator-statement-evidence-20261017/`，每目录三个固定样本、各稿输入哈希跨条件相同。生产契约两条件均3/3，**第一条件事实仍失败**，不以格式通过冒充修复。工具默认预览0次，live最多6次；保留原失败文件，不覆盖历史回执。
+- 有正文通常最多三次同模型调用，替代上轮两次候选：起草→作者陈述→编辑；没有正文不增加，没作者对话只编辑。陈述准备失败就不继续假装没有作者事实删稿；沿用保稿＋可见未完成提示。记录失败阶段、原始编辑与陈述、初稿和usage；没有自动采用／保存、别家回退或整篇拒收。开发工作树已实现，尚未部署。
+
+### 测试与自查
+
+- 开发工作树backend：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_model_comparison.py tests/test_creator_fact_edit.py tests/test_creator_statement_regression.py tests/test_creator_output_normalization.py tests/test_single_writer_sessions.py tests/test_creator_reference_projection.py tests/test_content_collaboration_provider.py tests/test_creator_writing_provider.py tests/test_content_collaboration_persistence.py tests/test_content_collaboration_sessions.py tests/test_model_calls.py tests/test_deepseek_transport.py tests/test_default_text_provider.py` → **281 passed（12.23秒）**。包括混合自述／否定原话、非作者／虚构摘录拒绝、任务不可直通编辑、真实原文／作者自述保留、观点不强求引用、提取失败保稿且跳过编辑、不调别家／不写Topic、原文坏稿与构造正例标记、预览0调用及三阶段rawContent不互相覆盖。
+- 完整后端同环境去掉文件过滤、加`--tb=short` → **2283 passed（247.58秒）**。当次收集时尚未新增最后4个工具回归，它们已包含在上述最终281项中，不冒称完整全量已收集2287项。临时数据库与mock模型，链接既有fixtures／Python环境、允许隔离本机测试端口，EXIT trap已清理并核对`backend/.venv`和临时data目录不存在；未启正式后端。已有LangGraph提醒仍在。
+- backend目录执行修改Python文件 `ruff check --no-cache` 与工作树 `git diff --check` 通过。脚本初版字符串引号、闭包绑定及从仓库根目录使用不同import发现范围的lint问题均已检查；最终按项目backend标准命令通过，不放宽生产校验。没有UI变更，不宣称视觉或整条真实保存链路验收。
+- **已知限制**：“很多应届生会问”仍有未证实的人群泛化；样本少，真实正例为短稿，event/opinion误分及语义支持错误仍可能发生。历史评论覆盖／稿件证据资格仍未解决；新增调用有等待成本且出现40秒长尾。定点亲历撤回有观察收益，不是整体事实遵从或低延迟全过。
+- **需要用户决定**：无，本轮仅继续开发验证，不擅自上线。**运行状态**：未部署、重启、提交或推送；产品DB、旧稿、主干跟踪代码不变，主仓库仍仅用户的promo目录未跟踪，开发工作树旧未提交修改保留。
+
+### 下一轮交接
+
+- **需要测试的功能**：同稿开场能否进一步直接回应读者，而不把“很多”改写成未经证实的群体频率；混合要求中的真实自述、否定、假设／示例引语、长稿交流事实与评论来源不误删。另需单独量端到端等待，不能把这次编辑增量当新起草时间。
+- **需要新增／修改的代码**：先评估独立陈述准备的长尾等待与必要性、查看分阶段回执，不继续叠更多串行模型；编辑的观点／经历判定与替换句保留什么表达作用需更精确。保留真实事实资格，不恢复全文user作证、不引入全词禁令或静默自动改写回执。
+- **下一项新改进及验收**：在同一坏稿上移除作者经历和无依据群体频率、用直接读者问题承接开场，真实交流长稿不删、观点有力度；在有限同条件回放中披露成功／失败、每步等待和新增成本，评估是否值得保留第三次调用，不因架构已写就宣称可上线。
+
+## 2026-10-17 推断事实化：同稿局部修正（候选完成，质量部分未过）
+
+用户要求继续解决“职责之外”等推断被写成事实，不堆限制、不把文章写保守，并用QSheep／一粒鱼验证。本轮选定问题：准确引用只证明原句存在，未证明模型补出的岗位、动机与时限。验收：修正具体断言、保留案例动作与作者立场；不新增整篇拒收／自动保存；正反稿、真实延迟与失败完整记录。预期与实际涉及创作provider、ModelCallService、新`creator_fact_edit.py`、创作／格式／持久化测试、冻结回归工具与本节／PRD／共创设计；不改前端或产品数据。详细原句见[完整评阅](creator-inference-facts-regression-20261017.md)。
+
+### 实现与取舍
+
+- 首次尝试同次生成列anchors／angle再写，4次请求仍把“职责之外”先写进观点再带入正文，QSheep还复制整篇而截断；已删除materialUse实验协议和代码，没有为其增加输出门槛。随后独立自由编辑仍漏咨询开场、删句后留悬空逗号，改为服务端按字面位置分句、独立编辑逐句keep／replace。
+- 当前单助手有copy_option才最多增加一次同配置模型调用；讨论／提纲／追问／旧团队不加。编辑只看稿件、所选原文、真实作者对话和候选句子，不看写作者摘要、confidence、引用解释或账号分析推论。分句id绑定候选、字段与位置，重复句子／emoji／换行仍精确定位，未修改文字逐字保留，不全篇重写或替换禁词。
+- 保存初稿、逐句决定与实际修改、模型及usage；已知根层候选镜像跟随局部修改，原回执不变。编辑失败或不完整时保住有效稿件、标unavailable／partial并显示简短未完成提示；不重试或换模型。completed仅代表覆盖完成，不是事实认证。人工采用／保存仍唯一写入途径。起草提示1788→1646字符，但总调用成本确实增加，不包装为总上下文更轻。
+- 增加同稿只编辑工具`check_creator_fact_edit.py`：最多1次，默认预览0次，核对case、provider、冻结来源和真实对话，拒绝覆盖输出；沿用现有模型适配和编辑实现，不接产品DB。原对照工具最多一次生成＋一次编辑，保留两份rawContent并披露最多请求数，避免编辑JSON覆盖原文章回执。
+
+### 真实验证：有收益，也有明确退步与残留
+
+- 本轮共 **20次DeepSeek请求**：4次同次用料试验；4稿各起草＋自由编辑共8次；4份旧稿逐句编辑；再用同4份旧稿尝试basis条件4次。最后8次只复用原稿，不为坏结果重生成文章。19次有usage共 **74,176 tokens**，首轮QSheep截断没有保存usage，完整总token和费用未知。均deepseek-flash非思考、temperature=0.3、每次max_tokens1800；无Qwen、抓取或产品库写入。
+- 保留的逐句版在**同一原有错误稿**上，将“这件事不大，甚至不在她的岗位职责里”改成“这件事不大，也不是什么惊天动地的项目”；普通211、实习、模板、产研核对、降错与ownership观点保留。QSheep“导员催你两天内决定”改回作者要求已给的“决策的时间又已经很紧”，句子完整；父亲MIT MBA／作者先就业正例11句全部keep。
+- 4份同稿编辑分别1.642／1.576／2.251／1.192秒，tokens2671／1839／2921／2097，覆盖23／7／22／11句，生产契约4/4通过。它们是**编辑增量**，非最终端到端等待实测。自由编辑时完整流程6.928～16.934秒，不能冒充最终逐句版等待。当前编辑系统提示与保存4份messages逐字一致4/4。
+- **质量未全过**：一粒鱼首稿“很多应届生跟我说”仍漏掉；QSheep“后台”渠道仍无依据；案例结尾“不是等别人派活”仍可能暗示未交办。原文确有“什么时候开始都不晚”，本轮不误报为新编事实。约250字任务仍偏长、部分判断偏硬，未借事实编辑改全文文风。
+- 后续要求编辑给basis反而拿“作者要求回应应届生”当作者接触事实的依据，并把职责断言改为“超出实习常规范围”，仍是新增事实；QSheep还删掉整段评论引入，暴露编辑输入未包含历史评论原话的覆盖缺口。**该条件已撤回**，失败不藏、不回填成功，也不继续无目标付费采样。保留版只是两个具体修复及一个事实保留正例，不是稳定消除幻觉。
+- 原始生成与失败位于主仓库忽略目录`data/evals/creator-material-use-{yiliyu,qs}-20261017/`、`creator-fact-edit-{yiliyu,qs}-20261017/`；保留条件在`creator-sentence-edit-20261017/`，撤回条件在`creator-claim-edit-20261017/`。具体完整原文、输入、回执和逐项得失见评阅文件。
+
+### 测试与运行
+
+- 开发工作树backend执行 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_fact_edit.py tests/test_creator_output_normalization.py tests/test_single_writer_sessions.py tests/test_creator_model_comparison.py tests/test_creator_reference_projection.py tests/test_content_collaboration_provider.py tests/test_creator_writing_provider.py tests/test_content_collaboration_persistence.py tests/test_content_collaboration_sessions.py tests/test_model_calls.py tests/test_deepseek_transport.py tests/test_default_text_provider.py` → **263 passed（6.17秒）**。覆盖独立来源、无旧助手、仅局部合并、重复句／Unicode、缺句／失败不丢稿且可见、编辑前后持久化、Topic未变和不调别家。
+- 同环境完整pytest（去掉文件列表、加`--tb=short`）→ **2269 passed（126.49秒）**。临时数据库／模拟模型；临时链接既有fixtures与Python环境以满足工作树测试，并允许隔离本机测试端口；绝对路径EXIT trap清理，未启正式后端。较早自由编辑快照也跑过2262项，不把它冒充最终结果。首次新增测试4项因fixture仍是qwen却只mock deepseek而失败，显式固定测试provider后通过，未放宽生产验证。
+- 修改Python文件`ruff check --no-cache`、`git diff --check`通过；同稿工具QSheep正例无live预览确认0请求。LangGraph既有弃用提醒仍在。没有UI变更，不将工程测试当视觉／语义全验收。
+- **运行状态**：未部署、重启、提交或推送；开发工作树既有未提交改动保留。主干跟踪代码未改，主仓库仍只有用户的promo目录未跟踪；产品库、旧稿和历史不变。
+- **需要用户决定**：无。当前候选质量仍部分未过，不宣称可直接上线。
+
+### 下一轮交接
+
+- **需要测试的功能**：同一“很多应届生跟我说”错误稿与确有作者交流事实的正例；有来源的历史评论必须保留但不捏造后台／私信渠道。再测最终起草＋编辑整条等待、错误旧稿续写、局部精修和采用保存；不重新生成文章规避坏句。
+- **需要新增／修改的代码**：事实编辑区分任务要求与真实补充的证据资格；将历史评论原话及归属完整提供而非一律排除，避免上下文缺失导致误删。先检查实际材料覆盖，不再加一般禁止列表或把引用可定位当语义正确。
+- **下一项改进及验收**：同稿能去掉无来源交流与案例条件，保留有依据的作者亲历／评论、观点和行动建议，改文不以“超出常规”等同义方式补事实；没有整篇拒收、没有默默增加更多调用。若独立编辑收益仍不足，应评估其等待成本，不为保留架构而包装成功。
+
+## 2026-10-17 创作事实归属：去重复任务、分开文档叙述者（实现与验证完成，质量仍部分未过）
+
+用户要求继续解决作者经历编造，不只堆prompt。本轮选上一轮交接中的“读者处境→作者接待经历”：定位实际输入与生成差异，调整上下文组织，用同一冻结请求和明确事实正例验证。验收：任务不被重复作为事实证据；稿件／原文／编辑观察／读者意见／作者对话各有归属，原文叙述者不自动等于账号作者；不删真实作者补充、不改正文或增加每次产品调用轮数。涉及provider的模型输入投影／引用数量约束、参考／单助手／解析回归测试、PRD／共创设计／[完整实测评阅](creator-source-attribution-regression-20261017.md)；模型默认、系统提示、前端、产品库与主干跟踪代码不改。
+
+### 定位与实现
+
+- 核对一粒鱼真实初稿输入：“很多应届生跟我说”在全部输入中不存在，但“开头回应觉得自己没做过大项目的应届生”重复3次（creativeBrief、allowedSources、真实user），整条要求还列为authorMessages。原文“这篇来自🍻”与招聘人的第一人称保留着，编辑分析却以“你用……案例”称呼账号；roleTask要求保留“其具体经历”，缺乏叙述者身份范围。这说明存在任务证据化、风格／案例身份混合的问题，不证明模型唯一内部因果路径；“很多人问我”的体裁惯性是合理推测，不包装为已证事实。
+- `creator-writing-packet/v2` 删除brief中的重复creatorRequest，用户请求通过真实user消息只出现一次。证据目录中的作者消息改为sourceId／dialogueIndex索引，全文仍在实际对话和服务器可引用来源字典；模型历史保持assistant角色。空白旧消息不占索引，避免目录和实际传输错位。不裁剪原笔记、分析观察和评论，不把作者真实补充删掉。
+- sourceRole区分稿件、原文、编辑分析、历史评论、读者意见和作者对话；原文的narration.speakerScope按来源分开，creatorBinding不因选择该篇就自动成立。它是文档身份范围，不是新模型提取了真实人物，也不是用户新增确认流程。roleTask取消重复事实禁令和默认保留亲历的引导，系统提示全文仍1788字符不变。初阶段数据帧QSheep12386→11902字符、一粒鱼9471→8724字符；后续仅补各文档的范围元数据，不扩展素材。
+- 实测出现5条都能逐字定位的引用被最多3条拒收，取消共用候选的引用条数硬上限，不截成3条、不丢证据。每条来源、逐字引文、单条长度、角色路由和人工采用仍校验；旧团队也受益于这个数量放宽，除此未改其输入组织。没有增加输出必填字段、语义拒收器、修复调用、禁词替换或自动回退。
+
+### 真实效果：8次，不能只报改善
+
+- 只用既有冻结QSheep／一粒鱼原笔记、诊断和请求。修改前各首稿一次；第一阶段各首稿／明确事实一次；第二阶段叙述者范围各明确事实一次。原计划6次，定位新主体接管后明确说明并获额外两次执行批准，最终 **8次DeepSeek请求、52,847 tokens，无重试**，回执均deepseek-flash非思考、temperature=0.3、max_tokens=1800。没有调用Qwen、抓取或写产品库，不为每个坏结果同条件重抽。
+- 修改前一粒鱼仍写“很多应届生跟我说”；第一阶段首稿改为“很多人觉得自己简历上没东西可写”，不再编作者接待，但写得偏长、部分判断仍过满。第一阶段明确事实任务又写“我后来给出去……sp offer”，主体失败；第二阶段改为“原笔记里……候选人”，保留普通211、模板、产研核对、降错，**仍新增原文未证实的‘甚至不在她的岗位职责里’**。主体改善不等于全篇事实正确。
+- QSheep两次明确事实均保留父亲MIT MBA、作者毕业后先就业，未串成作者学历／录取；首稿有“后台有人问”的渠道归属不精确及“什么时候开始都不晚”的保证，篇幅也变长。不能称写作质量全面提高。两账号每条件一次，无法估计稳定率，变化也包含sampling差异。
+- 修改前两首稿6.586／5.163秒；第一阶段一粒鱼首稿／明确事实7.184／4.129秒、QSheep5.881／3.258秒；第二阶段一粒鱼明确事实3.644秒、QSheep4.097秒。八次均完整finish_reason=stop，当时产品交付 **7/8**；唯一失败是QSheep5条合法引用超过3条上限，不是事实或JSON失败。取消数量限制后原8份响应经现有JSON解析与完整provider.run离线回放 **8/8通过**，标题／正文／引用逐字保留、原文件字节未改；原记录中的failed不回写成当时成功。
+- 原始回执位于主仓库忽略目录 `data/evals/creator-source-roles-control-{qs,yiliyu}-20261017/`、`creator-source-roles-candidate-{qs,yiliyu}-20261017/`、`creator-narrator-scope-{qs,yiliyu}-20261017/`。逐项得失、实际片段和完整文件索引见上述评阅文档。
+
+### 测试、运行与限制
+
+- 真实命令共用 `PYTHONDONTWRITEBYTECODE=1 <主仓库backend/.venv/bin/python> scripts/compare_creator_models.py --cases <主仓库data/evals/creator-model-compare[-yiliyu]-20261016/manifest.json> --env-root <主仓库> --provider deepseek --live --output <上述各独立新目录>`；control用 `--case initial`，candidate用 `--case initial --case confirmed`，narrator-scope用 `--case confirmed`。每组每账号一次，不覆盖已有目录；退出0表示记录成功，不等于质量验收。
+- 在开发工作树backend执行 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_reference_projection.py tests/test_single_writer_sessions.py tests/test_creator_model_comparison.py tests/test_creator_writing_provider.py tests/test_creator_output_normalization.py tests/test_content_collaboration_provider.py tests/test_content_collaboration_sessions.py tests/test_content_collaboration_persistence.py tests/test_model_calls.py tests/test_deepseek_transport.py tests/test_default_text_provider.py` → **240 passed（4.65秒）**。覆盖任务仅传一次、对话角色／索引、原文与真实作者事实引用、五条合法引用保留及第五条假引用仍拒绝。
+- 同一后端环境去掉文件列表、加 `--tb=short` 跑完整套件 → **2246 passed（128.96秒）**；仅模拟模型与临时数据库，允许测试所需临时本机端口，未启产品后端。临时链接已有fixtures／Python环境；脚本退出trap因cd后相对路径未清掉链接，随后核对绝对目标并经同类权限单独解除链接、删除空目录，最终确认不存在。主仓库样本和环境未改。
+- `ruff check --no-cache` 与 `git diff --check` 通过。离线回放辅助首次直接json.loads遇到一份原rawContent尾随内容失败；改为产品现有 `_parse_model_output` 后完整8份通过，未改产品JSON解析或原始文件。LangGraph既有弃用提醒仍在。
+- **已知限制**：事实幻觉未根治；最后叙述者范围版只测两份明确事实，首稿、纠错续写、局部精修与浏览器采用保存未全部重测。没有语义事实检查器，不能把8/8可解析或2246绿测等同于作者经历准确，也不能因这次题材有效就扩展到所有账号。未测UI，不自动部署。
+- **需要用户决定**：无；下一项应聚焦本轮新事实放大，不继续无目标采样。
+- **运行状态**：未重启、部署、提交或推送；产品数据库／原稿／旧历史、主干与冻结提交版不变，所有先前未提交改动保留。
+
+### 下一轮交接
+
+- **需要测试的功能**：最终叙述者范围下的两账号首稿、纠错续写与局部精修；特别同时检查不新增作者经历、保留明确真实事实、写作自然且篇幅合适，不只数关键词。
+- **需要新增／修改的代码**：先分析“做了模板→职责之外”“评论提问→后台问过”等推断为何被叙述成确定细节，考虑来源中的动作与解释的使用方式，不对原文机械删人称、不追加逐条禁词、不再设整篇拒收门槛。
+- **下一项新改进及验收**：能保留具体案例和观点，同时不把合理解释写成未证实的案例事实；源范围／对话索引继续无损且一次调用，人工采用不变。保留正反原文与付费次数，不把单次改善包装为稳定解决。
+
+## 2026-10-16 创作解析放宽：无歧义冗余不再丢弃正文（完成，未部署）
+
+用户明确要求修复拒收、放宽不必要要求并保证可用性。本轮问题：4份真实DeepSeek完整正文仅因根层多出空／重复字段而失败。验收：原4份回复通过生产解析，标题和正文不被改写；不增加模型请求，冲突／无效引用仍明确失败，结果可持久化且原稿不自动变更。涉及 `content_collaboration_provider.py`、生产解析共用的对照工具、独立格式兼容测试、创作持久化／对照测试及PRD／共创设计／评阅本节；不改模型默认、提示、产品数据或前端。
+
+### 完成
+
+- 单助手先做无损外层兼容，再执行原有完整turn校验：接受根层空evidenceRefs，以及与turn内完全相同的summary／nextRecipient／candidateSuggestions／usedCandidateIds；可选空列表沿用既有默认值。仍拒绝相冲突的内容、根层独有有效引用、未知内容、无正文／无标题、非法引用或越权路由。不猜写正文、不自动改文章、不新增模型修复调用；旧团队交接契约不变。
+- 回执新增可选outputNormalization，记录ignoredOuterFields及原始输出哈希；正常格式不增该项，原response.output不修改。对照脚本调用同一生产解析方法，保存原始output及兼容记录，避免“实验已通过、产品仍拒收”的标准分叉。
+- 用前轮4份原始rawContent及各自冻结manifest上下文，经完整 `RealContentCollaborationProvider.run` 离线回放，**4/4通过**；候选标题／正文与原记录完全一致、原JSON文件字节未改，每项只注入一次已保存响应，网络请求0次。原始“真实请求时0/4失败”及全部原文保留，不回填成当时成功。
+- 临时数据库＋模拟DeepSeek HTTP验证四种根层形式能完成“发送→结果保存→读取”，兼容字段与原始哈希持久化，正文候选保留、Topic标题／正文／updatedAt不变，单次请求、非思考且不存reasoning。未写用户产品数据库。
+
+### 测试与自查
+
+- 在开发工作树backend执行 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_output_normalization.py tests/test_creator_writing_provider.py tests/test_content_collaboration_provider.py tests/test_creator_model_comparison.py tests/test_single_writer_sessions.py tests/test_content_collaboration_sessions.py tests/test_content_collaboration_persistence.py tests/test_model_calls.py tests/test_deepseek_transport.py tests/test_creator_reference_projection.py tests/test_default_text_provider.py` → **235 passed（4.99秒）**。先前初轮5文件81项也通过；最终包含追加的对照工具同解析测试。私有原文不写入通用测试夹具，测试保留相同结构变体。
+- 离线真实回放以保存record.rawContent构造ModelCallResponse，不加载密钥或HTTP客户端，使用同manifest的receivedMessage／context走完整provider.run；断言candidateSuggestions逐字一致、注入计数1、原文件读取前后字节一致，输出四条passed回执。不是再次付费采样或UI采用验证。
+- 修改Python文件 `ruff check --no-cache` 最初提示SIM114重复分支，合并为明确的空引用／重复值判定后通过；最终同一235项再次全部通过（4.60秒），`git diff --check` 通过。追加测试首次补丁审批超时，核实未写入后按工具规则重试一次成功；不是代码／模型故障，无绕行。
+- **已知限制**：放宽的是不影响语义的外层格式；不承诺任意坏JSON／未知有效内容／真实空正文都能恢复。本轮未解决“很多应届生跟我说”等事实编造、写作过度断言，不以可解析替代质量验收。未做新付费调用、全后端重跑或浏览器视觉检查；相关后端覆盖235项，前轮完整2209项仍只作历史证据。LangGraph既有弃用提醒仍在。
+- **需要用户决定**：无。
+- **运行状态**：未部署、重启、提交或推送；主干跟踪代码、提交包、产品历史／稿件不改，前轮未提交改动保留。
+
+### 下一轮交接
+
+- **需要测试的功能**：获部署授权后确认实际新回复展示与兼容回执；明确事实保留／局部精修、采用后保存及重开历史，不重复付费重抽这四篇来美化结果。
+- **需要新增／修改的代码**：下一项是写作姿态与事实来源的映射，定位“回应某类读者”被改写成“作者曾接待该类读者”的来源位置；不继续叠加禁令或用解析层篡改正文。
+- **下一项新改进及验收**：材料足够时直接交付有文风的正文，能面向读者提问／建议而不新增作者咨询经历；保留真实场景与有依据的编辑泛化，减少绝对化结论。格式兼容保持单次、无损、人工采用，真实效果仍用原文展示。
+
+## 2026-10-16 DeepSeek四次真实创作回归（测试完成，发现阻塞回归，未修复）
+
+用户最新明确要求“你测测”，本轮获得外发批准后完成前轮未执行的冻结素材回归。当前问题：标题提示修复是否同时保住事实、写作及交付。验收：QSheep／一粒鱼各首稿和纠错续写一次，原上下文不变，文章标题可用、无新增作者经历／假时限、产品可解析；保留失败和全部原文。涉及真实回归工具运行、原始实验记录和本节／[完整评阅与四篇原文](deepseek-writer-regression-20261016.md)，**本轮不改产品代码、不追加提示、不重抽结果**。
+
+### 实际结果
+
+- **4次付费请求、无重试、仅DeepSeek**，模型回执 `deepseek-flash`，非思考、temperature=0.3、max_tokens=1800。QSheep首稿／续写5.773／5.864秒，一粒鱼首稿／续写12.374／9.523秒，平均8.384秒；总28,242 tokens，不臆测实际扣费金额。4次均完整返回、finish_reason=stop，但**产品契约0/4通过**，不能称为可用交付。
+- 失败均为根层多余字段而非缺正文、超长或截断：QSheep首稿usedCandidateIds、续写evidenceRefs；一粒鱼首稿nextRecipient和usedCandidateIds、续写evidenceRefs。这些值为空数组或重复creator，turn内原有结构完整。离线仅提取原有turn后走同一完整来源／业务校验4/4通过；只是诊断，不改原回执或生产解析、不将其计为产品成功。
+- 4篇标题都是真实文章标题，不再为“建议版本”。但此前将完整候选JSON示例缩为空数组加字段说明后，本轮出现根层冗余回归；结构示范减弱是待验证解释，不以单次sampling证明因果，也不认为标题变好就值得上线。
+- 一粒鱼首稿仍有无来源经历“很多应届生跟我说”；纠错续写删掉人工旧稿5项“下周截止／两天／80%／我上周发offer／脚本已放评论区”，且不再自称收过这些咨询，但仍有“大厂缺的不是做过大项目的人”的过度二分。正文704／595字符（591／526汉字），首稿偏长。QSheep两篇无“下周关闭”或虚构录取结果，续写少了训诫、更贴原文，但重复旧文开场；首稿仍预设当前申请季，两篇末尾“什么时候开始都不晚”在时间紧情境下过于保证。朋友放弃推免、候选人sp offer和模板降错是已有原文事实，不能误判为幻觉。
+- 对照前轮原回执，4/4 packet和全部非system消息逐字相同；未清洗旧稿或额外补料。完整生成文章、逐项得失、采样限制及解析定位见上述评阅文档；原JSON及输入在主仓库忽略目录 `data/evals/deepseek-title-regression-{qs,yiliyu}-20261016/`，不写产品历史。
+
+### 测试与限制
+
+- 在开发工作树运行两条真实命令：`PYTHONDONTWRITEBYTECODE=1 <主仓库backend/.venv/bin/python> scripts/compare_creator_models.py --cases <主仓库data/evals/creator-model-compare-20261016/manifest.json> --env-root <主仓库> --provider deepseek --case initial --case revision --live --output <主仓库data/evals/deepseek-title-regression-qs-20261016>`；第二条仅将cases改为 `creator-model-compare-yiliyu-20261016/manifest.json`、output改为 `deepseek-title-regression-yiliyu-20261016`。命令均退出0，仅表示实验记录保存成功，summary明确contractStatus=failed，不是业务通过。
+- 后端 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_model_comparison.py tests/test_creator_writing_provider.py tests/test_single_writer_sessions.py tests/test_model_calls.py tests/test_creator_reference_projection.py tests/test_default_text_provider.py` → **121 passed（2.94秒）**。这些是离线mock契约覆盖，不包含本轮真实根层冗余样本，说明现有测试缺少这种返回变体，不以绿测覆盖真实失败。
+- 离线诊断首次构造Settings遗漏两个必填路径而失败，补齐未使用临时路径后成功；未启动应用／连接数据库。`git diff --check` 通过。本轮没有源码变动，不重复跑全量；前轮2209项通过仍只是前轮mock及隔离验证。
+- **已知限制**：只测4项创作，不代表全部文字链路真实验证、长期稳定率或UI验收；未测明确事实保留、局部精修、浏览器等待和采用／保存。没有调用Qwen或更换默认模型；事实和输出可用性均尚未解决。
+- **需要用户决定**：无；本次测试已授权。后续修复不能通过增加调用／默默重试来掩盖问题。
+- **运行状态**：未重启、部署、提交或推送；产品数据库、原稿、历史和主干跟踪代码未改。
+
+### 下一轮交接
+
+- **需要测试的功能**：用本轮4份失败回执进行纯离线生产解析回归；明确事实保留、局部精修和实际采用后保存需在交付修复后验证。
+- **需要新增／修改的代码**：先处理单助手JSON结构示范与外层解析：仅对可证明无歧义的空／重复元数据考虑容错，拒绝冲突字段／未知有效内容，保留原回执与来源校验；新增真实变体测试，不靠模型修复轮。再定位“读者处境→作者收过咨询”的写作姿态转化，而非只追加禁令。
+- **下一项新改进及验收**：原4份有效turn不再因无信息的冗余元数据整包失败，冲突／非法来源仍不被吞掉；单次低延迟、人工采用和原稿不变。然后解决无来源亲历和过度断言，呈现原文得失，不以格式修复冒充质量提升。
+
+## 2026-10-16 所有文字链路默认 DeepSeek（完成，未部署）
+
+用户最新要求“都用DeepSeek”。本轮问题：不只是默认值，读者推荐只认Qwen凭据，访谈和旧协作强制创建Qwen服务，多个检查脚本也强制覆盖provider。验收：全部文字入口默认DeepSeek非思考，只有DeepSeek key也可启用；没有DeepSeek key时不能借Qwen key自动切换；回执与诊断脚本不误标Qwen，旧数据／交互契约不变。涉及配置、应用装配、协作适配、检查／smoke脚本、路由与兼容测试和公开配置文档；不重写业务流程、提示或媒体服务。
+
+### 完成
+
+- 全局 `MODEL_PROVIDER` 默认改为 `deepseek`；账号诊断和单助手创作原有独立设置保持DeepSeek。受众分析、推荐、反应／讨论／总结、访谈、旧专家协作、其他文字助手与结构生成均使用相应DeepSeek服务。移除代码中的Qwen强制覆盖与专属凭据启用条件，显式旧provider适配器仍可用于兼容验证，不作为自动回退。
+- 本地 `主仓库 backend/.env.local` 原来显式 `export MODEL_PROVIDER=qwen`，仅此非敏感配置改为DeepSeek，其他变量与密钥不变；重新只读加载确认全局／诊断／创作均为DeepSeek且凭据已配置。主干跟踪代码、冻结提交包及产品数据库未改；运行中的服务未重启，不宣称其已生效。
+- 历史检查工具不再覆盖为Qwen，回执跟随实际provider和model；账号画像／创作检查分别沿用业务专用配置。CLI在读取凭据前拒绝已存在的输出目录，不覆盖实验。workflow smoke改用 `replace(base, database_path=..., upload_directory=...)`，避免手工复制配置时丢掉DeepSeek密钥／模型／地址／超时。
+- 所有DeepSeek传输继续显式禁用思考，保留各操作现有输出预算及已有阶段数；图片／视频理解与生成仍是Qwen media专用实现，未尝试将它们接给文字模型，未调用官方Anthropic或生成视频。本轮不发送任何真实账号素材，**真实调用0次**；前轮标题回归外发审批未绕行或重试。
+- README、开发配置与PRD同步为全部文字默认DeepSeek。旧报告、模拟人物／历史、消息、未采用建议和稿件不修改，不自动采用或保存。
+
+### 测试与限制
+
+- 在开发工作树backend运行 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库 backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider --tb=short tests/test_default_text_provider.py tests/test_creator_writing_provider.py tests/test_content_collaboration_provider.py tests/test_deepseek_transport.py tests/test_config.py tests/test_reader_selection_model.py tests/test_account_provider_scope.py tests/test_creator_model_comparison.py tests/test_model_calls.py` → **230 passed（2.29秒）**。八类操作通过模拟HTTP检查实际请求只到DeepSeek、非思考且单次；全部默认服务装配及只有另一家key时不启用有覆盖。新推荐传输夹具曾缺少合法输入／账号范围，修正夹具后通过，未放宽产品契约。
+- 旧适配器共用测试夹具显式固定Qwen以保留历史适配器覆盖，生产默认与DeepSeek-only装配另用新测试直接构造默认Settings检查。账号诊断Qwen兼容CLI测试显式选择账号Qwen回退，不再依赖脚本偷偷覆盖provider。相关CLI／smoke追加回归 → **124 passed／1本机端口项暂排除（4.99秒）**，端口项纳入最终全量。
+- 初轮全量排除已知5个本机环境项后为2194通过／9失败；9项为上述旧CLI隐含Qwen配置及已存在输出检查顺序，已完成修复和定向复测。最终用同一pytest参数、无文件过滤或排除执行完整后端 → **2209 passed（141.52秒）**；临时链接连接主仓库既有样本和Python环境、允许临时本机端口，结束自动删除链接和空目录。测试使用临时数据库，不接产品库，没有真实付费模型调用。
+- 修改源码／测试／脚本 `ruff check --no-cache` 与 `git diff --check` 通过。无前端变更，不宣称UI、真实新模型质量或等待已复测；统一provider不等于解决事实编造／标题或人物相关性问题。已有LangGraph弃用提醒仍在。
+- **需要用户决定**：本轮模型范围已明确，无。前轮4次冻结素材向DeepSeek再次外发的真实生成验证仍未执行，不把本轮mock测试冒充模型效果。
+- **运行状态**：未部署／重启／提交／推送；只有下一次用更新代码和配置启动后，新默认才进入运行服务。
+
+### 下一轮交接
+
+- **需要测试的功能**：部署获授权后确认实际请求回执均为DeepSeek；检查读者推荐、访谈、创作编辑／采用保存、模拟历史读取。获冻结素材外发许可后再做前轮四次标题／事实回归，不重测Qwen。
+- **需要新增／修改的代码**：先观察DeepSeek真实回执与原文，再定位标题、无来源作者经历和模拟人物相关性；不再靠切换模型、扩充上下文或新设门槛代替质量改进。
+- **下一项新改进及验收**：DeepSeek单次低延迟交付可用标题／正文，明确事实保留且不新增作者经历；受众推荐可少但相关、人物反应有不同判断依据。保留原文和实际耗时，不仅报告契约通过。
+
+## 2026-10-16 DeepSeek 定向优化：标题语义修复（离线完成，真实验证被拦截）
+
+用户最新决定后续都针对 DeepSeek 优化。本轮从上一轮交接选择标题问题：DeepSeek 在一粒鱼首稿／续写中将“建议版本”当文章标题，与我们的末尾 JSON 示例一致。验收条件为整篇有可用文章标题、局部保留建议名称、不残留未确认时限，同时检查事实与文风有无退步。预期与实际涉及 `model_calls.py` 单助手提示、`test_single_writer_sessions.py`、冻结回归工具及测试、PRD和本节；不改其他业务默认路由、不重写已存数据、不增加生成轮次。
+
+### 完成与未完成
+
+- 移除格式示例里的 `title:建议版本`，改为外层 JSON 加候选字段说明，不放一个可被照抄的虚假文章标题；整篇首稿和整篇重写都使用文章标题。引用、局部范围、来源事实约束等其他提示不变，没有新增严格字段、禁词门槛或自动补标题。
+- `compare_creator_models.py` 默认单 DeepSeek，`--provider both` 才双模型；`--case` 可从原四类冻结输入中显式选择，禁止重复，同一模型同条件最多一次，默认预览零调用。只检查所选 provider 的凭据，不要求为了 DeepSeek 回归配置 Qwen；仍保存原文／回执、拒绝覆盖既有实验目录，不接产品数据库。
+- 离线逐一核对 QSheep／一粒鱼首稿和纠错续写四份冻结输入：**packet与全部非system消息逐字相同，4/4**；只改系统提示的标题和格式说明，未趁机清理旧稿污染或补来源。系统提示由1798缩至1788字符，不加长禁止清单。CLI预览为仅DeepSeek、2项计划、0请求。
+- 尝试执行两账号各首稿／续写，共4次非思考请求时，**命令在创建进程前被安全审批拒绝**：要求针对这批内部冻结素材再次外发至DeepSeek获得明确确认。未绕过审批、未重试或改目的地，实际 **0次模型调用／0费用**，没有真实生成原文；这不是DeepSeek模型或API失败。计划输出目录 `data/evals/deepseek-title-regression-{qs,yiliyu}-20261016` 未创建。标题与事实改善尚不能判定。
+
+### 验证与限制
+
+- 在开发工作树 backend 执行 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库 backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_model_comparison.py tests/test_creator_writing_provider.py tests/test_single_writer_sessions.py tests/test_model_calls.py tests/test_creator_reference_projection.py` → **105 passed（最终2.63秒）**。覆盖单模型默认、显式双模型、预览不调用、重复case拒绝、DeepSeek-only凭据和产品持久化边界。
+- 修改文件 `ruff check --no-cache` 与 `git diff --check` 通过。没有前端改动，不重复运行或宣称视觉验收；前轮后端全量与环境补测记录保留，本轮不将其冒充新全量结果。
+- **已知限制**：移除误导示例是基于输入证据的修复，但仍需真实采样；也不能由标题变好推断编造经历、篇幅偏长或训诫语气已解决。没有新增模型检查层替代这些质量问题。
+- **运行状态**：未部署、重启、提交或推送；主干、冻结提交版与产品库未改。前轮未提交候选保留。
+- **需要用户决定**：是否明确允许将已经测试过的两账号冻结原笔记、诊断与请求再次发送至DeepSeek，执行共4次有费用的非思考回归；无需重新提供密钥。
+
+### 下一轮交接
+
+- **需要测试的功能**：批准后仅执行上述4次，逐份展示原始文章标题与正文，核对无假时限／新增作者经历、明确事实主体保留、三件可执行动作与自然口吻；不因首个结果失败重抽。未批准则保持离线，不改用其他服务绕行。
+- **需要新增／修改的代码**：本项不再追加提示；先观察标题修复实测。后续事实优化应针对“历史引文／编辑判断被变成作者亲历”的具体输入位置，不扩大全账号上下文、不叠加评审或自动重试。
+- **下一项新改进及验收**：DeepSeek 交付可采用的文章标题／正文且不造作者新接触读者经历；以完整原文评阅事实与写作得失，记录实际延迟，保持单次生成和人工采用。
+
+## 2026-10-16 创作助手默认迁移 DeepSeek（实现完成，未部署）
+
+用户最新决定“就 DeepSeek，延迟低很重要”，取代前两轮对比阶段“先别切默认”的限制。本轮问题：产品单助手仍固定 Qwen，无法应用用户选择。验收：只将 `single_writer` 的首稿／续写／局部精修切到 DeepSeek 非思考；全局、账号诊断独立设置与旧专家团队不串线；缺密钥／失败不改调 Qwen；回执能持久化、原稿不被自动采用或覆盖。预期与实际修改为配置、应用装配、协作 provider、新增路由／传输／持久化测试和配置文档；不改提示模板或上下文以混淆迁移效果。
+
+### 本轮完成
+
+- 新增 `CREATOR_WRITING_PROVIDER`，默认 `deepseek`，显式 `qwen`／`dashscope` 可回退；沿用现有 `DEEPSEEK_MODEL=deepseek-flash`、密钥、地址与超时。没有新增 SDK、模型评审、重试或自动 fallback。生产装配显式注入单助手模型服务，与旧 Qwen 专家团队服务分开。
+- DeepSeek-only 配置也可执行单助手，不再因没有 Qwen key 被整体关闭。真实传输适配仍显式发送 `thinking: {type: disabled}`；测试开启 Qwen 思考配置亦不会污染 DeepSeek 请求。输出契约、1800 token预算、参考范围、人工采用和保存流程保留。
+- 临时数据库完整执行“创建单助手会话→发送→经模拟 HTTP 传输→保存回复”，验证回执为 DeepSeek、候选标题／正文保留、原选题标题／正文／时间戳未变，不持久化 reasoning 内容。旧消息、建议、报告和稿件不重写，后续新调用使用新配置，不修改既有回执。
+- README、开发配置与 PRD 同步；保留前两轮真实输出的全部得失，不把用户接受延迟取舍写成模型在所有维度胜出。本轮 **0次付费模型调用**。
+
+### 测试与限制
+
+- 在开发工作树 `backend` 执行 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库 backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_writing_provider.py tests/test_content_collaboration_provider.py tests/test_content_collaboration_sessions.py tests/test_single_writer_sessions.py tests/test_deepseek_transport.py tests/test_config.py tests/test_creator_reference_projection.py tests/test_creator_model_comparison.py tests/test_model_calls.py` → **223 passed（4.82秒）**。新测试首次因遗漏“显式空参考列表”被既有契约拒绝，补齐测试请求后通过，未放宽产品参考规则。
+- 后端同一隔离命令去掉测试文件列表执行全量 → **2182 passed／5 failed（131.92秒）**。逐项定位为1项沙箱禁止本机监听、3项独立工作树缺少忽略目录中的既有视频样本、1项脚本写死工作树内 `.venv` 路径；没有通过改产品代码或放宽断言消除。允许临时本机端口、仅链接主仓库既有 `data/xhs-fixtures` 与 Python 环境后，显式复跑这5项 → **5 passed（0.70秒）**，合计2187项通过，非一次性全绿。临时链接清理脚本初次受工作目录切换影响未删除，随后核对链接目标单独清理完成；主仓库样本／环境未改。LangGraph原有弃用提醒仍存在。
+- 修改过的后端源码／测试与对照脚本 `ruff check --no-cache` 通过，`git diff --check` 通过。复跑命令为同一 pytest 参数加 `tests/test_account_profile_check.py::test_network_trace_runs_through_real_local_http_transport tests/test_video_creator_quality_workflow.py::test_video_creator_real_xhs_fixture_runs_with_qwen_stage_outputs tests/test_video_creator_quality_workflow.py::test_video_creator_tt_fixture_preserves_no_video_evidence_boundary tests/test_xhs_import_package_export_script.py::test_generic_xhs_import_package_export_script`。
+- **已知限制**：事实编造未根治，DeepSeek也出现过“很多应届生跟我说”等无来源经历；“建议版本”标题与约500字任务偏长仍待修。此次保持提示不变，没有以迁移掩盖这些缺点。没有前端改动，不声称视觉或真实产品保存交互重新验收。
+- **运行状态**：未部署、未重启、未提交／推送，主干与冻结提交包未改；开发工作树前轮候选改动保留。运行中的旧后端不会因代码修改自动被宣称已切换。
+- **需要用户决定**：无，模型选择已明确。
+
+### 下一轮交接
+
+- **需要测试的功能**：获部署授权后，用 QSheep 新创作确认实际回执／等待、手动编辑、采用后保存及重开历史；继续确认旧报告和旧稿未变。标题修复只做一处单因素变更，沿用冻结输入核对事实和口吻，不盲目重跑整轮。
+- **需要新增／修改的代码**：消除单助手 JSON 示例中 `title:建议版本` 与“文章标题”要求的语义冲突；保留候选标签与文章标题的区别，不通过加后处理自动补标题。检查事实来源主体，不继续堆禁止清单或增加审查调用。
+- **下一项新改进及验收**：候选交付真实文章标题，且标题／正文均不继承未确认时限；保留明确事实与原主体，首稿不造作者接触读者经历。呈现完整原文得失，不以成功返回等同写作质量通过。
+
+## 2026-10-16 一粒鱼换账号／题材配对验证（完成，默认模型未改）
+
+用户要求沿用对比思路，看换账号和题材后事实遵从、写作质量是否仍有同样差别。本轮问题／验收：选一粒鱼已有原笔记与诊断，冻结四类任务，每对实际输入一致、每模型每任务一次，保留失败及完整原文，不改提示重抽样、不急于切默认。涉及对照脚本增加四组显式冻结输入入口、测试及本节交接；不改产品生成代码、配置或数据库。
+
+### 素材与方法
+
+- 只读开发库，显式选择《大厂想要的是能跑完整个闭环的超级个体》（`6a237b1f000000002100bd74`）完整文字，和一粒鱼2026-10-11已有诊断（`1e8940bc-4806-43c2-9f4c-13364388c3d7`）。改为应届生／普通实习／小改进题材，不继续保研出国题。通过现有参考解析器冻结，仅传所选笔记标题／正文和所选诊断的模型视图，不重算报告、不额外读取未选笔记全文、不传抓取链接中的访问参数。
+- 原笔记开头是“这篇来自🍻”，其中招聘人的“我”不能直接当账号本人；本轮保留原文与诊断，不替模型修好归属后再测。普通211、单段不够匹配的电商活动运营实习、配置模板／产研核对／错误率降低是已知案例；无具体降幅、开发用时、转正结局。
+- 首稿、错误旧稿续写、明确事实保留、局部精修四个请求都为离线测试构造。续写看到同一份**人工对抗旧稿**，故意含“下周截止／两天／80%／我上周发offer／脚本已放评论区”；这不是声称已有模型实际生成过这些内容。局部草稿同样为人工夹具，不冒充产品已保存稿。
+- **8次请求，52,366 tokens，无重试**；Qwen `qwen-plus` 沿用现有创作服务，DeepSeek `deepseek-flash` 非思考；同一系统提示、temperature=0.3、max_tokens=1800。四对messages哈希逐一相同，八次均完整返回、输出契约通过、finish_reason=stop；结构成功不等于事实成功。跨账号的请求和材料不同，不能视为严格单因素实验或长期稳定率。
+
+| 任务 | Qwen秒／tokens | DeepSeek秒／tokens |
+| --- | --- | --- |
+| 首稿 | 32.744／6650 | 18.413／6064 |
+| 人工错误旧稿续写 | 19.711／7041 | 8.149／6532 |
+| 明确事实保留 | 9.354／6329 | 3.189／5827 |
+| 局部精修 | 10.308／7236 | 5.444／6687 |
+
+### 实际得失，不能照搬上一轮结论
+
+1. **首稿并非DeepSeek事实干净胜出**：它写“很多应届生跟我说”，新增无来源的作者接触读者经历；但配置模板仍是“原笔记的候选人”，未编成作者新招聘。Qwen没有同类新作者亲历，却把原案例“只有一段中小电商活动运营实习”直接套给读者。Qwen三个动作更细，但停在草稿生成，缺实际反馈；DeepSeek闭环立意更完整，第二／三件事却重复AI边界，末句“没跑完闭环才是短板”仍有训诫感。
+2. **纠错续写DeepSeek较好，但不是完整交付通过**：去掉五类人工污染，三步为找问题→最小方案核对→真实反馈，允许“不好用”而非逼出漂亮结果；正文726字符／631汉字，偏离约500字目标，结尾“普通实习只是没遇到大项目”替读者下结论。Qwen正文也删除下周、80%、新招聘和已发脚本，不能抹去这部分改善；但**标题原样保留“两天做出能打的闭环”**，并补投十几份简历／大型618等未知读者情境。15分钟+2次返工→5分钟+0错误是它写给读者的成果话术，不是明确宣称某真实案例实测，但未标假设，不能当真实成果采用。
+3. **发现我们自己的标题示例歧义**：DeepSeek首稿、续写的原始标题都只有“建议版本”。实际system正文要求文章标题，末尾JSON示例却写 `title:建议版本`，共同输入存在冲突；不能将漏标题全归因于模型能力。尚未单因素验证该示例是否主因，本轮没有临时修改／重采样。Qwen续写保留错误旧标题也是实际失败，不能只验正文。
+4. **真实事实保留两边均明显可用**：普通211、单段实习、配置模板、核对及定性改善保住，主体未串到账号本人。Qwen267字符／202汉字，稍补“没等指令／梳理逻辑”等未记录过程，概念化收尾偏重；DeepSeek269字符／215汉字，分段更清楚、无大段照抄，解释“一件就够／就是ownership”偏满。两者最长连续原文复用仅17／18字符，未延续上轮DeepSeek大段摘编的现象。
+5. **局部精修无明显事实胜负**：两边只给76／79字符选段，无新经历或效果数据；Qwen利落、DeepSeek柔和但略绕。两边自述“去掉指令感”均比实际改动更满，不以自述当验收。Qwen首稿的3次／5步／3个草稿是建议，不把所有新数字误判为伪造统计。
+
+完整请求、原文、人工错误旧稿／手稿、回执与评阅在主仓库忽略目录：`data/evals/yiliyu-creator-cases-20261016.json`，`data/evals/creator-model-compare-yiliyu-20261016/{manifest,summary,review}.json` 与八份输出JSON；准备脚本 `data/evals/prepare-yiliyu-creator-20261016.py`。对话内四组对照保留八份标题／正文／模型自述，已与原始响应逐字核对8/8，无人工代填标题。凭据模式检查0匹配。预览736／390／320宽度无溢出，四组选项及材料展开正常，临时服务／页签已清理；产品开发服务未重启。
+
+### 测试、限制与下一轮
+
+- `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库 backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_model_comparison.py tests/test_creator_reference_projection.py tests/test_single_writer_sessions.py tests/test_model_calls.py` → **87 passed（2.26秒）**。对照脚本增加 `--cases`，仅接受四个固定顺序ID／单写作助手／作者发给writing，拒绝缺组、扩批与路径型ID，默认预览0调用。新脚本／测试ruff通过，`git diff --check`通过；前端无改动，不重复声称产品保存链路已验。
+- **限制**：两账号各一主题、每任务一次；续写的错误来源性质不同（上轮真实错误稿、本轮人工对抗稿），不能算跨账号严格同条件胜率。事实与语感评阅仍需用户判断，未增加模型评审调用。结论仅为DeepSeek在本轮纠错较好、但首稿也编经历，不能称换模型即可根治。
+- **需要用户决定**：无；本轮只呈现比较，默认模型、主干、冻结提交版、旧历史均不改，未部署／提交／推送。前一轮未提交候选保留。
+- **下一次需要测试的功能**：若进入修复，只改标题格式示例这一处，再用同样四份冻结输入检查文章标题和事实有无连带变化；不以标题成功就宣布事实通过。另保留“引用者不是账号本人”的归属测试及局部范围，不为统计显著性盲目扩批。
+- **需要新增／修改的代码**：本轮未实施产品修复。优先消除候选名称与文章标题的输出语义冲突，核对来源主体；没有用户迁移决定前不加创作默认provider开关、不接审查／重试层或扩大上下文。
+- **下一项新改进及验收**：文章标题不是候选标签、标题和正文均不能残留未确认时限；普通实习建议有可试方案和真实反馈，不靠编作者咨询经历或漂亮成果增强可信度；完整展示原文得失后再谈是否切模型。
+
+## 2026-10-16 Qwen／DeepSeek同题创作对照（已完成，默认模型未改）
+
+本轮按用户要求比较事实遵从与写作质量，完整展示实际原文及得失，不急于迁移。问题／验收：相同冻结材料、相同消息逐字输入，两边都测试首稿、错误旧稿续写、明确事实保留及局部精修；将结构返回成功与事实质量分开，保留失败，不重采样挑选好结果。涉及新增 `scripts/compare_creator_models.py`、`backend/tests/test_creator_model_comparison.py` 及本节记录，无产品代码、默认路由或数据库改动。
+
+### 范围、原文与实际观察
+
+- **4组配对／8次请求／64,961 tokens，无重试**。全是QSheep同一篇保研出国原笔记、同一份已有诊断，不是四个档案。首稿重放此前真实请求，其余为针对既有错误稿、真实原文事实及人工保存稿的离线构造请求。每对实际messages哈希一致，temperature=0.3、max_tokens=1800；Qwen沿用现有创作服务请求名 `qwen-plus`，DeepSeek返回名 `deepseek-flash`、非思考。未对服务别名背后的具体权重作额外推断。
+- 两边四次都完整返回、JSON／业务输出契约通过、finish_reason=stop；这只是**结构8/8成功，不是事实8/8成功**。每模型每任务只有一次，不能推断长期稳定率或统计优越性。
+- 首稿：Qwen新增原材料没有的“37%进入NGO/国际组织”、具体课程英文名、爸爸直接引语“支持你申，不等于支持你借债读”，并将目标模糊写成作者亲历；“下周截止”被放在条件情境里，仍无来源，但不能误称它断言所有学校下周关闭。DeepSeek没有同类具体新增事实，提出“问别人怎样排除另一条”有用；但预设当前申请期，“写不出来就说明信息不够”过于单因解释。未外部检索37%的现实真伪，判断的是无来源断言，不冒充已证伪。
+- 错误旧稿续写：已明确告知旧日期／学校要求未被确认，Qwen仍保留“推免系统下周就要关了”，与旧稿最长连续180字符相同，说明却声称无未确认信息；6.5在查证问题中，不误判成它断言所有项目要求6.5。DeepSeek去掉具体日期／分数／学校组合，但仍把申请门槛概括得过齐，并有“拿还没想好当理由停在原地”的训诫感。两者都不能称写作全面通过。
+- 明确事实保留：两者都正确保留爸爸MIT MBA与作者先就业的主体，朋友放弃材料／已有夏令营offer亦来自原文，不因细节具体就误判。Qwen重组较多但“机会延展／锚定”等表达偏正式；DeepSeek更接近原作者但最长连续78字符直接摘编。约250字开头，Qwen281汉字／323字符，略长且标题虚报248字；DeepSeek333汉字／392字符，篇幅扩张更明显，不把近似字数一律当硬失败。
+- 局部精修：两者只返回选段，分别54／65字符，无新增经历或时间事实。Qwen短但“你连……”更硬，仍是指令；DeepSeek“问自己”较柔和，但后文是外部查证，衔接不一定更准确。“3分钟”本来就在人工稿中，不算本次新增。
+
+| 任务 | Qwen秒／tokens | DeepSeek秒／tokens |
+| --- | --- | --- |
+| 无旧稿首稿 | 13.561／8153 | 4.655／7479 |
+| 错误旧稿续写 | 13.805／8928 | 4.064／8087 |
+| 明确事实保留 | 9.165／7834 | 3.120／7198 |
+| 局部精修 | 4.709／8997 | 1.332／8285 |
+
+原始消息、输入包、原始响应、模型输出、回执、哈希及人工评阅保存在主仓库忽略目录 `data/evals/creator-model-compare-20261016/` 的 `manifest.json`、八份配对JSON、`summary.json`、`review.json`。对话内四组选项对照保留完整标题／正文／模型自述，已逐字核对 **8/8**，评语与原文分开。展示预览在736／390／320宽度无横向溢出，四组切换可用；临时预览服务／页签已清理，开发5174／8000未重启。证据文件凭据模式检查0匹配；不复制环境文件或密钥。
+
+### 测试与下一轮交接
+
+- 在backend执行 `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库 backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_model_comparison.py tests/test_creator_reference_projection.py tests/test_single_writer_sessions.py tests/test_model_calls.py` → **86 passed（末次3.42秒）**。新脚本／测试 `ruff check --no-cache` 与 `git diff --check` 通过；输入冻结、原生角色、UTF-16选区、失败只记一次不重试／不建库有覆盖。前端无改动，未重复宣称产品视觉／保存链路验收。
+- **已知限制**：同账号同主题、每条件一次；当前候选上下文下比较，不代表所有Qwen／DeepSeek版本；没有质量打分模型或外部事实核验。DeepSeek具体事实边界在本组更好，不能称完全消除编造；写作也存在训诫、泛化和摘编的不同损失。
+- **需要用户决定**：本轮无，保持既有创作默认；若后续切换，应由用户审阅原文后决定。未部署、提交、推送，未改主干或冻结提交版，也未写产品会话／稿件。
+- **下一次需要测试的功能**：用户审阅本组之后，先确定可接受口吻与改写收益，再用一粒鱼或另一个既有主题小规模验证可迁移性；继续保留错误旧稿续写、明确事实不能删、局部范围三类，不为凑稳定率重复付费。
+- **需要新增／修改的代码**：只有用户选定后才接创作专用provider／model配置；保留来源投影与原生对话候选，不牵动账号诊断或其他业务，不新增事后审查／重试来掩盖首稿问题。
+- **下一项新改进及验收**：在不补日期、引语、比例和个人经历的前提下，写出有作者口吻的具体建议；明确事实保留、非训诫语气、适度篇幅及相对原文有编辑价值同时可人工核对，不能以JSON成功替代。
+
+## 2026-10-16 追查创作事实编造：来源与对话拆分候选（未部署，未完全解决）
+
+用户明确要求先查为何约束无效，不继续堆prompt。本轮问题／验收：找到“推免系统下周关闭”在实际输入中的来源，区分上下文串用、旧稿延续、服务缓存与自主补写；以同一冻结输入验证有观察收益的改动，不用禁词消失代替事实正确。修改仅涉及创作参考投影、单助手消息封装、精简提示和相关测试，不增加模型调用阶段、语义闸门、自动重试或前端说明。
+
+### 已证实的事实与不能证明的部分
+
+1. 两次新会话的原始用户请求只说“决策时间又紧”，所选原笔记只有朋友在递交材料当天放弃的历史事件；诊断中另一位历史评论者说导师给了两天考虑。原始参考中没有系统下周关闭。将“两天”具体改写成“下周”究竟怎样发生，无法从回执直接证明，不能当作已证实的推理路径。
+2. 上轮后两次系统提示真的包含失败句的近义原话“系统下周关闭”，作为负面例子。因此新会话仍可能接触这句话；上轮所谓新会话不是对这句话的干净隔离。但本轮完全移除失败例子后仍有其他截止时间编造，负面例子不是唯一原因。
+3. 账号分析整份结果作为一个来源：编辑观察、历史评论、统计范围、指标表共享同一文本封装；来源级的用途提醒没有把评论主体放在每句引文旁。旧助手稿虽然从allowedSources移出，仍以previousSuggestions序列化在一个user消息中。兼容API实际始终只收到system＋user两条消息，未采用真实assistant回合边界。
+4. 来源引用校验只检查ID与逐字quote；inference候选允许空引用。这保证了引用格式，不保证整篇新稿的事实。JSON成功、无重试、模型声称无新增事实，均不能视为事实核验。
+5. 两次首稿无旧助手历史；首稿回执cached_tokens为0、系统提示哈希随修改变化。本轮请求也得到不同新输出，未找到应用复用旧答案或服务没更新的证据。完整JSON返回且未触发长度上限错误，没有证据将此错误归因于超长截断。
+
+### 已实现的候选改动
+
+- 新增纯函数 `creator_reference_projection.py`：已知结构的账号报告拆成编辑观察和独立历史评论来源；逐条评论保留原句、主题与数量，并紧邻“历史评论者，身份未核实／当前适用未知”。去掉已知报告中创作不需要的observations统计表，不删原笔记全文、不概括改写引文。未知／旧结构与扩展字段保留，冻结参考、旧报告和数据库不改。
+- 单助手把历史creator／writing消息恢复成API的user／assistant回合，本轮请求放在最后；旧助手稿不再塞进user参考包。仍是一次请求、一次作者回合，legacy团队、其他工作流和模型默认不变。新回执记录实际message角色列表及输入哈希，不记录密钥／隐藏推理。
+- 移除场景化失败例子和重复禁令；系统提示从 **2453→1798字符**。保留原主体／时间、事实与建议区分、手动采用／局部编辑和输出契约，不把模板加长当成修复。
+
+### 小规模对照：4次请求，33,291 tokens，均无重试
+
+仅重放上轮保存的QSheep同一原笔记、同一诊断、同一约500字请求，不重算诊断、不抓取、不写产品会话或稿件。创作仍用当前配置的Qwen服务；DeepSeek只做一次对照，没有迁移产品。各条件只采样一次，不能形成稳定率或严格因果结论。
+
+| 条件 | 实际结果 | 时间／tokens |
+| --- | --- | --- |
+| Qwen：精简提示、原混合来源、无旧稿 | 编“我去年反复打开LSE官网／教务邮箱”，另编“资料已放评论区”；仍未遵守事实边界 | 15.810秒／9513 |
+| Qwen：相同精简提示、拆分来源、无旧稿 | 上述两种编造未出现，但补“推免系统快开了、语言考试deadline也近了”；不是事实通过 | 15.360秒／8091 |
+| DeepSeek Flash非思考：相同拆分来源与提示、无旧稿 | 无具体截止时间／已发布动作；却写“后来我发现，很多人……”，将少量历史反馈拔高成作者后来的观察；部分改善 | 4.382秒／7438 |
+| Qwen：拆分来源＋原生消息封装、本轮请求最后 | 仍编“推免材料下周就要交”，并假定15分钟能做完三件事；输入组织修复不等于语义已修复 | 13.498秒／8249 |
+
+第一与第二条件system逐字相同；第二与DeepSeek输入／system逐字相同，但不同模型tokenizer不同。第四的参考及system相同，去掉空previousSuggestions字段并额外作为最后一条原生user消息传递实际请求。source统计表拆分令第二条件user文本 **15698→12461字符**、input tokens **8914→7610**；不能因此称长上下文是唯一根因。第四没有旧assistant回合，验证的是本轮请求的位置，旧稿原生角色只完成了真实传输回归测试，未为此额外付费生成。
+
+**判断**：不同来源的主体／时间混杂，以及旧稿处在user数据包中，是可证实的工程问题；模型将“自然、具体、有时间压力的开头”补成具体场景，是与结果一致的强推断，不是可见的内部推理。删除失败原句、减少统计和改变请求位置仍不能稳定约束当前Qwen。不能宣布这四次已解决，也不能仅凭一次DeepSeek就宣布换模型能彻底解决。
+
+输入、原始输出、精简提示、回执与哈希在主工作区忽略目录 `data/evals/creator-facts-context-20261016/{flat,separated,separated-deepseek,native}.json`，不含密钥。临时只读重放脚本在 `/private/tmp/sqs-audit-writing-context.py`。没有重启开发服务／部署候选，5174仍运行上一版；未提交、推送或修改主干／冻结提交包。需要用户决定：无，本轮没有默认模型切换。
+
+### 测试和下一轮交接
+
+- backend：`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. <主仓库 backend/.venv/bin/python> -m pytest -o addopts='' -q -p no:cacheprovider tests/test_creator_reference_projection.py tests/test_single_writer_sessions.py tests/test_model_calls.py tests/test_content_collaboration_provider.py tests/test_creator_note_references.py tests/test_deepseek_transport.py tests/test_content_collaboration_sessions.py tests/test_content_collaboration_persistence.py` → **187 passed（11.40秒）**。同环境另跑 `tests/test_account_provider_scope.py tests/test_config.py tests/test_workflow_lifecycle.py tests/test_content_collaboration.py` → **62 passed（2.18秒）**。相关6文件ruff及 `git diff --check` 通过；不将提示字面断言或mock返回等同事实质量。前端未改，不重复跑前端全量或声称新视觉验收。
+- **下次需要测试的功能**：固定“无来源截止时间、第一人称经历、已完成发布动作、读者条件迁移、作者明确补充事实必须保留”这几类既有样本，逐项人工核对原回复与来源；不要只看是否含某个禁词或能否返回JSON。旧错误建议续写另列，不能让“新会话通过”替代它。
+- **需要新增／修改的代码**：先完成同一小样本下创作模型／生成任务的质量比较；不要继续扩大上下文、叠加禁令或增加事后评审调用。原生角色与来源投影已具备候选实现；暂不自动切模型、不改Qwen-only产品路由。若下一轮选定新生成方案，再接入明确的创作专用配置并保持其他业务不变。
+- **下一项新改进及验收**：使用来源材料写出有用的建议，而非为生动补齐事实；无日期不写具体日期，无亲历不编亲历，无发布操作不声称已发布，明确补充的真实事实不能被过度删除。保留文章具体性、自然口吻和可执行动作，完整报告得失；未通过就不以UI／结构测试掩盖。
+
 ## 2026-10-16 本轮修复提交范围
 
 用户明确授权push；本次仅提交本轮产品修复、回归测试与两轮真实检查记录到 `codex/account-reading-quality`，不更新master或冻结提交版，不纳入开发数据库、截图回执、密钥、环境文件及临时node_modules链接。提交署名已核验为 `littlelittlesheep <shiqishan319@gmail.com>`，不据此判断推送认证账号。沿用刚完成的779项前端／123项后端相关测试和lint／build／ruff结果，提交前 `git diff --check` 再次通过。事实生成仍未完全过关，以下限制随代码一同保留，不将本次push称为质量全部验收。

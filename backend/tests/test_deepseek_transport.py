@@ -23,7 +23,7 @@ def test_account_provider_defaults_are_scoped_and_environment_is_independent(mon
         monkeypatch.delenv(key, raising=False)
     general = Settings.from_environment()
     account = general.for_account_diagnosis()
-    assert general.model_provider == "qwen"
+    assert general.model_provider == "deepseek"
     assert account.model_provider == general.account_diagnosis_provider == "deepseek"
     assert account.deepseek_api_key == ""
     assert account.deepseek_model == "deepseek-flash"
@@ -35,7 +35,7 @@ def test_account_provider_defaults_are_scoped_and_environment_is_independent(mon
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://deepseek.example.test/v1")
     monkeypatch.setenv("DEEPSEEK_READ_TIMEOUT_SECONDS", "240")
     custom = Settings.from_environment()
-    assert custom.model_provider == "qwen"
+    assert custom.model_provider == "deepseek"
     assert custom.deepseek_api_key == "placeholder-secret"
     assert custom.deepseek_model == "deepseek-flash-pinned"
     assert custom.deepseek_base_url == "https://deepseek.example.test/v1"

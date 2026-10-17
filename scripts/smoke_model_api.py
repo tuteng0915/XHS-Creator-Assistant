@@ -75,6 +75,12 @@ def _settings_summary(settings: Settings) -> dict[str, Any]:
                 "messagesUrl": settings.anthropic_messages_url or "(derived)",
             }
         )
+    elif provider == "deepseek":
+        summary.update({
+            "apiKey": "set" if settings.deepseek_api_key.strip() else "missing",
+            "model": settings.deepseek_model,
+            "baseUrl": settings.deepseek_base_url,
+        })
     elif provider in {"qwen", "dashscope"}:
         summary.update(
             {

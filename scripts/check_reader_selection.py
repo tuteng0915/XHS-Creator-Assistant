@@ -1,4 +1,4 @@
-"""Two-topic saved-reader check. Read-only SQLite; --live makes at most two Qwen calls."""
+"""Two-topic saved-reader check. Read-only SQLite; --live makes at most two model calls."""
 from __future__ import annotations
 
 import argparse
@@ -8,7 +8,6 @@ import json
 import sqlite3
 import sys
 import time
-from dataclasses import replace
 from pathlib import Path
 
 from pydantic import ValidationError as SchemaError
@@ -125,12 +124,12 @@ def main():
         return 0
     if args.output is None:
         parser.error("--live 必须指定新的 --output 目录")
-    settings = replace(Settings.from_environment(), model_provider="qwen")
-    if not settings.qwen_api_key:
-        parser.error("未配置 Qwen 密钥")
+    settings = Settings.from_environment()
+    if not settings.has_text_model_credentials:
+        parser.error("未配置所选文字模型的密钥")
     args.output.mkdir(parents=True, exist_ok=False)
     reports = asyncio.run(check(RealReaderSelectionProvider(ModelCallService(settings)), inputs))
-    report = {"provider": "qwen", "configuredModel": settings.qwen_model,
+    report = {"provider": settings.model_provider, "configuredModel": settings.text_model_name,
               "authoredTestTopics": True, "requiresSemanticReview": True, "cases": reports}
     (args.output / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8",
@@ -138,7 +137,7 @@ def main():
     print(json.dumps({"report": str(args.output / "report.json"),
                       "statuses": [row["status"] for row in reports],
                       "requestAttempts": sum(row["requestAttempted"] for row in reports),
-                      "configuredModel": settings.qwen_model}, ensure_ascii=False))
+                      "configuredModel": settings.text_model_name}, ensure_ascii=False))
     return 1 if any(row["status"] == "failed" for row in reports) else 0
 
 

@@ -64,23 +64,33 @@ npm run dev -- --host 127.0.0.1
 
 ## 模型配置
 
-主应用的 live generation 统一经后端模型代理调用，浏览器不持有模型 API key。全局仍默认 Qwen；账号诊断通过独立配置默认使用 DeepSeek，不改变受众分析、Panel、创作助手与媒体功能。
+所有文字 live generation 默认通过 DeepSeek Flash 非思考，浏览器不持有模型 API key。包括账号诊断、受众画像、读者推荐、独立反应／讨论／总结、作者访谈、创作编辑、旧专家协作与其他文字助手。图片／视频的理解与生成仍是单独的 Qwen media 服务，不将其误接给文字模型；没有 Qwen 密钥不影响文字流程。
 
 ### 账号诊断：DeepSeek V4.1 Flash
 
 ```dotenv
+MODEL_PROVIDER=deepseek
 ACCOUNT_DIAGNOSIS_PROVIDER=deepseek
+CREATOR_WRITING_PROVIDER=deepseek
 DEEPSEEK_API_KEY=替换为自己的密钥
 DEEPSEEK_MODEL=deepseek-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_READ_TIMEOUT_SECONDS=180
 ```
 
-`deepseek-flash` 为[官方当前的 V4.1 Flash 调用名](https://api-docs.deepseek.com/zh-cn/)。本应用显式发送 `thinking: {type: "disabled"}`，使用 JSON object 和既有提示／输出预算，不同时更换报告模板。账号画像（含概览、精读、汇总）、反馈召回／排序、诊断内选题均走独立服务；不把 `MODEL_PROVIDER` 全局改成 DeepSeek。读取超时接受 1～300 秒，连接／写入／连接池仍为 90 秒。缺密钥明确报错，不静默改调 Qwen；原有输出恢复规则不变。
+本应用对 `deepseek-flash` 显式发送 `thinking: {type: "disabled"}`，使用 JSON object 和既有提示／输出预算，不同时更换报告模板。账号画像（含概览、精读、汇总）、反馈召回／排序、诊断内选题保留独立配置服务，默认与全局一样使用 DeepSeek。读取超时接受 1～300 秒，连接／写入／连接池仍为 90 秒。缺密钥明确报错，不静默改调 Qwen；原有输出恢复规则不变。
 
 回退用 `ACCOUNT_DIAGNOSIS_PROVIDER=qwen`，画像使用 `QWEN_PROFILE_MODEL`，其他诊断步骤使用 `QWEN_MODEL`；`inherit` 或空值跟随全局 provider。查看已有报告不需要密钥，也不重新生成。旧未完成任务仍按恢复时配置执行剩余阶段，不能将其当作纯新模型结果；切换前应先结束旧任务，新模型比较请新建分析。正式部署／重启另行授权，不自动修改已有运行服务或提交包。
 
-### Qwen 配置与本地文件
+### 创作助手：DeepSeek Flash 非思考
+
+`CREATOR_WRITING_PROVIDER` 默认 `deepseek`，使用上面的 `DEEPSEEK_API_KEY`、`DEEPSEEK_MODEL`（默认 `deepseek-flash`）、地址与超时。单助手首稿、续写、局部精修均走同一独立服务，显式禁用思考；沿用当前提示、人工选择参考、建议预览／采用及保存链路，不增加审查调用或自动重试。
+
+显式回退可用 `CREATOR_WRITING_PROVIDER=qwen`（或 `dashscope`），使用 `QWEN_MODEL`。仅接受这三个明确值，不跟随全局 provider，也不在缺密钥／请求失败时暗中回退。旧 research／writing／review 专家团队、读者推荐和访谈改为使用全局服务，不再固定 Qwen。缺少所选 provider 的密钥时不因配置了另一家密钥就启用或换模型。
+
+切换影响后续新调用，不重写已保存消息、建议或稿件；每条结果记录实际 provider／model，已有会话后续可出现不同模型的回执。历史可继续阅读，自动采用或覆盖稿件不因切模型开启。两个账号的配对实测支持延迟收益，但仍出现过新增经历、模板标题和文风问题，不将模型迁移等同于事实可靠性验收。运行服务需另行重启后才应用新代码，勿为配置迁移中断正在进行的请求。
+
+### 可选 Qwen 兼容配置与本地文件
 
 以下 Qwen PROFILE 参数在账号诊断显式回退到 Qwen 时生效，不覆盖 DeepSeek 配置。
 
@@ -107,7 +117,7 @@ export QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 | `QWEN_BASE_URL` | `DASHSCOPE_BASE_URL` |
 | `QWEN_DASHSCOPE_BASE_URL` | `DASHSCOPE_API_BASE_URL` |
 
-`MODEL_PROVIDER=dashscope` 也进入 Qwen 文本调用路径；通常保持默认 `qwen` 即可。
+`MODEL_PROVIDER=dashscope` 也进入 Qwen 文本调用路径；当前默认是 `deepseek`，Qwen仅在显式配置时使用。若要全部文字回退Qwen，还需分别设置 `ACCOUNT_DIAGNOSIS_PROVIDER=qwen` 和 `CREATOR_WRITING_PROVIDER=qwen`，不依赖请求失败自动回退。
 
 `QWEN_PROFILE_MODEL` 默认 `qwen3.8-max`，只影响账号报告的 PROFILE 操作，其他文本操作仍用 `QWEN_MODEL`。设为空字符串可显式继承总模型。`QWEN_PROFILE_ENABLE_THINKING` 可设 `true`/`false`，默认false保留既有Qwen3.8非思考请求；显式开启后传 `enable_thinking=true` 和 `QWEN_PROFILE_THINKING_BUDGET`（默认4096，本应用接受1～8192）。思考预算独立于最终答案 `max_tokens`，不从报告的答案预算中扣除。只影响Qwen的PROFILE请求，不改变其他功能或Anthropic路径；不增加模型调用、自动重试或降级。[官方思考说明](https://help.aliyun.com/zh/model-studio/deep-thinking)、[JSON模式](https://help.aliyun.com/zh/model-studio/qwen-structured-output)。诊断仅保留思考开关、预算和数值reasoning_tokens，不保存reasoning_content；reasoning_tokens是completion_tokens子集，不重复加到总用量。
 

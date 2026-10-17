@@ -145,10 +145,18 @@ def validate_editor_feedback(
     counts = Counter(
         item.get("id") for item in raw if isinstance(item, dict) and isinstance(item.get("id"), str)
     )
+    normalized = []
     for index, item in enumerate(raw):
         reason = "invalid_fields"
         try:
             card = EditorFeedback.model_validate(item)
+            # An empty replacement with questions is a request, not broken copy.
+            # Do not infer an operation when both replacement text and questions exist.
+            corrected_kind = (card.kind in {"clarify", "rewrite", "explore"}
+                              and bool(card.materialRequests) and not card.suggestedText.strip())
+            original_kind = card.kind
+            if corrected_kind:
+                card = card.model_copy(update={"kind": "add_material"})
             reason = "invalid_material_contract"
             if card.kind == "add_material":
                 if not card.materialRequests or card.suggestedText.strip():
@@ -219,6 +227,8 @@ def validate_editor_feedback(
             result["sources"] = [sources[s] for s in card.sourceMessageIds]
             result["readerConcerns"] = selected_concerns
             valid.append(result)
+            if corrected_kind:
+                normalized.append({"id": card.id, "from": original_kind, "to": "add_material"})
         except (ValidationError, ValueError):
             rejected.append({"index": index, "reason": reason})
     return {
@@ -234,6 +244,7 @@ def validate_editor_feedback(
         "editorFeedbackValidation": {
             "status": "partial" if valid and rejected else "invalid" if rejected else "validated",
             "rejected": rejected,
+            **({"normalized": normalized} if normalized else {}),
         },
     }
 

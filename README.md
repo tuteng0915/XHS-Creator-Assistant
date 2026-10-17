@@ -96,15 +96,14 @@ npm --prefix frontend ci
 在仓库根目录新建 `.env.local`，填入自己的密钥：
 
 ```dotenv
-MODEL_PROVIDER=qwen
-QWEN_API_KEY=你的密钥
-QWEN_MODEL=qwen-plus
+MODEL_PROVIDER=deepseek
 ACCOUNT_DIAGNOSIS_PROVIDER=deepseek
+CREATOR_WRITING_PROVIDER=deepseek
 DEEPSEEK_API_KEY=你的DeepSeek密钥
 DEEPSEEK_MODEL=deepseek-flash
 ```
 
-账号诊断默认使用 DeepSeek V4.1 Flash 非思考模式，整体阅读后并行精读代表作，再汇总报告；读者反馈与诊断内选题使用同一模型，其余功能保持 Qwen。旧报告无需重新生成；也可显式切回 Qwen。密钥仅由后端读取，`.env.local` 已被 Git 忽略。更多设置见[模型配置](docs/development.md#模型配置)。
+所有文字功能默认使用 DeepSeek Flash 非思考模式，包括账号诊断、受众分析、读者推荐、模拟／访谈和创作。诊断整体阅读后并行精读代表作，再汇总报告；创作仍由作者选择参考、采用和保存。旧报告与稿件不重写，缺密钥或请求失败不自动换模型。图片／视频专用能力另配 Qwen 密钥，不影响文字功能。密钥仅由后端读取，`.env.local` 已被 Git 忽略。更多设置见[模型配置](docs/development.md#模型配置)。
 
 ### 3. 启动应用
 
@@ -128,7 +127,7 @@ npm --prefix frontend run dev -- --host 127.0.0.1
 
 ## 面向本地使用的轻量架构
 
-`React + TypeScript` · `FastAPI` · `LangGraph` · `SQLite` · `Qwen`
+`React + TypeScript` · `FastAPI` · `LangGraph` · `SQLite` · `DeepSeek / Qwen`
 
 账号诊断与读者群聊使用各自的 LangGraph 流程；创作助手每次由一个写作 Agent 回应，只读取当前稿件、当前对话段和作者选择的参考。前后端通过 HTTP／SSE 通信，内容与历史保存在本地 SQLite 和文件目录。
 

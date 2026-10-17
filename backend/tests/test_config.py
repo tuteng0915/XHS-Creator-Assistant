@@ -32,11 +32,11 @@ def test_load_env_file_defaults_preserves_existing_environment(
     assert os.environ["ANTHROPIC_BASE_URL"] == "https://example.test/apps/anthropic"
 
 
-def test_model_provider_defaults_to_qwen_when_no_local_override(monkeypatch) -> None:
+def test_model_provider_defaults_to_deepseek_when_no_local_override(monkeypatch) -> None:
     monkeypatch.setattr("app.config.load_env_file_defaults", lambda _: None)
     monkeypatch.delenv("MODEL_PROVIDER", raising=False)
 
-    assert Settings.from_environment().model_provider == "qwen"
+    assert Settings.from_environment().model_provider == "deepseek"
 
 
 def test_model_provider_allows_an_explicit_compatible_override(monkeypatch) -> None:

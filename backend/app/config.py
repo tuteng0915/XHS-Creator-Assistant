@@ -59,13 +59,13 @@ class Settings:
     xhs_mediacrawler_directory: Path | None = None
     max_upload_bytes: int = 5 * 1024 * 1024
     csv_preview_rows: int = 20
-    # Qwen is the product default. Other supported providers remain explicit
-    # opt-ins through MODEL_PROVIDER rather than becoming an accidental
-    # fallback when a local env file is absent.
-    model_provider: str = "qwen"
-    # Account diagnosis has its own provider; other product flows keep Qwen.
+    # All text workflows default to DeepSeek; other adapters are explicit opt-ins.
+    model_provider: str = "deepseek"
+    # Account diagnosis has its own provider; no global provider mutation.
     # Use qwen for rollback, or inherit/empty to follow MODEL_PROVIDER.
     account_diagnosis_provider: str = "deepseek"
+    # Single-writer assistant override, independent of the shared text service.
+    creator_writing_provider: str = "deepseek"
     # Structured reports add isolated reading assistance by default;
     # source_led remains the explicit single-call rollback option.
     account_report_mode: str = "staged"
@@ -94,6 +94,10 @@ class Settings:
     video_preview_frame_count: int = 8
 
     def __post_init__(self) -> None:
+        if (not isinstance(self.creator_writing_provider, str)
+                or self.creator_writing_provider.strip().lower()
+                not in {"deepseek", "qwen", "dashscope"}):
+            raise ValueError("CREATOR_WRITING_PROVIDER must be deepseek, qwen, or dashscope")
         if (not isinstance(self.account_diagnosis_provider, str)
                 or self.account_diagnosis_provider.strip().lower()
                 not in {"", "inherit", "deepseek", "qwen", "dashscope", "anthropic"}):
@@ -122,6 +126,22 @@ class Settings:
             self.model_provider if provider in {"", "inherit"} else provider
         ))
 
+    def for_creator_writing(self) -> "Settings":
+        """Select the writer provider, preserving all other workflows' settings."""
+        return replace(self, model_provider=self.creator_writing_provider.strip().lower())
+
+    @property
+    def has_text_model_credentials(self) -> bool:
+        keys = {"deepseek": self.deepseek_api_key, "qwen": self.qwen_api_key,
+                "dashscope": self.qwen_api_key, "anthropic": self.anthropic_api_key}
+        return bool(keys.get(self.model_provider.strip().lower(), "").strip())
+
+    @property
+    def text_model_name(self) -> str:
+        models = {"deepseek": self.deepseek_model, "qwen": self.qwen_model,
+                  "dashscope": self.qwen_model, "anthropic": self.anthropic_model}
+        return models.get(self.model_provider.strip().lower(), "").strip()
+
     @classmethod
     def from_environment(cls) -> "Settings":
         repository_root = Path(__file__).resolve().parents[2]
@@ -149,8 +169,9 @@ class Settings:
                     repository_root / "data/external/MediaCrawler",
                 )
             ),
-            model_provider=os.getenv("MODEL_PROVIDER", "qwen"),
+            model_provider=os.getenv("MODEL_PROVIDER", "deepseek"),
             account_diagnosis_provider=os.getenv("ACCOUNT_DIAGNOSIS_PROVIDER", "deepseek"),
+            creator_writing_provider=os.getenv("CREATOR_WRITING_PROVIDER", "deepseek"),
             account_report_mode=os.getenv("ACCOUNT_REPORT_MODE", "staged"),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),

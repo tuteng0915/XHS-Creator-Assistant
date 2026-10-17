@@ -85,7 +85,7 @@ def test_material_feedback_asks_author_without_proposing_facts():
 @pytest.mark.parametrize("changes", [
     {"kind": "add_material"},
     {"kind": "add_material", "materialRequests": ["请补真实经历"], "suggestedText": "同伴鼓掌了"},
-    {"kind": "rewrite", "materialRequests": ["请补真实经历"]},
+    {"kind": "rewrite", "materialRequests": ["请补真实经历"], "suggestedText": "同伴鼓掌了"},
 ])
 def test_material_contract_does_not_masquerade_as_ready_copy(changes):
     result = validate([card(sourceType="editor_optional", sourceMessageIds=[],

@@ -48,6 +48,32 @@ def settings(**overrides: Any) -> Settings:
     return Settings(**values)
 
 
+def test_single_writer_transport_keeps_actual_turn_roles_and_latest_request_last(monkeypatch):
+    FakeAsyncClient.requests = []
+    FakeAsyncClient.response_status_code = 200
+    FakeAsyncClient.response_body = {"model": "fake-qwen", "choices": [
+        {"finish_reason": "stop", "message": {"content": '{"turn":{"summary":"讨论"}}'}},
+    ]}
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    service = ModelCallService(settings(model_provider="qwen", qwen_api_key="fake"))
+    context = {"assistantMode": "single_writer", "evidence": {"allowedSources": []},
+               "conversation": [
+                   {"role": "user", "content": "先给一版"},
+                   {"role": "assistant", "content": "一条未经确认的旧建议"},
+                   {"role": "user", "content": "重新写，事实按原笔记"},
+               ]}
+    response = asyncio.run(service.call_operation(ModelOperation.CONTENT_COLLABORATION_TURN,
+                                                 context))
+    messages = FakeAsyncClient.requests[0]["json"]["messages"]
+    assert [item["role"] for item in messages] == ["system", "user", "user", "assistant", "user"]
+    assert messages[-1]["content"] == "重新写，事实按原笔记"
+    assert "未经确认" not in messages[1]["content"]
+    assert json.loads(messages[-2]["content"])["turn"]["summary"] == "一条未经确认的旧建议"
+    assert response.model_metadata["inputMessageRoles"] == [item["role"] for item in messages]
+    assert len(response.model_metadata["inputMessagesHash"]) == 64
+    assert len(FakeAsyncClient.requests) == 1
+
+
 def test_reader_feedback_prompt_accepts_sparse_unknown_and_positive_comments():
     from app.services.model_calls import PROMPT_READER_FEEDBACK
 

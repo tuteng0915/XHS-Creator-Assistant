@@ -7,7 +7,7 @@ reader hypotheses as author facts. It cannot add readers or write replacement co
 
 import json
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -19,10 +19,6 @@ from app.services.reader_selection import ReaderSelectionInput, validate_reader_
 Text = Annotated[
     str, StringConstraints(strict=True, strip_whitespace=True, min_length=1, max_length=600)
 ]
-
-# The model may smuggle hypothetical answers into its follow-up questions.
-# Keep its explanation beside the source anchor, but do not prefill author input.
-MATERIAL_REQUEST = "这处你愿意补充哪些真实经历、观察或已确认的信息？没有相关材料，可以保留原文。"
 
 
 class FitDecision(BaseModel):
@@ -48,6 +44,8 @@ class PanelReview:
     system: str
     context: dict
     ids: list[str]
+    # Server-local provenance only. Never added to the checker prompt.
+    feedback: dict[str, dict] = field(default_factory=dict)
 
     @property
     def prompt(self):
@@ -126,7 +124,10 @@ def prepare_review(operation: str, context: dict, output: dict) -> PanelReview |
             reactions=context.get("reactions", []),
             replies=context.get("debateResponses", []),
         )["editorFeedback"]
-        valid = [c for c in valid if c["kind"] != "keep"]
+        # This checker approves replacement copy, not whether an author is allowed
+        # to consider a reader question or an optional future topic.
+        feedback = {c["id"]: c for c in valid}
+        valid = [c for c in valid if c["kind"] != "keep" and c["suggestedText"].strip()]
         if not valid:
             return None
         return PanelReview(
@@ -145,6 +146,7 @@ def prepare_review(operation: str, context: dict, output: dict) -> PanelReview |
                 ],
             },
             [c["id"] for c in valid],
+            feedback,
         )
     return None
 
@@ -186,14 +188,16 @@ def apply_review(plan: PanelReview, output: dict, raw: dict) -> tuple[dict, dict
             if decision is None:
                 cards.append(row)  # Original structural diagnostics are preserved downstream.
                 continue
+            if not row.get("suggestedText", "").strip():
+                cards.append(row)  # Historical question-only verdicts cannot erase feedback.
+                continue
             if decision.decision == "omit":
                 continue
             if decision.decision == "needs_material":
                 row.update(
                     kind="add_material",
                     suggestedText="",
-                    materialRequests=[MATERIAL_REQUEST],
-                    observation="补充真实材料后再完善这处表达",
+                    materialRequests=_source_questions(plan.feedback.get(row.get("id"), row)),
                     reason=decision.reason,
                 )
                 # Editor-only ideas have no reader concern; do not forge one on conversion.
@@ -209,4 +213,27 @@ def apply_review(plan: PanelReview, output: dict, raw: dict) -> tuple[dict, dict
         "status": "checked",
         "decisions": [d.model_dump() for d in decisions],
     }
+    if plan.kind == "edit_facts":
+        question_only = [row["id"] for row in result["synthesis"]["editorFeedback"]
+                         if row.get("id") in by_id and not row.get("suggestedText", "").strip()
+                         and by_id[row["id"]].decision != "needs_material"]
+        if question_only:
+            receipt["advisoryOnlyIds"] = question_only
     return result, receipt
+
+
+def _source_questions(card: dict) -> list[str]:
+    """Keep the concrete reading problem without trusting checker-invented answers."""
+    concerns = card.get("readerConcerns") or []
+    usable = [c for c in concerns if len(c["text"]) <= 480]
+    if usable:
+        return [
+            f"针对试读问题「{c['text']}」，你希望怎样回应或调整表达？也可以保留原文。"
+            for c in usable[:3]
+        ]
+    quote = card.get("target", {}).get("quote", "")
+    if len(quote) <= 480:
+        return [f"围绕原文「{quote}」，需要补充哪些真实依据或调整哪些表达？没有相关材料可以保留原文。"]
+    # Full anchors and long conditional concerns remain attached to the card;
+    # don't truncate a condition into a misleading new question.
+    return ["针对本条具体反馈及所引原文，你希望怎样回应或调整表达？没有相关材料可以保留原文。"]

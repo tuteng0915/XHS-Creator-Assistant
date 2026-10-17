@@ -457,8 +457,8 @@ def main():
     if not output.is_relative_to((ROOT / "data/evals").resolve()):
         parser.error("报告只能写入忽略的 data/evals 子目录")
     settings = Settings.from_environment()
-    if settings.model_provider.lower() not in {"qwen", "dashscope"} or not settings.qwen_api_key:
-        parser.error("需要已配置的 Qwen，不切换其他模型提供商")
+    if not settings.has_text_model_credentials:
+        parser.error("未配置所选文字模型的密钥，不切换其他模型提供商")
     output.mkdir(parents=True, exist_ok=False)
     destination = output / "report.json"
 

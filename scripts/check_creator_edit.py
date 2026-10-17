@@ -10,7 +10,6 @@ import asyncio
 import hashlib
 import json
 import sys
-from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -109,17 +108,20 @@ def main() -> int:
         return 0
     if args.output is None:
         parser.error("--live 必须指定 --output")
-    settings = replace(Settings.from_environment(), model_provider="qwen")
-    if not settings.qwen_api_key:
-        parser.error("未配置 Qwen 密钥")
+    if args.output.exists():
+        raise FileExistsError(args.output)
+    settings = Settings.from_environment().for_creator_writing()
+    if not settings.has_text_model_credentials:
+        parser.error("未配置所选文字模型的密钥")
     args.output.mkdir(parents=True, exist_ok=False)
     service = ModelCallService(settings)
     system, user = service._build_prompt(ModelOperation.CREATOR_EDIT, make_case(args.case))
     report = asyncio.run(run_check(service, args.case))
-    report.update(configuredModel=settings.qwen_model,
+    report.update(provider=settings.model_provider, configuredModel=settings.text_model_name,
                   promptHash=hashlib.sha256(system.encode()).hexdigest(),
                   inputHash=hashlib.sha256(user.encode()).hexdigest())
-    report = redact(report, [settings.qwen_api_key, settings.anthropic_api_key])
+    report = redact(report, [settings.qwen_api_key, settings.anthropic_api_key,
+                             settings.deepseek_api_key])
     (args.output / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8",
     )

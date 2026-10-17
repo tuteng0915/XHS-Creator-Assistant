@@ -1,4 +1,4 @@
-"""Two saved readers, two authored drafts, at most six Qwen attempts in an isolated DB."""
+"""Two saved readers, two authored drafts, at most six model attempts in an isolated DB."""
 
 from __future__ import annotations
 
@@ -270,9 +270,9 @@ def main():
         return 0
     if args.output is None or args.output.exists():
         parser.error("真实验证需要新的 --output 目录，不覆盖旧报告")
-    settings = replace(Settings.from_environment(), model_provider="qwen")
-    if not settings.qwen_api_key:
-        parser.error("未配置 Qwen 密钥")
+    settings = Settings.from_environment()
+    if not settings.has_text_model_credentials:
+        parser.error("未配置所选文字模型的密钥")
     args.output.mkdir(parents=True, exist_ok=False)
     report = asyncio.run(
         check(
@@ -283,7 +283,7 @@ def main():
             ModelCallService(settings),
         )
     )
-    report.update(provider="qwen", configuredModel=settings.qwen_model)
+    report.update(provider=settings.model_provider, configuredModel=settings.text_model_name)
     (args.output / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -292,7 +292,7 @@ def main():
             {
                 "report": str(args.output / "report.json"),
                 "status": report["status"],
-                "model": settings.qwen_model,
+                "model": settings.text_model_name,
                 "requestAttempts": report["requestAttempts"],
                 "sourceDatabaseUnchanged": report["sourceDatabaseUnchanged"],
             },

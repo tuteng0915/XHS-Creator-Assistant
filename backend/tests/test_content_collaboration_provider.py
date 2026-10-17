@@ -329,7 +329,7 @@ def test_live_provider_fails_closed_for_invalid_handoff(output: dict, expected: 
 def test_live_provider_never_switches_to_non_qwen_global_provider() -> None:
     message, context = frozen_context()
     model = FakeModelCallService({"turn": {}}, provider="anthropic")
-    with pytest.raises(ValidationError, match="仅支持已配置的 Qwen"):
+    with pytest.raises(ValidationError, match="仅支持已配置的 DeepSeek / Qwen"):
         asyncio.run(
             RealContentCollaborationProvider(model).run(
                 role="research", message=message, context=context
@@ -338,10 +338,12 @@ def test_live_provider_never_switches_to_non_qwen_global_provider() -> None:
     assert model.calls == []
 
 
-def test_app_wires_live_collaboration_to_qwen_without_changing_global_model(settings) -> None:
+def test_app_does_not_silently_force_qwen_when_another_provider_is_explicit(settings) -> None:
     application = create_app(
-        replace(settings, model_provider="anthropic", qwen_api_key="test-qwen-key")
+        replace(settings, model_provider="anthropic", qwen_api_key="test-qwen-key",
+                deepseek_api_key="test-deepseek-key")
     )
     provider = application.state.content_collaboration_service.live_provider
     assert isinstance(provider, RealContentCollaborationProvider)
-    assert provider.model_call_service.settings.model_provider == "qwen"
+    assert provider.model_call_service.settings.model_provider == "anthropic"
+    assert provider.writing_model_call_service.settings.model_provider == "deepseek"

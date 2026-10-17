@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -118,28 +119,10 @@ async def run_smoke(args: argparse.Namespace) -> int:
     with tempfile.TemporaryDirectory(prefix="sqsagent-workflow-smoke-") as temp_dir:
         temp_root = Path(temp_dir)
         base = Settings.from_environment()
-        settings = Settings(
+        settings = replace(
+            base,
             database_path=temp_root / "app.sqlite3",
             upload_directory=temp_root / "uploads",
-            max_upload_bytes=base.max_upload_bytes,
-            csv_preview_rows=base.csv_preview_rows,
-            model_provider=base.model_provider,
-            anthropic_api_key=base.anthropic_api_key,
-            anthropic_model=base.anthropic_model,
-            anthropic_base_url=base.anthropic_base_url,
-            anthropic_messages_url=base.anthropic_messages_url,
-            qwen_api_key=base.qwen_api_key,
-            qwen_model=base.qwen_model,
-            qwen_profile_model=base.qwen_profile_model,
-            qwen_base_url=base.qwen_base_url,
-            qwen_dashscope_base_url=base.qwen_dashscope_base_url,
-            qwen_vision_model=base.qwen_vision_model,
-            qwen_image_model=base.qwen_image_model,
-            qwen_video_model=base.qwen_video_model,
-            qwen_task_poll_interval_seconds=base.qwen_task_poll_interval_seconds,
-            qwen_task_poll_attempts=base.qwen_task_poll_attempts,
-            ffmpeg_path=base.ffmpeg_path,
-            video_preview_frame_count=base.video_preview_frame_count,
         )
         app = create_app(settings)
         transport = ASGITransport(app=app)

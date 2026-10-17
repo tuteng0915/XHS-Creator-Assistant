@@ -1,4 +1,4 @@
-"""Preview saved notes or check the profile stage with one Qwen call.
+"""Preview saved notes or check the profile stage with one configured model call.
 
 Optionally read saved workspace notes through read-only SQLite; no database writes,
 crawling, topic generation or retries. Reports include private source text; keep
@@ -13,7 +13,6 @@ import json
 import sqlite3
 import sys
 import time
-from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -253,7 +252,7 @@ def main() -> int:
                         help="账号或历史分析模式使用；默认读取配置路径")
     parser.add_argument("--note-ids", help="与 --workspace-id 一起使用；逗号分隔的精确笔记 ID")
     parser.add_argument("--limit", type=int, help="账号模式下选择最近 N 篇，默认 5，范围 1～50")
-    parser.add_argument("--live", action="store_true", help="运行一次 Qwen 画像检查，不重试")
+    parser.add_argument("--live", action="store_true", help="运行一次账号画像检查，不重试")
     parser.add_argument("--output", type=Path, help="新的报告目录，拒绝覆盖")
     parser.add_argument("--read-timeout-seconds", type=int, default=90,
                         help="仅本次检查的读取等待上限，1～300 秒；默认 90，不改变生产设置")
@@ -305,14 +304,19 @@ def main() -> int:
             **({"selection": case["inputSource"]} if database_input else {}),
         }, ensure_ascii=False))
         return 0
-    settings = replace(Settings.from_environment(), model_provider="qwen")
-    if not settings.qwen_api_key:
-        parser.error("未配置 Qwen 密钥")
+    if args.output.exists():
+        raise FileExistsError(args.output)
+    settings = Settings.from_environment().for_account_diagnosis()
+    if not settings.has_text_model_credentials:
+        parser.error("未配置所选文字模型的密钥")
     args.output.mkdir(parents=True, exist_ok=False)
     service = DiagnosticProfileCalls(settings, read_timeout_seconds=args.read_timeout_seconds)
     system, user = service._build_prompt(ModelOperation.PROFILE, case["context"])
     report = asyncio.run(run_check(service, case))
-    report.update(provider="qwen", configuredModel=service.qwen_model_for(ModelOperation.PROFILE),
+    report.update(provider=settings.model_provider,
+                  configuredModel=(service.qwen_model_for(ModelOperation.PROFILE)
+                                   if settings.model_provider in {"qwen", "dashscope"}
+                                   else settings.text_model_name),
                   promptVersion=profile_prompt_version(case["context"]),
                   promptHash=hashlib.sha256(system.encode()).hexdigest(),
                   inputHash=hashlib.sha256(user.encode()).hexdigest())

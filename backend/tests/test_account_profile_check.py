@@ -520,7 +520,8 @@ def test_diagnostic_cli_prints_only_summary(tmp_path, monkeypatch, settings, cap
     private_text = '{"profile": {"pillars": ["private-api-key", "私有正文"]}}'
     cls = check.DiagnosticProfileCalls
     requests = []
-    configured = replace(settings, qwen_api_key="private-api-key", model_provider="qwen")
+    configured = replace(settings, qwen_api_key="private-api-key", model_provider="qwen",
+                         account_diagnosis_provider="qwen")
     monkeypatch.setattr(check.Settings, "from_environment", lambda: configured)
     inputs = [str(source)]
     case = check.prepare_case(source)
@@ -766,7 +767,8 @@ def test_workspace_live_uses_one_qwen_request_and_preserves_database(
     monkeypatch.setattr(check, "ROOT", tmp_path)
     output = tmp_path / "data/evals/workspace-check"
     requests = []
-    configured = replace(settings, qwen_api_key="private-key", model_provider="qwen")
+    configured = replace(settings, qwen_api_key="private-key", model_provider="qwen",
+                         account_diagnosis_provider="qwen")
     if profile_model is not None:
         configured = replace(configured, qwen_profile_model=profile_model)
     monkeypatch.setattr(check.Settings, "from_environment", lambda: configured)
@@ -961,6 +963,7 @@ def test_analysis_run_live_calls_current_qwen_once_and_keeps_history_unchanged(
     monkeypatch.setattr(check, "ROOT", tmp_path)
     monkeypatch.setattr(check.Settings, "from_environment", lambda: replace(
         settings, database_path=database, qwen_api_key="private-key",
+        account_diagnosis_provider="qwen",
     ))
     output = tmp_path / "data/evals/history-check"
     monkeypatch.setattr(sys, "argv", [check.__file__, "--analysis-run-id", run_id,

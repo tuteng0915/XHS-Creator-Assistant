@@ -45,6 +45,9 @@ def settings(tmp_path: Path) -> Settings:
         upload_directory=tmp_path / "uploads",
         max_upload_bytes=1024 * 1024,
         csv_preview_rows=2,
+        # Existing adapter fixtures explicitly exercise Qwen. Production defaults
+        # and DeepSeek-only app wiring are covered separately, without live calls.
+        model_provider="qwen",
     )
 
 
