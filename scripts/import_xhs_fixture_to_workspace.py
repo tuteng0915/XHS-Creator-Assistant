@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import a fixed local XHS fixture into the SqsAgent SQLite workspace."""
+"""Import a fixed local XHS fixture into the 小红书创作助手 SQLite workspace."""
 
 from __future__ import annotations
 

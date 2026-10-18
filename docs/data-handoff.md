@@ -24,8 +24,8 @@
 
 ```bash
 git rev-parse HEAD
-tar -czf ../SqsAgent-creator-data.tar.gz data/app.sqlite3 data/uploads
-tar -tzf ../SqsAgent-creator-data.tar.gz
+tar -czf ../xhs-creator-assistant-data.tar.gz data/app.sqlite3 data/uploads
+tar -tzf ../xhs-creator-assistant-data.tar.gz
 ```
 
 记录第一条命令输出的代码提交号，与数据包一起交给对方。尚未提交的代码不会包含在该提交中，也不会随数据包一起交付。
@@ -39,7 +39,7 @@ tar -tzf ../SqsAgent-creator-data.tar.gz
 默认命令**不包含密钥**，对方可以[配置自己的模型](development.md#模型配置)。如果双方明确约定共用密钥，可把实际使用的 env 文件按原相对路径加入私下交付包。例如，配置仅在仓库根目录时：
 
 ```bash
-tar -czf ../SqsAgent-creator-data-with-config.tar.gz \
+tar -czf ../xhs-creator-assistant-data-with-config.tar.gz \
   data/app.sqlite3 data/uploads .env.local
 ```
 
@@ -56,7 +56,7 @@ tar -czf ../SqsAgent-creator-data-with-config.tar.gz \
 在仓库根目录先检查内容：
 
 ```bash
-tar -tzf ../SqsAgent-creator-data.tar.gz
+tar -tzf ../xhs-creator-assistant-data.tar.gz
 ```
 
 确认来自可信协作者，内容是预期的 `data/` 路径；含配置包另有约定的 env 文件。**已有自己的数据库、上传文件或配置时，先停止服务并另行备份，不能直接覆盖，也不能通过解压合并两个数据库。**
@@ -64,7 +64,7 @@ tar -tzf ../SqsAgent-creator-data.tar.gz
 确认后再恢复：
 
 ```bash
-tar -xzf ../SqsAgent-creator-data.tar.gz
+tar -xzf ../xhs-creator-assistant-data.tar.gz
 ```
 
 核对模型配置和本机路径，然后按[启动步骤](local-installation.md#3-启动与验证)分别启动后端、前端。后端启动时会应用尚未执行的数据库迁移；不要使用比备份时更旧的程序打开较新的数据库。

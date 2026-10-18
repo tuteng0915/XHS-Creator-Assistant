@@ -1,5 +1,12 @@
 # 当前状态与 TODO
 
+## 2026-10-18 正式产品名统一为“小红书创作助手”
+
+- 用户明确产品正式名称。README 正文、封面可见文字与无障碍标题、浏览器标题与描述、公开／开发侧栏及开发页标题、帮助标题、API 文档标题同步统一；安装／数据交接的新打包文件名示例改用 `xhs-creator-assistant`，两个导入工具说明也同步。PRD 补充正式命名规则，后续演示和面试材料沿用此名称。
+- 保留真实仓库目录、既有视频文件名和链接、历史截图路径、任务 ID、临时目录前缀及冻结提交包，不为消除字符串而改写历史或破坏运行／链接。主干和提交版工作树未改，当前修改仅在开发分支，未提交、推送或部署。
+- 验证：`npm --prefix frontend test -- --run src/components/WorkspaceShell.test.tsx src/helpContent.test.ts` 实际匹配 1 个测试文件、9 项通过（不存在独立 helpContent 测试，不虚报覆盖）；`npm --prefix frontend run build -- --outDir /private/tmp/xhs-creator-assistant-brand-build`、`npm --prefix frontend run lint` 通过；`ruff check --no-cache backend/app/main.py scripts/import_xhs_fixture_to_workspace.py scripts/xhs_mediacrawler_fixture.py` 通过；SVG XML／页面标题断言通过。临时无头浏览器实际渲染本地封面，标题边界 x=59～510.5，未侵入右侧卡片；截图 `/private/tmp/xhs-creator-assistant-cover.png` 已检查，浏览器已关闭。首次受沙箱限制启动失败，经临时浏览器权限后完成；没有启动正式服务、调用模型或修改数据。
+- 用户随后授权提交并推送本轮命名改动；目标仅为 `codex/account-reading-quality`，不更新主干或提交包，不纳入 `frontend/node_modules`、数据、环境和其他工作树文件。已核验提交署名为 littlelittlesheep <shiqishan319@gmail.com>，不据此推断推送认证账号；具体推送回执以本轮回复为准。需要用户决定的事项：无。
+
 ## 2026-10-17 用户授权提交受众局部恢复
 
 - 本次提交仅含下节受众模拟逐项展示／单项恢复、对应测试与PRD／交接；沿用刚完成的后端204项和前端全量787项、隔离浏览器及构建结果，提交前再次检查lint、ruff和diff格式。没有新增真实模型调用或正式库迁移。

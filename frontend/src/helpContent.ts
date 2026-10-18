@@ -260,7 +260,7 @@ export function getWorkspaceHelpContent({
   }
 
   return {
-    title: '账号诊断助手',
+    title: '小红书创作助手',
     description:
       '这里围绕一个小红书账号保存材料、诊断结果、选题、创作方案和受众模拟。',
     bullets: [

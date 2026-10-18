@@ -1,4 +1,4 @@
-"""Helpers for converting MediaCrawler XHS exports into SqsAgent assets."""
+"""Helpers for converting MediaCrawler XHS exports into 小红书创作助手 assets."""
 
 from __future__ import annotations
 

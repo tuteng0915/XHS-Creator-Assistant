@@ -109,7 +109,7 @@ tar \
   --exclude='data/external' \
   --exclude='data/browser-profiles' \
   --exclude='data/backups' \
-  -czf ../SqsAgent-local-data.tar.gz data
+  -czf ../xhs-creator-assistant-local-data.tar.gz data
 ```
 
 记录第一条命令输出的主仓库提交号，与数据包一同转交。代码和安装文档必须先提交并推送；未提交文件不会由接收方的 clone 自动获取。数据包包含账号、创作内容和历史记录，不要上传到公开 Git 仓库。
@@ -126,8 +126,8 @@ tar \
 2. 将数据包放在主仓库的上一级目录。在没有旧业务数据的全新目录里，从主仓库根目录执行：
 
    ```bash
-   tar -tzf ../SqsAgent-local-data.tar.gz
-   tar -xzf ../SqsAgent-local-data.tar.gz
+   tar -tzf ../xhs-creator-assistant-local-data.tar.gz
+   tar -xzf ../xhs-creator-assistant-local-data.tar.gz
    ```
 
    第一条先查看内容，第二条恢复。若目标已有数据库或上传文件，先停止服务并另行备份，不要直接覆盖或把两份数据库混在一起。刚安装的 `data/external/MediaCrawler` 不在包内，不会被这次恢复替换。

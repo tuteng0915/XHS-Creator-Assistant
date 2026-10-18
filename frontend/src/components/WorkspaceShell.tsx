@@ -131,7 +131,7 @@ export function WorkspaceShell({
         <div className="brand-row">
           <div className="logo">薯</div>
           <div>
-            <strong>创作者诊断助手</strong>
+            <strong>小红书创作助手</strong>
           </div>
         </div>
 
@@ -258,7 +258,7 @@ function DeveloperWorkspaceShell({
         <div className="brand-row">
           <div className="logo">薯</div>
           <div>
-            <strong>创作者工作区</strong>
+            <strong>小红书创作助手</strong>
             <span>{workspace?.name || '默认工作区'}</span>
           </div>
         </div>
@@ -291,7 +291,7 @@ function DeveloperWorkspaceShell({
       <main className="workspace-main">
         <header className="topbar">
           <div>
-            <h1>创作者内容诊断与选题共创助手</h1>
+            <h1>小红书创作助手</h1>
             <p>左侧管理内容资产；右侧发起 workflow 调用并查看能力资产。</p>
           </div>
           <button className={`help-button ${showHelp ? 'active' : ''}`} type="button" aria-expanded={showHelp} aria-controls="workspace-help-panel" onClick={onToggleHelp}>帮助</button>

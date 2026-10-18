@@ -330,7 +330,7 @@ def create_app(
     audience_analysis_service = AudienceAnalysisService(database, model_call_service)
     simulated_fan_service = SimulatedFanService(database)
     application = FastAPI(
-        title="Creator Workspace API",
+        title="小红书创作助手 API",
         version="0.1.0",
         description="Workspace and input-asset persistence for the creator prototype.",
         lifespan=lifespan,

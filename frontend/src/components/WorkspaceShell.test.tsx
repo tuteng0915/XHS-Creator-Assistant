@@ -52,7 +52,7 @@ describe('WorkspaceShell', () => {
   it('renders the creator-focused navigation without developer entries', () => {
     renderShell()
 
-    expect(screen.getByText('创作者诊断助手')).toBeInTheDocument()
+    expect(screen.getByText('小红书创作助手')).toBeInTheDocument()
     expect(screen.queryByText('导入小红书账号')).not.toBeInTheDocument()
     expect(screen.getByText('受众分析')).toBeInTheDocument()
     expect(screen.getByText('AI 创作助手')).toBeInTheDocument()
