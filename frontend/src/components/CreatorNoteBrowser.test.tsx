@@ -49,6 +49,29 @@ it('previews saved images and observation timestamps without toggling selection'
   expect(toggle).toHaveBeenCalledWith('n')
 })
 
+it('keeps the close control outside the note scroll area and restores focus after closing', () => {
+  render(<CreatorNoteBrowser notes={[{...note, desc:'长正文\n'.repeat(100)}]} mediaAssets={[]} />)
+  const trigger = screen.getByRole('button', {name:/已保存笔记 赞/})
+  trigger.focus()
+  fireEvent.click(trigger)
+  const dialog = screen.getByRole('dialog', {name:'已保存笔记'})
+  expect(dialog).toHaveClass('creator-note-preview-dialog')
+  const body = dialog.querySelector('.creator-dialog-body')!
+  expect(body.querySelector('.creator-note-detail')).toBeInTheDocument()
+  const close = within(dialog).getByRole('button', {name:'关闭'})
+  expect(body).not.toContainElement(close)
+  expect(dialog.querySelector('.creator-dialog-head')).toContainElement(close)
+  fireEvent.scroll(body, {target:{scrollTop:500}})
+  fireEvent.click(close)
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(trigger).toHaveFocus()
+
+  fireEvent.click(trigger)
+  fireEvent(screen.getByRole('dialog', {name:'已保存笔记'}), new Event('cancel', {cancelable:true}))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(trigger).toHaveFocus()
+})
+
 it('keeps negative or unknown metrics absent in the card and supports top N browsing', () => {
   const notes = Array.from({length:12},(_,i) => ({...note,noteId:`n${i}`,title:`笔记 ${i}`,metrics:{liked:i}}))
   render(<CreatorNoteBrowser notes={[...notes,{...note,noteId:'bad',title:'缺失指标',metrics:{liked:-3}}]} mediaAssets={[]} showFilters />)

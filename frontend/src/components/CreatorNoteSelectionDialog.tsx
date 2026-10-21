@@ -15,7 +15,7 @@ type NoteSelectionProps = {
 }
 
 export function CreatorNoteSelectionDialog(props: NoteSelectionProps) {
-  return <CreatorDialog title={props.title || '分析范围'} onClose={props.onClose} wide>
+  return <CreatorDialog title={props.title || '分析范围'} onClose={props.onClose} wide scrollBody>
     <CreatorNoteSelectionPanel {...props} />
   </CreatorDialog>
 }
@@ -62,8 +62,10 @@ export function CreatorNoteSelectionPanel({notes, mediaAssets, scope, selectedId
     {overLimit && <p role="alert">本次最多还能添加 {maxSelection} 篇原笔记，请减少选择后再完成。</p>}
     <div className="creator-note-selection-footer">
       <span role="status">已选 {ids.length} / {notes.length} 条笔记{hiddenSelectionCount ? ` · ${hiddenSelectionCount} 篇不在当前范围` : ''}{selectionMode === 'multiple' && includeComments ? '，包含对应评论。' : ''}</span>
-      <button type="button" onClick={onClose}>取消</button>
-      <button type="button" className="primary" disabled={!ids.length || overLimit} onClick={() => onConfirm(preset, ids)}>完成</button>
+      <div className="creator-note-selection-actions">
+        <button type="button" onClick={onClose}>取消</button>
+        <button type="button" className="primary" disabled={!ids.length || overLimit} onClick={() => onConfirm(preset, ids)}>完成</button>
+      </div>
     </div>
   </>
 }

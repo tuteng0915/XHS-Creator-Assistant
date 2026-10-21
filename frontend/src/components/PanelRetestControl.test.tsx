@@ -58,6 +58,26 @@ it('reuses request identity after an uncertain response, including remount',asyn
   expect(create.mock.calls[1][1].requestKey).toBe(key)
 })
 
+it('explains blocked closing during submission and restores it after failure', async () => {
+  setup()
+  let fail!:(error:Error)=>void
+  const create=vi.fn().mockImplementation(()=>new Promise((_resolve,reject)=>{fail=reject}))
+  render(<PanelRetestControl {...props} onCreate={create} onCreated={vi.fn()}/>)
+  await open()
+  expect(screen.getByRole('dialog').querySelector('.creator-dialog-footer')).toContainElement(screen.getByRole('button',{name:'确认开始复测'}))
+  fireEvent.click(screen.getByRole('button',{name:'确认开始复测'}))
+  expect(screen.getByRole('button',{name:'关闭'})).toBeDisabled()
+  expect(screen.getByText('正在创建复测，请等待结果后再关闭。')).toBeVisible()
+  fireEvent(screen.getByRole('dialog'),new Event('cancel',{cancelable:true}))
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
+  await act(async()=>fail(new Error('创建失败')))
+  expect(screen.getByRole('button',{name:'关闭'})).toBeEnabled()
+  expect(screen.queryByText('正在创建复测，请等待结果后再关闭。')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'关闭'}))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(create).toHaveBeenCalledOnce()
+})
+
 it.each(['dirty','changed'] as const)('blocks confirmation when the draft becomes %s',async kind => {
   setup(); const create=vi.fn(), done=vi.fn()
   const page=render(<PanelRetestControl {...props} onCreate={create} onCreated={done}/>)

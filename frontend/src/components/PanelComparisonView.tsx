@@ -69,7 +69,7 @@ export function PanelComparisonView({run}: {run:SimulationRun}) {
   }
   return <>
     <button disabled={!['completed','partially_completed','failed'].includes(run.status)} onClick={() => void load()}>逐人前后对照</button>
-    {open && <CreatorDialog title="逐人前后对照" wide onClose={close}>
+    {open && <CreatorDialog title="逐人前后对照" wide scrollBody onClose={close}>
       {loading && <p role="status">正在读取两次试读…</p>}
       {error && <><p role="alert">{error}</p><button onClick={() => void load()}>重新读取对照</button></>}
       {data && <>

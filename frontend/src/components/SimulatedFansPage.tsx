@@ -150,7 +150,7 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
       <p>上次修改已保存，列表暂未刷新。{dirty && '后续编辑尚未保存。'}</p>
       <button type="button" disabled={busy || voiceBusy} onClick={() => void retryRefresh()}>重试刷新</button>
     </div>}
-    {pendingId !== null && <CreatorDialog title={refreshError && !dirty ? '修改已保存' : '保留这次修改？'} onClose={() => !busy && setPendingId(null)}>
+    {pendingId !== null && <CreatorDialog title={refreshError && !dirty ? '修改已保存' : '保留这次修改？'} closeDisabledReason={busy ? '正在保存或刷新档案，请等待结果后再关闭。' : undefined} onClose={() => !busy && setPendingId(null)}>
       <p>{refreshError ? `上次修改已保存，列表暂未刷新。${dirty ? '后续编辑尚未保存。' : '刷新成功后继续切换。'}` : '当前粉丝有未保存的修改。'}</p>
       {!canSave && <p>请先返回，检查名称、阅读视角和兴趣领域。</p>}
       {error && <p role="alert">{error}</p>}
@@ -162,12 +162,16 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
           : <button type="button" className="primary" disabled={busy || !canSave} onClick={async () => {if (await save(saved.status)) onSelect(pendingId)}}>{refreshing ? '刷新中…' : busy ? '保存中…' : '保存并切换'}</button>}
       </div>
     </CreatorDialog>}
-    {voices && <CreatorDialog className="fan-voice-dialog" title={createdVoices ? '角色已加入' : '添加不同声音'} returnFocusRef={voiceTrigger} onClose={() => !voiceBusy && setVoices(null)}>
+    {voices && <CreatorDialog className="fan-voice-dialog" title={createdVoices ? '角色已加入' : '添加不同声音'} returnFocusRef={voiceTrigger} scrollBody
+      closeDisabledReason={voiceBusy ? '正在添加角色或刷新结果，请等待完成后再关闭。' : undefined}
+      onClose={() => !voiceBusy && setVoices(null)}
+      footer={createdVoices
+        ? <button type="button" className="primary" disabled={voiceBusy} onClick={() => void retryCreatedVoices()}>{voiceBusy ? '刷新中…' : '重试刷新'}</button>
+        : <button className="primary" disabled={voiceBusy || !chosenVoices.length} onClick={() => void addVoices()}>{voiceBusy ? '添加中…' : `加入 ${chosenVoices.length} 位`}</button>}>
       {createdVoices ? <>
         <p>已加入 {createdVoices.length} 位角色，无需再次创建。</p>
         <ul className="fan-created-list">{createdVoices.map(created => <li key={created.id}>{created.editable.name}</li>)}</ul>
         {voiceError && <p role="status">{voiceError}</p>}
-        <button type="button" className="primary" disabled={voiceBusy} onClick={() => void retryCreatedVoices()}>{voiceBusy ? '刷新中…' : '重试刷新'}</button>
       </> : <>
       <p>从这位粉丝的关注点出发，组合不同性格与表达方式。已有角色不会被覆盖。</p>
       <div className="fan-voice-grid">{voices.map(voice => <label key={voice.id} className={`fan-voice-option${chosenVoices.includes(voice.id) ? ' selected' : ''}`}>
@@ -175,10 +179,9 @@ function FanEditor({fan,onRefresh,onSelect,onBusyChange,ref}:{fan:SimulatedFan;o
         <span><strong>{voice.name}</strong><small id={`${voiceDescriptionPrefix}-${voice.id}`}>{voice.decisionStyle || voice.outlook}</small><small className="fan-voice-expression">{voice.expressionStyle}</small></span>
       </label>)}</div>
       {voiceError && <p role="alert">{voiceError}</p>}
-      <button className="primary" disabled={voiceBusy || !chosenVoices.length} onClick={() => void addVoices()}>{voiceBusy ? '添加中…' : `加入 ${chosenVoices.length} 位`}</button>
       </>}
     </CreatorDialog>}
-    {showSource && <CreatorDialog title="档案依据" onClose={() => setShowSource(false)}><FanSource source={source} /></CreatorDialog>}
+    {showSource && <CreatorDialog title="档案依据" scrollBody onClose={() => setShowSource(false)}><FanSource source={source} /></CreatorDialog>}
     <div className="fan-profile-management" role="group" aria-label="档案管理">
       {hasSource && <button type="button" className="text-button" onClick={() => setShowSource(true)}>查看依据</button>}
       <button type="button" className="text-button" disabled={busy || voiceBusy || dirty || Boolean(refreshError)} onClick={() => void save(saved.status === 'active' ? 'archived' : 'active')}>{saved.status === 'active' ? '归档' : '恢复'}</button>

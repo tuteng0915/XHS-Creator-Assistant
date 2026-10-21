@@ -97,6 +97,26 @@ function RunEdits({workspaceId, topic, runId, blocked, onApply, onUndo, onRetest
   const stale = proposal && (!matches(proposal.snapshot.before) || proposal.freshness === 'stale')
   const undoUnavailable = blocked || (proposal && (proposal.freshness === 'stale' || !matches(proposal.receipt.after || {}))
     ? '采用后稿件已有变化，不能撤销覆盖当前版本。' : '')
+  const dialogActions = dialog && ('card' in dialog
+    ? <button className="primary" disabled={busy || !operation || !!unavailable || (materialMode && !replacement.trim())} onClick={create}>{busy ? '正在保存提案…' : '保存提案并预览'}</button>
+    : proposal && (proposal.status === 'pending' || proposal.status === 'applied' && onUndo) && <>
+      {proposal.status === 'pending' && <>
+        {(blocked || stale) && <p role="status">{blocked || '稿件版本已变化，这份提案不能覆盖当前稿。请重新试读。'}</p>}
+        {missingAuthorMaterial && <p role="status">这份旧提案未记录作者素材。请关闭预览，从反馈卡重新补充素材；原记录仍保留。</p>}
+        <div className="panel-edit-actions"><button className="primary" disabled={busy || !!blocked || !!stale || !!missingAuthorMaterial} onClick={() => void perform(() => onApply(proposal))}>{busy ? '正在处理…' : '确认采用'}</button>
+          <button disabled={busy} onClick={() => void perform(() => panelEditApi.reject(workspaceId, proposal.id))}>不采用这份提案</button></div>
+      </>}
+      {proposal.status === 'applied' && onUndo && <>
+        {undoUnavailable && <p role="status">{undoUnavailable}</p>}
+        {undoConfirmId === proposal.id ? <section aria-label="撤销确认">
+          <p>将恢复为“修改前”的标题与正文。请确认这是你希望保留的版本。</p>
+          <div className="panel-edit-actions">
+            <button disabled={busy || !!undoUnavailable} onClick={() => void perform(() => onUndo(proposal))}>{busy ? '正在撤销…' : '确认恢复修改前内容'}</button>
+            <button disabled={busy} onClick={() => setUndoConfirmId('')}>保留当前版本</button>
+          </div>
+        </section> : <button disabled={busy || !!undoUnavailable} onClick={() => setUndoConfirmId(proposal.id)}>撤销这次采用</button>}
+      </>}
+    </>)
   return <div>
     {loading && <p role="status">正在读取试读反馈与改稿提案…</p>}
     {loadError && <p role="alert">{loadError}</p>}
@@ -117,7 +137,7 @@ function RunEdits({workspaceId, topic, runId, blocked, onApply, onUndo, onRetest
         <small>{p.status === 'undone' ? '已撤销' : p.status === 'applied' ? '已采用' : p.status === 'rejected' ? '未采用' : '待确认'} · {editOperationLabels[p.snapshot.edit.operation]}</small>
       </button>)}
     </section>}
-    {dialog && <CreatorDialog title={proposal ? '确认改稿提案' : materialMode ? '补充你的素材' : '准备局部修改'} wide onClose={() => {setDialog(null); setUndoConfirmId('')}}>
+    {dialog && <CreatorDialog title={proposal ? '确认改稿提案' : materialMode ? '补充你的素材' : '准备局部修改'} wide scrollBody footer={dialogActions} onClose={() => {setDialog(null); setUndoConfirmId('')}}>
       {error && <p role="alert">{error} 请求结果不确定时，可刷新提案核对或重试同一操作。</p>}
       {'card' in dialog && <>
         <p>{text(dialog.card.observation)}</p>
@@ -131,7 +151,6 @@ function RunEdits({workspaceId, topic, runId, blocked, onApply, onUndo, onRetest
         <label>{materialMode ? '作者补充的正文' : '建议文字'}<textarea aria-label={materialMode ? '作者补充的正文' : '建议文字'} value={replacement} maxLength={50000} disabled={busy} onChange={e => setReplacement(e.target.value)}/></label>
         <p className="muted">可先调整文字。预览只保存提案，不修改原稿，也不调用模型。</p>
         {unavailable && <p role="status">{unavailable}</p>}
-        <button className="primary" disabled={busy || !operation || !!unavailable || (materialMode && !replacement.trim())} onClick={create}>{busy ? '正在保存提案…' : '保存提案并预览'}</button>
       </>}
       {proposal && <>
         <p>{editOperationLabels[proposal.snapshot.edit.operation]} · {proposal.snapshot.edit.field === 'title' ? '标题' : '正文'}</p>
@@ -140,22 +159,7 @@ function RunEdits({workspaceId, topic, runId, blocked, onApply, onUndo, onRetest
           <section><h3>修改前</h3><h4>{proposal.snapshot.before.title}</h4><p className="panel-edit-text">{proposal.snapshot.before.body || '（空正文）'}</p></section>
           <section><h3>{['applied','undone'].includes(proposal.status) ? '当时采用后' : '建议稿'}</h3><h4>{proposal.snapshot.proposed.title}</h4><p className="panel-edit-text">{proposal.snapshot.proposed.body || '（空正文）'}</p></section>
         </div>
-        {proposal.status === 'pending' ? <>
-          {(blocked || stale) && <p role="status">{blocked || '稿件版本已变化，这份提案不能覆盖当前稿。请重新试读。'}</p>}
-          {missingAuthorMaterial && <p role="status">这份旧提案未记录作者素材。请关闭预览，从反馈卡重新补充素材；原记录仍保留。</p>}
-          <div className="panel-edit-actions"><button className="primary" disabled={busy || !!blocked || !!stale || !!missingAuthorMaterial} onClick={() => void perform(() => onApply(proposal))}>{busy ? '正在处理…' : '确认采用'}</button>
-            <button disabled={busy} onClick={() => void perform(() => panelEditApi.reject(workspaceId, proposal.id))}>不采用这份提案</button></div>
-        </> : <p role="status">{proposal.status === 'undone' ? '已撤销，撤销时恢复了“修改前”的标题与正文。原采用记录和撤销回执均保留。' : proposal.status === 'applied' ? '已采用，回执已保存。后续编辑不会改写这份对照。' : '未采用，原稿未因这份提案改变。'}</p>}
-        {proposal.status === 'applied' && onUndo && <>
-          {undoUnavailable && <p role="status">{undoUnavailable}</p>}
-          {undoConfirmId === proposal.id ? <section aria-label="撤销确认">
-            <p>将恢复为“修改前”的标题与正文。请确认这是你希望保留的版本。</p>
-            <div className="panel-edit-actions">
-              <button disabled={busy || !!undoUnavailable} onClick={() => void perform(() => onUndo(proposal))}>{busy ? '正在撤销…' : '确认恢复修改前内容'}</button>
-              <button disabled={busy} onClick={() => setUndoConfirmId('')}>保留当前版本</button>
-            </div>
-          </section> : <button disabled={busy || !!undoUnavailable} onClick={() => setUndoConfirmId(proposal.id)}>撤销这次采用</button>}
-        </>}
+        {proposal.status !== 'pending' && <p role="status">{proposal.status === 'undone' ? '已撤销，撤销时恢复了“修改前”的标题与正文。原采用记录和撤销回执均保留。' : proposal.status === 'applied' ? '已采用，回执已保存。后续编辑不会改写这份对照。' : '未采用，原稿未因这份提案改变。'}</p>}
       </>}
     </CreatorDialog>}
   </div>

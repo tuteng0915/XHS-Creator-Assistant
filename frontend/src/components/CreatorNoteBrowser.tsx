@@ -44,7 +44,7 @@ export function CreatorNoteBrowser({ notes, mediaAssets, selectedIds, onToggle, 
         </button>
       </article>)}
     </div>
-    {detail && <CreatorDialog title={detail.title} onClose={() => setDetailId(null)}>
+    {detail && <CreatorDialog title={detail.title} scrollBody className="creator-note-preview-dialog" onClose={() => setDetailId(null)}>
       <div className="creator-note-detail">
         {images(detail).length > 0 && <div className="creator-note-gallery">{images(detail).map((url, index) => <img key={url} src={url} alt={`${detail.title} · 图片 ${index + 1}`} />)}</div>}
         {notePublishedAt(detail) && <time>{new Date(notePublishedAt(detail)!).toLocaleDateString('zh-CN')}</time>}

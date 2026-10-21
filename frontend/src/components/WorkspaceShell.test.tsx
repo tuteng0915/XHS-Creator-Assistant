@@ -115,6 +115,33 @@ describe('WorkspaceShell', () => {
     expect(screen.getByRole('button', { name: '＋ 添加账号' })).toBeDisabled()
   })
 
+  it('explains disabled controls on hover, keyboard focus and touch without invoking actions', () => {
+    const reason = '正在爬取笔记和评论。完成后可添加或切换账号。'
+    const props = renderShell({ busy: true, busyReason: reason })
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+
+    const addHint = screen.getByRole('group', { name: '添加账号暂不可用' })
+    fireEvent.mouseEnter(addHint)
+    expect(screen.getByRole('tooltip')).toHaveTextContent(reason)
+    expect(addHint).toHaveAccessibleDescription(reason)
+    fireEvent.click(screen.getByRole('button', { name: '＋ 添加账号' }))
+    expect(props.onCreateCreatorProfile).not.toHaveBeenCalled()
+    fireEvent.mouseLeave(addHint)
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+
+    const switchHint = screen.getByRole('group', { name: '账号切换暂不可用' })
+    expect(switchHint).toHaveAttribute('tabindex', '0')
+    fireEvent.focus(switchHint)
+    expect(screen.getByRole('tooltip')).toHaveTextContent(reason)
+    fireEvent.keyDown(switchHint, { key: 'Escape' })
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    fireEvent.blur(switchHint)
+
+    fireEvent.click(addHint)
+    expect(screen.getByRole('tooltip')).toHaveTextContent(reason)
+    expect(props.onSelectWorkspace).not.toHaveBeenCalled()
+  })
+
   it('leaves developer navigation outside the public shell styling', () => {
     const { container } = render(<WorkspaceShell
       workspace={workspace}

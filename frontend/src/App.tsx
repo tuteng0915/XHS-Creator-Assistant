@@ -23,6 +23,7 @@ import {
   xhsCaptureApi,
 } from './api'
 import { HealthPage } from './HealthPage'
+import { getWorkspaceBusyReason } from './workspaceBusy'
 import { AccountProfilePage } from './components/AccountProfilePage'
 import { AgentDefinitionEditor } from './components/AgentDefinitionEditor'
 import { AgentConversationPanel } from './components/AgentConversationPanel'
@@ -3087,6 +3088,13 @@ function WorkspaceApp() {
     </>
   )
 
+  const workspaceBusyReason = getWorkspaceBusyReason({
+    running,
+    captureSubmitting: xhsCaptureSubmitting,
+    draftSaving: saveStates.draft.phase === 'saving',
+    captureStatus: xhsCaptureJob?.status,
+  })
+
   return (
     <WorkspaceShell
       workspace={workspace}
@@ -3113,7 +3121,8 @@ function WorkspaceApp() {
         setAnalysisNoteSelection(null)
         setCaptureNoteLimit(10)
       }}
-      busy={running || xhsCaptureSubmitting || saveStates.draft.phase === 'saving' || Boolean(xhsCaptureJob && ['pending', 'waiting_for_login', 'running', 'processing'].includes(xhsCaptureJob.status))}
+      busy={Boolean(workspaceBusyReason)}
+      busyReason={workspaceBusyReason}
       onCreateCreatorProfile={() => void createCreatorProfile()}
       onSetWorkflowTab={setWorkflowTab}
       onToggleHelp={() => setShowHelp((value) => !value)}

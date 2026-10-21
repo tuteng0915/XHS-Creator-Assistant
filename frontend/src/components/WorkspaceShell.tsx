@@ -9,6 +9,7 @@ import type { WorkflowAssetSummary, Workspace } from '../types'
 import type { WorkflowTab } from '../workflows'
 import { CreatorNavIcon, type CreatorNavIconName } from './CreatorNavIcon'
 import { InfoHint } from './InfoHint'
+import { DisabledControlHint } from './DisabledControlHint'
 import './CreatorShell.css'
 
 export type ActivePage =
@@ -48,6 +49,7 @@ type WorkspaceShellProps = {
   helpContent: HelpContent
   internalMode?: boolean
   busy?: boolean
+  busyReason?: string
   workflowAssets?: WorkflowAssetSummary[]
   children: ReactNode
   onOpenInputAsset: (panel: InputAssetPanel) => void
@@ -96,6 +98,7 @@ export function WorkspaceShell({
   helpContent,
   internalMode = false,
   busy = false,
+  busyReason,
   workflowAssets = [],
   children,
   onOpenInputAsset,
@@ -106,6 +109,7 @@ export function WorkspaceShell({
   onToggleHelp,
 }: WorkspaceShellProps) {
   const navigationPage = activePage === 'history' ? 'account-diagnosis' : activePage === 'topics' ? 'drafts' : activePage
+  const disabledReason = busy ? busyReason || '任务正在处理，完成后可添加或切换账号。' : undefined
   if (internalMode) {
     return (
       <DeveloperWorkspaceShell
@@ -137,21 +141,25 @@ export function WorkspaceShell({
 
         <section className="creator-switcher" aria-label="账号档案选择">
           <label htmlFor="creator-workspace-select">当前账号档案</label>
-          <select
-            id="creator-workspace-select"
-            value={selectedWorkspaceId}
-            disabled={busy}
-            onChange={(event) => onSelectWorkspace(event.target.value)}
-          >
-            {workspaces.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <button type="button" className="creator-add-button" disabled={busy} onClick={onCreateCreatorProfile}>
-            ＋ 添加账号
-          </button>
+          <DisabledControlHint reason={disabledReason} label="账号切换暂不可用">
+            <select
+              id="creator-workspace-select"
+              value={selectedWorkspaceId}
+              disabled={busy}
+              onChange={(event) => onSelectWorkspace(event.target.value)}
+            >
+              {workspaces.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </DisabledControlHint>
+          <DisabledControlHint reason={disabledReason} label="添加账号暂不可用">
+            <button type="button" className="creator-add-button" disabled={busy} onClick={onCreateCreatorProfile}>
+              ＋ 添加账号
+            </button>
+          </DisabledControlHint>
         </section>
 
         <nav className="creator-navigation" aria-label="创作者功能导航">

@@ -162,6 +162,10 @@ nav a.active, nav button.active { color: var(--accent); background: var(--accent
 .creator-note-selection-toolbar select { margin-top: 8px; width: 100%; }
 .creator-note-selection-footer { position: sticky; bottom: -24px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; background: white; padding: 18px 0; margin-top: 20px; border-top: 1px solid var(--line); }
 .creator-note-selection-footer span { flex: 1 1 200px; }
+.creator-note-selection-actions { display: flex; gap: 8px; margin-left: auto; }
+@media (max-width: 480px) {
+  .creator-note-selection-footer > span { flex-basis: 100%; }
+}
 .creator-note-card { overflow: hidden; min-width: 0; padding: 0; text-align: left; background: white; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-card); transition: border-color .15s ease, box-shadow .15s ease; }
 .creator-note-card:enabled:hover { background: white; border-color: #cbbdc2; box-shadow: 0 6px 18px rgb(38 24 28 / 7%); }
 .creator-note-card img, .creator-note-placeholder { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: cover; object-position: center 30%; border-bottom: 1px solid var(--line); }
@@ -172,9 +176,20 @@ nav a.active, nav button.active { color: var(--accent); background: var(--accent
 .creator-dialog { width: min(720px, calc(100vw - 32px)); max-height: 85vh; overflow: auto; border: 1px solid var(--line); border-radius: 18px; padding: 24px; color: var(--ink); box-shadow: 0 18px 70px #302a2c33; }
 .creator-dialog::backdrop { background: #302a2c66; }
 .creator-dialog-head { display: flex; gap: 20px; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
-.creator-dialog-head h2 { margin: 0; font-size: 20px; }
+.creator-dialog-head > div { min-width: 0; }
+.creator-dialog-head h2 { margin: 0; font-size: 20px; overflow-wrap: anywhere; }
+.creator-dialog-head > .disabled-control-hint { flex: 0 0 auto; }
+.creator-dialog-head .disabled-control-tooltip { left: auto; right: 0; width: min(260px, calc(100vw - 64px)); }
+.creator-dialog-head p.creator-dialog-close-status { margin: 8px 0 0; font-size: var(--text-xs); }
 .creator-dialog label { display: block; margin-bottom: 8px; }
 .creator-dialog p { color: var(--sub); line-height: 1.7; }
+.creator-dialog.creator-dialog-scroll { padding: 0; overflow: hidden; }
+.creator-dialog-scroll[open] { display: flex; flex-direction: column; }
+.creator-dialog-scroll > .creator-dialog-head { flex: 0 0 auto; margin: 0; padding: 24px 24px 16px; }
+.creator-dialog-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 24px 24px; }
+.creator-dialog-footer { flex: 0 0 auto; padding: 16px 24px; border-top: 1px solid var(--line); }
+.creator-dialog-footer > p { margin: 0 0 10px; font-size: var(--text-xs); }
+.creator-dialog-footer .creator-reference-actions { margin: 0; }
 .creator-note-detail > img { display: block; max-width: 100%; max-height: 460px; object-fit: contain; margin: 0 auto 20px; border-radius: 10px; }
 .creator-note-body { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink) !important; }
 .creator-note-comment { border-top: 1px solid var(--line); padding-top: 12px; }
@@ -228,9 +243,7 @@ nav a.active, nav button.active { color: var(--accent); background: var(--accent
 .simulated-fan-preview > button { margin-top: 6px; }
 @media (max-width: 480px) { .simulated-fan-preview { margin-left: 0; } }
 .fan-voice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 10px; max-height: 55vh; overflow-y: auto; margin: 16px 0; }
-.fan-voice-dialog[open] { display: flex; flex-direction: column; }
-.fan-voice-dialog > :not(.fan-voice-grid):not(.fan-created-list) { flex-shrink: 0; }
-.fan-voice-dialog .fan-voice-grid, .fan-voice-dialog .fan-created-list { min-height: 80px; flex: 1 1 auto; }
+.fan-voice-dialog .fan-voice-grid, .fan-voice-dialog .fan-created-list { min-height: 80px; max-height: none; overflow: visible; }
 .fan-voice-option { display: flex !important; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
 .fan-voice-option.selected { border-color: var(--accent-border-strong); background: var(--accent-soft); }
 .fan-voice-option:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }

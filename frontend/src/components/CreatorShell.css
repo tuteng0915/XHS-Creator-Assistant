@@ -196,6 +196,15 @@
     padding-inline: 8px;
   }
 
+  .creator-focused-shell .creator-switcher .disabled-control-tooltip {
+    width: min(260px, calc(100vw - 56px));
+  }
+
+  .creator-focused-shell .creator-switcher > .disabled-control-hint:last-child .disabled-control-tooltip {
+    left: auto;
+    right: 0;
+  }
+
   .creator-focused-shell .workspace-sidebar nav.creator-navigation {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -57,7 +57,16 @@ export function PanelRetestControl({workspaceId, runId, topic, blocked, onCreate
     </button>
     {error && !preview && <p role="alert">{error}</p>}
     {created && <p role="status">复测已创建，可在受众模拟历史中查看；原试读记录保留。</p>}
-    {preview && <CreatorDialog title="用同组读者复测" onClose={() => {if (!busy) {setPreview(null); setError('')}}}>
+    {preview && <CreatorDialog title="用同组读者复测" scrollBody
+      closeDisabledReason={busy ? '正在创建复测，请等待结果后再关闭。' : undefined}
+      onClose={() => {if (!busy) {setPreview(null); setError('')}}}
+      footer={<>
+        <p className="muted">{preview.mode === 'live' ? '确认后调用当前模型，会产生模型费用。' : '本次沿用演示模式，不调用真实模型。'}固定人物不保证每次反应一致。</p>
+        <div className="panel-edit-actions">
+          <button className="primary" disabled={!!blocked || stale || busy} onClick={() => void confirm()}>{busy ? '正在创建复测…' : '确认开始复测'}</button>
+          <button disabled={busy} onClick={() => {setPreview(null); setError('')}}>暂不复测</button>
+        </div>
+      </>}>
       <p>沿用上次 {preview.readers.length} 位读者，只更换为当前已保存的稿件。读者不会看到上次评价。</p>
       <div className="retest-reader-list" aria-label="固定的模拟读者">
         {preview.readers.map((reader, index) => <div key={reader.id}><b>{index + 1}. {reader.name}</b><p>{reader.profile}</p></div>)}
@@ -67,14 +76,9 @@ export function PanelRetestControl({workspaceId, runId, topic, blocked, onCreate
         {!!preview.panelTask.focusQuestions.length && <ol>{preview.panelTask.focusQuestions.map((q, i) => <li key={i}>{q}</li>)}</ol>}
       </section>
       <details><summary>本次已保存稿件：{preview.title}</summary><p className="panel-edit-text">{preview.body || '（空正文）'}</p></details>
-      <p className="muted">{preview.mode === 'live' ? '确认后调用当前模型，会产生模型费用。' : '本次沿用演示模式，不调用真实模型。'}固定人物不保证每次反应一致。</p>
       <details><summary>比较时需要注意</summary><ul>{preview.limitations.map((item, i) => <li key={i}>{item}</li>)}</ul></details>
       {(blocked || stale) && <p role="status">{blocked || '画布与服务器稿件版本不一致，请重新打开选题后再复测。'}</p>}
       {error && <p role="alert">{error} 结果不确定时可重试，将沿用本次请求标识。</p>}
-      <div className="panel-edit-actions">
-        <button className="primary" disabled={!!blocked || stale || busy} onClick={() => void confirm()}>{busy ? '正在创建复测…' : '确认开始复测'}</button>
-        <button disabled={busy} onClick={() => {setPreview(null); setError('')}}>暂不复测</button>
-      </div>
     </CreatorDialog>}
   </div>
 }

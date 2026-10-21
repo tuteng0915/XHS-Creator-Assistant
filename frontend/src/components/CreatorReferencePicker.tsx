@@ -102,7 +102,8 @@ export function CreatorReferencePicker({workspaceId, selection, onChange, disabl
       const key = creatorReferenceKey(reference), label = cache[`${workspaceId}:${key}`]?.label || `${referenceKindNames[reference.kind]} ${index + 1}`
       return <li key={key}><button type="button" className="text-button" onClick={() => {setViewing(reference); setOpen(true)}}>{label}</button><button type="button" className="icon-button" disabled={disabled} aria-label={`移除${label}`} onClick={() => onChange({...selection, references: selection.references.filter(item => creatorReferenceKey(item) !== key)})}>×</button></li>
     })}</ul>}
-    {open && <CreatorDialog title={viewing ? '参考材料' : '添加参考'} onClose={close} wide={!viewing && kind === 'imported_note'} className="creator-reference-dialog">
+    {open && <CreatorDialog title={viewing ? '参考材料' : '添加参考'} onClose={close} wide={!viewing && kind === 'imported_note'} className="creator-reference-dialog" scrollBody
+      footer={(viewing || kind !== 'imported_note') && <div className="creator-reference-actions"><button type="button" onClick={close}>{viewing ? '关闭' : '取消'}</button>{!viewing && <button type="button" className="primary" disabled={disabled || !preview || previewLoading || alreadySelected || selection.references.length >= 8} onClick={add}>{alreadySelected ? '已添加' : '添加这份材料'}</button>}</div>}>
       {!viewing && <div className="creator-reference-selectors"><label>资料类型<select value={kind} onChange={event => setKind(event.target.value as CreatorContextReference['kind'])}><option value="account_analysis">账号分析</option><option value="audience_analysis">受众分析</option><option value="imported_note">原笔记</option></select></label>
         {kind !== 'imported_note' && <label>分析记录<select disabled={loading} value={selectedId} onChange={event => setSelectedId(event.target.value)}><option value="">{loading ? '正在读取…' : '选择一份分析'}</option>{choices.map(choice => <option key={choice.reference.id} value={choice.reference.id}>{choice.label}{selection.references.some(reference => creatorReferenceKey(reference) === creatorReferenceKey(choice.reference)) ? ' · 已添加' : ''}</option>)}</select></label>}
       </div>}
@@ -120,7 +121,6 @@ export function CreatorReferencePicker({workspaceId, selection, onChange, disabl
       {preview && <section className="creator-reference-preview" aria-label={preview.note ? '原笔记原文' : '参考摘要'}><div><strong>{preview.label}</strong>{preview.isExample && <OracleNotice label="参考来源说明" />}</div><small>{preview.scope}</small>
         {previewImages.length > 0 && <div className="creator-reference-note-images">{previewImages.map(image => <img key={image.id} src={image.fileUrl} alt={`${preview.note?.title || '原笔记'} · 已保存图片`} />)}</div>}
         <p className={preview.note ? 'creator-reference-note-body' : undefined}>{preview.summary}</p>{preview.lines.length > 0 && <ul>{preview.lines.map((line, index) => <li key={index}>{line}</li>)}</ul>}</section>}
-      {(viewing || kind !== 'imported_note') && <div className="creator-reference-actions"><button type="button" onClick={close}>{viewing ? '关闭' : '取消'}</button>{!viewing && <button type="button" className="primary" disabled={disabled || !preview || previewLoading || alreadySelected || selection.references.length >= 8} onClick={add}>{alreadySelected ? '已添加' : '添加这份材料'}</button>}</div>}
     </CreatorDialog>}
   </div>
 }
