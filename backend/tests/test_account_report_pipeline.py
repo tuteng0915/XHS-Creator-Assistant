@@ -650,7 +650,7 @@ def test_old_saved_single_and_grouped_reports_stay_readable_without_the_old_gene
 
 
 def test_default_prompt_is_the_final_contract_and_auxiliary_selection_is_optional():
-    assert PIPELINE_VERSION.endswith("v5.2-independent-reading")
+    assert PIPELINE_VERSION.endswith("v6-image-recovery")
     assert MAX_EXTRA_REQUESTS == 1
     assert SYNTHESIS_PROMPT == SOURCE_LED_PROFILE_PROMPT
     assert OVERVIEW_PROMPT.startswith(TEXT_SCOPE)

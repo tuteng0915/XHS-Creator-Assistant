@@ -1171,6 +1171,9 @@ class AnalysisRunService:
         xhs_profile, analysis_range = scope_creator_profile(
             xhs_profile, payload.analysis_scope, selected_note_ids=payload.selected_note_ids,
         )
+        from app.services.account_image_text import freeze_note_images
+
+        diagnosis_images = freeze_note_images(connection, workspace["id"], xhs_profile["notes"])
         account_positioning = self._derive_xhs_account_positioning(xhs_profile)
         historical_text = self._derive_xhs_historical_posts_text(xhs_profile)
         comments_text = self._derive_xhs_comments_text(xhs_profile)
@@ -1180,6 +1183,7 @@ class AnalysisRunService:
             "workspaceName": workspace["name"],
             "accountPositioning": account_positioning,
             "analysisRange": analysis_range,
+            "diagnosisImages": diagnosis_images,
             "accountProfile": {
                 "source": "xhs_creator_profile",
                 "inputAssetId": xhs_asset["id"],

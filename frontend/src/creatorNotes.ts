@@ -8,6 +8,7 @@ export type CreatorNote = {
   metricsObservedAt?: string | number | null
   commentsObservedAt?: string | number | null
   coverMediaAssetId?: string
+  imageMediaAssetIds?: string[]
   metrics: { liked?: number; collected?: number; comments?: number; shares?: number }
   comments: Array<{ commentId?: string; content?: string; likeCount?: number }>
 }

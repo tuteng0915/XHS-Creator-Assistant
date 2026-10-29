@@ -75,8 +75,9 @@ def profile_stage_input(snapshot: dict[str, Any], snapshot_at: str) -> tuple[dic
             "schemaVersion": "account-reading-input/v2",
             "readingScope": {
                 "selectedNoteCount": len(notes),
+                "imageTextIncluded": bool(snapshot.get("diagnosisImageTextIncluded")),
                 "textScope": (
-                    "已保存的标题和文字正文；未读取图片内文字或视频内容，"
+                    "已保存的标题、正文及明确标记的图片识别文字；未读取图片和视频不在范围内，"
                     "不保证全文完整，不按字数推断完整性。"
                 ),
                 "metricScope": "所选样本的累计互动，各指标分别比较；null 表示未获取。",

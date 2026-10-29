@@ -74,8 +74,10 @@ def prepare_source_led_context(context: dict[str, Any]) -> dict[str, Any]:
         "readingScope": {
             "selectedNoteCount": len(notes),
             "textScope": (
-                "仅包含已保存的原标题和正文文字；片段按原文顺序保留全部已提供文字。"
-                "未读取图片内文字或视频内容，不保证原始资料全文完整。"
+                ("包含原标题、正文及明确标记的图片识别文字；图片识别可能有误字。"
+                   if packet.get("readingScope", {}).get("imageTextIncluded")
+                   else "包含原标题和正文；本次未读取图片内文字或视频内容。")
+                + "片段按原文顺序保留已提供文字。"
             ),
         },
         "notes": notes,

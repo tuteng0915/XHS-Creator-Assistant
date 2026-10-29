@@ -875,6 +875,14 @@ def create_api_router(
     def get_analysis_run(run_id: str) -> AnalysisRunResponse:
         return analysis_service.get(run_id)
 
+    @router.post("/analysis-runs/{run_id}/recover/{stage}", response_model=AnalysisRunResponse)
+    async def recover_analysis_run(run_id: str, stage: str) -> AnalysisRunResponse:
+        from app.services.account_recovery import recover_account
+
+        run = recover_account(analysis_service, run_id, stage)
+        await workflow_worker.enqueue_analysis_run(run.id)
+        return run
+
     @router.patch("/analysis-runs/{run_id}/review", response_model=AnalysisRunResponse)
     def update_analysis_run_review(
         run_id: str, payload: RunReviewUpdate

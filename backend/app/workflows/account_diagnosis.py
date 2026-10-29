@@ -374,6 +374,7 @@ class RealAccountDiagnosisModelProvider:
         positioning: str,
         historical_posts: str,
         on_update: Callable[[dict[str, Any]], Awaitable[None]],
+        checkpoint: dict | None = None,
     ):
         # Supported account providers share the same report workflow. Explicit
         # single-call rollback and legacy text retain their existing prompt.
@@ -392,6 +393,7 @@ class RealAccountDiagnosisModelProvider:
                 context,
                 self.model_call_service.call_account_report_step,
                 on_update=on_update,
+                checkpoint=checkpoint,
             )
         response = await self.model_call_service.call_operation(
             ModelOperation.PROFILE, context,
@@ -615,19 +617,25 @@ class _AccountDiagnosisGraphExecution:
         snapshot = self.snapshot()
         updated = dict(state)
 
+        recovery = self.service.analysis_service.get(self.run_id).model_metadata.get("recovery", {})
+
         async def run_profile() -> None:
-            if updated.get("profile"):
+            if updated.get("profile") or (recovery and recovery.get("stage") != "profile"):
                 return
             await self.emit("stage.started", "profile", "running", {})
             try:
                 run = self.service.analysis_service.get(self.run_id)
-                context, observations = profile_stage_input(snapshot, run.created_at.isoformat())
-                chronology = (observations or {}).get("chronology", {})
+                previous = run.model_metadata.get("profile", {})
                 metadata = {"engine": "langgraph"}
+                if previous.get("pipelineCheckpoint"):
+                    metadata["pipelineCheckpoint"] = previous["pipelineCheckpoint"]
                 latest_preview = ""
 
                 async def on_update(progress: dict[str, Any]) -> None:
                     nonlocal latest_preview
+                    progress = dict(progress)
+                    if "checkpoint" in progress:
+                        metadata["pipelineCheckpoint"] = progress.pop("checkpoint")
                     # Keep the last finished reading visible during the next call.
                     if isinstance(progress.get("preview"), str) and progress["preview"]:
                         latest_preview = progress["preview"]
@@ -645,12 +653,36 @@ class _AccountDiagnosisGraphExecution:
                     )
                     await self.emit("stage.progress", "profile", "running", progress)
 
+                from app.services.account_image_text import (
+                    read_note_images,
+                    snapshot_with_image_text,
+                )
+
+                readings = previous.get("imageReadings", [])
+                if snapshot.get("mode") == "live" and snapshot.get("diagnosisImages"):
+                    async def image_update(rows, total):
+                        metadata["imageReadings"] = rows
+                        await on_update({"phase": "images", "status": "running",
+                                         "completed": len(rows), "total": total})
+
+                    await image_update(readings, len(snapshot["diagnosisImages"]))
+                    readings = await read_note_images(
+                        self.service.analysis_service, snapshot, readings, image_update,
+                    )
+                    metadata["imageReadings"] = readings
+                report_snapshot = snapshot_with_image_text(snapshot, readings)
+                context, observations = profile_stage_input(
+                    report_snapshot, run.created_at.isoformat(),
+                )
+                chronology = (observations or {}).get("chronology", {})
                 with_updates = getattr(provider, "profile_with_updates", None)
                 if callable(with_updates):
                     response = await with_updates(
                         positioning=context["positioning"],
                         historical_posts=context["historicalPosts"],
                         on_update=on_update,
+                        **({"checkpoint": metadata.get("pipelineCheckpoint")}
+                           if isinstance(provider, RealAccountDiagnosisModelProvider) else {}),
                     )
                     output = response.output
                     metadata.update(response.model_metadata)
@@ -661,14 +693,16 @@ class _AccountDiagnosisGraphExecution:
                         historical_posts=context["historicalPosts"],
                     )
                 omissions: list[str] = []
-                prepared = compile_usable_account_report(output, snapshot, omissions=omissions)
+                prepared = compile_usable_account_report(
+                    output, report_snapshot, omissions=omissions,
+                )
                 if omissions:
                     metadata["omittedReportItems"] = omissions
                 result = ProfileStageResult.model_validate(prepared).model_dump(
                     mode="json"
                 )
                 result["profile"]["accountPortrait"] = verified_portrait(
-                    result["profile"].get("accountPortrait"), snapshot, chronology
+                    result["profile"].get("accountPortrait"), report_snapshot, chronology
                 )
                 if observations is not None:
                     result["observations"] = observations
@@ -687,7 +721,9 @@ class _AccountDiagnosisGraphExecution:
                 await self.stage_failed("profile", error, updated)
 
         async def run_pain_points() -> None:
-            if updated.get("pain_points") is not None:
+            if updated.get("pain_points") is not None or (
+                recovery and recovery.get("stage") != "pain_points"
+            ):
                 return
             await self.emit("stage.started", "pain_points", "running", {})
             try:
@@ -759,7 +795,8 @@ class _AccountDiagnosisGraphExecution:
         self, state: AccountDiagnosisState
     ) -> AccountDiagnosisState:
         updated = dict(state)
-        if updated.get("topics"):
+        recovery = self.service.analysis_service.get(self.run_id).model_metadata.get("recovery", {})
+        if updated.get("topics") is not None or (recovery and recovery.get("stage") != "topics"):
             await self.save_checkpoint("topic_generation", updated)
             return AccountDiagnosisState(**updated)
         if not updated.get("profile") and not updated.get("pain_points"):

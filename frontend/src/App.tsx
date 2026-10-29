@@ -6,6 +6,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
+import { AccountDiagnosisRecovery } from './components/AccountDiagnosisRecovery'
 
 import {
   agentApi,
@@ -350,6 +351,7 @@ function WorkspaceApp() {
   const [workflowOutputKindByWorkflow, setWorkflowOutputKindByWorkflow] =
     useState<WorkflowOutputKinds>(defaultWorkflowOutputKinds)
   const [currentRun, setCurrentRun] = useState<AnalysisRun | null>(null)
+  const analysisRecoveryLock = useRef(false)
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState('')
   const [manualTopicTitle, setManualTopicTitle] = useState('')
@@ -2688,8 +2690,30 @@ function WorkspaceApp() {
     }
   }
 
+  async function recoverDiagnosis(sourceRun: AnalysisRun, stage: string) {
+    if (analysisRecoveryLock.current || running || !workspace || sourceRun.workspaceId !== workspace.id) return
+    analysisRecoveryLock.current = true
+    setRunning(true); setRunError('')
+    setCurrentRun(sourceRun)
+    setAnalysisStageViews('account', stageSeedFromRun(sourceRun))
+    setActivePage('account-diagnosis')
+    try {
+      const recovered = await analysisRunApi.recover(sourceRun.id, stage)
+      if (recovered.workspaceId !== sourceRun.workspaceId) throw new Error('恢复记录不属于当前账号。')
+      setCurrentRun(recovered)
+      setAnalysisStageViews('account', stageSeedFromRun(recovered))
+      setActivePage('account-diagnosis')
+      await runAnalysisGraphWorkflow(recovered, 'account')
+      await refreshWorkspaceSummary()
+    } catch (error) { setRunError(errorMessage(error)) }
+    finally { analysisRecoveryLock.current = false; setRunning(false) }
+  }
+
   function renderStageResult(stage: StageView, sourceRun: AnalysisRun | null = currentRun): ReactNode {
     return (
+      <>
+      {sourceRun?.workflowType === 'account_diagnosis' && <AccountDiagnosisRecovery run={sourceRun} stage={stage.key} busy={running} mediaAssets={mediaAssets}
+        onRetry={key => void recoverDiagnosis(sourceRun, key)} onOpenSource={id => void openRun(id, true)} />}
       <StageResultRenderer
         publicMode={!internalMode}
         onSimulateSavedTopic={prepareAudienceSimulation}
@@ -2706,6 +2730,7 @@ function WorkspaceApp() {
         onGenerateDraft={generateDraftForTopic}
         onFillSimulationTopic={setSimulationTopic}
       />
+      </>
     )
   }
 

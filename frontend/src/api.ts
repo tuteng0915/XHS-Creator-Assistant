@@ -640,6 +640,8 @@ export const analysisRunApi = {
 
   get: (runId: string) => request<AnalysisRun>(`/api/analysis-runs/${runId}`),
 
+  recover: (runId: string, stage: string) => request<AnalysisRun>(`/api/analysis-runs/${runId}/recover/${stage}`, {method: 'POST'}),
+
   updateReview: (
     runId: string,
     payload: {

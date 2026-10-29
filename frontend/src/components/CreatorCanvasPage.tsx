@@ -88,6 +88,11 @@ function Canvas({workspaceId, topic, initialMessage, profile, mediaAssets, onUpd
   const [editorOpened, setEditorOpened] = useState(!!recoverable || !!topic.body?.trim())
   const [editorFocusRequested, setEditorFocusRequested] = useState(false)
   const [error, setError] = useState('')
+  const [copyStatus, setCopyStatus] = useState('')
+  async function copyAll(copyTitle: string, copyBody: string) {
+    try { await navigator.clipboard.writeText(`${copyTitle}\n\n${copyBody}`); setCopyStatus('已复制标题和正文') }
+    catch { setCopyStatus('复制失败，请允许剪贴板访问后重试') }
+  }
   const [saving, setSaving] = useState(false)
   const [collaborating, setCollaborating] = useState(false)
   const [split, setSplit] = useState(44)
@@ -403,6 +408,7 @@ function Canvas({workspaceId, topic, initialMessage, profile, mediaAssets, onUpd
       {previewTarget === 'body' ? <label>放入方式<select aria-label="建议放入方式" value={previewMode} onChange={event => setPreviewMode(event.target.value as 'append' | 'replace')}><option value="append">追加在当前正文后</option><option value="replace">替换当前正文</option></select></label> : <p>当前标题：{title} → 确认后替换为下方文字。</p>}
       </>}
       <label>{firstCandidate ? '' : preview.candidate.writingFocus?.selection ? '修改后' : '建议内容'}<textarea aria-label="编辑写作建议" value={previewText} disabled={saving} onChange={event => setPreviewText(event.target.value)} /></label>
+      {firstCandidate && <><button type="button" disabled={!previewText.trim()} onClick={() => void copyAll(previewTitle, previewText)}>复制全部</button>{copyStatus && <span role="status">{copyStatus}</span>}</>}
       <div className="canvas-candidate-preview-actions"><button className="primary" disabled={!previewText.trim() || !previewTitle.trim() || applying || retesting || saving || collaborating} onClick={firstCandidate ? () => void saveFirstCandidate() : putCandidateInEditor}>{saving && firstCandidate ? '保存中…' : firstCandidate ? '采用并保存' : preview.candidate.writingFocus?.selection ? '只替换这一段' : '确认放入画布'}</button><button disabled={saving} onClick={closePreview}>{firstCandidate ? '暂不采用' : '关闭预览'}</button></div>
     </section>}
         {!firstCandidate && <>
@@ -421,6 +427,7 @@ function Canvas({workspaceId, topic, initialMessage, profile, mediaAssets, onUpd
         </section> : null}
         {restoredDraft && dirty && <p className="canvas-draft-restored">已恢复本页未保存草稿。</p>}
         <div className="save-row"><button className="primary" disabled={!!draftConflict || retesting || applying || !dirty || saving || preparing || !title.trim()} onClick={() => {setError(''); void save().catch(e => setError(String(e)))}}>保存</button><small>{saving ? '保存中…' : dirty ? '有未保存修改' : '已保存'}</small>
+          <button type="button" disabled={!body.trim()} onClick={() => void copyAll(title, body)}>复制全部</button>{copyStatus && <span role="status">{copyStatus}</span>}
           {onSimulate && <button disabled={!!draftConflict || retesting || applying || preparing || saving || collaborating || !title.trim()} onClick={() => void prepareSimulation()}>{preparing ? '正在保存…' : '选择模拟读者'}</button>}
         </div>
         </>}

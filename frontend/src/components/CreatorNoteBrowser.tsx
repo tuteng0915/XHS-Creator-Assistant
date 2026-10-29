@@ -22,7 +22,7 @@ export function CreatorNoteBrowser({ notes, mediaAssets, selectedIds, onToggle, 
     mediaAssets.find(asset => asset.metadata.noteId === note.noteId)
   )?.fileUrl
   const images = (note: CreatorNote) => [...new Set([
-    coverUrl(note), ...mediaAssets.filter(asset => asset.metadata.noteId === note.noteId && asset.mediaType.startsWith('image/')).map(asset => asset.fileUrl),
+    coverUrl(note), ...mediaAssets.filter(asset => asset.metadata.noteId === note.noteId && asset.mediaType.startsWith('image/') && (!note.imageMediaAssetIds || note.imageMediaAssetIds.includes(asset.id))).sort((a,b) => Number(a.metadata.imageIndex || 1) - Number(b.metadata.imageIndex || 1)).map(asset => asset.fileUrl),
   ].filter((url): url is string => Boolean(url)))]
   return <>
     {showFilters && <CreatorNoteFilters range={range} sort={sort} onRangeChange={setRange} onSortChange={setSort} limit={limit} onLimitChange={setLimit} />}

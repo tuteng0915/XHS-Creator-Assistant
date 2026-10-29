@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -191,7 +192,7 @@ class XhsOfflineImportService:
         existing_media_by_note = {
             asset.metadata["noteId"]: asset
             for asset in existing_media
-            if asset.metadata.get("noteId")
+            if asset.metadata.get("noteId") and asset.metadata.get("imageIndex", 1) == 1
         }
 
         for note in creator_profile["notes"]:
@@ -209,6 +210,7 @@ class XhsOfflineImportService:
                 "noteUrl": note.get("noteUrl") or "",
                 "title": note.get("title") or "",
                 "caption": caption,
+                "imageIndex": 1,
             }
 
             media_asset = existing_media_by_note.get(note.get("noteId"))
@@ -218,6 +220,9 @@ class XhsOfflineImportService:
                     None, "", note.get("noteId")
                 }:
                     media_asset = named_asset
+            if (media_asset is not None
+                    and media_asset.sha256 != hashlib.sha256(package_file.content).hexdigest()):
+                media_asset = None
             if media_asset is None:
                 media_asset = self.media_asset_service.create_upload(
                     workspace_id,
@@ -243,10 +248,40 @@ class XhsOfflineImportService:
             existing_media_by_name[media_name] = media_asset
             existing_media_by_note[note.get("noteId")] = media_asset
             note["coverMediaAssetId"] = media_asset.id
+            note["imageMediaAssetIds"] = [media_asset.id]
             note["cover"] = {
                 "relativePath": relative_path,
                 "caption": caption,
             }
+
+            # All locally supplied pages of this note join the same asset library.
+            # No crawling or remote downloads happen during package import.
+            prefix = f"images/{note['noteId']}/"
+            paths = [path for path in package_files if path.startswith(prefix)
+                     and path != relative_path]
+            paths.sort(key=lambda path: [int(part) if part.isdigit() else part
+                                        for part in re.split(r"(\d+)", path)])
+            for page, path in enumerate(paths, 2):
+                image = package_files[path]
+                digest = hashlib.sha256(image.content).hexdigest()
+                asset = next((asset for asset in existing_media
+                              if asset.metadata.get("noteId") == note["noteId"]
+                              and asset.metadata.get("relativePath") == path
+                              and asset.sha256 == digest), None)
+                if asset is None:
+                    asset = self.media_asset_service.create_upload(
+                        workspace_id, asset_type=MediaAssetType.IMAGE,
+                        name=f"{note['title']} · 图片{page}", purpose="小红书笔记图片",
+                        filename=image.filename, media_type=image.media_type,
+                        content=image.content, source_type="upload",
+                    )
+                asset = self.media_asset_service.update(asset.id, MediaAssetUpdate(
+                    metadata={**asset.metadata, **metadata,
+                              "relativePath": path, "imageIndex": page},
+                    expected_updated_at=asset.updated_at,
+                ))
+                media_assets.append(asset)
+                note["imageMediaAssetIds"].append(asset.id)
 
         asset_content = json.dumps(creator_profile, ensure_ascii=False, indent=2)
         if existing_material is None:

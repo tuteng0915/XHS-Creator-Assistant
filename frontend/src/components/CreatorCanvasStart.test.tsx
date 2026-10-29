@@ -16,6 +16,23 @@ beforeEach(() => {
 })
 afterEach(() => {cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers()})
 
+it('copies the current unsaved title and body without adopting or saving', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  vi.stubGlobal('navigator', {...navigator, clipboard:{writeText}})
+  const save = vi.spyOn(topicApi, 'update')
+  render(<CreatorCanvasPage {...props} topic={{...topic, body:'原正文'}} />)
+  fireEvent.change(screen.getByLabelText('创作标题'), {target:{value:'新标题'}})
+  fireEvent.change(screen.getByLabelText('创作正文'), {target:{value:'未保存正文\n第二段'}})
+  fireEvent.click(screen.getByRole('button', {name:'复制全部'}))
+  await screen.findByText('已复制标题和正文')
+  expect(writeText).toHaveBeenCalledWith('新标题\n\n未保存正文\n第二段')
+  expect(save).not.toHaveBeenCalled()
+  writeText.mockRejectedValueOnce(new Error('denied'))
+  fireEvent.click(screen.getByRole('button', {name:'复制全部'}))
+  await screen.findByText('复制失败，请允许剪贴板访问后重试')
+  expect(screen.getByLabelText('创作正文')).toHaveValue('未保存正文\n第二段')
+})
+
 const emptySession: CollaborationSession = {id:'s',workspaceId:'w',title:'共创',assistantMode:'single_writer',status:'active',executionStatus:'waiting_creator',contextTarget:{assetType:'topic',assetId:topic.id},failureCode:'',failureDetail:'',createdAt:'',updatedAt:'',runs:[],messages:[]}
 function generated(kind: 'copy_option' | 'outline' | 'open_question' = 'copy_option'): CollaborationSession {
   return {...emptySession, runs:[{id:'run',status:'completed',triggerMessageId:'c',graphState:{},errorCode:'',errorDetail:'',createdAt:'',startedAt:null,completedAt:null}], messages:[
