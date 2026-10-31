@@ -139,7 +139,6 @@ nav a.active, nav button.active { color: var(--accent); background: var(--accent
 .creator-focused-shell .workspace-main { padding-top: 12px; }
 .creator-focused-shell .workspace-sidebar { width: 220px; padding: 16px 12px; }
 .creator-focused-shell .workspace-sidebar nav .creator-nav-child { padding-left: 30px; font-size: 12px; }
-.creator-focused-shell .topbar { margin-bottom: 8px; }
 .creator-start-hero h1, .creator-page-head h1 { margin: 0; font-size: var(--text-page); font-weight: 600; }
 .creator-range-row, .creator-diagnosis-controls { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
 .creator-range-row span { font-size: 13px; color: var(--sub); }

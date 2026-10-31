@@ -13,8 +13,8 @@
 }
 
 .creator-focused-shell .brand-row {
-  gap: 10px;
-  margin: 0 4px 28px;
+  gap: 6px;
+  margin: 0 0 28px;
 }
 
 .creator-focused-shell .brand-row strong {
@@ -22,7 +22,24 @@
   font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.03em;
+  white-space: nowrap;
 }
+
+.creator-focused-shell .creator-brand-help {
+  flex: 0 0 auto;
+  min-height: 28px;
+  margin-left: auto;
+  padding: 3px 5px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--sub);
+  font-size: 12px;
+  font-weight: 400;
+  box-shadow: none;
+}
+
+.creator-focused-shell .creator-brand-help:hover { background: var(--surface-muted); color: var(--ink); }
+.creator-focused-shell .creator-brand-help:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .creator-focused-shell .brand-row .logo {
   flex: 0 0 32px;
@@ -137,18 +154,6 @@
   height: 18px;
 }
 
-.creator-focused-shell .workspace-main > .topbar {
-  justify-content: flex-end;
-  align-items: center;
-  min-height: 32px;
-  margin-bottom: 18px;
-}
-
-.creator-focused-shell .workspace-main > .topbar .help-button {
-  color: var(--sub);
-  font-size: 12px;
-}
-
 .creator-subpage-actions {
   display: flex;
   justify-content: flex-end;
@@ -225,8 +230,4 @@
     text-align: center;
   }
 
-  .creator-focused-shell .workspace-main > .topbar {
-    flex-direction: row;
-    margin-bottom: 12px;
-  }
 }

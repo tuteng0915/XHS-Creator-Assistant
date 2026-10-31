@@ -1,5 +1,6 @@
 import type { SimulationCategory, SimulationRunSummary } from '../types'
 import { simulationCategoryFor } from '../simulationChat'
+import { InfoHint } from './InfoHint'
 import './SimulationHub.css'
 
 const SIMULATION_CATEGORIES: Array<{id: SimulationCategory; name: string; description: string}> = [
@@ -14,7 +15,7 @@ export function SimulationCategoryTabs({value, runs, onChange}: {
   onChange: (category: SimulationCategory) => void
 }) {
   return <section className="simulation-hub-heading" aria-label="受众模拟分类">
-    <h1>受众模拟</h1>
+    <h1>受众模拟 <InfoHint label="受众模拟说明">邀请模拟读者讨论账号方向、复盘已发布笔记或试读创作稿，了解不同视角的反馈。</InfoHint></h1>
     <div className="simulation-category-tabs" role="tablist" aria-label="模拟类别">
       {SIMULATION_CATEGORIES.map((category, index) => <button type="button" role="tab"
         key={category.id} id={`simulation-category-${category.id}`} aria-controls="simulation-category-content"

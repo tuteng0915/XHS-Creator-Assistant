@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 
 import {
   INPUT_ASSET_DEFINITIONS,
@@ -8,9 +8,12 @@ import {
 import type { WorkflowAssetSummary, Workspace } from '../types'
 import type { WorkflowTab } from '../workflows'
 import { CreatorNavIcon, type CreatorNavIconName } from './CreatorNavIcon'
-import { InfoHint } from './InfoHint'
 import { DisabledControlHint } from './DisabledControlHint'
 import './CreatorShell.css'
+import { CreatorDialog } from './CreatorDialog'
+import { GuidedTour } from './GuidedTour'
+import { findGuideTarget } from './guideTargets'
+import { pageGuides, workflowGuide, type GuideStep } from './guideSteps'
 
 export type ActivePage =
   | 'creator-start'
@@ -108,6 +111,14 @@ export function WorkspaceShell({
   onSetWorkflowTab,
   onToggleHelp,
 }: WorkspaceShellProps) {
+  const [guideMenu, setGuideMenu] = useState(false)
+  const [guide, setGuide] = useState<GuideStep[] | null>(null)
+  const guideTrigger = useRef<HTMLButtonElement>(null)
+  const startGuide = (steps: GuideStep[]) => {
+    const available = steps.filter(item => findGuideTarget(item.target))
+    setGuideMenu(false)
+    setGuide(available.length ? available : workflowGuide.filter(item => findGuideTarget(item.target)))
+  }
   const navigationPage = activePage === 'history' ? 'account-diagnosis' : activePage === 'topics' ? 'drafts' : activePage
   const disabledReason = busy ? busyReason || '任务正在处理，完成后可添加或切换账号。' : undefined
   if (internalMode) {
@@ -137,6 +148,7 @@ export function WorkspaceShell({
           <div>
             <strong>小红书创作助手</strong>
           </div>
+          <button ref={guideTrigger} type="button" className="creator-brand-help" aria-haspopup="dialog" aria-expanded={guideMenu || Boolean(guide?.length)} onClick={() => setGuideMenu(true)}>帮助</button>
         </div>
 
         <section className="creator-switcher" aria-label="账号档案选择">
@@ -169,6 +181,7 @@ export function WorkspaceShell({
               {group.items.map((item) => (
                 <button
                   key={item.page}
+                  data-guide-nav={item.page}
                   type="button"
                   className={`${item.child ? 'creator-nav-child ' : ''}${navigationPage === item.page ? 'active' : ''}`}
                   aria-current={navigationPage === item.page ? 'page' : undefined}
@@ -187,12 +200,15 @@ export function WorkspaceShell({
       </aside>
 
       <main className="workspace-main">
-        <header className="topbar">
-          <InfoHint key={activePage} label="页面帮助">{helpContent.description}</InfoHint>
-        </header>
-
         {children}
       </main>
+      {guideMenu && <CreatorDialog title="操作引导" className="guide-menu-dialog" returnFocusRef={guideTrigger} onClose={() => setGuideMenu(false)}>
+        <div className="guide-options">
+          <button type="button" onClick={() => startGuide(pageGuides[activePage] || workflowGuide)}>看看当前页怎么用</button>
+          <button type="button" onClick={() => startGuide(workflowGuide)}>了解完整流程</button>
+        </div>
+      </CreatorDialog>}
+      {!!guide?.length && <GuidedTour key={`${activePage}:${selectedWorkspaceId}`} steps={guide} returnFocusRef={guideTrigger} onClose={() => setGuide(null)} />}
     </div>
   )
 }

@@ -46,9 +46,29 @@ function renderShell(overrides: Partial<Parameters<typeof WorkspaceShell>[0]> = 
   return props
 }
 
-afterEach(() => cleanup())
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('WorkspaceShell', () => {
+  it('offers page and workflow tours without navigating or starting work', () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList)
+    const props = renderShell({activePage: 'account-diagnosis', children: <div className="creator-diagnosis-controls"><button data-guide="diagnosis-range" disabled>调整范围</button></div>})
+    fireEvent.click(screen.getByRole('button', {name: '帮助'}))
+    fireEvent.click(screen.getByRole('button', {name: /看看当前页怎么用/}))
+    expect(screen.getByRole('heading', {name: '选择分析范围'})).toBeInTheDocument()
+    expect(screen.getByText('1 / 1')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: '完成'}))
+    expect(screen.getByRole('button', {name: '帮助'})).toHaveFocus()
+    fireEvent.click(screen.getByRole('button', {name: '帮助'}))
+    fireEvent.click(screen.getByRole('button', {name: /了解完整流程/}))
+    expect(screen.getByText('1 / 7')).toBeInTheDocument()
+    for (let index = 0; index < 6; index++) fireEvent.click(screen.getByRole('button', {name: '下一步'}))
+    expect(screen.getByRole('heading', {name: '开始创作'})).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: '完成'}))
+    expect(props.onSetActivePage).not.toHaveBeenCalled()
+    expect(props.onSelectWorkspace).not.toHaveBeenCalled()
+    expect(props.onCreateCreatorProfile).not.toHaveBeenCalled()
+    expect(props.onOpenInputAsset).not.toHaveBeenCalled()
+  })
   it('renders the creator-focused navigation without developer entries', () => {
     renderShell()
 
@@ -169,13 +189,30 @@ describe('WorkspaceShell', () => {
     expect(within(screen.getByRole('navigation')).getByRole('button', {name: label})).toHaveAttribute('aria-current', 'page')
   })
 
-  it('keeps public help supplementary even if the old expanded preference was set', () => {
+  it.each(['creator-start', 'creator-overview', 'source-materials', 'account-diagnosis', 'history', 'audience-analysis', 'simulated-fans', 'simulations', 'drafts', 'topics'] as ActivePage[])('keeps help beside the brand without a separate header on %s', (activePage) => {
+    renderShell({activePage})
+    const help = screen.getByRole('button', {name: '帮助'})
+    expect(help.closest('.brand-row')).toHaveTextContent('小红书创作助手')
+    expect(screen.getByRole('main').firstElementChild).toHaveTextContent('页面内容')
+    expect(screen.getByRole('main').querySelector('.topbar')).toBeNull()
+    expect(screen.queryByRole('button', {name: '页面帮助'})).not.toBeInTheDocument()
+  })
+
+  it('keeps the help menu to two choices without repeated explanatory text', () => {
     renderShell({ showHelp: true })
     expect(screen.queryByLabelText('当前页面帮助')).not.toBeInTheDocument()
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '页面帮助' }))
-    expect(screen.getByRole('tooltip')).toHaveTextContent('这里是帮助内容')
-    fireEvent.keyDown(document, {key: 'Escape'})
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    expect(screen.queryByText('这里是帮助内容')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '帮助' }))
+    const menu = screen.getByRole('dialog')
+    expect(menu).toHaveClass('guide-menu-dialog')
+    expect(within(menu).getByRole('button', {name: '看看当前页怎么用'})).toBeInTheDocument()
+    expect(within(menu).getByRole('button', {name: '了解完整流程'})).toBeInTheDocument()
+    expect(menu.querySelector('.guide-options')?.children).toHaveLength(2)
+    expect(menu.querySelector('p, .guide-options span, .guide-options small')).toBeNull()
+    expect(screen.queryByText('这里是帮助内容')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {name: '关闭'}))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', {name: '帮助'})).toHaveFocus()
   })
 })
