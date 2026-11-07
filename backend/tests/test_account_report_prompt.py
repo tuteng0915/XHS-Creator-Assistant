@@ -82,7 +82,8 @@ def test_template_has_separate_deliverables_and_no_account_specific_examples():
     assert "下次写{已有题材}时，可以{一个具体编辑动作}" in SOURCE_LED_PROFILE_PROMPT
     assert "不诊断原文不存在的缺点" in SOURCE_LED_PROFILE_PROMPT
     assert "没有依据的可选内容用空数组" in SOURCE_LED_PROFILE_PROMPT
-    assert "不推断图片、视频、未选篇目" in SOURCE_LED_PROFILE_PROMPT
+    assert "明确标记的图片识别文字" in SOURCE_LED_PROFILE_PROMPT
+    assert "不推断未读取的图片、视频、未选篇目" in SOURCE_LED_PROFILE_PROMPT
     assert "QSheep" not in SOURCE_LED_PROFILE_PROMPT
     assert "传媒" not in SOURCE_LED_PROFILE_PROMPT
 
