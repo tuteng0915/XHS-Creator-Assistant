@@ -46,6 +46,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
+| [等待与失败统计](wait-and-failure-stats-20261107.md) | 2026-11-07 用已保存记录统计诊断、模拟、创作各阶段耗时与失败类型，并给出优化顺序 |
 | [DeepSeek 创作回归](deepseek-writer-regression-20261016.md) | 2026-10-16 切换 DeepSeek 后的创作回归与格式兼容 |
 | [作者要求变成经历](creator-author-request-boundary-20261017.md) | 作者要求被写成亲历的同稿回放 |
 | [两账号完整创作路径](creator-end-to-end-review-20261017.md) | 完整创作路径实测与增强取舍 |
