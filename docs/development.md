@@ -251,7 +251,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. .venv/bin/python -m pytest -o addopts='' 
 .venv/bin/ruff check --no-cache app tests
 ```
 
-最后在仓库根目录运行 `git diff --check`。2026-11-07 的基线是：前端 75 个文件、828 项通过；后端全量 2360 项通过，耗时约 2.5 分钟；ruff 检查 `app` 通过，`tests` 中 `test_staged_report_check.py` 有 4 处行过长（E501）的既有问题。LangGraph 的弃用提示和 Node 的 localstorage 警告不影响结果。
+最后在仓库根目录运行 `git diff --check`。2026-11-07 的基线是：前端 75 个文件、828 项通过；后端全量 2368 项通过，耗时约 4 分钟；ruff 检查 `app` 通过，`tests` 中 `test_staged_report_check.py` 有 4 处行过长（E501）的既有问题。LangGraph 的弃用提示和 Node 的 localstorage 警告不影响结果。
 
 自动测试使用假响应或 mock，不需要真实模型密钥。后端 pytest 会将应用导入时的默认初始化及各项测试数据隔离到临时目录；不要用真实模型 smoke 替代这组测试。
 

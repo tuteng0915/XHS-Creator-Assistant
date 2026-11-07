@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import re
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
 from typing import Any, Literal, Protocol, TypedDict
@@ -13,7 +15,7 @@ from pydantic import BaseModel, Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from app.db.database import SQLiteDatabase
-from app.errors import ConflictError, ValidationError
+from app.errors import ConflictError, ModelTransportError, ValidationError, transport_reason
 from app.models import ModelOperation, PanelTask, SimulationRunStatus
 from app.repositories.graph_checkpoints import GraphCheckpointRepository
 from app.repositories.simulation_runs import SIMULATION_TERMINAL_STATUSES
@@ -51,6 +53,34 @@ SIMULATION_STAGE_ORDER = [
 ]
 MAX_CONCURRENT_PERSONA_CALLS = 4
 SIMULATION_STEP_TIMEOUT_SECONDS = 30
+# The summary is generated after every visible reply is saved; a longer limit only
+# delays the summary, and cutting off a slow but valid summary costs a second paid call.
+SIMULATION_SYNTHESIS_TIMEOUT_SECONDS = 90
+_HTTP_FAILURE = re.compile(r"^Model call failed \((\d{3})\)$")
+
+
+class SimulationStepTimeout(TimeoutError):
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
+        super().__init__(f"step exceeded {seconds:g} seconds")
+
+
+def simulation_failure_kind(error: Exception) -> tuple[str, str | None]:
+    """Classify a failed unit for records: (kind, detail)."""
+    if isinstance(error, TimeoutError):
+        return "timeout", None
+    if isinstance(error, ModelTransportError):
+        return "no_response", error.kind
+    if isinstance(error, PydanticValidationError):
+        return "invalid_output", None
+    if isinstance(error, ValidationError):
+        text = str(error)
+        match = _HTTP_FAILURE.match(text)
+        if match:
+            return "http_error", match.group(1)
+        if text.startswith("Model response") or "长度上限" in text:
+            return "invalid_output", None
+    return "failed", type(error).__name__
 ACTIVE_SIMULATION_EXECUTION: contextvars.ContextVar[
     _AudienceSimulationGraphExecution | None
 ] = contextvars.ContextVar("audience_simulation_execution", default=None)
@@ -646,6 +676,7 @@ class AudienceSimulationWorkflowService:
         self.live_provider = live_provider
         self.graph = self._build_graph()
         self.step_timeout_seconds = SIMULATION_STEP_TIMEOUT_SECONDS
+        self.synthesis_timeout_seconds = SIMULATION_SYNTHESIS_TIMEOUT_SECONDS
 
     def initial_state_for_run(self, simulation_id: str) -> AudienceSimulationState:
         run = self.simulation_service.get(simulation_id)
@@ -760,6 +791,7 @@ class _AudienceSimulationGraphExecution:
         )
         run = service.simulation_service.get(simulation_id)
         self.response_calls = deepcopy(run.model_metadata.get("responseCalls", []))
+        self.step_records = deepcopy(run.model_metadata.get("stepRecords", []))
         self.recovery = deepcopy(run.model_metadata.get("recovery"))
 
     def record_model_response(self, operation, context, metadata):
@@ -776,7 +808,28 @@ class _AudienceSimulationGraphExecution:
     def model_metadata(self):
         return {"engine": "langgraph", **({"recovery": self.recovery} if self.recovery else {}),
                 **({"responseCalls": self.response_calls}
-                                         if self.response_calls else {})}
+                                         if self.response_calls else {}),
+                **({"stepRecords": self.step_records} if self.step_records else {})}
+
+    def record_step(self, stage_key: str, started: float, error: Exception | None) -> None:
+        # Wall time of one bounded unit (the provider operation), without prompts or outputs.
+        entry: dict[str, Any] = {"stageKey": stage_key, "status": "failed" if error else "completed",
+                                 "seconds": round(time.monotonic() - started, 3)}
+        if error is not None:
+            kind, detail = simulation_failure_kind(error)
+            entry.update(failure=kind, **({"detail": detail} if detail else {}))
+        self.step_records.append(entry)
+
+    def mark_failure(self, stage_key: str, error: Exception) -> None:
+        """Record a unit that failed after its call returned (e.g. output checks)."""
+        kind, detail = simulation_failure_kind(error)
+        for entry in reversed(self.step_records):
+            if entry.get("stageKey") == stage_key:
+                if entry.get("status") == "completed":
+                    entry.update(status="failed", failure=kind, **({"detail": detail} if detail else {}))
+                return
+        self.step_records.append({"stageKey": stage_key, "status": "failed", "seconds": None,
+                                  "failure": kind, **({"detail": detail} if detail else {})})
 
     @classmethod
     def current(cls) -> _AudienceSimulationGraphExecution:
@@ -841,7 +894,8 @@ class _AudienceSimulationGraphExecution:
             output = {'personas': saved_personas} if saved_personas else await self.call_once(
                 lambda: self.provider().personas(
                     positioning=updated["positioning_snapshot"], topic=updated["topic"],
-                )
+                ),
+                stage_key="personas",
             )
             if not saved_personas:
                 for persona in output.get("personas", []):
@@ -897,7 +951,8 @@ class _AudienceSimulationGraphExecution:
                     output = await self.call_once(
                         lambda: self.provider().initial_reaction(
                             persona=persona, topic=updated["topic"]
-                        )
+                        ),
+                        stage_key=f"initial_reactions.{persona_id}",
                     )
                 result = PersonaReactionResult.model_validate(
                     resolve_reaction_anchor(output, updated["topic"])
@@ -921,6 +976,7 @@ class _AudienceSimulationGraphExecution:
                                 {"reactions": list(delivered_reactions), "personaId": persona_id})
                 return result["reaction"]
             except Exception as error:
+                self.mark_failure(f"initial_reactions.{persona_id}", error)
                 updated.setdefault("stage_errors", {})[
                     f"initial_reactions.{persona_id}"
                 ] = self.error_message(error)
@@ -1017,7 +1073,8 @@ class _AudienceSimulationGraphExecution:
                             topic=updated["topic"],
                             other_reactions=others,
                             prior_reaction=prior_by_id[persona_id],
-                        )
+                        ),
+                        stage_key=f"debate_responses.{persona_id}",
                     )
                 result = DebateResponseResult.model_validate(output).model_dump(
                     mode="json"
@@ -1047,6 +1104,7 @@ class _AudienceSimulationGraphExecution:
                                 {"debateResponses": list(delivered_responses), "personaId": persona_id})
                 return response
             except Exception as error:
+                self.mark_failure(f"debate_responses.{persona_id}", error)
                 updated.setdefault("stage_errors", {})[
                     f"debate_responses.{persona_id}"
                 ] = self.error_message(error)
@@ -1104,7 +1162,9 @@ class _AudienceSimulationGraphExecution:
                     personas=updated.get("personas", []),
                     reactions=updated.get("initial_reactions", []),
                     debate_responses=updated.get("debate_responses", []),
-                )
+                ),
+                stage_key="synthesis",
+                timeout=self.service.synthesis_timeout_seconds,
             )
             result = SimulationSynthesisResult.model_validate(output).model_dump(
                 mode="json"
@@ -1187,6 +1247,7 @@ class _AudienceSimulationGraphExecution:
         self, stage_key: str, error: Exception, state: dict[str, Any]
     ) -> None:
         message = self.error_message(error)
+        self.mark_failure(stage_key, error)
         state.setdefault("stage_errors", {})[stage_key] = message
         self.service.simulation_service.save_progress(
             self.simulation_id,
@@ -1199,11 +1260,26 @@ class _AudienceSimulationGraphExecution:
     def selected_unit(self, key: str) -> bool:
         return not self.recovery or self.recovery["stageKey"] in {"personas", key}
 
-    async def call_once(self, call: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
+    async def call_once(
+        self, call: Callable[[], Awaitable[dict[str, Any]]], *, stage_key: str,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         # Bound the whole unit, including existing checks, with no hidden second
         # attempt. Cancellation propagates to the transport; explicit recovery
         # owns any subsequent request (billing after timeout remains unknown).
-        return await asyncio.wait_for(call(), timeout=self.service.step_timeout_seconds)
+        limit = self.service.step_timeout_seconds if timeout is None else timeout
+        started = time.monotonic()
+        try:
+            result = await asyncio.wait_for(call(), timeout=limit)
+        except TimeoutError:
+            error = SimulationStepTimeout(limit)
+            self.record_step(stage_key, started, error)
+            raise error from None
+        except Exception as error:
+            self.record_step(stage_key, started, error)
+            raise
+        self.record_step(stage_key, started, None)
+        return result
 
     async def save_checkpoint(self, node_key: str, state: dict[str, Any]) -> None:
         checkpoint_state = {
@@ -1302,10 +1378,18 @@ class _AudienceSimulationGraphExecution:
 
     @staticmethod
     def error_message(error: Exception) -> str:
+        kept = "已保留其他结果，可单独重试。"
+        if isinstance(error, SimulationStepTimeout):
+            return f"本环节等待超时（超过{error.seconds:g}秒未收到回复），{kept}"
         if isinstance(error, TimeoutError):
-            return "本环节等待超时，已保留其他结果，可单独重试。"
-        if isinstance(error, PydanticValidationError):
-            return "Model response failed structured validation"
+            return f"本环节等待超时，{kept}"
+        kind, detail = simulation_failure_kind(error)
+        if kind == "no_response":
+            return f"没有收到模型回复（{transport_reason(detail or '')}），{kept}"
+        if kind == "http_error":
+            return f"模型服务返回错误（HTTP {detail}），{kept}"
+        if kind == "invalid_output" and not (isinstance(error, ValidationError) and "长度上限" in str(error)):
+            return f"模型回复格式不符合要求，{kept}"
         if isinstance(error, (ValidationError, ConflictError)):
             return str(error)
         return str(error) or error.__class__.__name__

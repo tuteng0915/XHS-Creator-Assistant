@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
-from app.errors import ValidationError
+from app.errors import ModelTransportError, ValidationError
 from app.models import ModelCallRequest, ModelCallResponse, ModelOperation
 from app.services.account_report_contract import AccountReportOutputError
 from app.services.account_report_prompt import (
@@ -633,9 +633,10 @@ class ModelCallService:
                 thinking_parameters={"thinking": {"type": "disabled"}},
                 client_factory=self._deepseek_client, review_prompt=review_prompt,
             )
-        except (httpx.RequestError, httpx.InvalidURL):
-            # Request errors can contain endpoint URLs and provider response text.
-            raise ValidationError("DeepSeek model call failed (transport error)") from None
+        except (httpx.RequestError, httpx.InvalidURL) as error:
+            # Request errors can contain endpoint URLs and provider response text:
+            # keep only the exception class so records can tell no-reply from bad output.
+            raise ModelTransportError(type(error).__name__, provider="deepseek") from None
 
     async def _call_compatible(
         self, operation: ModelOperation, context: dict[str, Any], *,

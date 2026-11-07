@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from app.config import Settings
-from app.errors import ValidationError
+from app.errors import ModelTransportError, ValidationError
 from app.models import ModelOperation
 from app.services.account_report_contract import AccountReportOutputError
 from app.services.model_calls import ModelCallService
@@ -291,6 +291,32 @@ def test_deepseek_external_errors_never_include_raw_response_or_secret(
         assert error.value.code == "invalid_response"
 
 
+@pytest.mark.parametrize("raised,reason", [
+    (httpx.ReadTimeout, "等待回复超时"),
+    (httpx.RemoteProtocolError, "模型服务中断了连接"),
+    (httpx.ConnectError, "无法连接模型服务"),
+])
+def test_deepseek_no_reply_keeps_transport_kind_without_provider_text(
+    settings, monkeypatch, raised, reason,
+):
+    def respond(request):
+        raise raised("private-provider-text placeholder-secret", request=request)
+
+    service = ModelCallService(replace(
+        settings, model_provider="deepseek", deepseek_api_key="placeholder-secret",
+    ))
+    monkeypatch.setattr(service, "_deepseek_client", lambda _: httpx.AsyncClient(
+        transport=httpx.MockTransport(respond),
+    ))
+    monkeypatch.setattr(service, "_call_qwen", forbid_call)
+    with pytest.raises(ModelTransportError) as error:
+        asyncio.run(_invoke(service, "regular"))
+    assert error.value.kind == raised.__name__ and error.value.provider == "deepseek"
+    assert str(error.value) == f"模型服务没有返回结果：{reason}"
+    assert "private-provider-text" not in str(error.value)
+    assert error.value.__suppress_context__ is True
+
+
 def test_deepseek_read_timeout_applies_to_account_feedback_and_topics(settings):
     service = ModelCallService(replace(settings, deepseek_read_timeout_seconds=123))
     for operation in (ModelOperation.PROFILE, ModelOperation.PAIN_POINTS, ModelOperation.TOPICS):
@@ -313,7 +339,8 @@ def test_deepseek_invalid_url_never_exposes_configured_values(settings, monkeypa
     with pytest.raises(ValidationError) as error:
         asyncio.run(_invoke(service, kind))
     assert not isinstance(error.value, AccountReportOutputError)
-    assert str(error.value) == "DeepSeek model call failed (transport error)"
+    assert isinstance(error.value, ModelTransportError) and error.value.kind == "InvalidURL"
+    assert str(error.value) == "模型服务没有返回结果：模型服务地址配置无效"
     assert error.value.__suppress_context__ is True
     assert "placeholder" not in str(error.value)
     assert "api.example" not in str(error.value)
