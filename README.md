@@ -131,7 +131,7 @@ npm --prefix frontend run dev -- --host 127.0.0.1
 
 ## 面向本地使用的轻量架构
 
-`React + TypeScript` · `FastAPI` · `LangGraph` · `SQLite` · `DeepSeek / Qwen`
+`React + TypeScript` · `FastAPI` · `LangGraph` · `SQLite` · `DeepSeek`（文字与诊断图片文字默认；Qwen 只用于内部工作台的图像／视频和显式回退）
 
 账号诊断与读者群聊使用各自的 LangGraph 流程；创作助手每次由一个写作 Agent 回应，只读取当前稿件、当前对话段和作者选择的参考。前后端通过 HTTP／SSE 通信，内容与历史保存在本地 SQLite 和文件目录。
 
@@ -150,6 +150,8 @@ data/       本地数据库、上传文件与运行数据（不进入 Git）
 
 | 文档 | 适合什么时候看 |
 | --- | --- |
+| [项目总览](docs/project-overview.md) | 一次看清当前产品决定、架构、数据流、完成度与测试基线 |
+| [路线图](docs/roadmap.md) | 接下来按什么顺序做什么 |
 | [本地安装与排障](docs/local-installation.md) | 第一次运行，或配置主页导入、浏览器登录 |
 | [数据交接](docs/data-handoff.md) | 把现有账号、笔记、作品与历史交给协作者 |
 | [开发与验证](docs/development.md) | 调整模型配置、运行测试、做小规模复现 |

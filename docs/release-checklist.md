@@ -1,8 +1,10 @@
 # GitHub 发布前检查清单
 
+> 文档状态（2026-11-07 标注）：部分过时。本文写于 2026-08：Qwen smoke 已不是默认检查，OCR 已在账号诊断中实现（DeepSeek）；测试命令改为链接到开发与验证。当前状态见[项目总览](project-overview.md)。
+
 更新日期：2026-08-24
 
-本文档用于把当前版本提交到 GitHub 前做最后确认。它不是产品路线图，路线图见 `product-requirements.md` 和 `status-and-todo.md`。
+本文档用于把当前版本提交到 GitHub 前做最后确认。它不是产品路线图，路线图见 [roadmap.md](roadmap.md)。
 
 ## 当前版本结论
 
@@ -58,22 +60,7 @@ rg -n 'sk-[A-Za-z0-9_.-]|ANTHROPIC_API_KEY|QWEN_API_KEY|DASHSCOPE_API_KEY' \
 
 ### 5. 跑自动化检查
 
-前端：
-
-```bash
-cd frontend
-npm test -- --run
-npm run lint
-npm run build
-```
-
-后端：
-
-```bash
-PYTHONPATH=backend backend/.venv/bin/python -m pytest backend/tests -q
-PYTHONPATH=backend backend/.venv/bin/python -m ruff check backend/app backend/tests
-PYTHONPATH=backend backend/.venv/bin/python -m compileall -q backend/app
-```
+命令见[开发与验证：免费自动检查](development.md#免费自动检查)，那里的命令和基线随代码更新。
 
 ### 6. 按需跑真实 API smoke
 

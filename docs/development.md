@@ -62,9 +62,59 @@ npm run dev -- --host 127.0.0.1
 
 模型连通性需单独运行下文的真实模型 smoke；抓取可用性需完成真人登录验收，不能由 health 返回正常来推断。
 
+### 使用开发库启动演示实例
+
+上面的默认命令会使用主库 `data/app.sqlite3`。继续给用户演示或复测时，改用独立开发库 `data/development-runtime/20261016-f767f21/data/`（数据库与媒体目录成套使用）。启动前确认 5174／8000 端口和执行中的任务，并在同目录的 `backups/` 另建一份数据库备份：
+
+```bash
+R=data/development-runtime/20261016-f767f21
+sqlite3 "$R/data/app.sqlite3" ".backup '$R/backups/before-$(date +%Y%m%d)-<用途>.sqlite3'"
+```
+
+后端在仓库根目录运行下面的片段。它显式指向开发库，并读取本机的历史配置文件（DeepSeek 凭据目前只在那里；换电脑时改用自己的被忽略配置文件）：
+
+```bash
+backend/.venv/bin/python - <<'PY'
+import os
+import sys
+from pathlib import Path
+
+root = Path.cwd()
+assert (root / 'backend/app/main.py').is_file(), '请在仓库根目录运行'
+data = root / 'data/development-runtime/20261016-f767f21/data'
+assert (data / 'app.sqlite3').is_file(), '先确认开发数据库位置'
+sys.path.insert(0, str(root / 'backend'))
+from app.config import Settings, load_env_file_defaults
+
+load_env_file_defaults(Path('/Users/tut/.codex/worktrees/account-reading-quality/SqsAgent/.env.local'))
+os.environ.update({
+    'DATABASE_PATH': str(data / 'app.sqlite3'),
+    'UPLOAD_DIRECTORY': str(data / 'uploads/trends'),
+    'XHS_CAPTURE_DIRECTORY': str(data / 'xhs-captures'),
+    'MODEL_PROVIDER': 'deepseek',
+    'ACCOUNT_DIAGNOSIS_PROVIDER': 'deepseek',
+    'CREATOR_WRITING_PROVIDER': 'deepseek',
+    'DEEPSEEK_MODEL': 'deepseek-flash',
+})
+settings = Settings.from_environment()
+if not settings.deepseek_api_key.strip():
+    raise SystemExit('请先配置本地DeepSeek凭据')
+import uvicorn
+uvicorn.run('app.main:app', host='127.0.0.1', port=8000)
+PY
+```
+
+前端在仓库根目录另开终端：
+
+```bash
+npm --prefix frontend run dev -- --host 127.0.0.1 --port 5174 --strictPort
+```
+
+应用导入时会执行数据库迁移。2026-11-07 用这套命令启动过，开发库已在 0041，没有新迁移。启动后先看 `/api/health`，再打开 `http://127.0.0.1:5174/`；health 正常不代表模型密钥可用。只查看、做界面回归时，不点击会调用模型的按钮。
+
 ## 模型配置
 
-所有文字 live generation 默认通过 DeepSeek Flash 非思考，浏览器不持有模型 API key。包括账号诊断、受众画像、读者推荐、独立反应／讨论／总结、作者访谈、创作编辑、旧专家协作与其他文字助手。图片／视频的理解与生成仍是单独的 Qwen media 服务，不将其误接给文字模型；没有 Qwen 密钥不影响文字流程。
+所有文字 live generation 默认通过 DeepSeek Flash 非思考，浏览器不持有模型 API key。包括账号诊断、受众画像、读者推荐、独立反应／讨论／总结、作者访谈、创作编辑、旧专家协作与其他文字助手。账号诊断的图片文字识别（`services/account_image_text.py`，每次最多24张、单张10MB、3张并发，按哈希缓存）也直接调用 DeepSeek，使用同一组 `DEEPSEEK_*` 配置。独立的图片／视频理解与生成（内部工作台的 Qwen media 服务）仍走 Qwen，没有 Qwen 密钥不影响文字流程和诊断的图片文字识别。
 
 ### 账号诊断：DeepSeek V4.1 Flash
 
@@ -167,7 +217,7 @@ export ANTHROPIC_MESSAGES_URL=https://your-qwen-host/apps/anthropic/v1/messages
 
 ### Qwen 多模态配置
 
-`ANTHROPIC_*` 只供文本模型的 Anthropic-compatible 路径使用。图片/视频理解与生成始终走 Qwen / DashScope media skills；即使共用同一密钥，也要额外设置 Qwen 变量。例如自定义兼容服务：
+`ANTHROPIC_*` 只供文本模型的 Anthropic-compatible 路径使用。内部工作台的图片/视频理解与生成走 Qwen / DashScope media skills（账号诊断的图片文字识别不在此列，走 DeepSeek，见[模型配置](#模型配置)）；即使共用同一密钥，也要额外设置 Qwen 变量。例如自定义兼容服务：
 
 ```bash
 export QWEN_API_KEY=替换为自己的密钥
@@ -183,22 +233,25 @@ export QWEN_DASHSCOPE_BASE_URL=https://your-qwen-host/api/v1
 
 ### 免费自动检查
 
-前端检查，从仓库根目录执行：
+这里是测试命令的统一出处，其他文档只链接到本节。前端检查，从仓库根目录执行：
 
 ```bash
-cd frontend
-npm run lint
-npm run test
-npm run build
+npm --prefix frontend test -- --maxWorkers=2
+npm --prefix frontend run lint
+npm --prefix frontend run build -- --outDir /private/tmp/xhs-check-build
 ```
 
-后端检查，在另一个终端从仓库根目录执行：
+默认并发跑前端测试曾出现 5000ms 超时；`--maxWorkers=2` 可以稳定通过，不需要调高业务测试的超时。构建输出放到临时目录，避免覆盖 `frontend/dist`。
+
+后端检查，在 `backend/` 目录执行。先跑与改动相关的测试文件，再按风险跑全量：
 
 ```bash
-cd backend
-.venv/bin/python -m ruff check app tests
-.venv/bin/python -m pytest
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. .venv/bin/python -m pytest -o addopts='' -q -p no:cacheprovider tests/test_account_report_prompt.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. .venv/bin/python -m pytest -o addopts='' -q -p no:cacheprovider
+.venv/bin/ruff check --no-cache app tests
 ```
+
+最后在仓库根目录运行 `git diff --check`。2026-11-07 的基线是：前端 75 个文件、828 项通过；后端全量 2360 项通过，耗时约 2.5 分钟；ruff 检查 `app` 通过，`tests` 中 `test_staged_report_check.py` 有 4 处行过长（E501）的既有问题。LangGraph 的弃用提示和 Node 的 localstorage 警告不影响结果。
 
 自动测试使用假响应或 mock，不需要真实模型密钥。后端 pytest 会将应用导入时的默认初始化及各项测试数据隔离到临时目录；不要用真实模型 smoke 替代这组测试。
 
@@ -272,7 +325,7 @@ backend/.venv/bin/python scripts/check_audience_reactions.py \
   --live --output data/evals/reactions-run-01
 ```
 
-只有显式加 `--live --output <新的报告目录>` 才会调用 Qwen。输出目录必须尚不存在，脚本拒绝覆盖。完整图检查的应用初始化与运行数据库均自动隔离到临时目录，正常结束或异常时清理，无需额外包裹环境变量。
+只有显式加 `--live --output <新的报告目录>` 才会调用模型（使用当前配置的 provider，默认 DeepSeek）。输出目录必须尚不存在，脚本拒绝覆盖。完整图检查的应用初始化与运行数据库均自动隔离到临时目录，正常结束或异常时清理，无需额外包裹环境变量。
 
 ### 复用已有角色与报名条件对照
 
@@ -307,7 +360,7 @@ backend/.venv/bin/python scripts/check_account_profile.py \
   --input-from data/evals/profile-run-01/report.json
 ```
 
-真实检查仅调用一次 Qwen，需要新输出目录，并可明确设置本次读取超时：
+真实检查仅调用一次模型（按账号诊断配置的 provider，默认 DeepSeek），需要新输出目录，并可明确设置本次读取超时：
 
 ```bash
 backend/.venv/bin/python scripts/check_account_profile.py \

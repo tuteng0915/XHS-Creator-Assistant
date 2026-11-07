@@ -1,5 +1,7 @@
 # Architecture Review: Creator Asset Workspace
 
+> 文档状态（2026-11-07 标注）：历史，2026-08 的架构审查。文中的方案、默认配置（包括 Qwen 默认）和结论已被后续实现取代，仅用于了解演变。当前状态见[项目总览](project-overview.md)。
+
 Reviewed on 2026-08-13 against the current codebase.
 
 This report replaces older review notes. The product direction is now clear:

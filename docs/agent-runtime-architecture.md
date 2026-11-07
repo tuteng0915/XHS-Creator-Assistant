@@ -1,5 +1,7 @@
 # Agent Runtime and Context Architecture
 
+> 文档状态（2026-11-07 标注）：部分过时。文中单助手和专家调用使用 Qwen 的说法已过时，现在默认 DeepSeek（`deepseek-flash`）；关于不使用 checkpointer 的说明仍然正确。当前状态见[项目总览](project-overview.md)。
+
 ## 2026-10-10 product revision (single-writer core implemented)
 
 New public writing sessions explicitly use `assistantMode=single_writer`, replacing the three-specialist experience described below. One request has one writing turn addressed directly to the creator, using the existing session/message/run persistence, Qwen adapter, worker recovery and confirmation boundaries. No new runtime or database migration was added. Account analysis and reader panels keep their flows; both legacy conversation types remain readable and do not receive new single-writer messages. The API default remains `legacy_team` for older callers; the public UI always requests the new mode explicitly.

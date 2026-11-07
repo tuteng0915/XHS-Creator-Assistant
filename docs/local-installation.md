@@ -140,14 +140,7 @@ tar \
 - `/api/health` 返回正常，前端能加载账号选择列表。
 - 原账号的已抓取笔记、正文和封面可打开，切换账号不会混入其他账号的数据。
 - 选题、创作内容、对话、分析历史和受众模拟历史能重新打开；仅有数据库而缺少上传目录时，文字可能正常但图片会失败。
-- 先运行无需付费的自动检查：
-
-  ```bash
-  (cd backend && .venv/bin/python -m pytest tests)
-  npm --prefix frontend run lint
-  npm --prefix frontend test
-  npm --prefix frontend run build
-  ```
+- 先运行无需付费的自动检查，命令见[开发与验证：免费自动检查](development.md#免费自动检查)。
 
 - 再按需验证真实模型及抓取：`backend/.venv/bin/python scripts/smoke_model_api.py` 会实际请求配置的模型，可能产生费用；主页抓取需人工扫码，先用少量笔记，不需要为了确认数据恢复而重新抓取所有账号。
 
