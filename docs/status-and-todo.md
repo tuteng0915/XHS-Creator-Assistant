@@ -2,6 +2,16 @@
 
 > 本文是按日期倒序的工作记录。当前状态的汇总见[项目总览](project-overview.md)，待办与优先级见[路线图](roadmap.md)；文末 2026-08 的基线各节已过时。
 
+## 2026-11-08 读者模拟回测
+
+- 用户确认作品展示的用途后，选择先回测读者模拟。只读检查样本与泄露后，用户选定方案 A，上限 140 次（“Plan A, ≤140 calls”）。结果见[读者模拟回测](reader-simulation-backtest-20261108.md)，脚本为`scripts/backtest_reader_simulation.py`，图和抽查表在`docs/assets/reader-simulation-backtest-20261108/`，完整运行记录在本地`data/evals/reader-simulation-backtest-20261108/report.json`（不入库）。
+- 实际 134 次 DeepSeek 请求，全部正常返回；开发库只读复制到临时目录，哈希未变；没有改业务代码。
+- 结论：
+  - 在 QSheep 5 篇留出笔记上，模拟读者组覆盖 15 个真实评论主题中的 1 个，命中 5/44；直接预测评论覆盖 5 个，命中 11/40。
+  - 模拟读者的留言全部是追问缺失信息，回应多为“同问”。
+  - 两个账号的排序都无法判断：模拟立场几乎全是“犹豫”，对照分数只有 6 和 7。
+- 待办：模型标注需要用户人工抽查（`labelling-samples.md`）。
+
 ## 2026-11-07 受众模拟：失败原因与汇总等待上限
 
 - 用户确认根因与方案（“Yes, 90 s summary”）后修改。
