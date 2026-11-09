@@ -996,6 +996,7 @@ class ModelOperation(StrEnum):
     VIDEO_CREATOR_PROFILE = "video_creator_profile"
     VIDEO_QUALITY_ANALYSIS = "video_quality_analysis"
     INCENTIVE_FIT_ANALYSIS = "incentive_fit_analysis"
+    COMMENT_PREVIEW = "comment_preview"
 
 
 class ModelCallRequest(APIModel):

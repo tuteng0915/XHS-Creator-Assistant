@@ -1,0 +1,37 @@
+{
+  "version": "comment-tags/v1",
+  "occasions": [
+    {"name": "招聘内推", "typicalReactions": ["顶帖", "求资源", "提问", "蹭帖", "怀念"]},
+    {"name": "喜报成就", "typicalReactions": ["恭喜", "夸赞", "关怀", "共鸣"]},
+    {"name": "吐槽趣事", "typicalReactions": ["玩笑", "猜测", "现实关联", "支招", "共鸣"]},
+    {"name": "攻略资源", "typicalReactions": ["收藏", "夸赞", "提问", "行动表态"]},
+    {"name": "生活分享", "typicalReactions": ["夸赞", "羡慕", "共鸣", "延伸话题", "感慨"]},
+    {"name": "经历复盘", "typicalReactions": ["恭喜", "共鸣", "提问", "现实关联", "夸赞"]},
+    {"name": "观点讨论", "typicalReactions": ["共鸣", "提问", "背书", "支招", "延伸话题"]}
+  ],
+  "reactions": [
+    {"name": "恭喜", "definition": "祝贺作者的结果或好消息"},
+    {"name": "夸赞", "definition": "夸作者本人、文字、图片或项目"},
+    {"name": "共鸣", "definition": "说自己也有同样的感受或处境"},
+    {"name": "羡慕", "definition": "羡慕作者的生活、机会或状态"},
+    {"name": "关怀", "definition": "对作者表达关心、支持或亲近"},
+    {"name": "怀念", "definition": "回忆帖子涉及的团队、学校或一段经历"},
+    {"name": "顶帖", "definition": "用很短的话把帖子顶上去或表示蹲后续"},
+    {"name": "收藏", "definition": "表示已收藏、马克，以后再看"},
+    {"name": "关注", "definition": "表示因为这篇关注了作者"},
+    {"name": "行动表态", "definition": "说自己要去投递、尝试或照着做"},
+    {"name": "玩笑", "definition": "接梗、调侃、觉得好笑"},
+    {"name": "猜测", "definition": "猜帖子没明说的公司、人物或内情"},
+    {"name": "现实关联", "definition": "说自己和作者或帖中对象在现实中有交集"},
+    {"name": "提问", "definition": "询问帖子里没有回答的具体问题"},
+    {"name": "求资源", "definition": "直接求投递方式、联系方式、链接或资料"},
+    {"name": "支招", "definition": "给作者或其他读者出主意"},
+    {"name": "延伸话题", "definition": "顺着帖子聊相关的人物或事件"},
+    {"name": "感慨", "definition": "对帖子里的现象发一句旁观感叹"},
+    {"name": "背书", "definition": "替作者或帖中提到的人和机构作证或站台"},
+    {"name": "蹭帖", "definition": "借评论区宣传自己的招聘、账号或内容"}
+  ],
+  "targets": ["作者本人", "帖子观点", "缺失信息", "图片", "其他读者"],
+  "readers": ["熟人", "同路人", "陌生人"],
+  "lengths": ["一个词", "一句话", "一段话"]
+}

@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api import create_api_router
+from app.comment_preview_api import comment_preview_router
 from app.config import Settings
 from app.db.database import SQLiteDatabase
 from app.errors import ApplicationError, ConflictError, NotFoundError, ValidationError
@@ -60,6 +61,7 @@ from app.services.audience_analyses import (
     AudienceAnalysisResponse,
     AudienceAnalysisService,
 )
+from app.services.comment_preview import CommentPreviewService
 from app.services.fan_voice_templates import FanVoiceTemplateResponse, list_fan_voice_templates
 from app.services.panel_interviews import PanelInterviewService, RealPanelInterviewProvider
 from app.services.reader_selection_model import RealReaderSelectionProvider
@@ -168,6 +170,7 @@ def create_app(
         analysis_repository,
     )
     model_call_service = ModelCallService(active_settings)
+    comment_preview_service = CommentPreviewService(database, model_call_service)
     account_model_call_service = ModelCallService(active_settings.for_account_diagnosis())
     draft_service = DraftService(
         database,
@@ -366,6 +369,8 @@ def create_app(
     application.state.panel_interview_service = panel_interview_service
     application.include_router(panel_interview_router(panel_interview_service))
     application.include_router(simulation_review_router(SimulationTopicIdeaService(database)))
+    application.include_router(comment_preview_router(comment_preview_service))
+    application.state.comment_preview_service = comment_preview_service
     application.include_router(reader_selection_router(
         reader_selection_requests, reader_selection_worker,
     ))

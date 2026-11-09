@@ -21,6 +21,8 @@ import type {
   MediaAsset,
   MediaAssetType,
   VideoPreviewDeriveResponse,
+  CommentPreview,
+  CommentPreviewTarget,
   SimulationRun,
   SimulationRunSummary,
   SimulationPersonaOverrides,
@@ -669,6 +671,15 @@ export const readerSelectionApi = {
     }, payload.accountNoteSelection),
   get: (workspaceId: string, id: string) =>
     request<ReaderSelection>(`/api/workspaces/${workspaceId}/reader-selections/${id}`),
+}
+
+export const commentPreviewApi = {
+  create: (workspaceId: string, target: CommentPreviewTarget) =>
+    request<CommentPreview>(`/api/workspaces/${workspaceId}/comment-previews`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({...target, mode: 'live'}),
+    }),
 }
 
 export const simulationRunApi = {

@@ -336,6 +336,7 @@ MAX_TOKENS = {
     ModelOperation.VIDEO_CREATOR_PROFILE: 1800,
     ModelOperation.VIDEO_QUALITY_ANALYSIS: 2200,
     ModelOperation.INCENTIVE_FIT_ANALYSIS: 1800,
+    ModelOperation.COMMENT_PREVIEW: 1400,
 }
 
 _ACCOUNT_REPORT_STAGE_BUDGETS = {"overview": 1600, "read": 1600, "synthesis": 6000}
@@ -838,6 +839,9 @@ class ModelCallService:
     def _build_prompt(
         self, operation: ModelOperation, context: dict[str, Any]
     ) -> tuple[str, str]:
+        if operation == ModelOperation.COMMENT_PREVIEW:
+            from app.services.comment_preview import comment_preview_prompt
+            return comment_preview_prompt(context)
         if operation == ModelOperation.PANEL_INTERVIEW:
             from app.services.panel_interviews import build_interview_prompt
             return build_interview_prompt(context)
@@ -1122,6 +1126,7 @@ factCheck.safeToApply 表示本次更新没有未确认事实。supportedClaims 
             ModelOperation.VIDEO_CREATOR_PROFILE: {"creatorProfile": dict},
             ModelOperation.VIDEO_QUALITY_ANALYSIS: {"videoQuality": dict},
             ModelOperation.INCENTIVE_FIT_ANALYSIS: {"incentiveFit": dict},
+            ModelOperation.COMMENT_PREVIEW: {"preview": dict},
         }
         value = cls._normalize_output_aliases(operation, value)
         # Specialist handoffs deliberately use an exact, auditable wire

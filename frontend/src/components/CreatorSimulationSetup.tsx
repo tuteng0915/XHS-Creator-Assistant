@@ -10,6 +10,7 @@ import './TrialRoom.css'
 import './SimulationHub.css'
 import { SimulatedFanPicker } from './SimulatedFansPage'
 import { CreatorNoteSelectionDialog } from './CreatorNoteSelectionDialog'
+import { CommentPreview } from './CommentPreview'
 
 interface Props {
   workspaceId: string
@@ -154,6 +155,8 @@ export function CreatorSimulationSetup(props: Props) {
     {targetKind!=='account'&&target&&!target.body&&<p className="muted">只测标题吸引力与阅读期待，写出正文后可再做全文试读。</p>}
     {targetKind!=='account'&&target && <details className="simulation-target-preview"><summary>{target.body ? '查看待测正文' : '仅预演选题概念'}</summary>
       <p><strong>{target.title}</strong>{target.body && <><br />{target.body}</>}</p></details>}
+    {targetKind!=='account'&&target&&(noteRef||topic)&&<CommentPreview key={scope} workspaceId={workspaceId} disabled={running||applying}
+      target={noteRef||{topicId:topic!.id}}/>}
     <fieldset className="panel-task-controls" disabled={running || applying}>
       <legend>{targetKind==='account'?'讨论方式':'试读方式'} <InfoHint label="模拟范围说明">{targetKind==='account'
         ?'从所选笔记出发，聊聊为什么关注、期待什么，以及哪些方向值得持续讲。'

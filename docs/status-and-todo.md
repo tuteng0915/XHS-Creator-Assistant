@@ -2,6 +2,14 @@
 
 > 本文是按日期倒序的工作记录。当前状态的汇总见[项目总览](project-overview.md)，待办与优先级见[路线图](roadmap.md)；文末 2026-08 的基线各节已过时。
 
+## 2026-11-09 评论区预览（演示）
+
+- 用户决定把“生成留言”改成从 tag 库选择反应、再按 tag 写留言，只按演示用途做，不做量化评测（“对，来吧做吧”）。现有读者模拟不动，继续用于改稿反馈。
+- 新增：`backend/app/services/comment_tags.json`（7 个场合、20 个反应 tag，可直接增改）、`comment_preview.py`、`comment_preview_api.py`，接口`POST /api/workspaces/{id}/comment-previews`；前端`CommentPreview`放在受众模拟的已发布笔记级和创作级。不写数据库，每次一次模型调用；模型可以现场细化或新增 tag，界面会标出。
+- 检查：后端全量 2377 通过；前端 830 通过，lint 和 build 通过。真实调用 5 次（DeepSeek，单次 2.6～3.1 秒），用已保存的 5 篇笔记肉眼对比真实评论；40 条里提问 4 条、求资源 2 条，互动类反应基本对路。
+- 浏览器：受众模拟已发布笔记级，桌面和 375 宽度，无横向溢出，无控制台错误。开发后端未重启，接口响应在页面里用真实输出替换，真实后端到前端的整条链路还没走过。
+- 限制：tag 库是看过这批评论后写的，这 5 篇不是独立检查；模型看不到配图，以夸图片为主的评论说不中；熟人互动只能写语气。
+
 ## 2026-11-08 读者模拟回测
 
 - 用户确认作品展示的用途后，选择先回测读者模拟。只读检查样本与泄露后，用户选定方案 A，上限 140 次（“Plan A, ≤140 calls”）。结果见[读者模拟回测](reader-simulation-backtest-20261108.md)，脚本为`scripts/backtest_reader_simulation.py`，图和抽查表在`docs/assets/reader-simulation-backtest-20261108/`，完整运行记录在本地`data/evals/reader-simulation-backtest-20261108/report.json`（不入库）。

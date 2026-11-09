@@ -376,6 +376,27 @@ export interface AnalysisRun extends AnalysisRunSummary {
 }
 
 export type SimulationCategory = 'account' | 'published_note' | 'creation'
+
+export type CommentPreviewTarget = {sourceMaterialId: string; noteId: string} | {topicId: string}
+
+export interface PreviewComment {
+  tag: string
+  isNewTag: boolean
+  detail: string
+  target: string
+  reader: string
+  length: string
+  text: string
+}
+
+export interface CommentPreview {
+  title: string
+  occasion: string
+  occasionReason: string
+  comments: PreviewComment[]
+  tagLibraryVersion: string
+  mode: 'demo' | 'live'
+}
 export type SimulationPersonaOverrides = Record<string, {
   profile?: string
   coreConcern?: string
