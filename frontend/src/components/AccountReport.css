@@ -21,10 +21,11 @@
   border-top: 0;
 }
 
+/* Report headings share one ink; hierarchy comes from size and weight, not hue. */
 .account-report h4,
 .account-report.account-portrait-view section h4 {
   margin: 0 0 12px;
-  color: var(--report-observation-ink);
+  color: var(--ink);
   font-size: 16px;
   font-weight: 600;
   line-height: 1.5;
@@ -47,18 +48,7 @@
 .account-report .account-portrait-claim:last-child { padding-bottom: 0; }
 .account-report .account-portrait-keywords { margin-top: 4px; }
 
-.account-report .account-portrait-keyword,
-.account-report .account-profile-tag {
-  border-color: var(--report-observation-border);
-  background: var(--report-observation-surface);
-  color: var(--report-observation-ink);
-}
-
-.account-report .account-portrait-keyword[aria-expanded="true"] {
-  border-color: var(--report-observation-ink);
-  background: var(--report-observation-surface);
-  color: var(--report-observation-ink);
-}
+/* Topic chips are neutral; the expanded one uses the shared selected state from App.css. */
 
 .account-report .account-portrait-keyword-detail,
 .account-report .account-portrait-evidence {
@@ -68,12 +58,10 @@
 
 .account-report .account-portrait-quotes span { border-color: var(--report-observation-border); }
 
-.account-report.account-portrait-view .account-portrait-strengths > h4 { color: var(--report-strength-ink); }
+/* Strengths are plain findings: a neutral rule, no tinted panel (yellow belongs to suggestions). */
 .account-report .account-portrait-strengths > .account-portrait-claims {
-  padding: 10px 14px;
-  border-left: 3px solid var(--report-strength-border);
-  border-radius: 8px;
-  background: var(--report-strength-surface);
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid #ecc9a6;
 }
 
 .account-report .account-report-topics {
@@ -137,8 +125,6 @@
 
 .account-report .account-report-example-quote { color: var(--ink); }
 
-.account-report .account-report-next-steps > h4,
-.account-report.account-portrait-view .account-report-next-steps > h4 { color: var(--report-suggestion-ink); }
 .account-report .account-report-next-steps > .account-portrait-claims,
 .account-report .account-report-next-steps > ol {
   padding: 10px 14px;
@@ -175,3 +161,26 @@
 .account-report .account-report-saved-performance .cmp-lose h5 { color: var(--report-lower-ink); }
 .account-report .account-report-legacy-performance .cmp-item,
 .account-report .account-report-saved-performance .cmp-item { font-size: 14px; }
+
+/* Each section gets a small tinted icon tile; heading text keeps the one report ink. */
+.account-report > .account-portrait-intro > h4,
+.account-report > .account-performance-view > h4,
+.account-report > .account-portrait-strengths > h4,
+.account-report > .account-report-content > h4,
+.account-report > .account-report-expression > h4,
+.account-report > .account-report-next-steps > h4 { display: flex; align-items: center; gap: 10px; }
+.account-report > .account-portrait-intro > h4::before,
+.account-report > .account-performance-view > h4::before,
+.account-report > .account-portrait-strengths > h4::before,
+.account-report > .account-report-content > h4::before,
+.account-report > .account-report-expression > h4::before,
+.account-report > .account-report-next-steps > h4::before {
+  content: ""; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 8px;
+  background: var(--section-icon) center / 16px no-repeat, var(--section-tint);
+}
+.account-report > .account-portrait-intro { --section-tint: #f6dde3; --section-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23af3f56' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2.5l1.3 3.2 3.2 1.3-3.2 1.3L8 11.5 6.7 8.3 3.5 7l3.2-1.3z'/%3E%3Cpath d='M12.5 11v3M11 12.5h3'/%3E%3C/svg%3E"); } /* impression */
+.account-report > .account-performance-view { --section-tint: #f4e9da; --section-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23716355' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13.5V9M8 13.5V3.5M13 13.5V6.5'/%3E%3C/svg%3E"); } /* performance */
+.account-report > .account-portrait-strengths { --section-tint: #fbe3cc; --section-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%239c6240' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 11.5 6.5 7.5 9 10l4.5-5'/%3E%3Cpath d='M10 5h3.5v3.5'/%3E%3C/svg%3E"); } /* strengths */
+.account-report > .account-report-content { --section-tint: #f3e4ee; --section-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%238f4f60' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='8' cy='8' r='5.5'/%3E%3Ccircle cx='8' cy='8' r='2'/%3E%3C/svg%3E"); } /* content direction */
+.account-report > .account-report-expression { --section-tint: #f6e1d9; --section-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23b26145' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4h10v6.5H7.5L4.5 13v-2.5H3z'/%3E%3Cpath d='M5.5 7.2h5'/%3E%3C/svg%3E"); } /* expression */
+.account-report > .account-report-next-steps { --section-tint: #fbefc8; --section-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23796021' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 13.5h4'/%3E%3Cpath d='M6.3 11.5h3.4c0-2 2.3-2.8 2.3-5.2a4 4 0 0 0-8 0c0 2.4 2.3 3.2 2.3 5.2z'/%3E%3C/svg%3E"); } /* next steps */

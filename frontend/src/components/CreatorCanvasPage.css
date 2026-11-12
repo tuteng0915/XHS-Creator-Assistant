@@ -12,7 +12,7 @@
 .canvas-editor-heading > span { color: var(--sub); font-size: var(--text-xs); }
 .creator-canvas-page .canvas-editor > input { font-size: var(--text-section); line-height: 1.5; font-weight: 600; }
 .creator-canvas-page .canvas-editor > textarea { min-height: 380px; line-height: 1.85; }
-.creator-canvas-page .canvas-editor .canvas-candidate-preview { margin: 0; padding: 14px; background: var(--accent-surface); border-color: var(--accent-border); }
+.creator-canvas-page .canvas-editor .canvas-candidate-preview { margin: 0; padding: 14px; background: var(--surface-muted); border-color: var(--line); }
 .creator-canvas-page .canvas-editor .canvas-candidate-preview.is-first-draft { padding: 0; border: 0; background: transparent; display: flex; flex-direction: column; flex: 1; gap: 14px; }
 .canvas-candidate-preview.is-first-draft > input { font-size: var(--text-section); font-weight: 600; }
 .canvas-candidate-preview.is-first-draft > label { display: flex; flex: 1; }

@@ -8,5 +8,5 @@
 .comment-preview li p { margin: 0; font-size: 14px; line-height: 1.6; }
 .comment-preview-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 5px; color: var(--sub); }
 .comment-preview-tags small { font-size: 12px; }
-.comment-preview-tag { padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-size: 12px; }
-.comment-preview-tag.is-new { background: transparent; box-shadow: inset 0 0 0 1px var(--accent-border-strong); }
+.comment-preview-tag { padding: 1px 8px; border-radius: 999px; background: var(--surface-soft); color: var(--ink); font-size: 12px; }
+.comment-preview-tag.is-new { background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); }

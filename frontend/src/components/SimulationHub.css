@@ -7,7 +7,7 @@
 .simulation-category-tabs button > small { font-size: 12px; font-weight: 400; white-space: nowrap; }
 .simulation-category-tabs button[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent-border-strong); color: var(--accent-ink); }
 .simulation-hub-heading .simulation-category-description { margin: 12px 0 0; color: var(--sub); }
-.simulation-account-preview { border: 1px solid var(--accent-border); border-radius: 12px; padding: 16px; background: var(--accent-surface); }
+.simulation-account-preview { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--surface-muted); }
 .simulation-account-preview h3 { font-size: 17px; margin: 0 0 6px; }
 .simulation-account-preview p { margin: 6px 0; font-size: 14px; line-height: 1.6; }
 .simulation-account-range { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }

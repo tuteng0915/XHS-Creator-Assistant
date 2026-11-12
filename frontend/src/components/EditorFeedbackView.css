@@ -12,8 +12,8 @@
 .editor-feedback .feedback-section + .feedback-section { margin-top: 24px; }
 .editor-feedback .feedback-section > h4 { margin: 0 0 10px; font-size: var(--text-section); font-weight: 600; }
 .editor-feedback .editor-feedback-card { min-width: 0; margin: 10px 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
-.editor-feedback .editor-feedback-card.feedback-keep { border-color: var(--report-strength-border); background: var(--report-strength-surface); }
-.editor-feedback .feedback-keep .feedback-kind { color: var(--report-strength-ink); }
+.editor-feedback .editor-feedback-card.feedback-keep { border-color: var(--line); background: var(--surface-muted); }
+.editor-feedback .feedback-keep .feedback-kind { color: var(--ink); }
 .editor-feedback .feedback-card-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; color: var(--sub); font-size: var(--text-xs); }
 .editor-feedback .feedback-option-label { margin-left: auto; }
 .editor-feedback .editor-feedback-card h5 { margin: 8px 0; font-size: var(--text-body); line-height: 1.65; font-weight: 600; }

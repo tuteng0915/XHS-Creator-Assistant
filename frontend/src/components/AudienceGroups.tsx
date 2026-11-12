@@ -4,6 +4,7 @@ import { creatorNotesFromPayload, type CreatorNote } from '../creatorNotes'
 import type { AudienceAnalysis } from '../types'
 import { CreatorNoteBrowser } from './CreatorNoteBrowser'
 import { ReaderAvatar } from './ReaderAvatar'
+import { readerTintStyle } from './readerAvatarModel'
 import './AudienceResults.css'
 
 const BASIS_LABELS: Record<string, string> = {
@@ -43,7 +44,7 @@ export function AudienceGroups({run, savingGroup, savedFanKeys, onSave}: {
       if (mounted.current) setLoading(false)
     }
   }
-  return <div className="audience-groups">{run.result.groups?.map(g => <article className="audience-group-card" key={g.id} aria-label={g.name}>
+  return <div className="audience-groups">{run.result.groups?.map(g => <article className="audience-group-card" key={g.id} aria-label={g.name} style={readerTintStyle(`${run.id}:${g.id}`)}>
     <div className="reader-card-heading"><ReaderAvatar id={`${run.id}:${g.id}`} name={g.name} /><h2>{g.name}</h2></div>
     {g.profile?.trim() && <p className="audience-reader-profile">{g.profile}</p>}
     {g.coreConcern?.trim() && <p className="audience-reader-need"><span>想获得</span>{g.coreConcern}</p>}

@@ -3,6 +3,7 @@ import type {SimulationRun, Topic} from '../types'
 import {simulationRunApi} from '../api'
 import {panelInterviewApi, type PanelInterview} from '../panelInterview'
 import {ReaderAvatar} from './ReaderAvatar'
+import {readerTintStyle} from './readerAvatarModel'
 import {EditorFeedbackView} from './EditorFeedbackView'
 import {SimulationReviewSummary} from './SimulationReviewSummary'
 import {InfoHint} from './InfoHint'
@@ -105,7 +106,7 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
     const target=text(item.replyToId).replace(/^initial:|^reply:/,'') || text(item.targetedAt)
     const content=reply ? text(item.response)||text(item.text) : (item.action === 'no_comment' || item.action === 'skip') ? '' : text(item.quote)||text(item.text)
     if(reply&&!content)return null
-    return <article className={`trial-message${!content?' trial-silent':''}`} key={text(item.messageId)||`${reply}:${text(item.personaId)}`}>
+    return <article className={`trial-message${!content?' trial-silent':''}`} style={readerTintStyle(avatarId(item.personaId))} key={text(item.messageId)||`${reply}:${text(item.personaId)}`}>
       <ReaderAvatar id={avatarId(item.personaId)} name={speaker}/><div className="trial-message-main">
         <div className="trial-message-meta"><b>{speaker}</b>{reply&&target&&<span>回复 {name(target)}</span>}</div>
         {content ? <p className="trial-bubble">{visibleReply(content,people)}</p> : <p className="trial-silent-note">{item.action==='skip'?'选择划走':'读完了，暂时没有留言'}</p>}
@@ -139,7 +140,7 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
           <ReaderAvatar id="creator" name="作者"/>
           <div className="trial-message-main"><div className="trial-message-meta"><b>作者</b><span>询问 参与读者</span></div><p className="trial-bubble">{text(oracleInterview.question)}</p></div>
         </article>
-        {oracleAnswers.map((answer,index)=><article className="trial-message" key={`${text(answer.personaId)}:${index}`}>
+        {oracleAnswers.map((answer,index)=><article className="trial-message" style={readerTintStyle(avatarId(answer.personaId))} key={`${text(answer.personaId)}:${index}`}>
           <ReaderAvatar id={avatarId(answer.personaId)} name={name(answer.personaId)}/>
           <div className="trial-message-main"><div className="trial-message-meta"><b>{name(answer.personaId)}</b><span>回复 作者</span></div><p className="trial-bubble">{visibleReply(text(answer.quote),people)}</p></div>
         </article>)}
@@ -197,7 +198,7 @@ function InterviewComposer({run,people,name,avatarId,feedbackReaderIds,onUseFeed
   return <section className="trial-interview" aria-label="作者访谈">
     {!!rounds.length&&<div className="trial-divider">作者加入讨论</div>}
     <div role="log" aria-label="访谈发言" aria-live="polite">{rounds.map(round=><div key={round.id}>
-      {round.messages.map(m=><article key={m.id} className={`trial-message ${m.role==='author'?'trial-author':''}`}>
+      {round.messages.map(m=><article key={m.id} className={`trial-message ${m.role==='author'?'trial-author':''}`} style={m.role==='author'?undefined:readerTintStyle(avatarId(m.personaId))}>
         <ReaderAvatar id={m.role==='author'?'creator':avatarId(m.personaId)} name={m.role==='author'?'作者':m.senderName}/>
         <div className="trial-message-main"><div className="trial-message-meta"><b>{m.role==='author'?'作者 · 你':m.senderName}</b><span>{m.role==='author'?`询问 ${m.recipientName||'所有读者'}`:'回复 作者'}</span></div><p className="trial-bubble">{visibleReply(m.content,people)}</p>
           {m.role==='reader'&&feedbackReaderIds.has(text(m.personaId))&&onUseFeedback&&m.content.trim()&&<button className="text-button trial-use-feedback" onClick={()=>onUseFeedback('interview',m.id,m.senderName,m.content,round.id,round.question)}>拿这条意见改稿</button>}

@@ -1,3 +1,5 @@
+import type {CSSProperties} from 'react'
+
 /** Decorative identity only: none of these choices infer a reader's appearance. */
 export const readerAvatarOptions = {
   background: ['#f6dde3', '#f7e3c9', '#efdfe5', '#f6e1d9', '#d9ede8', '#e4e9dc', '#f4e9da', '#efe4dc', '#f4d5d4', '#e9e4da'],
@@ -43,4 +45,9 @@ export function readerAvatarModel(id: string): ReaderAvatarModel {
     mouth: pick('mouth'),
     clothing: pick('clothing'),
   }
+}
+
+/** A reader's light avatar background, exposed as --reader-tint so their bubbles and cards share it. */
+export function readerTintStyle(id: string): CSSProperties {
+  return {'--reader-tint': readerAvatarModel(id).background} as CSSProperties
 }

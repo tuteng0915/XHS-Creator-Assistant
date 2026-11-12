@@ -60,9 +60,9 @@ button.text-button {
   --button-background: transparent;
   --button-border: transparent;
   --button-foreground: var(--accent);
-  --button-hover-background: var(--accent-soft);
+  --button-hover-background: var(--surface-soft);
   --button-hover-border: transparent;
-  --button-active-background: var(--accent-soft-hover);
+  --button-active-background: #ebe6e8;
   min-height: 28px;
   padding: 3px 4px;
   border-radius: 5px;
@@ -92,6 +92,6 @@ button:is(.creator-note-card, .run-row, .topic-row, .capability-ref-chip, .panel
   font-weight: 400;
   white-space: normal;
 }
-nav button:where(:enabled:hover) { color: var(--accent); background: var(--accent-soft); }
+nav button:where(:enabled:hover) { color: var(--ink); background: var(--surface-soft); }
 
 @media (prefers-reduced-motion: reduce) { button { transition: none; } }

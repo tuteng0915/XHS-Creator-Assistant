@@ -67,9 +67,9 @@ describe('creator red theme', () => {
     expect(new Set(['observation', 'strength', 'suggestion'].map(role => token(`report-${role}-surface`))).size).toBe(3)
   })
 
-  it('reserves green for lower-performance comparisons while completed states stay blue', () => {
-    expect(appStyles).toContain('--ok: var(--report-observation-ink);')
-    expect(appStyles).toContain('--ok-soft: var(--report-observation-surface);')
+  it('reserves green for lower-performance comparisons while completed states stay neutral', () => {
+    expect(appStyles).not.toMatch(/--ok(?:-soft)?: var\(--report-/)
+    expect(contrast(token('ok'), '#ffffff')).toBeGreaterThanOrEqual(4.5)
     expect(contrast(token('report-observation-ink'), '#ffffff')).toBeGreaterThanOrEqual(4.5)
     for (const [path, css] of Object.entries(styles)) {
       const otherStyles = path === 'App.css'
@@ -80,7 +80,7 @@ describe('creator red theme', () => {
         expect(g > r + 5 / 255 && g > b + 2 / 255, `${path}: ${hex}`).toBe(false)
       }
     }
-    expect(styles['components/TrialRoom.css']).toMatch(/\.simulation-final-readers\s*\{[^}]*background:var\(--report-observation-surface\)/)
+    expect(styles['components/TrialRoom.css']).toMatch(/\.simulation-final-readers\s*\{[^}]*background:var\(--surface-muted\)/)
     expect(appStyles).toMatch(/\.panel-edit-compare section:last-child\s*\{[^}]*background: var\(--report-suggestion-surface\)/)
   })
 
@@ -111,9 +111,39 @@ describe('creator red theme', () => {
     expect(report).toContain('.account-report .account-report-next-steps > .account-portrait-claims')
     expect(report).toContain('background: var(--report-observation-surface);')
     expect(styles['components/AudienceResults.css']).toContain('.audience-evidence-ref > p')
-    expect(styles['components/TrialRoom.css']).toMatch(/\.trial-bubble\s*\{[^}]*background:var\(--report-observation-surface\)/)
     expect(styles['components/TrialRoom.css']).toMatch(/\.trial-takeaways\s*\{[^}]*background:var\(--report-suggestion-surface\)/)
     expect(styles['components/EditorFeedbackView.css']).toContain('.editor-feedback .editor-feedback-card.feedback-keep')
     expect(styles['components/EditorFeedbackView.css']).toMatch(/\.editor-feedback \.feedback-original\s*\{[^}]*background: var\(--report-observation-surface\)/)
+  })
+
+  it('gives each color one job: red for primary and selected, yellow for suggestions, blue for evidence', () => {
+    const report = styles['components/AccountReport.css']
+    // Report headings share one ink; only the suggestion panel stays yellow.
+    expect(report).toMatch(/\.account-report h4,[^{]*\{[^}]*color: var\(--ink\)/)
+    expect(report).not.toMatch(/h4\s*\{[^}]*color: var\(--report-/)
+    expect(report).not.toContain('var(--report-strength-')
+    expect(report).toMatch(/\.account-report-next-steps > ol\s*\{[^}]*background: var\(--report-suggestion-surface\)/)
+    // Hover is neutral; only the active page and selected items are red.
+    expect(styles['components/CreatorShell.css']).toMatch(/nav\.creator-navigation button:hover\s*\{[^}]*background: var\(--surface-soft\)/)
+    expect(styles['Button.css']).toMatch(/nav button:where\(:enabled:hover\)\s*\{[^}]*background: var\(--surface-soft\)/)
+    // Conversations are colored by speaker: each reader's avatar tint, the author's soft brand tint.
+    expect(styles['components/TrialRoom.css']).toMatch(/\.trial-bubble\s*\{[^}]*background:color-mix\(in srgb,var\(--reader-tint/)
+    expect(styles['components/TrialRoom.css']).toMatch(/\.trial-author \.trial-bubble\s*\{[^}]*background:var\(--accent-soft\)/)
+    // Report sections carry a tinted icon tile beside the shared heading ink.
+    for (const section of ['account-portrait-intro', 'account-performance-view', 'account-portrait-strengths', 'account-report-content', 'account-report-expression', 'account-report-next-steps']) {
+      expect(report, section).toMatch(new RegExp(`\\.account-report > \\.${section} \\{ --section-tint: #[0-9a-f]{6}; --section-icon: url`))
+    }
+  })
+
+  it('draws one disclosure marker, one select chevron and flat cards', () => {
+    expect(appStyles).toMatch(/summary::-webkit-details-marker\s*\{\s*display: none;/)
+    expect(appStyles).toMatch(/details > summary::before\s*\{[^}]*mask: var\(--chevron-right\)/)
+    expect(appStyles).toMatch(/details\[open\] > summary::before\s*\{\s*transform: rotate\(90deg\)/)
+    expect(appStyles).toMatch(/\nselect\s*\{[^}]*appearance: none;[^}]*background-image: var\(--chevron-down\)/)
+    expect(appStyles).toContain('--shadow-card: none;')
+    for (const [path, css] of Object.entries(styles)) {
+      // A shorthand background on a select would erase the chevron.
+      expect(css, path).not.toMatch(/(?:^|[\s,>])select\s*(?:,[^{]*)?\{[^}]*\bbackground:/m)
+    }
   })
 })

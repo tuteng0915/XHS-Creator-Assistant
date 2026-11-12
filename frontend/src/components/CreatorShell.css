@@ -68,7 +68,7 @@
 
 .creator-focused-shell .creator-switcher select {
   min-width: 0;
-  padding: 9px 7px;
+  padding: 9px 32px 9px 10px;
   border-color: var(--line);
   border-radius: 8px;
   color: var(--ink);
@@ -89,8 +89,8 @@
 }
 
 .creator-focused-shell .creator-add-button:enabled:hover {
-  color: var(--accent-ink);
-  border-color: var(--accent-border);
+  color: var(--ink);
+  border-color: var(--line-strong);
   background: #fff;
 }
 
@@ -132,8 +132,8 @@
 }
 
 .creator-focused-shell .workspace-sidebar nav.creator-navigation button:hover {
-  color: var(--accent-ink);
-  background: var(--accent-surface);
+  color: var(--ink);
+  background: var(--surface-soft);
 }
 
 .creator-focused-shell .workspace-sidebar nav.creator-navigation button.active {
