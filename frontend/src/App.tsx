@@ -94,7 +94,7 @@ import { WorkflowsPage } from './components/WorkflowsPage'
 import { WorkflowRunPage } from './components/WorkflowRunPage'
 import { CreatorMaterialsPage } from './components/CreatorMaterialsPage'
 import { CreatorDiagnosisPage } from './components/CreatorDiagnosisPage'
-import { CreatorOverviewPage } from './components/CreatorOverviewPage'
+import { CreatorOverviewPage, type OverviewStep } from './components/CreatorOverviewPage'
 import { AudienceAnalysisPage } from './components/AudienceAnalysisPage'
 import { CreatorCanvasPage } from './components/CreatorCanvasPage'
 import { useAudienceAnalyses } from './hooks/useAudienceAnalyses'
@@ -106,7 +106,7 @@ import { simulationCategoryFor } from './simulationChat'
 import type { ReaderFeedbackIntent } from './contentCollaboration'
 import type { ReaderSelectionLink } from './readerSelection'
 import type { AccountNoteSelection, PanelTask, SimulationCategory, SimulationPersonaOverrides } from './types'
-import type { AnalysisScope } from './creatorNotes'
+import { creatorNotes, type AnalysisScope } from './creatorNotes'
 import {
   WorkflowOutputPanel,
   type StageView,
@@ -2828,6 +2828,8 @@ function WorkspaceApp() {
       {!loading && workspace && activePage === 'creator-overview' && <CreatorOverviewPage
         workspace={workspace}
         profile={xhsCreatorProfileMaterial}
+        mediaAssets={mediaAssets}
+        steps={overviewSteps()}
         onNotes={() => openInputAsset('xhs_creator_profiles')}
         onAnalyze={() => { setWorkflowTab('account'); setActivePage('account-diagnosis') }}
         onImport={openExistingCreatorImport}
@@ -3328,6 +3330,31 @@ function WorkspaceApp() {
     } catch (error) {
       setSaveState('xhs', { phase: 'error', message: errorMessage(error) })
     }
+  }
+
+  function overviewSteps(): OverviewStep[] {
+    const finished = (status: string) => status === 'completed' || status === 'partially_completed'
+    const busy = (status: string) => status === 'pending' || status === 'running'
+    const go = (page: ActivePage) => () => setActivePage(page)
+    const noteCount = creatorNotes(xhsCreatorProfileMaterial).length
+    const diagnoses = analysisRuns.filter(run => run.workflowType === 'account_diagnosis')
+    const readers = fans.rows.filter(fan => fan.status === 'active').length
+    const audiences = audience.rows.filter(row => finished(row.status)).length
+    const simulations = simulationRuns.filter(run => finished(run.status)).length
+    const creations = topics.filter(topic => topic.sourceWorkflow !== 'trend_analysis' && topic.status !== 'archived').length
+    const state = (count: number, running = false): OverviewStep['state'] => count > 0 ? 'done' : running ? 'running' : 'todo'
+    return [
+      {key: 'import', label: '导入', icon: 'notes', state: state(noteCount), detail: `${noteCount} 篇笔记`, onOpen: () => openInputAsset('xhs_creator_profiles')},
+      {key: 'diagnosis', label: '诊断', icon: 'analysis', state: state(diagnoses.filter(run => finished(run.status)).length, diagnoses.some(run => busy(run.status))),
+        detail: diagnoses.some(run => busy(run.status)) ? '生成中' : `${diagnoses.filter(run => finished(run.status)).length} 份报告`,
+        onOpen: () => { setWorkflowTab('account'); setActivePage('account-diagnosis') }},
+      {key: 'readers', label: '读者', icon: 'readers', state: state(readers + audiences, audience.rows.some(row => busy(row.status))),
+        detail: readers ? `${readers} 位读者` : audience.rows.some(row => busy(row.status)) ? '分析中' : `${audiences} 份分析`,
+        onOpen: go(readers ? 'simulated-fans' : 'audience-analysis')},
+      {key: 'simulation', label: '模拟', icon: 'conversation', state: state(simulations, simulationRuns.some(run => busy(run.status))),
+        detail: simulationRuns.some(run => busy(run.status)) ? '进行中' : `${simulations} 次模拟`, onOpen: go('simulations')},
+      {key: 'creation', label: '创作', icon: 'writing', state: state(creations), detail: `${creations} 个选题`, onOpen: go('drafts')},
+    ]
   }
 
   function renderAccountProfilePage() {

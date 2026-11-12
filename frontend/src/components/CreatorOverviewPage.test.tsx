@@ -101,3 +101,44 @@ it('keeps the import entry unchanged before an account is available', () => {
   expect(callbacks.onImport).toHaveBeenCalledOnce()
   expect(callbacks.onAnalyze).not.toHaveBeenCalled()
 })
+
+const media = (id: string, noteId: string) => ({id, workspaceId: 'w', type: 'image', name: id, purpose: '', sourceType: 'upload',
+  originalFilename: `${id}.jpg`, mediaType: 'image/jpeg', byteSize: 1, sha256: '', metadata: {noteId}, derived: {}, userNotes: '',
+  fileUrl: `/media/${id}.jpg`, createdAt: timestamp, updatedAt: timestamp}) as unknown as import('../types').MediaAsset
+
+const datedProfile: TextInputAsset = {...profile, content: JSON.stringify({schemaVersion: 'xhs-creator-profile/v1', creator: {displayName: '测试作者'}, notes: [
+  {noteId: 'late', title: '后发的笔记', publishedAt: 1780000000, metrics: {liked: 5, collected: 1}},
+  {noteId: 'early', title: '先发的笔记', publishedAt: 1770000000, metrics: {liked: 90, collected: 10, comments: 3}},
+  {noteId: 'undated', title: '没有日期的笔记', metrics: {liked: 1}},
+]})}
+
+it('shows note covers beside the top notes and plots dated notes in publish order', () => {
+  const {container} = render(<CreatorOverviewPage {...props()} profile={datedProfile} mediaAssets={[media('c1', 'early')]} />)
+  expect(container.querySelector('.creator-overview-notes img')).toHaveAttribute('src', '/media/c1.jpg')
+  const slots = container.querySelectorAll('.overview-trend-slot')
+  expect(slots).toHaveLength(2)
+  expect(slots[0]).toHaveClass('is-top')
+  expect(screen.getByRole('img', {name: /2 篇笔记互动量，最高 103/})).toBeInTheDocument()
+  fireEvent.click(slots[0])
+  expect(screen.getByText('先发的笔记', {selector: '.overview-trend-tip strong'})).toBeInTheDocument()
+  expect(screen.getByText(/互动 103：赞 90 · 收藏 10 · 评论 3/)).toBeInTheDocument()
+})
+
+it('marks the first unfinished step as next and opens each step on click', () => {
+  const open = vi.fn()
+  const steps = [
+    {key: 'import', label: '导入', icon: 'notes' as const, state: 'done' as const, detail: '3 篇笔记', onOpen: vi.fn()},
+    {key: 'diagnosis', label: '诊断', icon: 'analysis' as const, state: 'running' as const, detail: '生成中', onOpen: vi.fn()},
+    {key: 'readers', label: '读者', icon: 'readers' as const, state: 'todo' as const, detail: '0 份分析', onOpen: open},
+    {key: 'simulation', label: '模拟', icon: 'conversation' as const, state: 'todo' as const, detail: '0 次模拟', onOpen: vi.fn()},
+  ]
+  render(<CreatorOverviewPage {...props()} steps={steps} />)
+  const flow = screen.getByRole('navigation', {name: '创作流程'})
+  expect(within(flow).getByText('3 篇笔记')).toBeInTheDocument()
+  expect(within(flow).getByText('生成中')).toBeInTheDocument()
+  const next = within(flow).getByRole('button', {name: /读者\s*下一步/})
+  expect(next).toHaveAttribute('aria-current', 'step')
+  expect(within(flow).getByText('0 次模拟')).toBeInTheDocument()
+  fireEvent.click(next)
+  expect(open).toHaveBeenCalledOnce()
+})

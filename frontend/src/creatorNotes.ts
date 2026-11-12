@@ -1,4 +1,4 @@
-import type { TextInputAsset } from './types'
+import type { MediaAsset, TextInputAsset } from './types'
 
 export type CreatorNote = {
   noteId: string
@@ -30,6 +30,13 @@ export function creatorNotesFromPayload(payload: unknown): CreatorNote[] {
     metrics: note.metrics || {},
     comments: Array.isArray(note.comments) ? note.comments.filter((comment) => comment && typeof comment === 'object') : [],
   }))
+}
+
+export function noteCoverUrl(note: CreatorNote, mediaAssets: MediaAsset[]): string | undefined {
+  return (
+    mediaAssets.find(asset => asset.id === note.coverMediaAssetId) ||
+    mediaAssets.find(asset => asset.metadata.noteId === note.noteId)
+  )?.fileUrl
 }
 
 export function notePublishedAt(note: CreatorNote): number | null {

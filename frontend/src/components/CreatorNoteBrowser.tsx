@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { MediaAsset } from '../types'
-import { filterCreatorNotes, noteCommentsTimeLabel, noteDataTimeLabel, notePublishedAt, selectTopCreatorNotes, validNoteMetric, type CreatorNote, type CreatorNoteRange, type CreatorNoteSort } from '../creatorNotes'
+import { filterCreatorNotes, noteCommentsTimeLabel, noteCoverUrl, noteDataTimeLabel, notePublishedAt, selectTopCreatorNotes, validNoteMetric, type CreatorNote, type CreatorNoteRange, type CreatorNoteSort } from '../creatorNotes'
 import { CreatorDialog } from './CreatorDialog'
 import { CreatorNoteFilters } from './CreatorNoteFilters'
 
@@ -17,10 +17,7 @@ export function CreatorNoteBrowser({ notes, mediaAssets, selectedIds, onToggle, 
   const [limit, setLimit] = useState(0)
   const detail = notes.find(note => note.noteId === detailId)
   const visibleNotes = showFilters ? limit ? selectTopCreatorNotes(notes, range, sort, limit) : filterCreatorNotes(notes, range, sort) : notes
-  const coverUrl = (note: CreatorNote) => (
-    mediaAssets.find(asset => asset.id === note.coverMediaAssetId) ||
-    mediaAssets.find(asset => asset.metadata.noteId === note.noteId)
-  )?.fileUrl
+  const coverUrl = (note: CreatorNote) => noteCoverUrl(note, mediaAssets)
   const images = (note: CreatorNote) => [...new Set([
     coverUrl(note), ...mediaAssets.filter(asset => asset.metadata.noteId === note.noteId && asset.mediaType.startsWith('image/') && (!note.imageMediaAssetIds || note.imageMediaAssetIds.includes(asset.id))).sort((a,b) => Number(a.metadata.imageIndex || 1) - Number(b.metadata.imageIndex || 1)).map(asset => asset.fileUrl),
   ].filter((url): url is string => Boolean(url)))]
