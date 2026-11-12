@@ -4,6 +4,21 @@ import { filterCreatorNotes, noteCommentsTimeLabel, noteCoverUrl, noteDataTimeLa
 import { CreatorDialog } from './CreatorDialog'
 import { CreatorNoteFilters } from './CreatorNoteFilters'
 
+const METRIC_ICONS = {
+  liked: <path d="M12 20s-7-4.4-7-9.6A3.9 3.9 0 0 1 12 8a3.9 3.9 0 0 1 7 2.4C19 15.6 12 20 12 20Z" />,
+  collected: <path d="m12 4 2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8Z" />,
+  comments: <path d="M5 5h14a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-7l-4 3.5V16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" />,
+  shares: <path d="M12 15V4M8 8l4-4 4 4M5 13v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5" />,
+}
+
+// The label stays in the text for screen readers and copy; the icon carries it visually.
+function NoteMetric({ icon, label, value }: { icon: keyof typeof METRIC_ICONS; label: string; value: unknown }) {
+  return <span title={label}>
+    <svg className="creator-note-metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{METRIC_ICONS[icon]}</svg>
+    <span className="visually-hidden">{label} </span>{validNoteMetric(value) ?? '—'}
+  </span>
+}
+
 // Shared browsing surface for My Notes and the diagnosis selection dialog.
 export function CreatorNoteBrowser({ notes, mediaAssets, selectedIds, onToggle, showFilters = false, selectionMode = 'multiple', showComments = true, showObservationTimes = true }: {
   notes: CreatorNote[]; mediaAssets: MediaAsset[];
@@ -33,8 +48,8 @@ export function CreatorNoteBrowser({ notes, mediaAssets, selectedIds, onToggle, 
         <button type="button" className="creator-note-card" onClick={() => setDetailId(note.noteId)}>
           {coverUrl(note) ? <img src={coverUrl(note)} alt={note.title} loading="lazy" /> : <div className="creator-note-placeholder">暂无封面</div>}
           <div><strong>{note.title}</strong><p className="creator-note-metrics">
-            <span className="creator-note-metric-row"><span>赞 {validNoteMetric(note.metrics.liked) ?? '—'}</span><span>收藏 {validNoteMetric(note.metrics.collected) ?? '—'}</span></span>
-            <span className="creator-note-metric-row"><span>评论 {validNoteMetric(note.metrics.comments) ?? '—'}</span><span>分享 {validNoteMetric(note.metrics.shares) ?? '—'}</span></span>
+            <span className="creator-note-metric-row"><NoteMetric icon="liked" label="赞" value={note.metrics.liked} /><NoteMetric icon="collected" label="收藏" value={note.metrics.collected} /></span>
+            <span className="creator-note-metric-row"><NoteMetric icon="comments" label="评论" value={note.metrics.comments} /><NoteMetric icon="shares" label="分享" value={note.metrics.shares} /></span>
           </p>
             {notePublishedAt(note) !== null && <time>{new Date(notePublishedAt(note)!).toLocaleDateString('zh-CN')}</time>}
           </div>

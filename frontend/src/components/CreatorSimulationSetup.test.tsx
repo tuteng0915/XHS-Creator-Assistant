@@ -645,3 +645,12 @@ it('marks adjusted recommended roles and prevents a blank local override before 
   fireEvent.click(screen.getByRole('button',{name:'恢复已保存画像'}))
   expect(screen.getByText('已采用推荐')).toBeVisible()
 })
+
+it('names the missing step beside a disabled start button and clears it once the list is ready',async()=>{
+  setup()
+  await screen.findAllByRole('option',{name:'读者a'})
+  expect(screen.getByRole('button',{name:'开始模拟'})).toBeDisabled()
+  expect(screen.getByText('还差第 3 步：选定至少一位读者')).toBeVisible()
+  fireEvent.change(screen.getAllByRole('combobox').at(-1)!,{target:{value:'a'}})
+  await waitFor(()=>expect(screen.queryByText(/还差第 \d 步/)).not.toBeInTheDocument())
+})

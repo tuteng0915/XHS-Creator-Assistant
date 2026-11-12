@@ -1,3 +1,4 @@
+import { SkeletonStatus, WorkspaceSkeleton } from './components/Skeleton'
 import {
   useCallback,
   useEffect,
@@ -2797,7 +2798,7 @@ function WorkspaceApp() {
   const mainContent = (
     <>
       {loadError && <div className="error-banner">⚠ {loadError}</div>}
-      {loading && <div className="loading-card">正在加载账号档案…</div>}
+      {loading && <SkeletonStatus label="正在加载账号档案…"><WorkspaceSkeleton /></SkeletonStatus>}
 
       {!loading && !workspace && !addingCreator && (
         <div className="empty-workspace">

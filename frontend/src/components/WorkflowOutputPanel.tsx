@@ -8,6 +8,7 @@ import type { FeedbackRun } from '../editorFeedback'
 import { isOracleShowcase } from '../recordOrigin'
 import { OracleNotice } from './OracleNotice'
 import { workflowProgressLabel, type WorkflowProgress } from '../workflowProgress'
+import { ReportSkeleton } from './Skeleton'
 
 export type StageView = {
   key: string
@@ -93,6 +94,8 @@ export function WorkflowOutputPanel({
             )}
             {isSimulation ? <SimulationStageNotice stage={stage} /> : stage.error && <div className="err">{stage.error}</div>}
             {renderStageResult(stage)}
+            {!isSimulation && stage.result == null && !stage.error && (stage.status === 'running' || stage.status === 'waiting')
+              && <ReportSkeleton sections={stage.status === 'running' ? 2 : 1} still={stage.status === 'waiting'} />}
           </div>
         ))
       )}

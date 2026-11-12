@@ -25,7 +25,27 @@
 .simulation-recommendation-details { margin-top: 12px; font-size: 13px; }
 .simulation-recommendation-details summary { cursor: pointer; color: var(--sub); }
 .simulation-readers-error, .simulation-readers-empty { font-size: 14px; }
-.simulation-start { margin-top: 12px; }
+.simulation-start-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; margin-top: 16px; }
+.simulation-start-row .simulation-start { margin: 0; }
+.simulation-start-hint { color: var(--sub); font-size: var(--text-sm); line-height: 1.5; }
+/* Setup reads as three numbered steps on one card, separated by rules instead of boxes in a box. */
+.creator-simulation-setup { counter-reset: setup-step; gap: 0; }
+.creator-simulation-setup > :is(.simulation-account-preview, .simulation-note-target, .simulation-target) { padding: 0 0 18px; border: 0; border-radius: 0; background: none; }
+.creator-simulation-setup > .panel-task-controls { padding: 18px 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.creator-simulation-setup > .panel-task-controls > legend { float: left; width: 100%; margin: 0 0 12px; padding: 0; font-size: var(--text-section); }
+.creator-simulation-setup > .panel-task-controls > legend + * { clear: both; }
+.creator-simulation-setup > .simulation-final-readers { margin: 0; padding: 18px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; }
+.creator-simulation-setup > :is(.simulation-target-preview, .comment-preview, p) { margin: 0 0 18px; }
+.creator-simulation-setup :is(.simulation-account-preview h3, .simulation-note-target h3, .panel-task-controls > legend, .simulation-participant-heading h3)::before,
+.creator-simulation-setup > .simulation-target::before {
+  counter-increment: setup-step; content: counter(setup-step);
+  display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 9px; vertical-align: 1px;
+  border-radius: 50%; background: var(--surface-soft); border: 1px solid var(--line-strong); color: var(--ink);
+  font-size: 12px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums;
+}
+.creator-simulation-setup > .simulation-target { display: block; font-size: var(--text-section); font-weight: 600; }
+.creator-simulation-setup > .simulation-target select { display: block; margin-top: 10px; font-size: var(--text-body); font-weight: 400; }
+.creator-simulation-setup .simulation-participant-heading h3 { font-size: var(--text-section); }
 .simulation-participant-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
 .simulation-participant-heading h3 { margin: 0; }
 .simulation-selection-origin { font-size: 12px; white-space: nowrap; }

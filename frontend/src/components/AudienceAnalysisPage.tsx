@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ReaderCardsSkeleton } from './Skeleton'
 import { audienceAnalysisApi, simulatedFanApi } from '../api'
 import { ANALYSIS_SCOPE_LABELS, creatorNotes, selectCreatorNotes, type AnalysisScope } from '../creatorNotes'
 import type { AudienceAnalysis, MediaAsset, TextInputAsset } from '../types'
@@ -96,6 +97,7 @@ export function AudienceAnalysisPage({workspaceId, profile, mediaAssets = [], an
       <strong>{selected.status === 'pending' ? '准备阅读历史图文' : '正在整理读者视角'}</strong>
       <p>完成后可逐位查看和收录。你可以先浏览其他页面。</p>
     </div>}
+    {selected && ['pending', 'running'].includes(selected.status) && <ReaderCardsSkeleton />}
     {selected && ['completed', 'partially_completed'].includes(selected.status) && <>
       <div className="audience-results-heading">
         <div><h2>候选读者{isOracleShowcase(selected) && <OracleNotice />}</h2><p className="audience-adoption-summary" role="status">{selected.result.groups?.length || 0} 位 · 已收录 {adoptedCount} 位</p></div>

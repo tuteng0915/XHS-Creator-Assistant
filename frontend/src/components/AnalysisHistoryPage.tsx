@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 
 import { SaveIndicator, type SaveState } from './StageResultViews'
 import type { StageView } from './WorkflowOutputPanel'
@@ -7,6 +7,8 @@ import { reviewStatusLabel, workflowLabel } from '../appUtils'
 import { stageSeedFromRun } from '../workflowStageViews'
 import { isOracleShowcase } from '../recordOrigin'
 import { OracleNotice } from './OracleNotice'
+import { ReportToc } from './ReportToc'
+import { ReportSkeleton, SkeletonStatus } from './Skeleton'
 import { creatorNotesFromPayload } from '../creatorNotes'
 import type { RunStatus } from '../types'
 
@@ -113,6 +115,7 @@ export function AnalysisHistoryPage({
   onAnalysisReviewDraftChange,
   onSaveAnalysisRunReview,
 }: AnalysisHistoryPageProps) {
+  const detailRef = useRef<HTMLElement>(null)
   return (
     <div className={`workspace-page${publicMode ? ' analysis-history-public' : ''}${embedded ? ' diagnosis-history-embedded' : ''}`} role="region" aria-label={publicMode ? '诊断历史' : '分析结果'}>
       <section className="history-list">
@@ -134,8 +137,10 @@ export function AnalysisHistoryPage({
           ))
         )}
       </section>
-      <section className="history-detail">
-        {loadState?.phase === 'saving' && <p role="status">正在读取分析记录…</p>}
+      <section className="history-detail" ref={detailRef}>
+        {loadState?.phase === 'saving' && (selectedRun
+          ? <p role="status">正在读取分析记录…</p>
+          : <SkeletonStatus label="正在读取分析记录…"><ReportSkeleton /></SkeletonStatus>)}
         {loadState?.phase === 'error' && <p role="alert">{loadState.message} 请重新点击记录重试。</p>}
         {selectedRun ? (
           <>
@@ -163,6 +168,7 @@ export function AnalysisHistoryPage({
             <details open={!publicMode}><summary>{publicMode ? '本次分析的材料' : '原始输入快照'}</summary>
               {publicMode ? <AnalysisMaterials run={selectedRun} /> : <pre className="json-preview">{JSON.stringify(selectedRun.inputSnapshot, null, 2)}</pre>}
             </details>
+            {publicMode && <ReportToc containerRef={detailRef} watch={selectedRun.id} />}
             {!publicMode && <label>生成结果</label>}
             {stageSeedFromRun(selectedRun).map((stage) => (
               <div className="stage compact" key={stage.key}>

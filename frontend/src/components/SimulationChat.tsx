@@ -7,6 +7,7 @@ import {readerTintStyle} from './readerAvatarModel'
 import {EditorFeedbackView} from './EditorFeedbackView'
 import {SimulationReviewSummary} from './SimulationReviewSummary'
 import {InfoHint} from './InfoHint'
+import {MessageSkeleton, SkeletonBlock, SkeletonLines} from './Skeleton'
 import './TrialRoom.css'
 import {simulationCategoryFor, visibleReply} from '../simulationChat'
 import type {ReaderFeedbackIntent} from '../contentCollaboration'
@@ -118,6 +119,18 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
       </div>
     </article>
   }
+  // The conclusion leads the record. When it arrives during a live run, bring it into view once.
+  const hasSynthesis=Object.keys(run.synthesis).length>0
+  const summaryRef=useRef<HTMLDivElement>(null)
+  const summarySeen=useRef({id:run.id,present:hasSynthesis})
+  useEffect(()=>{
+    const seen=summarySeen.current
+    if(seen.id===run.id&&!seen.present&&hasSynthesis){
+      const reduce=typeof window.matchMedia==='function'&&window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      summaryRef.current?.scrollIntoView?.({block:'start',behavior:reduce?'auto':'smooth'})
+    }
+    summarySeen.current={id:run.id,present:hasSynthesis}
+  },[run.id,hasSynthesis])
   const topic=obj(run.inputSnapshot.topic)
   const scope=obj(obj(run.inputSnapshot.sourceAccount).scope)
   const oracleInterview=oracle?obj(run.inputSnapshot.oracleInterview):{}
@@ -127,9 +140,28 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
     <header className="trial-room-head"><div><div className="reader-card-heading"><h3>{category==='account'?'账号读者群聊':category==='published_note'?'笔记复盘群聊':'试读讨论'}</h3>{review&&<InfoHint label="讨论范围说明">{category==='account'?'基于账号样本，讨论读者为何留下、接下来想看什么。':'讨论下一篇同类内容；已发布笔记不作修改。'}</InfoHint>}</div><p>{run.targetTitle||text(topic.title)}</p></div><span>{people.length} 位读者</span></header>
     {category==='account'&&text(scope.omissionNotice)&&<p className="trial-context">{text(scope.omissionNotice)}</p>}
     {category==='creation'&&!text(topic.body)&&!run.inputSnapshot.draft&&<p className="trial-context">本次只看标题，讨论阅读意愿与期待。</p>}
+    {hasSynthesis&&<div className="trial-summary-first" ref={summaryRef}>
+      {summaryStale&&<p className="trial-context">以下是补回发言前的汇总，更新后再采用；原记录仍保留。</p>}
+      {review?<SimulationReviewSummary key={`review:${run.workspaceId}:${run.id}`} run={run} onTopicAdded={onTopicAdded} topics={topics} readOnly={readOnly||summaryStale}/>:<section className="trial-takeaways"><h3>修改方向</h3>
+        {text(run.synthesis.verdict)&&<p>{text(run.synthesis.verdict)}</p>}
+        {text(run.synthesis.mainResistance)&&<p><b>最需要解决</b><br/>{text(run.synthesis.mainResistance)}</p>}
+        <EditorFeedbackView data={run.synthesis} run={run}/>
+      </section>}
+    </div>}
+    {running&&!hasSynthesis&&<div className="trial-summary-first trial-summary-pending" aria-hidden="true"><div className="simulation-review-summary">
+      <SkeletonBlock height={18} width={236} radius={6}/><SkeletonLines widths={['100%','62%']}/><SkeletonBlock height={104} radius={8}/>
+    </div></div>}
+    {(hasSynthesis||running)&&<div className="trial-divider trial-divider-process">讨论过程</div>}
     <div className="trial-conversation" role="log" aria-label="试读发言" aria-live="polite">
       {!run.reactionResults.length&&!running&&<p className="muted">这次还没有读者发言。</p>}
       {run.reactionResults.map(item=>bubble(item))}
+      {running&&!people.length&&<><MessageSkeleton/><MessageSkeleton lines={['70%','42%']}/></>}
+      {running&&people.filter(p=>!settledReaders.has(text(p.id))).map(p=><article className="trial-message trial-pending" key={`pending:${text(p.id)}`} style={readerTintStyle(avatarId(p.id))}>
+        <ReaderAvatar id={avatarId(p.id)} name={name(p.id)}/><div className="trial-message-main">
+          <div className="trial-message-meta"><b>{name(p.id)}</b><span>正在读</span></div>
+          <div className="trial-bubble trial-bubble-pending"><SkeletonLines widths={['220px','132px']}/></div>
+        </div>
+      </article>)}
       {!!run.debateResults.length&&<div className="trial-divider">读者互相回应</div>}
       {run.debateResults.map(item=>bubble(item,true))}
     </div>
@@ -159,12 +191,6 @@ export function SimulationChat({run, onObserved,onTopicAdded,topics,onUseReaderF
       <button disabled={!!recovering} onClick={()=>void recoverPart('synthesis')}>{recovering==='synthesis'?'正在提交…':'更新汇总'}</button>
     </div>}
     {!viewOnly&&!running&&people.length>0&&['completed','partially_completed'].includes(run.status)&&<InterviewComposer key={run.id} run={run} people={people} name={name} avatarId={avatarId} feedbackReaderIds={feedbackReaderIds} onUseFeedback={canUseFeedback?handleFeedback:undefined}/>}
-    {summaryStale&&Object.keys(run.synthesis).length>0&&<p className="trial-context">以下是补回发言前的汇总，更新后再采用；原记录仍保留。</p>}
-    {Object.keys(run.synthesis).length>0&&(review?<SimulationReviewSummary key={`review:${run.workspaceId}:${run.id}`} run={run} onTopicAdded={onTopicAdded} topics={topics} readOnly={readOnly||summaryStale}/>:<section className="trial-takeaways"><h3>修改方向</h3>
-      {text(run.synthesis.verdict)&&<p>{text(run.synthesis.verdict)}</p>}
-      {text(run.synthesis.mainResistance)&&<p><b>最需要解决</b><br/>{text(run.synthesis.mainResistance)}</p>}
-      <EditorFeedbackView data={run.synthesis} run={run}/>
-    </section>)}
   </section>
 }
 

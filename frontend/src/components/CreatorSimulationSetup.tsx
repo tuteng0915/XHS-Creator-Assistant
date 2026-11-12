@@ -116,6 +116,10 @@ export function CreatorSimulationSetup(props: Props) {
   const checkingAdoption=!!activeAdoption&&recommendation.busy
   const startLabel=checkingAdoption?'正在核验推荐…':activeAdoption&&!adoptionReady?'按当前名单开始':!selectionDecided&&fans.ids.length&&target?'确认名单并开始':'开始模拟'
   const hasActiveFans=fans.rows.some(f=>f.status==='active')
+  // Names the first missing step so a disabled start button is never unexplained.
+  const startBlocker=running||applying||checkingAdoption?'':!target
+    ?targetKind==='account'?'还差第 1 步：选定要讨论的笔记':targetKind==='note'?'还差第 1 步：选定一篇已发布笔记':'还差第 1 步：选定选题'
+    :!taskValid?'还差第 2 步：补全重点问题':!fans.ids.length?'还差第 3 步：选定至少一位读者':''
   const proposalCards=<ul>{proposals.map(p => <li key={p.fanId}>
     <div className="reader-card-heading"><ReaderAvatar id={(() => {const fan=fans.rows.find(f=>f.id===p.fanId);return fan?`${fan.sourceAnalysisId}:${fan.sourceGroupId}`:p.fanId})()} name={record?.inputSnapshot.candidates.find(f=>f.id===p.fanId)?.name||'读者'}/><strong>{record?.inputSnapshot.candidates.find(f => f.id === p.fanId)?.name || '已保存读者'}</strong></div>
     <p>{p.fitReason}</p><p className="muted">{p.contribution}</p>
@@ -228,7 +232,7 @@ export function CreatorSimulationSetup(props: Props) {
       </>}
       {fans.loaded&&!fans.loading&&!fans.error&&!hasActiveFans&&<div className="simulation-readers-empty"><p>还没有可用的模拟读者。</p><button type="button" onClick={onAddFans}>从受众分析添加模拟粉丝</button></div>}
       {!!invalidPersonaIds.length&&<p role="status">还有 {invalidPersonaIds.length} 位读者的本次设定需要补全，完成或恢复后即可开始。</p>}
-    <button className="primary simulation-start" disabled={running || applying || checkingAdoption || !taskValid || !!invalidPersonaIds.length || !fans.ids.length || !target}
+    <div className="simulation-start-row"><button className="primary simulation-start" disabled={running || applying || checkingAdoption || !taskValid || !!invalidPersonaIds.length || !fans.ids.length || !target}
       onClick={() => {const link=activeAdoption&&adoptionReady ? {
         readerSelectionId: activeAdoption.readerSelectionId,
         readerSelectionInputHash: activeAdoption.readerSelectionInputHash,
@@ -240,6 +244,7 @@ export function CreatorSimulationSetup(props: Props) {
         else if(noteRef)props.onRunNote?.(noteRef,link,panelTask,...extra)
         else if(topic)onRun(topic,link,panelTask,...extra)
       }}>{startLabel}</button>
+      {startBlocker&&<span className="simulation-start-hint">{startBlocker}</span>}</div>
     </section>
   </section>
 }

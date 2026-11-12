@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { MessageSkeleton, SkeletonStatus } from './Skeleton'
 
 import { EmptyState, JsonPreview } from './CommonUi'
 import { RunReviewEditor } from './AnalysisHistoryPage'
@@ -112,7 +113,9 @@ export function SimulationHistoryPage({
         )}
       </section>
       <section className="history-detail">
-        {loadState?.phase === 'saving' && <p role="status">正在读取模拟记录…</p>}
+        {loadState?.phase === 'saving' && (selectedSimulationRun
+          ? <p role="status">正在读取模拟记录…</p>
+          : <SkeletonStatus label="正在读取模拟记录…"><MessageSkeleton /><MessageSkeleton lines={['72%', '40%']} /><MessageSkeleton lines={['90%']} /></SkeletonStatus>)}
         {loadState?.phase === 'error' && <p role="alert">{loadState.message} 请重新点击记录重试。</p>}
         {selectedSimulationRun ? (
           <>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { MessageSkeleton } from './Skeleton'
 import { agentConversationApi } from '../api'
 import type { AgentConversation, MediaAsset, TextInputAsset, Topic } from '../types'
 import { collaborationCandidates, collaborationSummary, contentCollaborationApi, creatorContextSignature, emptyCreatorContext } from '../contentCollaboration'
@@ -269,6 +270,7 @@ export function ContentCollaborationChat({workspaceId, topic, profile, mediaAsse
           </div>
         </div>
       </article>)}
+      {running && <MessageSkeleton lines={['92%', '80%', '48%']} />}
       {running && <div className="collaboration-progress" role="status"><span className="collaboration-pulse" /> <strong>{pollPaused ? '等待恢复进度连接' : session?.executionStatus === 'queued' ? '正在准备这次创作' : '创作助手正在整理'}</strong><small>已等待 {elapsed} 秒</small>{elapsed > 45 && <p>耗时较久，可继续编辑稿件。</p>}</div>}
       {session?.executionStatus === 'failed' && <div className="collaboration-error" role="alert"><p>{session.failureDetail || lastRun?.errorDetail || '这一轮没有完成，前面已完成的结果已经保留。'}</p><button type="button" onClick={retryLastInstruction}>把上次要求放回输入框</button><small>检查后点击发送会开始新一轮，不会自动重试。</small></div>}
     </div>

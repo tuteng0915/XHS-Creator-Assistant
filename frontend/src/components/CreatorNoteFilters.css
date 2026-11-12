@@ -8,9 +8,11 @@
 .creator-materials-heading { align-items: baseline; }
 .creator-note-meta { display: inline-flex; align-items: center; }
 .creator-note-card time { display: block; color: var(--sub); font-size: 11px; margin-top: 6px; }
-.creator-note-metrics { display: grid; gap: 2px; }
-.creator-note-metric-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.creator-note-metric-row > span { min-width: 0; overflow-wrap: anywhere; }
+/* Four metrics on one line; they wrap to two lines only in narrow evidence cards. */
+.creator-note-metrics { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.creator-note-metric-row { display: contents; }
+.creator-note-metric-row > span { display: inline-flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
+.creator-note-metric-icon { flex: none; width: 13px; height: 13px; opacity: .75; }
 .creator-note-gallery { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; }
 .creator-note-gallery img { width: min(100%, 340px); max-height: 420px; object-fit: contain; border-radius: 10px; }
 @media (max-width: 500px) {

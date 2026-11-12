@@ -16,8 +16,9 @@
 .fan-profile-source p { margin: 0 0 14px; white-space: pre-wrap; }
 .fan-profile-source ul { margin: 4px 0 14px; padding-left: 20px; }
 .fan-profile-source .fan-profile-limitation { color: var(--sub); font-size: 12px; }
-.fan-profile-management { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); }
-.fan-profile-management > button { color: var(--sub); font-size: 13px; }
+.fan-profile-management { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
+/* Profile actions read as buttons, one step quieter than the primary edit action. */
+.fan-profile-management > button.text-button { --button-background: #fff; --button-border: var(--line-strong); --button-hover-border: #a8979e; --button-foreground: var(--ink); min-height: 32px; padding: 5px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; text-align: center; }
 @media (max-width: 480px) {
   .fan-profile-head { flex-wrap: wrap; gap: 14px; }
   .fan-profile-head h2 { font-size: 18px; }

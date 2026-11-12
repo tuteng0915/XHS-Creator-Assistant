@@ -382,3 +382,18 @@ it('does not offer handoff for unmatched initial, reply or interview identities 
   }
   expect(screen.getAllByRole('button',{name:'拿这条意见改稿'})).toHaveLength(2)
 })
+
+it('puts the conclusion before the discussion and holds a place for readers who have not replied',()=>{
+  const page=render(<SimulationChat run={{...run,synthesis:{verdict:'先保留不用补这句话'}}} readOnly/>)
+  const summary=screen.getByText('先保留不用补这句话'),log=screen.getByRole('log',{name:'试读发言'})
+  expect(summary.compareDocumentPosition(log)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(screen.getByText('讨论过程')).toBeVisible()
+  expect(screen.queryByText('正在读')).not.toBeInTheDocument()
+
+  vi.spyOn(simulationRunApi,'get').mockResolvedValue({...run,status:'running'})
+  page.rerender(<SimulationChat run={{...run,status:'running',reactionResults:[run.reactionResults[0]],debateResults:[]}} onObserved={()=>{}}/>)
+  const pending=screen.getByText('正在读').closest('.trial-pending')!
+  expect(pending).toHaveTextContent('细节求证型')
+  expect(within(log).getAllByText('正在读')).toHaveLength(1)
+  expect(document.querySelector('.trial-summary-pending')).toHaveAttribute('aria-hidden','true')
+})

@@ -5,15 +5,16 @@
 .audience-results-heading h2 { margin: 0 0 4px; font-size: var(--text-section); font-weight: 600; }
 .audience-results-heading .audience-adoption-summary { margin: 0; color: var(--sub); font-size: var(--text-sm); }
 .audience-result-summary { margin: 0 0 20px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
-.audience-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; }
-.audience-group-card { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow-wrap: anywhere; }
+.audience-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 16px; }
+.audience-group-card { display: flex; flex-direction: column; min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow-wrap: anywhere; }
 .audience-group-card .reader-card-heading { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
 .audience-group-card h2 { min-width: 0; margin: 0; font-size: var(--text-section); font-weight: 600; line-height: 1.5; }
 .audience-group-card p { margin: 0; line-height: 1.7; white-space: pre-wrap; font-size: var(--text-body); }
 .audience-group-card .audience-reader-need { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--reader-tint, var(--surface-muted)) 55%, #fff); }
 .audience-reader-need > span { display: block; margin-bottom: 2px; color: var(--sub); font-size: var(--text-xs); }
 .audience-group-card .audience-reader-interests { margin-top: 12px; color: var(--sub); font-size: var(--text-sm); }
-.audience-card-action { margin: 16px 0 12px; }
+/* Cards in a row share one height; the action and the disclosures sit at the bottom edge. */
+.audience-card-action { margin: auto 0 12px; padding-top: 16px; }
 .audience-card-action:last-child { margin-bottom: 0; }
 .audience-group-card > details { border-top: 1px solid var(--line); padding: 10px 0; }
 .audience-group-card > details:last-child { padding-bottom: 0; }

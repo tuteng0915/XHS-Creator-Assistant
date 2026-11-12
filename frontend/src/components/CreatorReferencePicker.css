@@ -4,7 +4,11 @@
 .creator-reference-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
 .creator-reference-chips > li { display: flex; align-items: center; min-width: 0; max-width: 100%; border: 1px solid var(--line); background: var(--surface-muted); border-radius: 8px; }
 .creator-reference-chips .text-button { white-space: normal; overflow-wrap: anywhere; text-align: left; min-height: 30px; padding: 4px 8px; font-size: var(--text-xs); color: var(--ink); }
-.creator-reference-chips .icon-button { width: 28px; height: 28px; min-height: 28px; flex-shrink: 0; color: var(--sub); }
+/* Removing a reference is secondary: quiet until the chip is hovered or the button is focused. */
+.creator-reference-chips .icon-button { width: 24px; min-width: 24px; height: 24px; min-height: 24px; margin-right: 3px; flex-shrink: 0; border-radius: 6px; --button-border: transparent; --button-background: transparent; --button-hover-border: transparent; --button-hover-background: #ebe6e8; color: var(--sub); opacity: .5; transition: opacity .15s ease, background-color .15s ease, color .15s ease; }
+.creator-reference-chips > li:hover .icon-button:enabled, .creator-reference-chips .icon-button:focus-visible { opacity: 1; }
+.creator-reference-chips .icon-button:enabled:hover { color: var(--ink); }
+@media (pointer: coarse) { .creator-reference-chips .icon-button { width: 32px; min-width: 32px; height: 32px; min-height: 32px; opacity: .8; } }
 .creator-reference-selectors { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; }
 .creator-reference-selectors label { display: grid; gap: 6px; font-size: var(--text-sm); color: var(--sub); min-width: 0; }
 .creator-reference-selectors select { width: 100%; min-width: 0; }

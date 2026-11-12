@@ -59,3 +59,12 @@
 .creator-simulation-history .detail-head h2 {font-size:20px}
 .creator-simulation-history .simulation-reader-summary {margin-bottom:16px}
 @media(max-width:650px){.trial-room-head,.trial-conversation,.trial-interview,.trial-takeaways{padding:16px}.trial-context{margin:12px 16px}.trial-message-main{max-width:calc(100% - 48px)}.trial-message-meta{gap:4px}.trial-progress{margin:0 16px 16px}.trial-composer-footer{align-items:flex-end}.trial-room-head{flex-direction:column;gap:4px}.trial-bubble{padding:10px 12px}}
+/* The conclusion sits directly under the header; the discussion follows as the record behind it. */
+.trial-summary-first {scroll-margin-top:16px}
+.trial-summary-first>.simulation-review-summary {border-top:0;border-bottom:1px solid var(--line)}
+.trial-summary-first>.trial-takeaways {border-top:0;border-bottom:1px solid var(--report-suggestion-border)}
+.trial-divider-process {padding:20px 24px 0}
+.trial-divider-process+.trial-conversation {padding-top:18px}
+.trial-bubble-pending {min-width:min(260px,100%);padding:14px 16px}
+.trial-summary-pending>.simulation-review-summary {display:grid;gap:14px;justify-items:start}
+.trial-summary-pending .skeleton-lines,.trial-summary-pending .skeleton-block:last-child {width:100%}
