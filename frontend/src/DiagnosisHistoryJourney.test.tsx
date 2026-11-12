@@ -139,7 +139,8 @@ describe('diagnosis history on the public diagnosis page', () => {
     const history = await openDiagnosis()
     const start = screen.getByRole('button', {name: '开始分析'})
     expect(start.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(history).getAllByRole('button')).toHaveLength(1)
+    const list = within(history).getByText('◷ 诊断历史').closest('section') as HTMLElement
+    expect(within(list).getAllByRole('button')).toHaveLength(1)
     expect(within(history).queryByText('热点分析')).not.toBeInTheDocument()
     expect(within(history).queryByText('未复盘')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', {name: '分析历史'})).not.toBeInTheDocument()
@@ -161,6 +162,15 @@ describe('diagnosis history on the public diagnosis page', () => {
     navigate('账号诊断')
     expect(await screen.findByRole('region', {name: '诊断历史'})).toBeVisible()
     expect(screen.getByText('甲账号的历史诊断结论')).toBeVisible()
+  })
+
+  it('opens the newest record by default instead of an empty detail panel', async () => {
+    const control = setup()
+    const history = await openDiagnosis()
+    expect(await within(history).findByText('甲账号的历史诊断结论')).toBeVisible()
+    expect(within(history).queryByText('选择一条诊断记录查看结果。')).not.toBeInTheDocument()
+    expect(within(history).getByRole('button', {name: /账号诊断/}).className).toContain('active')
+    expect(control.fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
   it('shows an empty history before the first run', async () => {

@@ -2754,6 +2754,24 @@ function WorkspaceApp() {
     />
   }
 
+  // Open the newest diagnosis once per workspace instead of an empty "pick a record" panel.
+  // Never replaces a record the author opened, a live run, or a load in progress or failed.
+  const autoOpenedRunWorkspace = useRef('')
+  const openRunRef = useRef(openRun)
+  useEffect(() => { openRunRef.current = openRun })
+  const showsDiagnosisHistory = !internalMode && !loading && workspace?.id === selectedWorkspaceId &&
+    (activePage === 'history' || (activePage === 'account-diagnosis' && analysisStageViewsByWorkflow.account.length === 0 && !runError))
+  useEffect(() => {
+    if (!showsDiagnosisHistory || selectedRun || running || analysisHistoryLoad.phase !== 'idle') return
+    if (autoOpenedRunWorkspace.current === selectedWorkspaceId) return
+    const latest = analysisRuns
+      .filter(run => run.workspaceId === selectedWorkspaceId && run.workflowType === 'account_diagnosis')
+      .reduce<AnalysisRunSummary | null>((best, run) => !best || run.createdAt > best.createdAt ? run : best, null)
+    if (!latest) return
+    autoOpenedRunWorkspace.current = selectedWorkspaceId
+    void openRunRef.current(latest.id)
+  }, [showsDiagnosisHistory, selectedRun, running, analysisHistoryLoad.phase, selectedWorkspaceId, analysisRuns])
+
   const topicDraftSource = useRef<Topic | null>(null)
   useEffect(() => {
     const previous = topicDraftSource.current

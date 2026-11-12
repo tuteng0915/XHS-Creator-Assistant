@@ -198,6 +198,16 @@ nav a.active, nav button.active { color: var(--accent); background: var(--accent
 .creator-diagnosis-page .diagnosis-history-embedded { width: 100%; min-width: 0; }
 .diagnosis-history-embedded > .history-list,
 .diagnosis-history-embedded > .history-detail { min-width: 0; }
+/* Diagnosis history: records get a narrow column so the report keeps most of the width. */
+.workspace-page.analysis-history-public { grid-template-columns: 240px minmax(0, 1fr); }
+.analysis-history-public > .history-list, .analysis-history-public > .history-detail { min-width: 0; }
+@media (max-width: 1279px) {
+  .workspace-page.analysis-history-public { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .analysis-history-public > .history-list { display: flex; gap: 8px; align-items: center; overflow-x: auto; padding: 12px 16px; }
+  .analysis-history-public > .history-list .panel-title { flex: 0 0 auto; margin: 0 4px 0 0; }
+  .analysis-history-public > .history-list .run-row { flex: 0 0 auto; width: auto; margin: 0; }
+  .analysis-history-public > .history-list .empty-card { margin: 0; }
+}
 .creator-simulation-setup { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
 .simulation-reader-controls { min-width: 0; padding: 0; margin: 0; border: 0; }
 .simulation-target { display: grid; gap: 8px; min-width: 0; }

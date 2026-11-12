@@ -114,7 +114,7 @@ export function AnalysisHistoryPage({
   onSaveAnalysisRunReview,
 }: AnalysisHistoryPageProps) {
   return (
-    <div className={`workspace-page${embedded ? ' diagnosis-history-embedded' : ''}`} role="region" aria-label={publicMode ? '诊断历史' : '分析结果'}>
+    <div className={`workspace-page${publicMode ? ' analysis-history-public' : ''}${embedded ? ' diagnosis-history-embedded' : ''}`} role="region" aria-label={publicMode ? '诊断历史' : '分析结果'}>
       <section className="history-list">
         <div className="panel-title">◷ {publicMode ? '诊断历史' : '分析结果'}</div>
         {analysisRuns.length === 0 ? (

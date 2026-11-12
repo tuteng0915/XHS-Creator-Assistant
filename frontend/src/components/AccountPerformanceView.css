@@ -56,8 +56,9 @@
   background: var(--report-lower-surface);
 }
 .account-performance-paired .account-performance-lower > h5 { color: var(--report-lower-ink); }
-.account-performance-paired .account-performance-row-summary { grid-template-columns: minmax(0, 1fr); }
-.account-performance-paired .account-performance-value { text-align: left; }
+/* Same specificity as the base rules below would lose to them, so scope under the view. */
+.account-performance-view .account-performance-paired .account-performance-row-summary { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.account-performance-view .account-performance-paired .account-performance-value { text-align: left; }
 
 .account-performance-view .account-performance-row {
   display: grid;
@@ -140,4 +141,10 @@
 
 @media (max-width: 480px) {
   .account-performance-view .account-performance-row-summary { gap: 10px; }
+}
+
+/* Stack the higher/lower columns whenever the report column itself is narrow. */
+.account-performance-view { container-type: inline-size; }
+@container (max-width: 440px) {
+  .account-performance-view .account-performance-paired { grid-template-columns: minmax(0, 1fr); }
 }
